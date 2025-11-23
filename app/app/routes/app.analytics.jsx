@@ -15,19 +15,33 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
 export const loader = async ({ request }) => {
-    const { session } = await authenticate.admin(request);
+    const { session, admin } = await authenticate.admin(request);
     let shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
 
     if (!shop) {
+        // Get shop details from Shopify
+        const shopResponse = await admin.graphql(
+            `#graphql
+                query {
+                    shop {
+                        id
+                    }
+                }
+            `
+        );
+        const shopData = await shopResponse.json();
+        const shopifyShopId = shopData.data.shop.id.replace('gid://shopify/Shop/', '');
+        
         // Create shop if it doesn't exist
         const { PLANS } = await import("../billing");
         shop = await prisma.shop.create({
             data: {
                 shopDomain: session.shop,
+                shopifyShopId: shopifyShopId,
+                accessToken: session.accessToken || "pending",
                 plan: PLANS.FREE.id,
                 dailyQuota: PLANS.FREE.dailyQuota,
-                monthlyQuota: PLANS.FREE.monthlyQuota,
-                geminiApiKey: process.env.GEMINI_API_KEY || ""
+                monthlyQuota: PLANS.FREE.monthlyQuota
             }
         });
     }
