@@ -17,7 +17,5 @@ scopes = "write_products,read_products"
 
 [auth]
 redirect_urls = [ 
-  "https://see-it-production.up.railway.app/auth",
-  "https://see-it-production.up.railway.app/auth/callback",
-  "https://see-it-production.up.railway.app/api/auth"
+  "https://see-it-production.up.railway.app/auth/callback"
 ]
