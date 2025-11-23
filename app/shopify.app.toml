@@ -2,19 +2,22 @@
 
 client_id = "404b1dcd8562143be56b2dd81dec2270"
 name = "See It"
-application_url = "https://shopify.dev/apps/default-app-home"
+application_url = "https://see-it-production.up.railway.app"
 embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2026-01"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = ""
+scopes = "write_products,read_products"
 
 [auth]
-redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+redirect_urls = [ 
+  "https://see-it-production.up.railway.app/auth",
+  "https://see-it-production.up.railway.app/auth/callback",
+  "https://see-it-production.up.railway.app/api/auth"
+]
