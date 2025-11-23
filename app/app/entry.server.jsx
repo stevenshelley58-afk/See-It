@@ -4,6 +4,12 @@ import { RemixServer } from "@remix-run/react";
 import { createReadableStreamFromReadable } from "@remix-run/node";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
+import { startPrepareProcessor } from "./services/prepare-processor.server";
+
+// Start the background processor when the server starts
+if (process.env.NODE_ENV === "production") {
+  startPrepareProcessor();
+}
 
 export const streamTimeout = 5000;
 
