@@ -1,0 +1,18 @@
+{
+  "see_it": {
+    "button_label": "See it in your room",
+    "modal_title": "See it in your room",
+    "upload_prompt": "Upload a photo of your room",
+    "size_label": "Product Size",
+    "style_label": "Style",
+    "save_room": "Save This Room",
+    "saved_rooms": "Saved Rooms",
+    "remove_object": "Remove Object",
+    "reset_room": "Reset Room",
+    "generate_view": "Generate View",
+    "adjust_placement": "Adjust Placement",
+    "retry": "Retry",
+    "generating": "Generating...",
+    "error": "An error occurred"
+  }
+}

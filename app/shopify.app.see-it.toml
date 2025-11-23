@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "b5c65a61df2d863f967109610c9f471e"
+client_id = "404b1dcd8562143be56b2dd81dec2270"
 name = "See It"
 application_url = "https://see-it-production.up.railway.app"
 embedded = true
