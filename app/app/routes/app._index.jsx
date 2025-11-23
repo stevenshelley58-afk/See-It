@@ -22,10 +22,19 @@ import { ProgressBar } from "@shopify/polaris";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+  let shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
 
   if (!shop) {
-    throw new Response("Shop not found", { status: 404 });
+    // Create shop record if it doesn't exist
+    shop = await prisma.shop.create({
+      data: {
+        shopDomain: session.shop,
+        plan: PLANS.FREE.id,
+        dailyQuota: PLANS.FREE.dailyQuota,
+        monthlyQuota: PLANS.FREE.monthlyQuota,
+        geminiApiKey: process.env.GEMINI_API_KEY || ""
+      }
+    });
   }
 
   const today = new Date();

@@ -44,9 +44,23 @@ export const loader = async ({ request }) => {
     const responseJson = await response.json();
     const products = responseJson.data.products.edges.map((edge) => edge.node);
 
-    const shop = await prisma.shop.findUnique({
+    let shop = await prisma.shop.findUnique({
         where: { shopDomain: session.shop },
     });
+
+    // Create shop if it doesn't exist
+    if (!shop) {
+        const { PLANS } = await import("../billing");
+        shop = await prisma.shop.create({
+            data: {
+                shopDomain: session.shop,
+                plan: PLANS.FREE.id,
+                dailyQuota: PLANS.FREE.dailyQuota,
+                monthlyQuota: PLANS.FREE.monthlyQuota,
+                geminiApiKey: process.env.GEMINI_API_KEY || ""
+            }
+        });
+    }
 
     let assetsMap = {};
     let statusCounts = { ready: 0, pending: 0, failed: 0, stale: 0, unprepared: 0 };
