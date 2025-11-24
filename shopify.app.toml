@@ -17,3 +17,8 @@ redirect_urls = [
   "https://see-it-production.up.railway.app/auth/callback",
   "https://see-it-production.up.railway.app/api/auth"
 ]
+
+[app_proxy]
+url = "https://see-it-production.up.railway.app/app-proxy"
+subpath = "see-it"
+prefix = "apps"
