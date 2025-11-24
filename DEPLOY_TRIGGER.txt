@@ -1,0 +1,3 @@
+Deploy trigger: Fixed OpenSSL issue for Prisma in Railway deployment
+Timestamp: 2024-11-24
+Changes: Updated nixpacks.toml to properly configure OpenSSL for Prisma
