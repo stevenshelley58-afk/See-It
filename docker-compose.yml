@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # Main Shopify Remix App
+  app:
+    build: 
+      context: ./app
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:./prisma/dev.sqlite
+      # Add your Shopify environment variables here
+      # - SHOPIFY_APP_URL=${SHOPIFY_APP_URL}
+      # - SHOPIFY_API_KEY=${SHOPIFY_API_KEY}
+      # - SHOPIFY_API_SECRET=${SHOPIFY_API_SECRET}
+    volumes:
+      - ./app/prisma:/app/prisma  # Persist SQLite database
+    networks:
+      - see-it-network
+    depends_on:
+      - image-service
+
+  # Image Processing Service
+  image-service:
+    build:
+      context: ./image-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - NODE_ENV=production
+      - PORT=8001
+      # Add your Google Cloud and other env vars here
+      # - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      # - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
+    volumes:
+      # Mount service account credentials if needed
+      # - ./credentials/service-account.json:/app/service-account.json:ro
+      - image-storage:/app/storage  # Persist generated images
+    networks:
+      - see-it-network
+
+networks:
+  see-it-network:
+    driver: bridge
+
+volumes:
+  image-storage:

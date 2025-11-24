@@ -1,5 +1,6 @@
 FROM node:18-alpine
-RUN apk add --no-cache openssl openssl-dev libc6-compat
+# Install dependencies required for Prisma on Alpine
+RUN apk add --no-cache openssl openssl-dev libc6-compat python3 make g++
 
 EXPOSE 3000
 

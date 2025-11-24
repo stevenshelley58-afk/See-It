@@ -13,7 +13,7 @@ api_version = "2026-01"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products,write_products"
+scopes = "write_products,read_products"
 
 [auth]
 redirect_urls = [ "https://see-it-production.up.railway.app/auth/callback" ]
