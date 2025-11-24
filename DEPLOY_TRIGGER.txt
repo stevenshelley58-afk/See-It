@@ -1,6 +1,8 @@
-Deploy trigger: Fixed Nixpacks build error - removed invalid package name
-Timestamp: 2024-11-24 (v2)
+Deploy trigger: Comprehensive Prisma OpenSSL Fix
+Timestamp: 2024-11-24 (v3)
 Changes: 
-- Removed invalid 'libc6-compat' package (Alpine package, not Nix)
-- Added libssl-dev to APT packages for OpenSSL support
-- Simplified configuration for Railway deployment
+- Updated railway.json with --engine-type binary flag
+- Enhanced nixpacks.toml with proper OpenSSL setup
+- Added railway.toml as alternative configuration
+- Set Prisma binary target environment variables
+- Force binary engine instead of library engine
