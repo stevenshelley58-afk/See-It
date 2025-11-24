@@ -25,52 +25,87 @@
 <div id="see-it-modal" class="see-it-modal hidden">
   <div class="see-it-modal-content">
     <span class="see-it-close">&times;</span>
-    <h2>See it in your room</h2>
     
-    <div id="see-it-step-1" class="see-it-step">
-      <p>Upload a photo of your room</p>
-      <input type="file" id="see-it-upload" accept="image/*" />
+    <!-- Step 0: Welcome -->
+    <div id="see-it-step-welcome" class="see-it-step">
+      <div class="see-it-welcome-container">
+        <img src="https://cdn.shopify.com/s/files/1/0663/6801/2539/files/room-visualizer-hero.jpg?v=1700000000" alt="Room Visualizer" class="see-it-hero-image" style="width: 100%; border-radius: 8px; margin-bottom: 20px; display: none;"> <!-- Placeholder for hero image if needed -->
+        <h2>See it in Your Home</h2>
+        <p>Welcome! You can now visualize our products in your own space using augmented reality.</p>
+        
+        <div class="see-it-welcome-actions">
+           <button id="see-it-btn-upload" class="button see-it-primary-btn">
+             <span class="icon">📂</span> Upload Image
+           </button>
+           <button id="see-it-btn-camera" class="button see-it-secondary-btn">
+             <span class="icon">📷</span> Take Photo
+           </button>
+           <input type="file" id="see-it-upload" accept="image/*" style="display: none;" />
+           <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
+        </div>
+      </div>
     </div>
 
-    <div id="see-it-step-2" class="see-it-step hidden">
-      <div id="see-it-canvas-container" style="position: relative; width: 100%; max-width: 500px; margin: 0 auto;">
-        <img id="see-it-room-image" src="" alt="Room" width="500" height="500" style="width: 100%; display: block;" />
-        <img id="see-it-product-image" src="" alt="Product" width="100" height="100" class="draggable" style="position: absolute; top: 50%; left: 50%; width: 100px; cursor: move; transform: translate(-50%, -50%);" />
+    <!-- Step 1: Edit Room (Crop/Cleanup) -->
+    <div id="see-it-step-edit-room" class="see-it-step hidden">
+      <h3>Edit Your Room</h3>
+      <div class="see-it-canvas-wrapper">
+        <img id="see-it-room-preview" src="" alt="Room Preview" />
       </div>
-      <div style="margin-top: 15px; text-align: center;">
-        <label for="see-it-scale-slider" style="display: block; margin-bottom: 5px; font-weight: bold;">Product Size: <span id="see-it-scale-value">1.0</span>x</label>
-        <input type="range" id="see-it-scale-slider" min="0.5" max="2.0" step="0.1" value="1.0" style="width: 80%; max-width: 300px;" />
-      </div>
-      <div style="margin-top: 15px; text-align: center;">
-        <label for="see-it-style-preset" style="display: block; margin-bottom: 5px; font-weight: bold;">Style:</label>
-        <select id="see-it-style-preset" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
-          <option value="neutral">Neutral</option>
-          <option value="warm">Warm</option>
-          <option value="crisp">Crisp</option>
-        </select>
-      </div>
-      <div style="margin-top: 15px; text-align: center;">
-        <button id="see-it-save-room" style="padding: 8px 16px; background: #008060; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Save This Room</button>
-      </div>
-      <div style="margin-top: 20px;">
-        <h4 style="margin-bottom: 10px; font-weight: bold;">Saved Rooms</h4>
-        <div id="see-it-saved-rooms-list"></div>
-      </div>
-      <div style="margin-top: 10px; text-align: center;">
+      
+      <div class="see-it-tools-panel">
+        <button id="see-it-tool-crop" class="button tool-btn" disabled title="Coming Soon">Crop</button>
+        <button id="see-it-tool-cleanup" class="button tool-btn">Remove Object</button>
         <input type="file" id="see-it-mask-upload" accept="image/*" style="display: none;" />
-        <button id="see-it-clean-room" class="button" style="margin-right: 5px;">Remove Object</button>
-        <button id="see-it-reset-room" class="button" style="margin-right: 5px;">Reset Room</button>
-        <button id="see-it-generate" class="button">Generate View</button>
+      </div>
+
+      <div class="see-it-actions-row">
+        <button id="see-it-back-to-welcome" class="button see-it-text-btn">Back</button>
+        <button id="see-it-confirm-room" class="button see-it-primary-btn">Continue</button>
       </div>
     </div>
 
-    <div id="see-it-step-3" class="see-it-step hidden">
+    <!-- Step 2: Place Product -->
+    <div id="see-it-step-place" class="see-it-step hidden">
+      <div id="see-it-canvas-container" class="see-it-interactive-canvas">
+        <img id="see-it-room-image" src="" alt="Room" />
+        
+        <div id="see-it-product-container" class="draggable-container">
+            <img id="see-it-product-image" src="" alt="Product" class="draggable-item" />
+            <!-- Resize Handles -->
+            <div class="resize-handle handle-tl"></div>
+            <div class="resize-handle handle-tr"></div>
+            <div class="resize-handle handle-bl"></div>
+            <div class="resize-handle handle-br"></div>
+        </div>
+      </div>
+
+      <div class="see-it-controls-panel">
+        <!-- Desktop Slider (Hidden on mobile if pinch works well, but good to keep as fallback) -->
+        <div class="see-it-slider-control">
+            <label for="see-it-scale-slider">Size: <span id="see-it-scale-value">1.0</span>x</label>
+            <input type="range" id="see-it-scale-slider" min="0.5" max="2.0" step="0.1" value="1.0" />
+        </div>
+        
+        <div class="see-it-actions-row">
+            <button id="see-it-save-room" class="button see-it-secondary-btn">Save Room</button>
+            <button id="see-it-generate" class="button see-it-primary-btn">Generate View</button>
+        </div>
+      </div>
+      
+      <div id="see-it-saved-rooms-list" class="saved-rooms-scroll"></div>
+    </div>
+
+    <!-- Step 3: Result -->
+    <div id="see-it-step-result" class="see-it-step hidden">
       <p id="see-it-status">Generating...</p>
       <div id="see-it-error" class="see-it-error hidden"></div>
       <div id="see-it-result"></div>
-      <div id="see-it-actions" class="hidden" style="margin-top: 15px; text-align: center;">
-        <button id="see-it-adjust-placement" class="button" style="margin-right: 5px;">Adjust Placement</button>
+      
+      <div id="see-it-actions" class="hidden see-it-actions-row">
+        <button id="see-it-adjust-placement" class="button">Adjust Placement</button>
         <button id="see-it-retry" class="button see-it-retry-btn hidden">Retry</button>
+        <button id="see-it-start-over" class="button see-it-text-btn">Start Over</button>
       </div>
     </div>
   </div>

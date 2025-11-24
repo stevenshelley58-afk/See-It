@@ -1,89 +1,307 @@
+/* Base Modal Styles */
 .see-it-modal {
-  display: none;
   position: fixed;
-  z-index: 10000;
+  z-index: 99999;
   left: 0;
   top: 0;
   width: 100%;
   height: 100%;
   overflow: auto;
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
 }
 
 .see-it-modal.hidden {
   display: none;
 }
 
-.see-it-modal:not(.hidden) {
-  display: block;
-}
-
 .see-it-modal-content {
   background-color: #fefefe;
-  margin: 15% auto;
-  padding: 20px;
+  margin: auto;
+  padding: 0;
   border: 1px solid #888;
-  width: 80%;
+  width: 90%;
   max-width: 600px;
-  border-radius: 8px;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
   position: relative;
+  overflow: hidden;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .see-it-close {
   color: #aaa;
-  float: right;
+  position: absolute;
+  top: 10px;
+  right: 15px;
   font-size: 28px;
   font-weight: bold;
   cursor: pointer;
+  z-index: 10;
 }
 
 .see-it-close:hover,
 .see-it-close:focus {
-  color: black;
+  color: #000;
   text-decoration: none;
   cursor: pointer;
+}
+
+/* Steps Container */
+.see-it-step {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .see-it-step.hidden {
   display: none;
 }
 
-.draggable {
+/* Welcome Screen */
+.see-it-welcome-container {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.see-it-welcome-container h2 {
+  font-size: 24px;
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.see-it-welcome-container p {
+  color: #666;
+  margin-bottom: 30px;
+  line-height: 1.5;
+}
+
+.see-it-welcome-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+/* Buttons */
+.button.see-it-primary-btn {
+  background-color: #008060;
+  color: white;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.button.see-it-primary-btn:hover {
+  background-color: #006e52;
+}
+
+.button.see-it-secondary-btn {
+  background-color: #f1f2f3;
+  color: #333;
+  border: 1px solid #d9d9d9;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.button.see-it-secondary-btn:hover {
+  background-color: #e3e4e5;
+}
+
+.button.see-it-text-btn {
+  background: none;
+  border: none;
+  color: #666;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 10px;
+}
+
+/* Edit Room Step */
+.see-it-canvas-wrapper {
+  width: 100%;
+  max-height: 50vh;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+#see-it-room-preview {
+  max-width: 100%;
+  max-height: 50vh;
+  object-fit: contain;
+}
+
+.see-it-tools-panel {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.tool-btn {
+  padding: 8px 16px;
+  border-radius: 20px;
+  border: 1px solid #ddd;
+  background: white;
+  cursor: pointer;
+}
+
+.tool-btn:hover {
+  background: #f9f9f9;
+}
+
+/* Place Product Step */
+.see-it-interactive-canvas {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f4f4f4;
+  touch-action: none; /* Critical for touch drag */
+}
+
+#see-it-room-image {
+  width: 100%;
+  display: block;
+  pointer-events: none; /* Let clicks pass through to container if needed */
+}
+
+/* Draggable Container & Handles */
+.draggable-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%); /* Initial center */
+  cursor: grab;
   touch-action: none;
   user-select: none;
 }
 
-/* Scale slider styling */
-#see-it-scale-slider {
-  cursor: pointer;
+.draggable-container.is-dragging {
+  cursor: grabbing;
+  outline: 2px dashed #008060; /* Visual cue */
 }
 
-#see-it-scale-value {
-  color: #333;
-  font-weight: bold;
+.draggable-item {
+  width: 100%; /* Fill container */
+  height: auto;
+  display: block;
+  pointer-events: none; /* Events handled by container */
 }
 
-/* Error message styling */
-.see-it-error {
-  background-color: #fee;
-  border: 1px solid #fcc;
-  color: #c00;
-  padding: 10px;
-  margin: 10px 0;
-  border-radius: 4px;
+/* Resize Handles */
+.resize-handle {
+  position: absolute;
+  width: 24px; /* Larger hit area */
+  height: 24px;
+  background-color: white;
+  border: 2px solid #008060;
+  border-radius: 50%;
+  z-index: 10;
+  display: none; /* Hidden by default, shown on hover/active */
+}
+
+/* Show handles on hover or when dragging */
+.draggable-container:hover .resize-handle,
+.draggable-container.is-dragging .resize-handle,
+.draggable-container:active .resize-handle {
+  display: block;
+}
+
+.handle-tl { top: -12px; left: -12px; cursor: nwse-resize; }
+.handle-tr { top: -12px; right: -12px; cursor: nesw-resize; }
+.handle-bl { bottom: -12px; left: -12px; cursor: nesw-resize; }
+.handle-br { bottom: -12px; right: -12px; cursor: nwse-resize; }
+
+/* Controls Panel */
+.see-it-controls-panel {
+  padding: 15px;
+  background: white;
+  border-top: 1px solid #eee;
+}
+
+.see-it-slider-control {
+  margin-bottom: 15px;
   text-align: center;
 }
 
-.see-it-error.hidden {
-  display: none;
+.see-it-actions-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
 }
 
-/* Action buttons */
-.see-it-retry-btn {
-  background-color: #007bff;
-  color: white;
+/* Saved Rooms */
+.saved-rooms-scroll {
+  max-height: 100px;
+  overflow-y: auto;
+  margin-top: 10px;
+  padding: 0 10px;
 }
 
-.see-it-retry-btn:hover {
-  background-color: #0056b3;
+/* Result Step */
+#see-it-result img {
+  width: 100%;
+  border-radius: 8px;
+}
+
+.see-it-error {
+  color: #d82c0d;
+  background: #fff4f4;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+/* Mobile Optimizations */
+@media (max-width: 600px) {
+  .see-it-modal-content {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
+  
+  .resize-handle {
+    width: 30px; /* Even bigger on mobile */
+    height: 30px;
+  }
+  
+  .see-it-slider-control {
+    display: none; /* Hide slider on mobile in favor of pinch */
+  }
 }

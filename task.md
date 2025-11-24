@@ -23,3 +23,10 @@
 ## Phase 7: Advanced Enhancements
 - [x] Analytics Dashboard (app.analytics.jsx)
 - [x] Multi-Room Sessions (localStorage-based, frontend-only)
+
+## Phase 8: UI/UX Overhaul & Flow Fixes
+- [x] Revamp User Flow (Welcome -> Upload -> Edit -> Place)
+- [x] Implement Missing Upload Logic
+- [x] Improve Drag & Drop and Resize Interactions
+- [x] Remove Style Selector
+
