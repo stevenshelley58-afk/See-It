@@ -1,8 +1,7 @@
-Deploy trigger: Simplified configuration using Railway environment variables
-Timestamp: 2024-11-24 (v4)
+Deploy trigger: Switch Railway to Dockerfile build with OpenSSL
+Timestamp: 2024-11-24 (v5)
 Changes: 
-- Deleted nixpacks.toml (Railway prefers env vars)
-- Deleted railway.toml (avoid conflicts)
-- Simplified railway.json
-- Must set environment variables in Railway dashboard
-- See RAILWAY_ENV_VARS.md for required variables
+- Added root-level Dockerfile (Node 20 slim + apt-get openssl/libssl-dev)
+- railway.json now uses the Dockerfile builder
+- Removed reliance on Nixpacks + env overrides
+- Updated docs (RAILWAY_ENV_VARS.md, PRISMA_OPENSSL_FIX.md) with new steps
