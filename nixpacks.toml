@@ -1,6 +1,6 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "openssl", "libc6-compat", "python3", "gcc"]
-aptPkgs = ["openssl"]
+nixPkgs = ["nodejs_20", "openssl", "python3", "gcc"]
+aptPkgs = ["openssl", "libssl-dev"]
 
 [phases.install]
 cmds = ["cd app && npm ci"]
@@ -10,7 +10,3 @@ cmds = ["cd app && npx prisma generate && npm run build"]
 
 [start]
 cmd = "cd app && npm run start"
-
-[variables]
-LD_LIBRARY_PATH = "/nix/var/nix/profiles/default/lib:$LD_LIBRARY_PATH"
-PRISMA_QUERY_ENGINE_LIBRARY = "/nix/var/nix/profiles/default/lib/libssl.so"
