@@ -1,68 +1,40 @@
-# Railway Environment Variables - MUST SET IN DASHBOARD
+# Railway Environment Variables (Docker Deployment)
 
-## 🚨 CRITICAL: Add These to Railway Dashboard NOW
+## ✅ Required Variables (keep existing values)
+- `SHOPIFY_API_KEY`
+- `SHOPIFY_API_SECRET`
+- `SCOPES`
+- `IMAGE_SERVICE_TOKEN`
+- `IMAGE_SERVICE_BASE_URL`
+- `DATABASE_URL`
+- `SHOPIFY_APP_URL`
+- `NODE_ENV`
 
-Go to your Railway project → Variables tab → Add these EXACTLY:
+These already live in Railway → Variables and should remain unchanged.
 
-```
-NIXPACKS_APT_PACKAGES=openssl libssl-dev ca-certificates
-NIXPACKS_NODE_VERSION=20
-NIXPACKS_INSTALL_CMD=cd app && npm ci
-NIXPACKS_BUILD_CMD=cd app && npx prisma generate && npm run build
-PRISMA_CLI_BINARY_TARGETS=["native","linux-musl-openssl-3.0.x"]
-LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
-```
+## 🧹 Remove Old Nixpacks Variables
+Delete the following entries from Railway → Variables (they are no longer used once we switch to the Dockerfile builder):
+- `NIXPACKS_APT_PACKAGES`
+- `NIXPACKS_NODE_VERSION`
+- `NIXPACKS_INSTALL_CMD`
+- `NIXPACKS_BUILD_CMD`
+- `LD_LIBRARY_PATH`
+- `PRISMA_CLI_BINARY_TARGETS`
 
-## Why This Works
+## 🆕 Nothing New To Add
+The new Dockerfile installs OpenSSL (`openssl`, `libssl-dev`, `ca-certificates`) and runs the full Prisma workflow during the image build, so no additional configuration variables are required.
 
-1. **NIXPACKS_APT_PACKAGES**: Installs OpenSSL at the system level
-2. **PRISMA_CLI_BINARY_TARGETS**: Forces Prisma to use the correct binary
-3. **LD_LIBRARY_PATH**: Tells the system where to find OpenSSL libraries
-
-## Steps to Deploy
-
-1. **Add ALL variables above to Railway Dashboard**
-   - Go to https://railway.app
-   - Open your project
-   - Click "Variables" tab
-   - Add each variable EXACTLY as shown
-
-2. **Simplify railway.json** (already done)
-
-3. **Push changes**:
+## 🚀 Deploy Steps
+1. Remove the obsolete variables listed above.
+2. Commit & push the Dockerfile + `railway.json` changes:
    ```bash
-   git add railway.json RAILWAY_ENV_VARS.md
-   git rm nixpacks.toml railway.toml  # Remove deleted files from git
-   git commit -m "Fix: Use Railway environment variables for OpenSSL"
+   git add Dockerfile railway.json RAILWAY_ENV_VARS.md DEPLOY_TRIGGER.txt
+   git commit -m "Fix: Use Dockerfile build on Railway with OpenSSL"
    git push origin main
    ```
+3. Railway will rebuild automatically using the Dockerfile builder (Node 20 slim + OpenSSL).
 
-4. **Force rebuild in Railway**:
-   - After push, go to Railway dashboard
-   - Click on your deployment
-   - Click "Redeploy" → "Clear build cache"
-
-## Verification
-
-After deployment, check logs for:
-- ✅ No OpenSSL warning
-- ✅ "Starting Container" message
-- ✅ Clean startup
-
-## If STILL Not Working
-
-Add these additional variables:
-```
-PRISMA_QUERY_ENGINE_LIBRARY=/usr/lib/x86_64-linux-gnu/libssl.so.3
-OPENSSL_CONF=/etc/ssl/
-```
-
-## Railway's Approach
-
-Railway recommends using environment variables over config files for Nixpacks configuration. This is why we:
-- Deleted nixpacks.toml
-- Deleted railway.toml  
-- Simplified railway.json
-- Use environment variables for everything
-
-Source: Railway's official build configuration guide
+## ✅ Verification
+After the redeploy completes, tail the logs:
+- Expect **no** `Prisma failed to detect the libssl/openssl version` warnings
+- App should boot via `npm run docker-start` (which runs Prisma migrations + Remix serve)
