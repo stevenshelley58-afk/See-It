@@ -1,8 +1,8 @@
-Deploy trigger: Comprehensive Prisma OpenSSL Fix
-Timestamp: 2024-11-24 (v3)
+Deploy trigger: Simplified configuration using Railway environment variables
+Timestamp: 2024-11-24 (v4)
 Changes: 
-- Updated railway.json with --engine-type binary flag
-- Enhanced nixpacks.toml with proper OpenSSL setup
-- Added railway.toml as alternative configuration
-- Set Prisma binary target environment variables
-- Force binary engine instead of library engine
+- Deleted nixpacks.toml (Railway prefers env vars)
+- Deleted railway.toml (avoid conflicts)
+- Simplified railway.json
+- Must set environment variables in Railway dashboard
+- See RAILWAY_ENV_VARS.md for required variables
