@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher, useLoaderData, useSubmit } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -11,14 +11,13 @@ import {
   List,
   Link,
   InlineStack,
+  ProgressBar,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { json } from "@remix-run/node";
-import { useLoaderData, useSubmit } from "@remix-run/react";
 import prisma from "../db.server";
 import { PLANS } from "../billing";
-import { ProgressBar } from "@shopify/polaris";
 
 export const loader = async ({ request }) => {
   const { session, admin } = await authenticate.admin(request);

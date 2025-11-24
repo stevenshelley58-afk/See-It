@@ -1,4 +1,4 @@
-import { ActionFunctionArgs, json } from "@remix-run/node";
+import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { StorageService } from "../services/storage.server";
 import prisma from "../db.server";
@@ -10,8 +10,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ status: "forbidden" }, { status: 403 });
     }
 
-    const body = await request.json();
-    const { product_id } = body;
+    await request.json();
     const shopDomain = session.shop;
 
     // Find or create shop record (Stub logic for MVP)

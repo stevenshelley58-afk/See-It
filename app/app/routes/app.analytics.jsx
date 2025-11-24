@@ -92,7 +92,10 @@ export default function Analytics() {
     const rows = recentJobs.map(job => [
         new Date(job.createdAt).toLocaleString(),
         job.productId.split('/').pop(),
-        <Badge tone={job.status === 'completed' ? 'success' : job.status === 'failed' ? 'critical' : 'info'}>
+        <Badge
+            key={`${job.id}-status`}
+            tone={job.status === 'completed' ? 'success' : job.status === 'failed' ? 'critical' : 'info'}
+        >
             {job.status}
         </Badge>,
         job.stylePreset || 'Default',
