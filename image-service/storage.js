@@ -12,8 +12,25 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
             jsonString = jsonString.slice(1, -1);
         }
         
-        console.log(`[Storage] Parsing GOOGLE_CREDENTIALS_JSON (length: ${jsonString.length})`);
-        const credentials = JSON.parse(jsonString);
+        // Try base64 decode first (if Railway truncates, use base64)
+        let credentials;
+        try {
+            const decoded = Buffer.from(jsonString, 'base64').toString('utf-8');
+            if (decoded.startsWith('{')) {
+                // Valid JSON after base64 decode
+                credentials = JSON.parse(decoded);
+                console.log('[Storage] Decoded GOOGLE_CREDENTIALS_JSON from base64');
+            } else {
+                // Not base64, parse as direct JSON
+                credentials = JSON.parse(jsonString);
+                console.log('[Storage] Parsed GOOGLE_CREDENTIALS_JSON as direct JSON');
+            }
+        } catch {
+            // Fallback: try direct JSON parse
+            credentials = JSON.parse(jsonString);
+            console.log('[Storage] Parsed GOOGLE_CREDENTIALS_JSON as direct JSON (base64 failed)');
+        }
+        
         storage = new Storage({ credentials });
         console.log('[Storage] Successfully initialized with GOOGLE_CREDENTIALS_JSON');
     } catch (error) {
