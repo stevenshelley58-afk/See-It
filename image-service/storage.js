@@ -1,6 +1,21 @@
 import { Storage } from '@google-cloud/storage';
 
-const storage = new Storage();
+// Initialize GCS client with credentials from environment variable
+// Cloud Run/Railway stores the JSON as a string in GOOGLE_CREDENTIALS_JSON
+let storage;
+
+if (process.env.GOOGLE_CREDENTIALS_JSON) {
+    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+    storage = new Storage({ credentials });
+    console.log('[Storage] Using credentials from GOOGLE_CREDENTIALS_JSON');
+} else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    // File path to credentials (local dev or Cloud Run with mounted secret)
+    storage = new Storage();
+    console.log('[Storage] Using credentials from GOOGLE_APPLICATION_CREDENTIALS file');
+} else {
+    console.warn('[Storage] No GCS credentials found - using default (may fail)');
+    storage = new Storage();
+}
 
 export async function downloadToBuffer(url) {
     console.log(`Downloading from: ${url}`);

@@ -10,6 +10,16 @@
 - `SHOPIFY_APP_URL`
 - `NODE_ENV`
 
+## 🆕 Required for GCS Storage (ADD THESE)
+- `GCS_BUCKET` = `see-it-room` (your GCS bucket name - CORS configured)
+- `GOOGLE_CREDENTIALS_JSON` = (paste the ENTIRE contents of gcs-key.json as a single line)
+
+### How to set GOOGLE_CREDENTIALS_JSON:
+1. Open `image-service/gcs-key.json`
+2. Copy the entire JSON content
+3. In Railway → Variables, create `GOOGLE_CREDENTIALS_JSON`
+4. Paste the JSON as the value (Railway handles escaping)
+
 These already live in Railway → Variables and should remain unchanged.
 
 ## 🧹 Remove Old Nixpacks Variables

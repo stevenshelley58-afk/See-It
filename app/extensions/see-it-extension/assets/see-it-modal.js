@@ -283,12 +283,28 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const uploadImage = async (file, uploadUrl) => {
-        const res = await fetch(uploadUrl, {
-            method: 'PUT',
-            body: file,
-            headers: { 'Content-Type': file.type }
-        });
-        if (!res.ok) throw new Error('Failed to upload image to storage');
+        console.log('[See It] Uploading to GCS:', uploadUrl.substring(0, 100) + '...');
+        try {
+            const res = await fetch(uploadUrl, {
+                method: 'PUT',
+                body: file,
+                headers: { 'Content-Type': file.type },
+                mode: 'cors'
+            });
+            if (!res.ok) {
+                const errorText = await res.text().catch(() => res.statusText);
+                console.error('[See It] GCS upload failed:', res.status, errorText);
+                throw new Error(`Upload failed (${res.status}): ${errorText || 'CORS or network error'}`);
+            }
+            console.log('[See It] Upload successful');
+        } catch (err) {
+            console.error('[See It] Upload error:', err);
+            // Check if it's a CORS error
+            if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+                throw new Error('Upload blocked - GCS CORS not configured. Contact support.');
+            }
+            throw err;
+        }
     };
 
     const confirmRoom = async (sessionId) => {
@@ -424,13 +440,12 @@ document.addEventListener('DOMContentLoaded', function () {
         btnConfirmRoom.addEventListener('click', () => {
             if (state.isUploading || state.isCleaningUp) return;
             
-            // Must have completed upload before continuing
-            if (!state.sessionId || !state.originalRoomImageUrl) {
-                showError('Please wait for upload to complete');
+            // Need at least a local image to continue
+            const roomUrl = getActiveRoomUrl() || state.currentRoomImageUrl;
+            if (!roomUrl) {
+                showError('Please upload an image first');
                 return;
             }
-            
-            const roomUrl = getActiveRoomUrl() || state.currentRoomImageUrl;
             if (roomImage) roomImage.src = roomUrl;
             
             showStep(stepPlace);

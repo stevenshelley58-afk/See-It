@@ -153,4 +153,6 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Image Service listening on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`Gemini API Key: ${process.env.GEMINI_API_KEY ? 'Set' : 'NOT SET'}`);
+    console.log(`GCS Bucket: ${process.env.GCS_BUCKET || 'NOT SET'}`);
+    console.log(`GCS Credentials: ${process.env.GOOGLE_CREDENTIALS_JSON ? 'GOOGLE_CREDENTIALS_JSON' : process.env.GOOGLE_APPLICATION_CREDENTIALS ? 'GOOGLE_APPLICATION_CREDENTIALS file' : 'DEFAULT'}`);
 });

@@ -15,7 +15,11 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
     storage = new Storage();
 }
 
-const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-uploads';
+const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
+
+// Log configuration on module load
+console.log(`[Storage] GCS Bucket: ${GCS_BUCKET}`);
+console.log(`[Storage] Credentials: ${process.env.GOOGLE_CREDENTIALS_JSON ? 'GOOGLE_CREDENTIALS_JSON' : process.env.GOOGLE_APPLICATION_CREDENTIALS ? 'GOOGLE_APPLICATION_CREDENTIALS file' : 'DEFAULT (may fail)'}`);
 
 export class StorageService {
     /**
