@@ -5,11 +5,28 @@ import { Storage } from '@google-cloud/storage';
 let storage: Storage;
 
 if (process.env.GOOGLE_CREDENTIALS_JSON) {
-    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
-    storage = new Storage({ credentials });
+    try {
+        // Railway may wrap in quotes - remove them if present
+        let jsonString = process.env.GOOGLE_CREDENTIALS_JSON.trim();
+        if (jsonString.startsWith('"') && jsonString.endsWith('"')) {
+            jsonString = jsonString.slice(1, -1);
+        }
+        
+        console.log(`[Storage] Parsing GOOGLE_CREDENTIALS_JSON (length: ${jsonString.length})`);
+        const credentials = JSON.parse(jsonString);
+        storage = new Storage({ credentials });
+        console.log('[Storage] Successfully initialized with GOOGLE_CREDENTIALS_JSON');
+    } catch (error) {
+        console.error('[Storage] Failed to parse GOOGLE_CREDENTIALS_JSON:', error instanceof Error ? error.message : error);
+        console.error(`[Storage] JSON length: ${process.env.GOOGLE_CREDENTIALS_JSON?.length || 0}`);
+        console.error(`[Storage] First 100 chars: ${process.env.GOOGLE_CREDENTIALS_JSON?.substring(0, 100)}`);
+        console.error('[Storage] Falling back to default credentials (may fail)');
+        storage = new Storage();
+    }
 } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     // File path to credentials (local dev)
     storage = new Storage();
+    console.log('[Storage] Using GOOGLE_APPLICATION_CREDENTIALS file');
 } else {
     console.warn('[Storage] No GCS credentials found - uploads will fail');
     storage = new Storage();
