@@ -10,7 +10,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ status: "forbidden" }, { status: 403 });
     }
 
-    await request.json();
+    // No body needed for this endpoint
     const shopDomain = session.shop;
 
     // Find or create shop record (Stub logic for MVP)
