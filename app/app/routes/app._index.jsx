@@ -1,5 +1,4 @@
-import { useEffect } from "react";
-import { useFetcher, useLoaderData, useSubmit } from "@remix-run/react";
+import { useLoaderData, useSubmit } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -8,23 +7,37 @@ import {
   Button,
   BlockStack,
   Box,
-  List,
-  Link,
   InlineStack,
   ProgressBar,
+  Banner,
+  Icon,
+  Divider,
+  Badge,
 } from "@shopify/polaris";
-import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
+import {
+  HomeIcon,
+  ImageIcon,
+  SettingsIcon,
+  ChartVerticalFilledIcon,
+} from "@shopify/polaris-icons";
+import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { PLANS } from "../billing";
+
+// ============================================
+// VERSION INFO - Update this when deploying!
+// ============================================
+const APP_VERSION = "2.0.0";
+const BUILD_DATE = "Nov 25, 2025";
+const BUILD_ID = "gemini3-nov25";
 
 export const loader = async ({ request }) => {
   const { session, admin } = await authenticate.admin(request);
   let shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
 
   if (!shop) {
-    // Get shop details from Shopify
     const shopResponse = await admin.graphql(
       `#graphql
         query {
@@ -37,7 +50,6 @@ export const loader = async ({ request }) => {
     const shopData = await shopResponse.json();
     const shopifyShopId = shopData.data.shop.id.replace('gid://shopify/Shop/', '');
 
-    // Create shop record if it doesn't exist
     shop = await prisma.shop.create({
       data: {
         shopDomain: session.shop,
@@ -67,365 +79,351 @@ export const loader = async ({ request }) => {
   });
   const monthlyUsage = monthlyUsageAgg._sum.compositeRenders || 0;
 
+  // Get total renders all time
+  const totalRendersAgg = await prisma.renderJob.count({
+    where: { shopId: shop.id, status: "completed" }
+  });
+
   return json({
     shop,
     usage: usage || { compositeRenders: 0, prepRenders: 0 },
-    monthlyUsage
+    monthlyUsage,
+    totalRenders: totalRendersAgg,
+    version: { app: APP_VERSION, build: BUILD_ID, date: BUILD_DATE }
   });
 };
 
-export const action = async ({ request }) => {
-  const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-          }
-        }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
-        },
-      },
-    },
-  );
-  const responseJson = await response.json();
-  const product = responseJson.data.productCreate.product;
-  const variantId = product.variants.edges[0].node.id;
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyRemixTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
-      },
-    },
-  );
-  const variantResponseJson = await variantResponse.json();
-
-  return {
-    product: responseJson.data.productCreate.product,
-    variant: variantResponseJson.data.productVariantsBulkUpdate.productVariants,
-  };
-};
-
 export default function Index() {
-  const { shop, usage, monthlyUsage } = useLoaderData();
-  const fetcher = useFetcher();
+  const { shop, usage, monthlyUsage, totalRenders, version } = useLoaderData();
   const submit = useSubmit();
-  const shopify = useAppBridge();
 
   const handleUpgrade = () => submit({ plan: "PRO" }, { method: "POST", action: "/api/billing" });
   const handleDowngrade = () => submit({ plan: "FREE" }, { method: "POST", action: "/api/billing" });
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
-  const productId = fetcher.data?.product?.id.replace(
-    "gid://shopify/Product/",
-    "",
-  );
 
-  useEffect(() => {
-    if (productId) {
-      shopify.toast.show("Product created");
-    }
-  }, [productId, shopify]);
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+  const isPro = shop.plan === PLANS.PRO.id;
+  const dailyPercent = Math.min((usage.compositeRenders / shop.dailyQuota) * 100, 100);
+  const monthlyPercent = Math.min((monthlyUsage / shop.monthlyQuota) * 100, 100);
 
   return (
     <Page>
-      <TitleBar title="Remix app template">
-        <button variant="primary" onClick={generateProduct}>
-          Generate a product
-        </button>
-      </TitleBar>
-      <BlockStack gap="500">
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="500">
-                <BlockStack gap="200">
-                  <Text as="h2" variant="headingMd">
-                    Congrats on creating a new Shopify app 🎉
+      <TitleBar title="See It Dashboard" />
+      
+      <BlockStack gap="600">
+        {/* Welcome Banner */}
+        <Card>
+          <BlockStack gap="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <BlockStack gap="200">
+                <InlineStack gap="200" blockAlign="center">
+                  <Text as="h1" variant="headingXl">
+                    👋 Welcome to See It
                   </Text>
-                  <Text variant="bodyMd" as="p">
-                    This embedded app template uses{" "}
-                    <Link
-                      url="https://shopify.dev/docs/apps/tools/app-bridge"
-                      target="_blank"
-                      removeUnderline
-                    >
-                      App Bridge
-                    </Link>{" "}
-                    interface examples like an{" "}
-                    <Link url="/app/additional" removeUnderline>
-                      additional page in the app nav
-                    </Link>
-                    , as well as an{" "}
-                    <Link
-                      url="https://shopify.dev/docs/api/admin-graphql"
-                      target="_blank"
-                      removeUnderline
-                    >
-                      Admin GraphQL
-                    </Link>{" "}
-                    mutation demo, to provide a starting point for app
-                    development.
-                  </Text>
-                </BlockStack>
-                <BlockStack gap="200">
-                  <Text as="h3" variant="headingMd">
-                    Get started with products
-                  </Text>
-                  <Text as="p" variant="bodyMd">
-                    Generate a product with GraphQL and get the JSON output for
-                    that product. Learn more about the{" "}
-                    <Link
-                      url="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-                      target="_blank"
-                      removeUnderline
-                    >
-                      productCreate
-                    </Link>{" "}
-                    mutation in our API references.
-                  </Text>
-                </BlockStack>
-                <InlineStack gap="300">
-                  <Button loading={isLoading} onClick={generateProduct}>
-                    Generate a product
-                  </Button>
-                  {fetcher.data?.product && (
-                    <Button
-                      url={`shopify:admin/products/${productId}`}
-                      target="_blank"
-                      variant="plain"
-                    >
-                      View product
-                    </Button>
-                  )}
+                  <Badge tone={isPro ? "success" : "info"}>
+                    {isPro ? "Pro Plan" : "Free Plan"}
+                  </Badge>
                 </InlineStack>
-                {fetcher.data?.product && (
-                  <>
-                    <Text as="h3" variant="headingMd">
-                      {" "}
-                      productCreate mutation
-                    </Text>
-                    <Box
-                      padding="400"
-                      background="bg-surface-active"
-                      borderWidth="025"
-                      borderRadius="200"
-                      borderColor="border"
-                      overflowX="scroll"
-                    >
-                      <pre style={{ margin: 0 }}>
-                        <code>
-                          {JSON.stringify(fetcher.data.product, null, 2)}
-                        </code>
-                      </pre>
-                    </Box>
-                    <Text as="h3" variant="headingMd">
-                      {" "}
-                      productVariantsBulkUpdate mutation
-                    </Text>
-                    <Box
-                      padding="400"
-                      background="bg-surface-active"
-                      borderWidth="025"
-                      borderRadius="200"
-                      borderColor="border"
-                      overflowX="scroll"
-                    >
-                      <pre style={{ margin: 0 }}>
-                        <code>
-                          {JSON.stringify(fetcher.data.variant, null, 2)}
-                        </code>
-                      </pre>
-                    </Box>
-                  </>
-                )}
+                <Text variant="bodyMd" tone="subdued">
+                  Help customers visualize your products in their space
+                </Text>
               </BlockStack>
-            </Card>
-          </Layout.Section>
-          <Layout.Section variant="oneThird">
+              <Box
+                background="bg-surface-secondary"
+                padding="300"
+                borderRadius="200"
+              >
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Version</Text>
+                  <Text variant="headingSm" fontWeight="bold">
+                    {version.app}
+                  </Text>
+                  <Text variant="bodySm" tone="subdued">
+                    Build: {version.build}
+                  </Text>
+                </BlockStack>
+              </Box>
+            </InlineStack>
+          </BlockStack>
+        </Card>
+
+        <Layout>
+          {/* Main Content - Left Side */}
+          <Layout.Section>
             <BlockStack gap="500">
+              {/* Quick Stats */}
               <Card>
                 <BlockStack gap="400">
                   <Text as="h2" variant="headingMd">
-                    Billing & Usage
+                    📊 Quick Stats
+                  </Text>
+                  <InlineStack gap="400" wrap={false}>
+                    <Box
+                      background="bg-fill-success-secondary"
+                      padding="400"
+                      borderRadius="200"
+                      minWidth="120px"
+                    >
+                      <BlockStack gap="100" inlineAlign="center">
+                        <Text variant="headingLg" fontWeight="bold">
+                          {totalRenders}
+                        </Text>
+                        <Text variant="bodySm" tone="subdued">
+                          Total Renders
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                    <Box
+                      background="bg-fill-info-secondary"
+                      padding="400"
+                      borderRadius="200"
+                      minWidth="120px"
+                    >
+                      <BlockStack gap="100" inlineAlign="center">
+                        <Text variant="headingLg" fontWeight="bold">
+                          {usage.compositeRenders}
+                        </Text>
+                        <Text variant="bodySm" tone="subdued">
+                          Today
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                    <Box
+                      background="bg-fill-warning-secondary"
+                      padding="400"
+                      borderRadius="200"
+                      minWidth="120px"
+                    >
+                      <BlockStack gap="100" inlineAlign="center">
+                        <Text variant="headingLg" fontWeight="bold">
+                          {monthlyUsage}
+                        </Text>
+                        <Text variant="bodySm" tone="subdued">
+                          This Month
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                  </InlineStack>
+                </BlockStack>
+              </Card>
+
+              {/* Getting Started */}
+              <Card>
+                <BlockStack gap="400">
+                  <Text as="h2" variant="headingMd">
+                    🚀 Getting Started
+                  </Text>
+                  <BlockStack gap="300">
+                    <Box
+                      background="bg-surface-secondary"
+                      padding="400"
+                      borderRadius="200"
+                    >
+                      <InlineStack gap="300" blockAlign="center">
+                        <Text variant="headingMd">1️⃣</Text>
+                        <BlockStack gap="100">
+                          <Text variant="bodyMd" fontWeight="semibold">
+                            Add the "See It" button to your theme
+                          </Text>
+                          <Text variant="bodySm" tone="subdued">
+                            Go to Online Store → Themes → Customize → Add block → See It Button
+                          </Text>
+                        </BlockStack>
+                      </InlineStack>
+                    </Box>
+                    <Box
+                      background="bg-surface-secondary"
+                      padding="400"
+                      borderRadius="200"
+                    >
+                      <InlineStack gap="300" blockAlign="center">
+                        <Text variant="headingMd">2️⃣</Text>
+                        <BlockStack gap="100">
+                          <Text variant="bodyMd" fontWeight="semibold">
+                            Position the button on product pages
+                          </Text>
+                          <Text variant="bodySm" tone="subdued">
+                            Place the block near your "Add to Cart" button for best results
+                          </Text>
+                        </BlockStack>
+                      </InlineStack>
+                    </Box>
+                    <Box
+                      background="bg-surface-secondary"
+                      padding="400"
+                      borderRadius="200"
+                    >
+                      <InlineStack gap="300" blockAlign="center">
+                        <Text variant="headingMd">3️⃣</Text>
+                        <BlockStack gap="100">
+                          <Text variant="bodyMd" fontWeight="semibold">
+                            Customers can now visualize products!
+                          </Text>
+                          <Text variant="bodySm" tone="subdued">
+                            They upload a room photo, place your product, and see it come to life
+                          </Text>
+                        </BlockStack>
+                      </InlineStack>
+                    </Box>
+                  </BlockStack>
+                </BlockStack>
+              </Card>
+
+              {/* How It Works */}
+              <Card>
+                <BlockStack gap="400">
+                  <Text as="h2" variant="headingMd">
+                    ✨ How It Works
+                  </Text>
+                  <Text variant="bodyMd">
+                    See It uses AI-powered image generation to place your products 
+                    into customer room photos. Customers can:
                   </Text>
                   <BlockStack gap="200">
-                    <Text variant="bodyMd">
-                      Current Plan:{" "}
-                      <Text as="span" fontWeight="bold">
-                        {shop.plan === PLANS.PRO.id ? "Pro" : "Free"}
-                      </Text>
+                    <InlineStack gap="200">
+                      <Text>📸</Text>
+                      <Text variant="bodyMd">Upload or capture a photo of their room</Text>
+                    </InlineStack>
+                    <InlineStack gap="200">
+                      <Text>🎯</Text>
+                      <Text variant="bodyMd">Drag and resize your product to position it</Text>
+                    </InlineStack>
+                    <InlineStack gap="200">
+                      <Text>🎨</Text>
+                      <Text variant="bodyMd">Generate a photorealistic composite image</Text>
+                    </InlineStack>
+                    <InlineStack gap="200">
+                      <Text>💾</Text>
+                      <Text variant="bodyMd">Save and share their visualization</Text>
+                    </InlineStack>
+                  </BlockStack>
+                </BlockStack>
+              </Card>
+            </BlockStack>
+          </Layout.Section>
+
+          {/* Sidebar - Right Side */}
+          <Layout.Section variant="oneThird">
+            <BlockStack gap="500">
+              {/* Plan & Usage */}
+              <Card>
+                <BlockStack gap="400">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h2" variant="headingMd">
+                      📈 Usage & Billing
                     </Text>
-                    {shop.plan === PLANS.FREE.id ? (
-                      <Button variant="primary" onClick={handleUpgrade}>
+                    <Badge tone={isPro ? "success" : "attention"}>
+                      {isPro ? "Pro" : "Free"}
+                    </Badge>
+                  </InlineStack>
+                  
+                  <Divider />
+
+                  <BlockStack gap="300">
+                    <BlockStack gap="100">
+                      <InlineStack align="space-between">
+                        <Text variant="bodySm">Daily Renders</Text>
+                        <Text variant="bodySm" fontWeight="semibold">
+                          {usage.compositeRenders} / {shop.dailyQuota}
+                        </Text>
+                      </InlineStack>
+                      <ProgressBar
+                        progress={dailyPercent}
+                        tone={dailyPercent > 80 ? "critical" : "primary"}
+                        size="small"
+                      />
+                    </BlockStack>
+
+                    <BlockStack gap="100">
+                      <InlineStack align="space-between">
+                        <Text variant="bodySm">Monthly Renders</Text>
+                        <Text variant="bodySm" fontWeight="semibold">
+                          {monthlyUsage} / {shop.monthlyQuota}
+                        </Text>
+                      </InlineStack>
+                      <ProgressBar
+                        progress={monthlyPercent}
+                        tone={monthlyPercent > 80 ? "critical" : "primary"}
+                        size="small"
+                      />
+                    </BlockStack>
+                  </BlockStack>
+
+                  <Divider />
+
+                  {isPro ? (
+                    <BlockStack gap="200">
+                      <Text variant="bodySm" tone="subdued">
+                        You're on the Pro plan with higher limits
+                      </Text>
+                      <Button onClick={handleDowngrade} variant="plain">
+                        Downgrade to Free
+                      </Button>
+                    </BlockStack>
+                  ) : (
+                    <BlockStack gap="200">
+                      <Text variant="bodySm" tone="subdued">
+                        Upgrade for more renders and features
+                      </Text>
+                      <Button onClick={handleUpgrade} variant="primary">
                         Upgrade to Pro
                       </Button>
-                    ) : (
-                      <Button onClick={handleDowngrade}>Downgrade to Free</Button>
-                    )}
-                  </BlockStack>
-                  <BlockStack gap="200">
-                    <Text variant="bodySm" as="p">
-                      Daily Usage
-                    </Text>
-                    <ProgressBar
-                      progress={(usage.compositeRenders / shop.dailyQuota) * 100}
-                      tone="primary"
-                    />
-                    <Text variant="bodySm" as="p">
-                      {usage.compositeRenders} / {shop.dailyQuota} renders
-                    </Text>
-                  </BlockStack>
-                  <BlockStack gap="200">
-                    <Text variant="bodySm" as="p">
-                      Monthly Usage
-                    </Text>
-                    <ProgressBar
-                      progress={(monthlyUsage / shop.monthlyQuota) * 100}
-                      tone="primary"
-                    />
-                    <Text variant="bodySm" as="p">
-                      {monthlyUsage} / {shop.monthlyQuota} renders
-                    </Text>
-                  </BlockStack>
+                    </BlockStack>
+                  )}
                 </BlockStack>
               </Card>
+
+              {/* System Status */}
               <Card>
-                <BlockStack gap="200">
+                <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">
-                    App template specs
+                    🔧 System Status
                   </Text>
                   <BlockStack gap="200">
                     <InlineStack align="space-between">
-                      <Text as="span" variant="bodyMd">
-                        Framework
-                      </Text>
-                      <Link
-                        url="https://remix.run"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        Remix
-                      </Link>
+                      <Text variant="bodySm">App Version</Text>
+                      <Badge>{version.app}</Badge>
                     </InlineStack>
                     <InlineStack align="space-between">
-                      <Text as="span" variant="bodyMd">
-                        Database
-                      </Text>
-                      <Link
-                        url="https://www.prisma.io/"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        Prisma
-                      </Link>
+                      <Text variant="bodySm">Build</Text>
+                      <Text variant="bodySm" tone="subdued">{version.build}</Text>
                     </InlineStack>
                     <InlineStack align="space-between">
-                      <Text as="span" variant="bodyMd">
-                        Interface
-                      </Text>
-                      <span>
-                        <Link
-                          url="https://polaris.shopify.com"
-                          target="_blank"
-                          removeUnderline
-                        >
-                          Polaris
-                        </Link>
-                        {", "}
-                        <Link
-                          url="https://shopify.dev/docs/apps/tools/app-bridge"
-                          target="_blank"
-                          removeUnderline
-                        >
-                          App Bridge
-                        </Link>
-                      </span>
+                      <Text variant="bodySm">Last Updated</Text>
+                      <Text variant="bodySm" tone="subdued">{version.date}</Text>
                     </InlineStack>
                     <InlineStack align="space-between">
-                      <Text as="span" variant="bodyMd">
-                        API
-                      </Text>
-                      <Link
-                        url="https://shopify.dev/docs/api/admin-graphql"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        GraphQL API
-                      </Link>
+                      <Text variant="bodySm">AI Model</Text>
+                      <Text variant="bodySm" tone="subdued">Gemini 3 Pro</Text>
                     </InlineStack>
                   </BlockStack>
                 </BlockStack>
               </Card>
+
+              {/* Need Help */}
               <Card>
-                <BlockStack gap="200">
+                <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">
-                    Next steps
+                    💬 Need Help?
                   </Text>
-                  <List>
-                    <List.Item>
-                      Build an{" "}
-                      <Link
-                        url="https://shopify.dev/docs/apps/getting-started/build-app-example"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        {" "}
-                        example app
-                      </Link>{" "}
-                      to get started
-                    </List.Item>
-                    <List.Item>
-                      Explore Shopify’s API with{" "}
-                      <Link
-                        url="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-                        target="_blank"
-                        removeUnderline
-                      >
-                        GraphiQL
-                      </Link>
-                    </List.Item>
-                  </List>
+                  <Text variant="bodySm" tone="subdued">
+                    Having issues or questions? We're here to help.
+                  </Text>
+                  <Button url="mailto:support@seeit.app" external>
+                    Contact Support
+                  </Button>
                 </BlockStack>
               </Card>
             </BlockStack>
           </Layout.Section>
         </Layout>
+
+        {/* Footer */}
+        <Box paddingBlockStart="400">
+          <InlineStack align="center">
+            <Text variant="bodySm" tone="subdued">
+              See It v{version.app} • Built with ❤️ using Gemini 3 AI
+            </Text>
+          </InlineStack>
+        </Box>
       </BlockStack>
     </Page>
   );
