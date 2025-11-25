@@ -1,30 +1,40 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const sharp = require('sharp');
-const { downloadToBuffer, uploadBufferToGCS } = require('./storage');
+// Updated to use the new @google/genai SDK (2025)
+// See: https://ai.google.dev/gemini-api/docs/image-generation
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+import { GoogleGenAI } from "@google/genai";
+import sharp from 'sharp';
+import { downloadToBuffer, uploadBufferToGCS } from './storage.js';
+
+// Initialize the new GenAI client
+// The API key is read from GEMINI_API_KEY or GOOGLE_API_KEY env var automatically
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// Model for image generation/editing - updated to latest
+const IMAGE_MODEL = "gemini-2.5-flash-image";
+const FALLBACK_MODEL = "gemini-2.0-flash-exp"; // Fallback if primary fails
 
 async function callGemini(promptText, imageBuffer, maskBuffer = null) {
-    let modelId = process.env.GEMINI_IMAGE_MODEL_PRIMARY;
+    let modelId = IMAGE_MODEL;
 
     const makeRequest = async (currentModelId) => {
         console.log(`Calling Gemini model: ${currentModelId}`);
-        const model = genAI.getGenerativeModel({ model: currentModelId });
 
-        const parts = [
-            { text: promptText },
-            {
-                inlineData: {
-                    mimeType: 'image/png',
-                    data: imageBuffer.toString('base64')
-                }
+        // Build the content parts array
+        const parts = [];
+
+        // Text prompt first
+        parts.push({ text: promptText });
+
+        // Main image as inline data
+        parts.push({
+            inlineData: {
+                mimeType: 'image/png',
+                data: imageBuffer.toString('base64')
             }
-        ];
+        });
 
+        // If mask provided, add it
         if (maskBuffer) {
-            // For inpainting/cleanup, mask might need to be passed differently depending on exact API shape,
-            // but standard multimodal usually accepts multiple images.
-            // Assuming standard content parts structure for now.
             parts.push({
                 inlineData: {
                     mimeType: 'image/png',
@@ -33,40 +43,51 @@ async function callGemini(promptText, imageBuffer, maskBuffer = null) {
             });
         }
 
-        const result = await model.generateContent({
-            contents: [{ role: 'user', parts: parts }]
+        // Use the new SDK pattern
+        const response = await ai.models.generateContent({
+            model: currentModelId,
+            contents: parts,
         });
 
-        const response = await result.response;
-        // Accessing the inline data from the response
-        // Note: The exact path might vary slightly based on SDK version, but this is standard for image gen.
-        // If text-only model was used, this would fail, but we are using image models.
-        // Typically image generation returns inlineData in candidates.
-
-        const candidate = response.candidates[0];
-        if (!candidate || !candidate.content || !candidate.content.parts || !candidate.content.parts[0].inlineData) {
-            throw new Error("No image data in response");
+        // Extract image data from response using new SDK structure
+        const candidate = response.candidates?.[0];
+        if (!candidate?.content?.parts) {
+            throw new Error("No content in response");
         }
 
-        return candidate.content.parts[0].inlineData.data;
+        // Find the inline image data in the response parts
+        for (const part of candidate.content.parts) {
+            if (part.inlineData) {
+                return part.inlineData.data;
+            }
+        }
+
+        throw new Error("No image data in response");
     };
 
     try {
         return await makeRequest(modelId);
     } catch (error) {
-        console.error(`Error with primary model ${modelId}:`, error);
-        if (error.status === 429 || error.status >= 500) {
+        console.error(`Error with primary model ${modelId}:`, error.message);
+        // Check for rate limiting or server errors
+        if (error.status === 429 || error.status >= 500 || error.message?.includes('429')) {
             console.log('Falling back to secondary model');
-            modelId = process.env.GEMINI_IMAGE_MODEL_FALLBACK;
+            modelId = FALLBACK_MODEL;
             return await makeRequest(modelId);
         }
         throw error;
     }
 }
 
-async function prepareProduct(sourceImageUrl, shopId, productId, assetId) {
+export async function prepareProduct(sourceImageUrl, shopId, productId, assetId) {
+    console.log(`Preparing product: ${shopId}/${productId}/${assetId}`);
     const imageBuffer = await downloadToBuffer(sourceImageUrl);
-    const prompt = "Return this exact product image with background removed. Set background pixels to alpha 0. Do not modify product shape, color or texture. Output PNG.";
+
+    // Improved prompt for background removal
+    const prompt = `Remove the background from this product image completely. 
+Make the background fully transparent (alpha = 0). 
+Keep the product exactly as it is - do not modify the product's shape, color, texture, or any details.
+Output as PNG with transparency.`;
 
     const base64Data = await callGemini(prompt, imageBuffer);
     const outputBuffer = Buffer.from(base64Data, 'base64');
@@ -75,21 +96,28 @@ async function prepareProduct(sourceImageUrl, shopId, productId, assetId) {
     return await uploadBufferToGCS(process.env.GCS_BUCKET_PRODUCT, key, outputBuffer, 'image/png');
 }
 
-async function cleanupRoom(roomImageUrl, maskUrl) {
+export async function cleanupRoom(roomImageUrl, maskUrl) {
+    console.log('Processing room cleanup');
     const roomBuffer = await downloadToBuffer(roomImageUrl);
     const maskBuffer = await downloadToBuffer(maskUrl);
 
-    const prompt = "Use the mask to remove objects inside the white region. Inpaint background to match local context. Do not alter pixels outside the mask.";
+    // Improved inpainting prompt
+    const prompt = `Using the provided room image and mask image:
+The white regions in the mask indicate objects to be removed.
+Remove objects in the masked (white) areas and fill with appropriate background.
+Match the surrounding context - floor, wall, or whatever is around the masked area.
+Do NOT alter any pixels outside the masked region.
+Maintain consistent lighting and perspective.`;
 
     const base64Data = await callGemini(prompt, roomBuffer, maskBuffer);
     const outputBuffer = Buffer.from(base64Data, 'base64');
 
-    // Generate a unique key for the cleaned room
     const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
     return await uploadBufferToGCS(process.env.GCS_BUCKET_ROOM, key, outputBuffer, 'image/jpeg');
 }
 
-async function compositeScene(preparedProductImageUrl, roomImageUrl, placement, stylePreset) {
+export async function compositeScene(preparedProductImageUrl, roomImageUrl, placement, stylePreset) {
+    console.log('Processing scene composite');
     const productBuffer = await downloadToBuffer(preparedProductImageUrl);
     const roomBuffer = await downloadToBuffer(roomImageUrl);
 
@@ -101,27 +129,38 @@ async function compositeScene(preparedProductImageUrl, roomImageUrl, placement, 
     const pixelX = Math.round(roomWidth * placement.x);
     const pixelY = Math.round(roomHeight * placement.y);
 
-    // Resize product based on scale (assuming scale is relative to room width or just a raw multiplier? 
-    // Spec says "newWidth = productWidth * scale". Let's assume scale is a multiplier for the product's original size 
-    // OR relative to room. Usually "scale" in these contexts is a multiplier. 
-    // Let's stick to the spec: "newWidth = productWidth * scale" implies multiplier on original size.
-    // Wait, usually in UI scale 1.0 means "default size". 
-    // Let's check if we need to fit it to room. 
-    // Spec says: "newWidth = productWidth * scale". I will follow that.
-
+    // Resize product based on scale
     const productMetadata = await sharp(productBuffer).metadata();
     const newWidth = Math.round(productMetadata.width * placement.scale);
 
+    // Ensure the product is placed correctly (centered at the placement point)
     const resizedProduct = await sharp(productBuffer)
         .resize({ width: newWidth })
         .toBuffer();
 
+    const resizedProductMeta = await sharp(resizedProduct).metadata();
+    const adjustedX = Math.max(0, pixelX - Math.round(resizedProductMeta.width / 2));
+    const adjustedY = Math.max(0, pixelY - Math.round(resizedProductMeta.height / 2));
+
     const guideImageBuffer = await sharp(roomBuffer)
-        .composite([{ input: resizedProduct, top: pixelY, left: pixelX }])
+        .composite([{
+            input: resizedProduct,
+            top: adjustedY,
+            left: adjustedX
+        }])
         .toBuffer();
 
-    // Step 2: AI Polish
-    const prompt = `Object is already placed in the room. Do NOT move, resize or warp the object. Harmonize lighting, shadows, reflections to match room. Apply style: ${stylePreset}`;
+    // Step 2: AI Polish - improved prompt
+    const styleDescription = stylePreset === 'neutral' ? 'natural and realistic' : stylePreset;
+    const prompt = `This image shows a product that has been placed into a room scene.
+The product is already positioned - do NOT move, resize, reposition, or warp the product.
+Your task is to make the composite look photorealistic by:
+1. Harmonizing the lighting on the product to match the room's light sources
+2. Adding appropriate shadows beneath and around the product
+3. Adding subtle reflections if on a reflective surface
+4. Ensuring color temperature consistency
+Style: ${styleDescription}
+Keep the product's exact position, size, and shape unchanged.`;
 
     const base64Data = await callGemini(prompt, guideImageBuffer);
     const outputBuffer = Buffer.from(base64Data, 'base64');
@@ -129,9 +168,3 @@ async function compositeScene(preparedProductImageUrl, roomImageUrl, placement, 
     const key = `composite/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
     return await uploadBufferToGCS(process.env.GCS_BUCKET_COMPOSITE, key, outputBuffer, 'image/jpeg');
 }
-
-module.exports = {
-    prepareProduct,
-    cleanupRoom,
-    compositeScene
-};

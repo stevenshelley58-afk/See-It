@@ -1,9 +1,8 @@
-const { Storage } = require('@google-cloud/storage');
-const path = require('path');
+import { Storage } from '@google-cloud/storage';
 
 const storage = new Storage();
 
-async function downloadToBuffer(url) {
+export async function downloadToBuffer(url) {
     console.log(`Downloading from: ${url}`);
     const response = await fetch(url);
     if (!response.ok) {
@@ -13,7 +12,7 @@ async function downloadToBuffer(url) {
     return Buffer.from(arrayBuffer);
 }
 
-async function uploadBufferToGCS(bucketName, key, buffer, contentType) {
+export async function uploadBufferToGCS(bucketName, key, buffer, contentType) {
     console.log(`Uploading to bucket: ${bucketName}, key: ${key}`);
     const bucket = storage.bucket(bucketName);
     const file = bucket.file(key);
@@ -23,6 +22,7 @@ async function uploadBufferToGCS(bucketName, key, buffer, contentType) {
         resumable: false
     });
 
+    // Make the file publicly accessible or generate a signed URL
     const [signedUrl] = await file.getSignedUrl({
         version: 'v4',
         action: 'read',
@@ -32,8 +32,3 @@ async function uploadBufferToGCS(bucketName, key, buffer, contentType) {
     console.log(`Generated signed URL: ${signedUrl}`);
     return signedUrl;
 }
-
-module.exports = {
-    downloadToBuffer,
-    uploadBufferToGCS
-};

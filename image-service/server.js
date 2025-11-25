@@ -1,13 +1,17 @@
 console.log("Starting Image Service...");
 
 // CRITICAL: Load env vars FIRST, before any modules that use process.env
-const dotenv = require('dotenv');
+import dotenv from 'dotenv';
 dotenv.config();
 
-const express = require('express');
+import express from 'express';
+
 let prepareProduct, cleanupRoom, compositeScene;
 try {
-    ({ prepareProduct, cleanupRoom, compositeScene } = require('./gemini'));
+    const geminiModule = await import('./gemini.js');
+    prepareProduct = geminiModule.prepareProduct;
+    cleanupRoom = geminiModule.cleanupRoom;
+    compositeScene = geminiModule.compositeScene;
     console.log("Gemini module loaded successfully");
 } catch (error) {
     console.error("Failed to load Gemini module:", error);
@@ -22,7 +26,7 @@ const PORT = process.env.PORT || 8080;
 // Auth Middleware
 app.use((req, res, next) => {
     // Skip auth for healthcheck
-    if (req.path === '/healthz') return next();
+    if (req.path === '/healthz' || req.path === '/') return next();
 
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -45,7 +49,7 @@ app.use((req, res, next) => {
 
 // Root route for Cloud Run default health check
 app.get('/', (req, res) => {
-    res.json({ status: 'ok', service: 'see-it-image-service' });
+    res.json({ status: 'ok', service: 'see-it-image-service', version: '2.0.0' });
 });
 
 app.get('/healthz', (req, res) => {
@@ -89,7 +93,7 @@ app.post('/scene/composite', async (req, res) => {
             prepared_product_image_url,
             room_image_url,
             placement,
-            prompt ? prompt.style_preset : 'default'
+            prompt ? prompt.style_preset : 'neutral'
         );
 
         res.json({ image_url });
@@ -101,4 +105,6 @@ app.post('/scene/composite', async (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Image Service listening on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`Gemini API Key: ${process.env.GEMINI_API_KEY ? 'Set' : 'NOT SET'}`);
 });
