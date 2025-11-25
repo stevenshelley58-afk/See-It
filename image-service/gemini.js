@@ -113,8 +113,8 @@ Output as PNG with transparency.`;
     });
     const outputBuffer = Buffer.from(base64Data, 'base64');
 
-    const key = `${shopId}/${productId}/${assetId}_prepared.png`;
-    return await uploadBufferToGCS(process.env.GCS_BUCKET_PRODUCT, key, outputBuffer, 'image/png');
+    const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
+    return await uploadBufferToGCS(process.env.GCS_BUCKET, key, outputBuffer, 'image/png');
 }
 
 export async function cleanupRoom(roomImageUrl, maskUrl) {
@@ -137,7 +137,7 @@ Maintain consistent lighting and perspective.`;
     const outputBuffer = Buffer.from(base64Data, 'base64');
 
     const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    return await uploadBufferToGCS(process.env.GCS_BUCKET_ROOM, key, outputBuffer, 'image/jpeg');
+    return await uploadBufferToGCS(process.env.GCS_BUCKET, key, outputBuffer, 'image/jpeg');
 }
 
 export async function compositeScene(preparedProductImageUrl, roomImageUrl, placement, stylePreset) {
@@ -195,5 +195,5 @@ Keep the product's exact position, size, and shape unchanged.`;
     const outputBuffer = Buffer.from(base64Data, 'base64');
 
     const key = `composite/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    return await uploadBufferToGCS(process.env.GCS_BUCKET_COMPOSITE, key, outputBuffer, 'image/jpeg');
+    return await uploadBufferToGCS(process.env.GCS_BUCKET, key, outputBuffer, 'image/jpeg');
 }
