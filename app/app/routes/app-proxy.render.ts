@@ -25,10 +25,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const body = await request.json();
     const { product_id, variant_id, room_session_id, placement, config } = body;
 
-    // Validate required placement data
-    if (!placement || typeof placement.x !== 'number' || typeof placement.y !== 'number') {
+    // Validate required placement data (NaN check - typeof NaN === 'number')
+    if (!placement || !Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
+        console.error('Invalid placement:', placement);
         return json(
             { error: "invalid_placement", message: "Placement x, y, and scale are required" },
+            { status: 400, headers: CORS_HEADERS }
+        );
+    }
+
+    // Validate room_session_id
+    if (!room_session_id) {
+        return json(
+            { error: "missing_session", message: "room_session_id is required" },
             { status: 400, headers: CORS_HEADERS }
         );
     }

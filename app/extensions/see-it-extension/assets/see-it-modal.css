@@ -334,11 +334,24 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
+  /* Subtle border so user can see product bounds */
+  border: 1px dashed rgba(0, 128, 96, 0.5);
+  border-radius: 4px;
+  padding: 4px;
+  /* Subtle shadow to lift product off the room */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.draggable-container:hover {
+  border-color: rgba(0, 128, 96, 0.8);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .draggable-container.is-dragging {
   cursor: grabbing;
-  outline: 2px dashed #008060; /* Visual cue */
+  border: 2px dashed #008060;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
 }
 
 .draggable-item {
@@ -346,31 +359,62 @@
   height: auto;
   display: block;
   pointer-events: none; /* Events handled by container */
+  /* Ensure transparent backgrounds show through */
+  background: transparent;
 }
 
-/* Resize Handles */
+/* Resize Handles - Always visible for discoverability */
 .resize-handle {
   position: absolute;
-  width: 24px; /* Larger hit area */
-  height: 24px;
+  width: 20px;
+  height: 20px;
   background-color: white;
   border: 2px solid #008060;
   border-radius: 50%;
   z-index: 10;
-  display: none; /* Hidden by default, shown on hover/active */
+  display: block; /* Always visible */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s, background-color 0.15s;
 }
 
-/* Show handles on hover or when dragging */
-.draggable-container:hover .resize-handle,
-.draggable-container.is-dragging .resize-handle,
-.draggable-container:active .resize-handle {
-  display: block;
+.resize-handle:hover {
+  transform: scale(1.2);
+  background-color: #008060;
 }
 
-.handle-tl { top: -12px; left: -12px; cursor: nwse-resize; }
-.handle-tr { top: -12px; right: -12px; cursor: nesw-resize; }
-.handle-bl { bottom: -12px; left: -12px; cursor: nesw-resize; }
-.handle-br { bottom: -12px; right: -12px; cursor: nwse-resize; }
+.resize-handle:active {
+  transform: scale(1.1);
+  background-color: #006e52;
+}
+
+/* Corner resize icon indicators */
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #008060;
+  border-bottom: 2px solid #008060;
+}
+
+.resize-handle:hover::after {
+  border-color: white;
+}
+
+.handle-tl { top: -10px; left: -10px; cursor: nwse-resize; }
+.handle-tl::after { transform: translate(-50%, -50%) rotate(-135deg); }
+
+.handle-tr { top: -10px; right: -10px; cursor: nesw-resize; }
+.handle-tr::after { transform: translate(-50%, -50%) rotate(-45deg); }
+
+.handle-bl { bottom: -10px; left: -10px; cursor: nesw-resize; }
+.handle-bl::after { transform: translate(-50%, -50%) rotate(135deg); }
+
+.handle-br { bottom: -10px; right: -10px; cursor: nwse-resize; }
+.handle-br::after { transform: translate(-50%, -50%) rotate(45deg); }
 
 /* Controls Panel */
 .see-it-controls-panel {

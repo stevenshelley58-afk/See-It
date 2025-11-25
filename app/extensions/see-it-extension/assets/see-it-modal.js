@@ -53,13 +53,15 @@ document.addEventListener('DOMContentLoaded', function () {
         originalRoomImageUrl: null,
         cleanedRoomImageUrl: null,
         currentRoomImageUrl: null,
-        productImageUrl: trigger ? trigger.dataset.productImage : '',
+        productImageUrl: trigger ? trigger.dataset.productImage : '',  // Fallback to original
+        preparedProductImageUrl: null,  // Transparent background version
         productId: trigger ? trigger.dataset.productId : '',
         scale: 1.0,
         x: 0,
         y: 0,
         isUploading: false,
-        isCleaningUp: false
+        isCleaningUp: false,
+        isPrepared: false  // Track if product has background removed
     };
     
     // Canvas drawing state
@@ -96,9 +98,11 @@ document.addEventListener('DOMContentLoaded', function () {
     
     const updateEraserButtons = () => {
         const hasDrawing = drawHistory.length > 0;
+        const uploadComplete = !state.isUploading && state.originalRoomImageUrl;
         if (btnUndo) btnUndo.disabled = !hasDrawing;
         if (btnClear) btnClear.disabled = !hasDrawing;
-        if (btnRemove) btnRemove.disabled = !hasDrawing || state.isCleaningUp;
+        // Remove button needs: drawing exists, not cleaning up, upload finished
+        if (btnRemove) btnRemove.disabled = !hasDrawing || state.isCleaningUp || !uploadComplete;
     };
 
     // --- Canvas Drawing ---
@@ -251,6 +255,27 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     // --- API Calls ---
+    
+    // Fetch prepared product image (with transparent background) from our API
+    const fetchPreparedProductImage = async (productId) => {
+        try {
+            const res = await fetch(`/apps/see-it/product/prepared?product_id=${encodeURIComponent(productId)}`);
+            if (!res.ok) {
+                console.log('No prepared image found, using original');
+                return null;
+            }
+            const data = await res.json();
+            if (data.prepared_image_url) {
+                console.log('Found prepared image:', data.prepared_image_url);
+                return data.prepared_image_url;
+            }
+            return null;
+        } catch (err) {
+            console.warn('Failed to fetch prepared image:', err);
+            return null;
+        }
+    };
+    
     const startSession = async () => {
         const res = await fetch('/apps/see-it/room/start', { method: 'POST' });
         if (!res.ok) throw new Error('Failed to start session');
@@ -296,11 +321,27 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // 1. Initialize
     if (trigger) {
-        trigger.addEventListener('click', () => {
+        trigger.addEventListener('click', async () => {
             modal.classList.remove('hidden');
             
-            state.productImageUrl = trigger.dataset.productImage || state.productImageUrl;
             state.productId = trigger.dataset.productId || state.productId;
+            const originalImageUrl = trigger.dataset.productImage || state.productImageUrl;
+            
+            // Fetch the prepared (background-removed) image if available
+            const preparedUrl = await fetchPreparedProductImage(state.productId);
+            
+            if (preparedUrl) {
+                // Use the prepared image (transparent background)
+                state.preparedProductImageUrl = preparedUrl;
+                state.productImageUrl = preparedUrl;
+                state.isPrepared = true;
+            } else {
+                // Fall back to original Shopify image
+                state.preparedProductImageUrl = null;
+                state.productImageUrl = originalImageUrl;
+                state.isPrepared = false;
+            }
+            
             if (productImage) productImage.src = state.productImageUrl;
             
             if (state.sessionId && (state.originalRoomImageUrl || state.cleanedRoomImageUrl)) {
@@ -383,6 +424,12 @@ document.addEventListener('DOMContentLoaded', function () {
         btnConfirmRoom.addEventListener('click', () => {
             if (state.isUploading || state.isCleaningUp) return;
             
+            // Must have completed upload before continuing
+            if (!state.sessionId || !state.originalRoomImageUrl) {
+                showError('Please wait for upload to complete');
+                return;
+            }
+            
             const roomUrl = getActiveRoomUrl() || state.currentRoomImageUrl;
             if (roomImage) roomImage.src = roomUrl;
             
@@ -397,7 +444,11 @@ document.addEventListener('DOMContentLoaded', function () {
     // Remove button - process the mask
     if (btnRemove) {
         btnRemove.addEventListener('click', async () => {
-            if (state.isCleaningUp || !state.sessionId || drawHistory.length === 0) return;
+            // Must have session, drawing, not cleaning up, and upload must be complete
+            if (state.isCleaningUp || !state.sessionId || drawHistory.length === 0 || state.isUploading || !state.originalRoomImageUrl) {
+                console.log('Remove blocked:', { isCleaningUp: state.isCleaningUp, sessionId: state.sessionId, hasDrawing: drawHistory.length > 0, isUploading: state.isUploading, hasOriginalUrl: !!state.originalRoomImageUrl });
+                return;
+            }
             
             state.isCleaningUp = true;
             if (cleanupLoading) cleanupLoading.classList.remove('hidden');
