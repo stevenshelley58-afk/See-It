@@ -117,22 +117,29 @@ Output as PNG with transparency.`;
     return await uploadBufferToGCS(process.env.GCS_BUCKET, key, outputBuffer, 'image/png');
 }
 
-export async function cleanupRoom(roomImageUrl, maskUrl) {
-    console.log('Processing room cleanup');
+// Cleanup room using drawn mask (white = remove, black = keep)
+export async function cleanupRoom(roomImageUrl, maskDataUrl) {
+    console.log('Processing room cleanup with drawn mask');
+    
+    // Download the room image
     const roomBuffer = await downloadToBuffer(roomImageUrl);
-    const maskBuffer = await downloadToBuffer(maskUrl);
+    
+    // Parse the mask from base64 data URL
+    // Format: "data:image/png;base64,iVBORw0KGgo..."
+    const maskBase64 = maskDataUrl.split(',')[1];
+    const maskBuffer = Buffer.from(maskBase64, 'base64');
 
-    // Use PRO model for inpainting (needs better understanding)
     const prompt = `Using the provided room image and mask image:
 The white regions in the mask indicate objects to be removed.
 Remove objects in the masked (white) areas and fill with appropriate background.
 Match the surrounding context - floor, wall, or whatever is around the masked area.
 Do NOT alter any pixels outside the masked region.
-Maintain consistent lighting and perspective.`;
+Maintain consistent lighting and perspective.
+The result should look natural, as if nothing was ever there.`;
 
     const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
         model: IMAGE_MODEL_PRO,
-        imageSize: "2K"  // High quality for room cleanup
+        imageSize: "2K"
     });
     const outputBuffer = Buffer.from(base64Data, 'base64');
 

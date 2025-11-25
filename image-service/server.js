@@ -47,7 +47,7 @@ app.use((req, res, next) => {
     next();
 });
 
-const SERVICE_VERSION = '2.0.0-gemini3-nov25';
+const SERVICE_VERSION = '2.1.0-eraser-mask';
 
 // Root route for Cloud Run default health check
 app.get('/', (req, res) => {
@@ -79,10 +79,18 @@ app.post('/product/prepare', async (req, res) => {
 
 app.post('/room/cleanup', async (req, res) => {
     try {
-        const { room_image_url, mask_url, prompt, model } = req.body;
-        console.log('Processing room cleanup');
+        const { room_image_url, mask_data_url } = req.body;
+        
+        if (!room_image_url || !mask_data_url) {
+            return res.status(400).json({ 
+                error: 'Bad Request', 
+                message: 'room_image_url and mask_data_url are required' 
+            });
+        }
+        
+        console.log('Processing room cleanup with drawn mask');
 
-        const cleaned_room_image_url = await cleanupRoom(room_image_url, mask_url);
+        const cleaned_room_image_url = await cleanupRoom(room_image_url, mask_data_url);
 
         res.json({ cleaned_room_image_url });
     } catch (error) {

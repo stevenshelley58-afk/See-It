@@ -9,29 +9,15 @@ import {
   Box,
   InlineStack,
   ProgressBar,
-  Banner,
-  Icon,
   Divider,
   Badge,
 } from "@shopify/polaris";
-import {
-  HomeIcon,
-  ImageIcon,
-  SettingsIcon,
-  ChartVerticalFilledIcon,
-} from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { PLANS } from "../billing";
-
-// ============================================
-// VERSION INFO - Update this when deploying!
-// ============================================
-const APP_VERSION = "2.0.0";
-const BUILD_DATE = "Nov 25, 2025";
-const BUILD_ID = "gemini3-nov25";
+import pkg from "../../package.json" with { type: "json" };
 
 export const loader = async ({ request }) => {
   const { session, admin } = await authenticate.admin(request);
@@ -84,12 +70,19 @@ export const loader = async ({ request }) => {
     where: { shopId: shop.id, status: "completed" }
   });
 
+  // Auto-generate build info from package.json and server start time
+  const buildTimestamp = process.env.BUILD_TIMESTAMP || new Date().toISOString();
+
   return json({
     shop,
     usage: usage || { compositeRenders: 0, prepRenders: 0 },
     monthlyUsage,
     totalRenders: totalRendersAgg,
-    version: { app: APP_VERSION, build: BUILD_ID, date: BUILD_DATE }
+    version: { 
+      app: pkg.version, 
+      build: buildTimestamp.slice(0, 10).replace(/-/g, ''),
+      date: new Date(buildTimestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    }
   });
 };
 

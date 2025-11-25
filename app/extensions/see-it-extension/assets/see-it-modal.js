@@ -18,22 +18,25 @@ document.addEventListener('DOMContentLoaded', function () {
     const cameraInput = $('see-it-camera-input');
 
     // Edit Inputs
+    const canvasWrapper = $('see-it-canvas-wrapper');
     const roomPreview = $('see-it-room-preview');
-    const btnCleanup = $('see-it-tool-cleanup');
-    const maskInput = $('see-it-mask-upload');
+    const maskCanvas = $('see-it-mask-canvas');
     const btnConfirmRoom = $('see-it-confirm-room');
     const btnBackToWelcome = $('see-it-back-to-welcome');
+    const cleanupLoading = $('see-it-cleanup-loading');
+    
+    // Eraser Controls
+    const btnUndo = $('see-it-undo-btn');
+    const btnClear = $('see-it-clear-btn');
+    const btnRemove = $('see-it-remove-btn');
 
     // Place Inputs
     const roomImage = $('see-it-room-image');
     const productContainer = $('see-it-product-container');
     const productImage = $('see-it-product-image');
-    const canvasContainer = $('see-it-canvas-container');
     const scaleSlider = $('see-it-scale-slider');
     const scaleValue = $('see-it-scale-value');
     const btnGenerate = $('see-it-generate');
-    const btnSaveRoom = $('see-it-save-room');
-    const savedRoomsList = $('see-it-saved-rooms-list');
 
     // Result Inputs
     const resultDiv = $('see-it-result');
@@ -47,20 +50,36 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- State ---
     let state = {
         sessionId: null,
-        originalRoomImageUrl: null, // The confirmed URL from server
-        currentRoomImageUrl: null,  // The blob/data URL for display
+        originalRoomImageUrl: null,
+        cleanedRoomImageUrl: null,
+        currentRoomImageUrl: null,
         productImageUrl: trigger ? trigger.dataset.productImage : '',
         productId: trigger ? trigger.dataset.productId : '',
         scale: 1.0,
         x: 0,
         y: 0,
-        isUploading: false
+        isUploading: false,
+        isCleaningUp: false
     };
+    
+    // Canvas drawing state
+    let ctx = null;
+    let isDrawing = false;
+    let drawHistory = []; // For undo
+    const BRUSH_SIZE = 30;
+    const BRUSH_COLOR = 'rgba(138, 43, 226, 0.5)'; // Semi-transparent purple
+    
+    const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl;
 
     // --- Helpers ---
     const showStep = (step) => {
         [stepWelcome, stepEdit, stepPlace, stepResult].forEach(s => s && s.classList.add('hidden'));
         if (step) step.classList.remove('hidden');
+        
+        // Initialize canvas when entering edit step
+        if (step === stepEdit) {
+            setTimeout(initCanvas, 100);
+        }
     };
 
     const showError = (msg) => {
@@ -73,6 +92,162 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const resetError = () => {
         if (errorDiv) errorDiv.classList.add('hidden');
+    };
+    
+    const updateEraserButtons = () => {
+        const hasDrawing = drawHistory.length > 0;
+        if (btnUndo) btnUndo.disabled = !hasDrawing;
+        if (btnClear) btnClear.disabled = !hasDrawing;
+        if (btnRemove) btnRemove.disabled = !hasDrawing || state.isCleaningUp;
+    };
+
+    // --- Canvas Drawing ---
+    const initCanvas = () => {
+        if (!maskCanvas || !roomPreview) return;
+        
+        // Wait for image to load
+        if (!roomPreview.complete) {
+            roomPreview.onload = initCanvas;
+            return;
+        }
+        
+        // Size canvas to match image display size
+        const rect = roomPreview.getBoundingClientRect();
+        maskCanvas.width = rect.width;
+        maskCanvas.height = rect.height;
+        maskCanvas.style.width = rect.width + 'px';
+        maskCanvas.style.height = rect.height + 'px';
+        
+        ctx = maskCanvas.getContext('2d');
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = BRUSH_SIZE;
+        ctx.strokeStyle = BRUSH_COLOR;
+        
+        // Clear and reset
+        ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        drawHistory = [];
+        updateEraserButtons();
+    };
+    
+    const getEventPos = (e) => {
+        const rect = maskCanvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+            x: clientX - rect.left,
+            y: clientY - rect.top
+        };
+    };
+    
+    const saveState = () => {
+        if (!ctx) return;
+        drawHistory.push(ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height));
+        // Limit history size
+        if (drawHistory.length > 20) drawHistory.shift();
+        updateEraserButtons();
+    };
+    
+    const startDraw = (e) => {
+        if (!ctx) return;
+        e.preventDefault();
+        isDrawing = true;
+        saveState();
+        const pos = getEventPos(e);
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+        // Draw a dot for single taps
+        ctx.lineTo(pos.x + 0.1, pos.y + 0.1);
+        ctx.stroke();
+    };
+    
+    const draw = (e) => {
+        if (!isDrawing || !ctx) return;
+        e.preventDefault();
+        const pos = getEventPos(e);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+    };
+    
+    const stopDraw = () => {
+        if (!ctx) return;
+        isDrawing = false;
+        ctx.beginPath();
+        updateEraserButtons();
+    };
+    
+    // Canvas event listeners
+    if (maskCanvas) {
+        // Mouse events
+        maskCanvas.addEventListener('mousedown', startDraw);
+        maskCanvas.addEventListener('mousemove', draw);
+        maskCanvas.addEventListener('mouseup', stopDraw);
+        maskCanvas.addEventListener('mouseleave', stopDraw);
+        
+        // Touch events
+        maskCanvas.addEventListener('touchstart', startDraw, { passive: false });
+        maskCanvas.addEventListener('touchmove', draw, { passive: false });
+        maskCanvas.addEventListener('touchend', stopDraw);
+        maskCanvas.addEventListener('touchcancel', stopDraw);
+    }
+    
+    // Undo button
+    if (btnUndo) {
+        btnUndo.addEventListener('click', () => {
+            if (drawHistory.length > 0 && ctx) {
+                drawHistory.pop(); // Remove current state
+                if (drawHistory.length > 0) {
+                    ctx.putImageData(drawHistory[drawHistory.length - 1], 0, 0);
+                } else {
+                    ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                }
+                updateEraserButtons();
+            }
+        });
+    }
+    
+    // Clear button
+    if (btnClear) {
+        btnClear.addEventListener('click', () => {
+            if (ctx) {
+                ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                drawHistory = [];
+                updateEraserButtons();
+            }
+        });
+    }
+    
+    // Generate mask image from canvas
+    const generateMaskImage = () => {
+        if (!ctx || !maskCanvas) return null;
+        
+        // Create a new canvas for the mask (white on black)
+        const maskCtx = document.createElement('canvas').getContext('2d');
+        maskCtx.canvas.width = maskCanvas.width;
+        maskCtx.canvas.height = maskCanvas.height;
+        
+        // Fill with black
+        maskCtx.fillStyle = 'black';
+        maskCtx.fillRect(0, 0, maskCtx.canvas.width, maskCtx.canvas.height);
+        
+        // Get the drawing data
+        const imageData = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+        const maskData = maskCtx.getImageData(0, 0, maskCtx.canvas.width, maskCtx.canvas.height);
+        
+        // Convert: any pixel with alpha > 0 becomes white
+        for (let i = 0; i < imageData.data.length; i += 4) {
+            if (imageData.data[i + 3] > 0) { // If alpha > 0
+                maskData.data[i] = 255;     // R
+                maskData.data[i + 1] = 255; // G
+                maskData.data[i + 2] = 255; // B
+                maskData.data[i + 3] = 255; // A
+            }
+        }
+        
+        maskCtx.putImageData(maskData, 0, 0);
+        return maskCtx.canvas.toDataURL('image/png');
     };
 
     // --- API Calls ---
@@ -100,6 +275,22 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!res.ok) throw new Error('Failed to confirm room');
         return await res.json();
     };
+    
+    const cleanupWithMask = async (maskDataUrl) => {
+        const res = await fetch('/apps/see-it/room/cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                room_session_id: state.sessionId,
+                mask_data_url: maskDataUrl
+            })
+        });
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.message || 'Cleanup failed');
+        }
+        return await res.json();
+    };
 
     // --- Flow Handlers ---
 
@@ -107,12 +298,23 @@ document.addEventListener('DOMContentLoaded', function () {
     if (trigger) {
         trigger.addEventListener('click', () => {
             modal.classList.remove('hidden');
-            showStep(stepWelcome);
-            // Reset state if needed, or keep previous session? Let's reset for now.
-            state.currentRoomImageUrl = null;
-            state.originalRoomImageUrl = null;
-            state.sessionId = null;
+            
+            state.productImageUrl = trigger.dataset.productImage || state.productImageUrl;
+            state.productId = trigger.dataset.productId || state.productId;
             if (productImage) productImage.src = state.productImageUrl;
+            
+            if (state.sessionId && (state.originalRoomImageUrl || state.cleanedRoomImageUrl)) {
+                const roomUrl = getActiveRoomUrl();
+                if (roomPreview) roomPreview.src = roomUrl;
+                if (roomImage) roomImage.src = roomUrl;
+                showStep(stepEdit);
+            } else {
+                state.currentRoomImageUrl = null;
+                state.originalRoomImageUrl = null;
+                state.cleanedRoomImageUrl = null;
+                state.sessionId = null;
+                showStep(stepWelcome);
+            }
         });
     }
 
@@ -125,7 +327,10 @@ document.addEventListener('DOMContentLoaded', function () {
         const file = e.target.files[0];
         if (!file) return;
 
-        // Show preview immediately
+        state.cleanedRoomImageUrl = null;
+        state.originalRoomImageUrl = null;
+        state.sessionId = null;
+
         const reader = new FileReader();
         reader.onload = (e) => {
             state.currentRoomImageUrl = e.target.result;
@@ -135,25 +340,22 @@ document.addEventListener('DOMContentLoaded', function () {
         };
         reader.readAsDataURL(file);
 
-        // Start Upload Process in Background (or block 'Continue' until done)
         try {
             state.isUploading = true;
             if (btnConfirmRoom) {
                 btnConfirmRoom.textContent = 'Uploading...';
                 btnConfirmRoom.disabled = true;
             }
+            if (btnRemove) btnRemove.disabled = true;
 
-            // A. Start Session
             const sessionData = await startSession();
             state.sessionId = sessionData.sessionId;
             const uploadUrl = sessionData.uploadUrl;
 
-            // B. Upload File
             await uploadImage(file, uploadUrl);
 
-            // C. Confirm
             const confirmData = await confirmRoom(state.sessionId);
-            state.originalRoomImageUrl = confirmData.roomImageUrl; // The real URL
+            state.originalRoomImageUrl = confirmData.roomImageUrl;
 
             console.log('Upload complete:', state.originalRoomImageUrl);
 
@@ -162,9 +364,10 @@ document.addEventListener('DOMContentLoaded', function () {
         } finally {
             state.isUploading = false;
             if (btnConfirmRoom) {
-                btnConfirmRoom.textContent = 'Continue';
+                btnConfirmRoom.textContent = 'Continue →';
                 btnConfirmRoom.disabled = false;
             }
+            updateEraserButtons();
         }
     };
 
@@ -178,25 +381,64 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (btnConfirmRoom) {
         btnConfirmRoom.addEventListener('click', () => {
-            if (state.isUploading) return; // Should be disabled anyway
+            if (state.isUploading || state.isCleaningUp) return;
+            
+            const roomUrl = getActiveRoomUrl() || state.currentRoomImageUrl;
+            if (roomImage) roomImage.src = roomUrl;
+            
             showStep(stepPlace);
-            // Reset placement
             state.x = 0;
             state.y = 0;
             state.scale = 1.0;
             updateTransform();
         });
     }
-
-    // Cleanup (Remove Object) - Just a stub/hook for now
-    if (btnCleanup) btnCleanup.addEventListener('click', () => maskInput.click());
-    if (maskInput) maskInput.addEventListener('change', async (e) => {
-        // Reuse existing cleanup logic if available, or stub
-        alert('Object removal logic would trigger here. (Backend integration pending)');
-    });
+    
+    // Remove button - process the mask
+    if (btnRemove) {
+        btnRemove.addEventListener('click', async () => {
+            if (state.isCleaningUp || !state.sessionId || drawHistory.length === 0) return;
+            
+            state.isCleaningUp = true;
+            if (cleanupLoading) cleanupLoading.classList.remove('hidden');
+            if (btnRemove) btnRemove.disabled = true;
+            if (btnUndo) btnUndo.disabled = true;
+            if (btnClear) btnClear.disabled = true;
+            
+            try {
+                const maskDataUrl = generateMaskImage();
+                console.log('Sending mask for cleanup...');
+                
+                const result = await cleanupWithMask(maskDataUrl);
+                
+                state.cleanedRoomImageUrl = result.cleaned_room_image_url;
+                
+                if (roomPreview) roomPreview.src = result.cleaned_room_image_url;
+                if (roomImage) roomImage.src = result.cleaned_room_image_url;
+                
+                // Clear canvas for next edit
+                if (ctx) {
+                    ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                    drawHistory = [];
+                }
+                
+                // Re-init canvas for the new image
+                setTimeout(initCanvas, 100);
+                
+                console.log('Cleanup complete:', result.cleaned_room_image_url);
+                
+            } catch (err) {
+                console.error('Cleanup error:', err);
+                showError('Failed to remove: ' + err.message);
+            } finally {
+                state.isCleaningUp = false;
+                if (cleanupLoading) cleanupLoading.classList.add('hidden');
+                updateEraserButtons();
+            }
+        });
+    }
 
     // 4. Place Product (Interactions)
-
     const updateTransform = () => {
         if (productContainer) {
             productContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
@@ -205,13 +447,12 @@ document.addEventListener('DOMContentLoaded', function () {
         if (scaleSlider) scaleSlider.value = state.scale;
     };
 
-    // Drag Logic
     let isDragging = false;
     let startX, startY, initialX, initialY;
 
     if (productContainer) {
         productContainer.addEventListener('mousedown', (e) => {
-            if (e.target.classList.contains('resize-handle')) return; // Ignore handles
+            if (e.target.classList.contains('resize-handle')) return;
             e.preventDefault();
             isDragging = true;
             productContainer.classList.add('is-dragging');
@@ -224,10 +465,8 @@ document.addEventListener('DOMContentLoaded', function () {
         window.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
             e.preventDefault();
-            const dx = e.clientX - startX;
-            const dy = e.clientY - startY;
-            state.x = initialX + dx;
-            state.y = initialY + dy;
+            state.x = initialX + (e.clientX - startX);
+            state.y = initialY + (e.clientY - startY);
             updateTransform();
         });
 
@@ -236,9 +475,8 @@ document.addEventListener('DOMContentLoaded', function () {
             if (productContainer) productContainer.classList.remove('is-dragging');
         });
 
-        // Touch Events for Drag
         productContainer.addEventListener('touchstart', (e) => {
-            if (e.touches.length > 1) return; // Pinch handled elsewhere
+            if (e.touches.length > 1) return;
             if (e.target.classList.contains('resize-handle')) return;
             isDragging = true;
             productContainer.classList.add('is-dragging');
@@ -250,10 +488,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
         window.addEventListener('touchmove', (e) => {
             if (!isDragging) return;
-            const dx = e.touches[0].clientX - startX;
-            const dy = e.touches[0].clientY - startY;
-            state.x = initialX + dx;
-            state.y = initialY + dy;
+            state.x = initialX + (e.touches[0].clientX - startX);
+            state.y = initialY + (e.touches[0].clientY - startY);
             updateTransform();
         }, { passive: false });
 
@@ -263,8 +499,6 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Resize Logic (Handles)
-    // Simplified: Dragging a handle changes scale based on distance from center
     const handles = document.querySelectorAll('.resize-handle');
     handles.forEach(handle => {
         let isResizing = false;
@@ -293,10 +527,8 @@ document.addEventListener('DOMContentLoaded', function () {
             e.preventDefault();
             const clientX = e.clientX || e.touches[0].clientX;
             const clientY = e.clientY || e.touches[0].clientY;
-            const currentDist = getDist(clientX, clientY);
-
-            const newScale = startScale * (currentDist / startDist);
-            state.scale = Math.max(0.2, Math.min(5.0, newScale)); // Clamp
+            const newScale = startScale * (getDist(clientX, clientY) / startDist);
+            state.scale = Math.max(0.2, Math.min(5.0, newScale));
             updateTransform();
         };
 
@@ -305,13 +537,11 @@ document.addEventListener('DOMContentLoaded', function () {
         handle.addEventListener('mousedown', onDown);
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup', onUp);
-
         handle.addEventListener('touchstart', onDown);
         window.addEventListener('touchmove', onMove, { passive: false });
         window.addEventListener('touchend', onUp);
     });
 
-    // Slider Logic
     if (scaleSlider) {
         scaleSlider.addEventListener('input', (e) => {
             state.scale = parseFloat(e.target.value);
@@ -328,35 +558,22 @@ document.addEventListener('DOMContentLoaded', function () {
             resultDiv.innerHTML = '';
             actionsDiv.classList.add('hidden');
 
-            // Calculate relative coordinates
-            // Note: We need to map the visual placement back to 0-1 coordinates relative to the ROOM image
             const roomRect = roomImage.getBoundingClientRect();
-            const productRect = productImage.getBoundingClientRect(); // Visual rect
+            const productRect = productImage.getBoundingClientRect();
 
-            // Center of product relative to room top-left
             const productCX = productRect.left + productRect.width / 2 - roomRect.left;
             const productCY = productRect.top + productRect.height / 2 - roomRect.top;
-
-            const relativeX = productCX / roomRect.width;
-            const relativeY = productCY / roomRect.height;
-
-            // Scale is tricky because it depends on the intrinsic size relation.
-            // For MVP, we pass the raw slider scale or a normalized visual scale.
-            // Let's pass the raw state.scale and let backend/image-service interpret or adjust.
-            // Better: Pass the ratio of product width to room width?
-            // The current backend expects `scale` as a multiplier of the "prepared product size".
-            // Let's stick to state.scale for now.
 
             const payload = {
                 room_session_id: state.sessionId,
                 product_id: state.productId,
                 placement: {
-                    x: relativeX,
-                    y: relativeY,
+                    x: productCX / roomRect.width,
+                    y: productCY / roomRect.height,
                     scale: state.scale
                 },
                 config: {
-                    style_preset: 'neutral', // Default
+                    style_preset: 'neutral',
                     quality: 'standard'
                 }
             };

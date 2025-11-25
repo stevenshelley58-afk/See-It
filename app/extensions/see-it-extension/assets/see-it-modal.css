@@ -64,6 +64,13 @@
   display: none;
 }
 
+.see-it-step h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 8px 0;
+}
+
 /* Welcome Screen */
 .see-it-welcome-container {
   text-align: center;
@@ -90,6 +97,13 @@
   margin: 0 auto;
 }
 
+.see-it-version-badge {
+  margin-top: 24px;
+  font-size: 11px;
+  color: #9ca3af;
+  letter-spacing: 0.5px;
+}
+
 /* Buttons */
 .button.see-it-primary-btn {
   background-color: #008060;
@@ -108,8 +122,13 @@
   width: 100%;
 }
 
-.button.see-it-primary-btn:hover {
+.button.see-it-primary-btn:hover:not(:disabled) {
   background-color: #006e52;
+}
+
+.button.see-it-primary-btn:disabled {
+  background-color: #9ca3af;
+  cursor: not-allowed;
 }
 
 .button.see-it-secondary-btn {
@@ -134,16 +153,34 @@
 }
 
 .button.see-it-text-btn {
-  background: none;
-  border: none;
-  color: #666;
-  text-decoration: underline;
+  background: white;
+  border: 1px solid #d1d5db;
+  color: #374151;
+  text-decoration: none;
   cursor: pointer;
-  padding: 10px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.button.see-it-text-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+/* Step Description */
+.see-it-step-description {
+  color: #6b7280;
+  font-size: 14px;
+  margin-bottom: 16px;
+  line-height: 1.5;
 }
 
 /* Edit Room Step */
 .see-it-canvas-wrapper {
+  position: relative;
   width: 100%;
   max-height: 50vh;
   overflow: hidden;
@@ -152,33 +189,123 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 #see-it-room-preview {
   max-width: 100%;
   max-height: 50vh;
   object-fit: contain;
+  display: block;
 }
 
-.see-it-tools-panel {
+/* Drawing Canvas */
+#see-it-mask-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* Eraser Controls */
+.see-it-eraser-controls {
   display: flex;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 20px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  gap: 12px;
 }
 
-.tool-btn {
-  padding: 8px 16px;
-  border-radius: 20px;
-  border: 1px solid #ddd;
+.see-it-eraser-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.see-it-eraser-icon {
+  font-size: 20px;
+}
+
+.see-it-eraser-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.see-it-tool-btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
   background: white;
   cursor: pointer;
+  font-size: 13px;
+  color: #374151;
+  transition: all 0.15s ease;
 }
 
-.tool-btn:hover {
-  background: #f9f9f9;
+.see-it-tool-btn:hover:not(:disabled) {
+  background: #f3f4f6;
+  border-color: #9ca3af;
 }
+
+.see-it-tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.see-it-remove-btn {
+  padding: 8px 16px;
+  width: auto;
+}
+
+.see-it-loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: 8px;
+  z-index: 5;
+}
+
+.see-it-loading-overlay.hidden {
+  display: none;
+}
+
+.see-it-loading-overlay p {
+  color: #374151;
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.see-it-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e5e7eb;
+  border-top-color: #008060;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 
 /* Place Product Step */
 .see-it-interactive-canvas {
@@ -260,8 +387,22 @@
 .see-it-actions-row {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
+}
+
+/* Actions row with divider (used in edit room step) */
+.see-it-step > .see-it-actions-row {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* Actions row inside controls panel (no extra divider needed) */
+.see-it-controls-panel .see-it-actions-row {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 /* Saved Rooms */
@@ -297,11 +438,38 @@
   }
   
   .resize-handle {
-    width: 30px; /* Even bigger on mobile */
+    width: 30px;
     height: 30px;
   }
   
   .see-it-slider-control {
-    display: none; /* Hide slider on mobile in favor of pinch */
+    display: none;
+  }
+  
+  .see-it-actions-row {
+    flex-direction: column-reverse;
+  }
+  
+  .see-it-actions-row .button {
+    width: 100%;
+  }
+  
+  /* Mobile eraser controls */
+  .see-it-eraser-controls {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .see-it-eraser-hint {
+    font-size: 13px;
+  }
+  
+  .see-it-eraser-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  
+  .see-it-remove-btn {
+    flex: 1;
   }
 }

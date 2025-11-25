@@ -10,10 +10,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const body = await request.json();
-    const { room_session_id, mask_image_url } = body;
+    const { room_session_id, mask_data_url } = body;
 
-    if (!room_session_id || !mask_image_url) {
-        return json({ status: "error", message: "Missing required fields" }, { status: 400 });
+    if (!room_session_id) {
+        return json({ status: "error", message: "room_session_id is required" }, { status: 400 });
+    }
+
+    if (!mask_data_url) {
+        return json({ status: "error", message: "mask_data_url is required" }, { status: 400 });
     }
 
     const roomSession = await prisma.roomSession.findFirst({
@@ -27,10 +31,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ status: "error", message: "Invalid session" }, { status: 404 });
     }
 
-    const imageServiceUrl = process.env.IMAGE_SERVICE_BASE_URL;
-    console.log(`[Proxy] Sending cleanup request to ${imageServiceUrl}/room/cleanup`);
+    // Use the most recent room image (cleaned if available, otherwise original)
+    const currentRoomUrl = roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl;
+    
+    if (!currentRoomUrl) {
+        return json({ status: "error", message: "No room image found" }, { status: 400 });
+    }
 
+    const imageServiceUrl = process.env.IMAGE_SERVICE_BASE_URL;
+    
     try {
+        console.log(`[Proxy] Mask-based cleanup for session ${room_session_id}`);
+        
         const response = await fetch(`${imageServiceUrl}/room/cleanup`, {
             method: "POST",
             headers: {
@@ -38,24 +50,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 "Authorization": `Bearer ${process.env.IMAGE_SERVICE_TOKEN}`
             },
             body: JSON.stringify({
-                room_image_url: roomSession.originalRoomImageUrl,
-                mask_url: mask_image_url,
-                prompt: { id: "room_cleanup", version: 1 },
-                model: { id: "gemini-3-pro-image" }
+                room_image_url: currentRoomUrl,
+                mask_data_url: mask_data_url
             })
         });
 
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Image service error: ${errorText}`);
             throw new Error(`Image service failed: ${response.statusText}`);
         }
 
         const data = await response.json();
         const { cleaned_room_image_url } = data;
 
-        // Update session
+        // Update session with the new cleaned image
         await prisma.roomSession.update({
             where: { id: room_session_id },
-            data: { cleanedRoomImageUrl: cleaned_room_image_url }
+            data: { 
+                cleanedRoomImageUrl: cleaned_room_image_url,
+                lastUsedAt: new Date()
+            }
         });
 
         return json({

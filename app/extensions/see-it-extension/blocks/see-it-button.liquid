@@ -29,9 +29,8 @@
     <!-- Step 0: Welcome -->
     <div id="see-it-step-welcome" class="see-it-step">
       <div class="see-it-welcome-container">
-        <img src="https://cdn.shopify.com/s/files/1/0663/6801/2539/files/room-visualizer-hero.jpg?v=1700000000" alt="Room Visualizer" class="see-it-hero-image" style="width: 100%; border-radius: 8px; margin-bottom: 20px; display: none;"> <!-- Placeholder for hero image if needed -->
         <h2>See it in Your Home</h2>
-        <p>Welcome! You can now visualize our products in your own space using augmented reality.</p>
+        <p>Visualize this product in your own space using AI-powered image generation.</p>
         
         <div class="see-it-welcome-actions">
            <button id="see-it-btn-upload" class="button see-it-primary-btn">
@@ -43,25 +42,46 @@
            <input type="file" id="see-it-upload" accept="image/*" style="display: none;" />
            <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
         </div>
+        <div class="see-it-version-badge">See It v1.1.0</div>
       </div>
     </div>
 
-    <!-- Step 1: Edit Room (Crop/Cleanup) -->
+    <!-- Step 1: Edit Room -->
     <div id="see-it-step-edit-room" class="see-it-step hidden">
-      <h3>Edit Your Room</h3>
-      <div class="see-it-canvas-wrapper">
+      <h3>Prepare Your Room</h3>
+      <p class="see-it-step-description">Paint over anything you want to remove, or skip to place the product.</p>
+      
+      <div class="see-it-canvas-wrapper" id="see-it-canvas-wrapper">
         <img id="see-it-room-preview" src="" alt="Room Preview" />
+        <canvas id="see-it-mask-canvas"></canvas>
+        <div id="see-it-cleanup-loading" class="see-it-loading-overlay hidden">
+          <div class="see-it-spinner"></div>
+          <p>Removing...</p>
+        </div>
       </div>
       
-      <div class="see-it-tools-panel">
-        <button id="see-it-tool-crop" class="button tool-btn" disabled title="Coming Soon">Crop</button>
-        <button id="see-it-tool-cleanup" class="button tool-btn">Remove Object</button>
-        <input type="file" id="see-it-mask-upload" accept="image/*" style="display: none;" />
+      <!-- Simple Eraser Controls -->
+      <div class="see-it-eraser-controls">
+        <div class="see-it-eraser-hint">
+          <span class="see-it-eraser-icon">🖌️</span>
+          <span>Draw over what to remove</span>
+        </div>
+        <div class="see-it-eraser-actions">
+          <button id="see-it-undo-btn" class="see-it-tool-btn" disabled>
+            ↩️ Undo
+          </button>
+          <button id="see-it-clear-btn" class="see-it-tool-btn" disabled>
+            🗑️ Clear
+          </button>
+          <button id="see-it-remove-btn" class="button see-it-primary-btn see-it-remove-btn" disabled>
+            Remove
+          </button>
+        </div>
       </div>
 
       <div class="see-it-actions-row">
         <button id="see-it-back-to-welcome" class="button see-it-text-btn">Back</button>
-        <button id="see-it-confirm-room" class="button see-it-primary-btn">Continue</button>
+        <button id="see-it-confirm-room" class="button see-it-primary-btn">Continue →</button>
       </div>
     </div>
 
