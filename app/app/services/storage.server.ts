@@ -1,9 +1,19 @@
 import { Storage } from '@google-cloud/storage';
 
-// Initialize GCS client
-// In Cloud Run/Railway, credentials come from GOOGLE_APPLICATION_CREDENTIALS env var
-// or from the service account attached to the compute instance
-const storage = new Storage();
+// Initialize GCS client with credentials from environment variable
+// Railway stores the JSON as a string in GOOGLE_CREDENTIALS_JSON
+let storage: Storage;
+
+if (process.env.GOOGLE_CREDENTIALS_JSON) {
+    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+    storage = new Storage({ credentials });
+} else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    // File path to credentials (local dev)
+    storage = new Storage();
+} else {
+    console.warn('[Storage] No GCS credentials found - uploads will fail');
+    storage = new Storage();
+}
 
 const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-uploads';
 

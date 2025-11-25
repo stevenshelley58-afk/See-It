@@ -25,8 +25,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const body = await request.json();
     const { product_id, variant_id, room_session_id, placement, config } = body;
 
+    // Validate required placement data
+    if (!placement || typeof placement.x !== 'number' || typeof placement.y !== 'number') {
+        return json(
+            { error: "invalid_placement", message: "Placement x, y, and scale are required" },
+            { status: 400, headers: CORS_HEADERS }
+        );
+    }
+
     // Rate limiting check
-    if (!checkRateLimit(room_session_id)) {
+    if (!checkRateLimit(room_session_id || 'anonymous')) {
         return json(
             { error: "rate_limit_exceeded", message: "Too many requests. Please wait a moment." },
             { status: 429, headers: CORS_HEADERS }
@@ -48,16 +56,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const job = await prisma.renderJob.create({
         data: {
-            shopId: shop.id,
+            shop: { connect: { id: shop.id } },
             productId: product_id,
-            variantId: variant_id,
-            roomSessionId: room_session_id,
+            variantId: variant_id || null,
+            roomSession: room_session_id ? { connect: { id: room_session_id } } : undefined,
             placementX: placement.x,
             placementY: placement.y,
-            placementScale: placement.scale,
-            stylePreset: config.style_preset || "neutral",
-            quality: config.quality || "standard",
-            configJson: JSON.stringify(config),
+            placementScale: placement.scale || 1.0,
+            stylePreset: config?.style_preset || "neutral",
+            quality: config?.quality || "standard",
+            configJson: JSON.stringify(config || {}),
             status: "queued",
             createdAt: new Date(),
         }
