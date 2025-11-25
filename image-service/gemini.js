@@ -10,10 +10,11 @@ import { downloadToBuffer, uploadBufferToGCS } from './storage.js';
 // Initialize the new GenAI client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// Models as of November 2025:
+// Models as of November 2025 - Nano Banana release!
+// See: https://ai.google.dev/gemini-api/docs/image-generation
 // - gemini-3-pro-image-preview (Nano Banana Pro): Professional, 4K, thinking mode, up to 14 reference images
 // - gemini-2.5-flash-image (Nano Banana): Fast, efficient, 1024px, high-volume
-const IMAGE_MODEL_PRO = "gemini-3-pro-image-preview";  // For high-quality composites
+const IMAGE_MODEL_PRO = "gemini-3-pro-image-preview";   // For high-quality composites (4K)
 const IMAGE_MODEL_FAST = "gemini-2.5-flash-image";      // For quick operations like bg removal
 
 async function callGemini(promptText, imageBuffers, options = {}) {
@@ -44,16 +45,16 @@ async function callGemini(promptText, imageBuffers, options = {}) {
         }
     }
 
-    // Build config with new Gemini 3 options
+    // Build config with Nano Banana options
     const config = {
-        responseModalities: ['TEXT', 'IMAGE'],
+        responseModalities: ['IMAGE'],  // Request image output
     };
 
-    // Add image config if specified (Gemini 3 features)
+    // Add imageConfig for aspect ratio and resolution (Gemini 3 Pro supports 4K!)
     if (aspectRatio || imageSize) {
         config.imageConfig = {};
         if (aspectRatio) config.imageConfig.aspectRatio = aspectRatio;
-        if (imageSize) config.imageConfig.imageSize = imageSize;
+        if (imageSize) config.imageConfig.imageSize = imageSize;  // "1K", "2K", "4K"
     }
 
     try {
@@ -90,7 +91,7 @@ async function callGemini(promptText, imageBuffers, options = {}) {
         
         // Fallback to fast model if pro fails
         if (model === IMAGE_MODEL_PRO) {
-            console.log('Falling back to fast model');
+            console.log('Falling back to Nano Banana (fast model)');
             return callGemini(promptText, imageBuffers, { ...options, model: IMAGE_MODEL_FAST });
         }
         throw error;
@@ -108,7 +109,7 @@ Keep the product exactly as it is - do not modify the product's shape, color, te
 Output as PNG with transparency.`;
 
     const base64Data = await callGemini(prompt, imageBuffer, {
-        model: IMAGE_MODEL_FAST,  // Fast model for bg removal
+        model: IMAGE_MODEL_FAST,  // Nano Banana for fast bg removal
         aspectRatio: "1:1"
     });
     const outputBuffer = Buffer.from(base64Data, 'base64');
