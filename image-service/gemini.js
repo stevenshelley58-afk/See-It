@@ -10,6 +10,43 @@ import { downloadToBuffer, uploadBufferToGCS } from './storage.js';
 // Initialize the new GenAI client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+// Cache for Gemini file uploads (short-lived, avoids re-uploading same image)
+const fileCache = new Map();
+const FILE_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * Pre-upload a room image to Gemini Files API
+ * Returns a file URI that can be referenced in subsequent API calls
+ */
+export async function preloadRoomToGemini(roomImageUrl) {
+    // Check cache first
+    if (fileCache.has(roomImageUrl)) {
+        const cached = fileCache.get(roomImageUrl);
+        if (Date.now() - cached.timestamp < FILE_CACHE_TTL) {
+            console.log(`Using cached Gemini file for ${roomImageUrl}`);
+            return cached.fileUri;
+        }
+        fileCache.delete(roomImageUrl);
+    }
+
+    console.log(`Pre-uploading room to Gemini: ${roomImageUrl}`);
+    const buffer = await downloadToBuffer(roomImageUrl);
+    
+    // Upload to Gemini Files API
+    const file = await ai.files.upload({
+        file: new Blob([buffer], { type: 'image/jpeg' }),
+        config: { mimeType: 'image/jpeg' }
+    });
+
+    const fileUri = file.uri;
+    console.log(`Room pre-uploaded to Gemini: ${fileUri}`);
+    
+    // Cache it
+    fileCache.set(roomImageUrl, { fileUri, timestamp: Date.now() });
+    
+    return fileUri;
+}
+
 // Models as of November 2025 - Nano Banana release!
 // See: https://ai.google.dev/gemini-api/docs/image-generation
 // - gemini-3-pro-image-preview (Nano Banana Pro): Professional, 4K, thinking mode, up to 14 reference images
@@ -119,11 +156,9 @@ Output as PNG with transparency.`;
 }
 
 // Cleanup room using drawn mask (white = remove, black = keep)
-export async function cleanupRoom(roomImageUrl, maskDataUrl) {
+// Can accept either a room URL or a pre-uploaded Gemini file URI
+export async function cleanupRoom(roomImageUrl, maskDataUrl, geminiFileUri = null) {
     console.log('Processing room cleanup with drawn mask');
-    
-    // Download the room image
-    const roomBuffer = await downloadToBuffer(roomImageUrl);
     
     // Parse the mask from base64 data URL
     // Format: "data:image/png;base64,iVBORw0KGgo..."
@@ -138,14 +173,75 @@ Do NOT alter any pixels outside the masked region.
 Maintain consistent lighting and perspective.
 The result should look natural, as if nothing was ever there.`;
 
-    const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
-        model: IMAGE_MODEL_PRO,
-        imageSize: "2K"
-    });
+    let base64Data;
+    
+    if (geminiFileUri) {
+        // Use pre-uploaded file reference (FAST PATH - no re-download!)
+        console.log(`Using pre-uploaded Gemini file: ${geminiFileUri}`);
+        base64Data = await callGeminiWithFileRef(prompt, geminiFileUri, maskBuffer, {
+            model: IMAGE_MODEL_PRO,
+            imageSize: "2K"
+        });
+    } else {
+        // Download room and upload both (SLOW PATH)
+        console.log(`Downloading room from URL: ${roomImageUrl}`);
+        const roomBuffer = await downloadToBuffer(roomImageUrl);
+        base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
+            model: IMAGE_MODEL_PRO,
+            imageSize: "2K"
+        });
+    }
+    
     const outputBuffer = Buffer.from(base64Data, 'base64');
 
     const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
     return await uploadBufferToGCS(process.env.GCS_BUCKET, key, outputBuffer, 'image/jpeg');
+}
+
+// Call Gemini with a file reference + inline mask
+async function callGeminiWithFileRef(promptText, fileUri, maskBuffer, options = {}) {
+    const { model = IMAGE_MODEL_PRO } = options;
+
+    console.log(`Calling Gemini model ${model} with file reference`);
+
+    const config = {
+        responseModalities: ['IMAGE'],
+    };
+
+    try {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: [
+                { text: promptText },
+                { fileData: { fileUri: fileUri, mimeType: 'image/jpeg' } },
+                { inlineData: { mimeType: 'image/png', data: maskBuffer.toString('base64') } }
+            ],
+            config: config,
+        });
+
+        const candidates = response.candidates;
+        if (!candidates || !candidates[0]?.content?.parts) {
+            if (response.parts) {
+                for (const part of response.parts) {
+                    if (part.inlineData) {
+                        return part.inlineData.data;
+                    }
+                }
+            }
+            throw new Error("No content in response");
+        }
+
+        for (const part of candidates[0].content.parts) {
+            if (part.inlineData) {
+                return part.inlineData.data;
+            }
+        }
+
+        throw new Error("No image data in response");
+    } catch (error) {
+        console.error(`Error with file reference call:`, error.message);
+        throw error;
+    }
 }
 
 export async function compositeScene(preparedProductImageUrl, roomImageUrl, placement, stylePreset) {

@@ -74,6 +74,7 @@ model RoomSession {
   shopId               String    @map("shop_id")
   originalRoomImageUrl String?   @map("original_room_image_url")
   cleanedRoomImageUrl  String?   @map("cleaned_room_image_url")
+  geminiFileUri        String?   @map("gemini_file_uri")
   createdAt            DateTime  @map("created_at")
   expiresAt            DateTime  @map("expires_at")
   lastUsedAt           DateTime? @map("last_used_at")

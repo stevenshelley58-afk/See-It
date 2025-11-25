@@ -1,6 +1,6 @@
 {
   "name": "see-it-app",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "private": true,
   "scripts": {
     "build": "remix vite:build",
@@ -24,6 +24,7 @@
     "node": "^18.20 || ^20.10 || >=21.0.0"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.0.0",
     "@prisma/client": "^6.19.0",
     "@remix-run/dev": "^2.16.1",
     "@remix-run/fs-routes": "^2.16.1",

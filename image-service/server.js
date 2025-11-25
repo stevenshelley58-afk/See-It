@@ -6,12 +6,13 @@ dotenv.config();
 
 import express from 'express';
 
-let prepareProduct, cleanupRoom, compositeScene;
+let prepareProduct, cleanupRoom, compositeScene, preloadRoomToGemini;
 try {
     const geminiModule = await import('./gemini.js');
     prepareProduct = geminiModule.prepareProduct;
     cleanupRoom = geminiModule.cleanupRoom;
     compositeScene = geminiModule.compositeScene;
+    preloadRoomToGemini = geminiModule.preloadRoomToGemini;
     console.log("Gemini module loaded successfully");
 } catch (error) {
     console.error("Failed to load Gemini module:", error);
@@ -47,7 +48,7 @@ app.use((req, res, next) => {
     next();
 });
 
-const SERVICE_VERSION = '2.1.0-eraser-mask';
+const SERVICE_VERSION = '2.2.0-gemini-preload';
 
 // Root route for Cloud Run default health check
 app.get('/', (req, res) => {
@@ -77,20 +78,50 @@ app.post('/product/prepare', async (req, res) => {
     }
 });
 
-app.post('/room/cleanup', async (req, res) => {
+// Pre-upload room to Gemini for faster cleanup (optional optimization)
+app.post('/room/preload', async (req, res) => {
     try {
-        const { room_image_url, mask_data_url } = req.body;
+        const { room_image_url } = req.body;
         
-        if (!room_image_url || !mask_data_url) {
+        if (!room_image_url) {
             return res.status(400).json({ 
                 error: 'Bad Request', 
-                message: 'room_image_url and mask_data_url are required' 
+                message: 'room_image_url is required' 
+            });
+        }
+        
+        console.log('Pre-uploading room to Gemini');
+        const gemini_file_uri = await preloadRoomToGemini(room_image_url);
+
+        res.json({ gemini_file_uri });
+    } catch (error) {
+        console.error('Error in /room/preload:', error);
+        res.status(500).json({ error: 'Internal Server Error', message: error.message });
+    }
+});
+
+app.post('/room/cleanup', async (req, res) => {
+    try {
+        const { room_image_url, mask_data_url, gemini_file_uri } = req.body;
+        
+        if (!mask_data_url) {
+            return res.status(400).json({ 
+                error: 'Bad Request', 
+                message: 'mask_data_url is required' 
+            });
+        }
+        
+        if (!room_image_url && !gemini_file_uri) {
+            return res.status(400).json({ 
+                error: 'Bad Request', 
+                message: 'room_image_url or gemini_file_uri is required' 
             });
         }
         
         console.log('Processing room cleanup with drawn mask');
 
-        const cleaned_room_image_url = await cleanupRoom(room_image_url, mask_data_url);
+        // Use gemini_file_uri if provided (fast path), otherwise fall back to URL
+        const cleaned_room_image_url = await cleanupRoom(room_image_url, mask_data_url, gemini_file_uri);
 
         res.json({ cleaned_room_image_url });
     } catch (error) {

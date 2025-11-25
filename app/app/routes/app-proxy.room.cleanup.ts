@@ -43,6 +43,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
         console.log(`[Proxy] Mask-based cleanup for session ${room_session_id}`);
         
+        // Use Gemini file URI if available (FAST PATH)
+        // Note: geminiFileUri is only valid for the original room, not cleaned versions
+        const useGeminiFileUri = roomSession.geminiFileUri && !roomSession.cleanedRoomImageUrl;
+        
         const response = await fetch(`${imageServiceUrl}/room/cleanup`, {
             method: "POST",
             headers: {
@@ -51,7 +55,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
             body: JSON.stringify({
                 room_image_url: currentRoomUrl,
-                mask_data_url: mask_data_url
+                mask_data_url: mask_data_url,
+                // Pass the Gemini file URI for faster processing (if available)
+                gemini_file_uri: useGeminiFileUri ? roomSession.geminiFileUri : null
             })
         });
 
@@ -65,10 +71,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const { cleaned_room_image_url } = data;
 
         // Update session with the new cleaned image
+        // Note: After cleanup, geminiFileUri is no longer valid for this new image
         await prisma.roomSession.update({
             where: { id: room_session_id },
             data: { 
                 cleanedRoomImageUrl: cleaned_room_image_url,
+                geminiFileUri: null,  // Invalidate - new image needs new preload
                 lastUsedAt: new Date()
             }
         });
