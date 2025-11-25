@@ -1,6 +1,6 @@
 {
   "name": "see-it-app",
-  "version": "1.0.11",
+  "version": "1.0.15",
   "private": true,
   "scripts": {
     "build": "remix vite:build",
