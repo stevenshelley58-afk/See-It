@@ -618,6 +618,17 @@ document.addEventListener('DOMContentLoaded', function () {
     // 5. Generate
     if (btnGenerate) {
         btnGenerate.addEventListener('click', () => {
+            // Validate required state
+            if (!state.sessionId || !state.productId) {
+                showError('Missing session or product ID');
+                return;
+            }
+
+            if (!roomImage || !productImage) {
+                showError('Room or product image not loaded');
+                return;
+            }
+
             showStep(stepResult);
             resetError();
             statusText.textContent = 'Generating...';
@@ -627,22 +638,49 @@ document.addEventListener('DOMContentLoaded', function () {
             const roomRect = roomImage.getBoundingClientRect();
             const productRect = productImage.getBoundingClientRect();
 
+            if (!roomRect.width || !roomRect.height) {
+                showError('Room image dimensions invalid');
+                return;
+            }
+
             const productCX = productRect.left + productRect.width / 2 - roomRect.left;
             const productCY = productRect.top + productRect.height / 2 - roomRect.top;
+
+            // Calculate normalized coordinates (0-1 range)
+            // Use calculated position, or fallback to state.x/y if calculation fails
+            let normalizedX = Number.isFinite(productCX / roomRect.width) 
+                ? productCX / roomRect.width 
+                : (state.x / roomRect.width) || 0.5;
+            let normalizedY = Number.isFinite(productCY / roomRect.height)
+                ? productCY / roomRect.height
+                : (state.y / roomRect.height) || 0.5;
+
+            // Clamp to valid range (0-1)
+            normalizedX = Math.max(0, Math.min(1, normalizedX));
+            normalizedY = Math.max(0, Math.min(1, normalizedY));
+
+            console.log('[See It] Placement calculation:', {
+                productCX, productCY,
+                roomWidth: roomRect.width, roomHeight: roomRect.height,
+                normalizedX, normalizedY,
+                stateX: state.x, stateY: state.y
+            });
 
             const payload = {
                 room_session_id: state.sessionId,
                 product_id: state.productId,
                 placement: {
-                    x: productCX / roomRect.width,
-                    y: productCY / roomRect.height,
-                    scale: state.scale
+                    x: normalizedX,
+                    y: normalizedY,
+                    scale: state.scale || 1.0
                 },
                 config: {
                     style_preset: 'neutral',
                     quality: 'standard'
                 }
             };
+
+            console.log('[See It] Render payload:', payload);
 
             fetch('/apps/see-it/render', {
                 method: 'POST',
