@@ -33,5 +33,5 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
     });
 
-    return json({ ok: true });
+    return json({ ok: true, roomImageUrl: publicUrl });
 };

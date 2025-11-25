@@ -40,8 +40,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const { uploadUrl, publicUrl } = await StorageService.getPresignedUploadUrl(shop.id, roomSession.id, "room.jpg");
 
     return json({
-        room_session_id: roomSession.id,
-        upload_url: uploadUrl,
-        room_image_future_url: publicUrl
+        sessionId: roomSession.id,
+        uploadUrl: uploadUrl,
+        roomImageFutureUrl: publicUrl
     });
 };

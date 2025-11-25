@@ -27,10 +27,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     }
 
     return json({
-        job_id: job.id,
+        jobId: job.id,
         status: job.status,
-        image_url: job.imageUrl,
-        error_code: job.errorCode,
-        error_message: job.errorMessage
+        imageUrl: job.imageUrl,
+        errorCode: job.errorCode,
+        errorMessage: job.errorMessage
     }, { headers: CORS_HEADERS });
 };
