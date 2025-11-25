@@ -47,9 +47,16 @@ app.use((req, res, next) => {
     next();
 });
 
+const SERVICE_VERSION = '2.0.0-gemini3-nov25';
+
 // Root route for Cloud Run default health check
 app.get('/', (req, res) => {
-    res.json({ status: 'ok', service: 'see-it-image-service', version: '2.0.0' });
+    res.json({ 
+        status: 'ok', 
+        service: 'see-it-image-service', 
+        version: SERVICE_VERSION,
+        timestamp: new Date().toISOString()
+    });
 });
 
 app.get('/healthz', (req, res) => {

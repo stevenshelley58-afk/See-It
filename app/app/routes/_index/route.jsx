@@ -13,15 +13,20 @@ export const loader = async ({ request }) => {
   return { showForm: Boolean(login) };
 };
 
+const APP_VERSION = "2.0.0-gemini3"; // Updated Nov 25, 2025
+
 export default function App() {
   const { showForm } = useLoaderData();
 
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>See It - Visualize Products in Your Space</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Let customers see how your products look in their room before buying.
+        </p>
+        <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+          Version: {APP_VERSION}
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
