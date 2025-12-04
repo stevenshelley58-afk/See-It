@@ -34,40 +34,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Get a 24-hour signed read URL
     const publicUrl = await StorageService.getSignedReadUrl(key, 24 * 60 * 60 * 1000);
 
-    // Pre-upload to Gemini for faster cleanup (background, don't block)
-    let geminiFileUri: string | null = null;
-    const imageServiceUrl = process.env.IMAGE_SERVICE_BASE_URL;
-    
-    if (imageServiceUrl) {
-        try {
-            console.log(`[Proxy] Pre-uploading room to Gemini for session ${room_session_id}`);
-            const preloadResponse = await fetch(`${imageServiceUrl}/room/preload`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${process.env.IMAGE_SERVICE_TOKEN}`
-                },
-                body: JSON.stringify({ room_image_url: publicUrl })
-            });
-            
-            if (preloadResponse.ok) {
-                const preloadData = await preloadResponse.json();
-                geminiFileUri = preloadData.gemini_file_uri;
-                console.log(`[Proxy] Room pre-uploaded to Gemini: ${geminiFileUri}`);
-            } else {
-                console.warn(`[Proxy] Gemini preload failed: ${preloadResponse.status}`);
-            }
-        } catch (error) {
-            // Non-fatal - cleanup will still work, just slower
-            console.warn(`[Proxy] Gemini preload error (non-fatal):`, error);
-        }
-    }
+    // Note: Gemini preload removed - now calling Gemini directly from Railway
+    // The preload optimization was only needed for Cloud Run architecture
 
     await prisma.roomSession.update({
         where: { id: room_session_id },
         data: {
             originalRoomImageUrl: publicUrl,
-            geminiFileUri: geminiFileUri,
+            geminiFileUri: null,  // No longer using preload
             lastUsedAt: new Date()
         }
     });
