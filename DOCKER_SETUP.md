@@ -1,112 +1,46 @@
-# Docker Setup Guide
+# Docker Configuration
 
-## Overview
+## ⚠️ DEPRECATED FOR LOCAL DEVELOPMENT
 
-This project has multiple deployment options:
-- **Production**: Railway with Nixpacks (automatic)
-- **Local Development**: Docker Compose (for testing)
-- **Individual Services**: Separate Dockerfiles
-
-## Directory Structure
-
-```
-c:\See It\
-├── docker-compose.yml         # Orchestrates all services for local dev
-├── app/
-│   └── Dockerfile            # Shopify Remix app container
-└── image-service/
-    └── Dockerfile            # Image processing service container
-```
-
-## Local Development with Docker
-
-### 1. Quick Start with Docker Compose
-
-```bash
-# Build and start all services
-docker-compose up --build
-
-# Or run in background
-docker-compose up -d --build
-
-# Stop all services
-docker-compose down
-```
-
-This will start:
-- **App**: http://localhost:3000
-- **Image Service**: http://localhost:8001
-
-### 2. Running Services Individually
-
-#### Shopify App Only
-```bash
-cd app
-docker build -t see-it-app .
-docker run -p 3000:3000 see-it-app
-```
-
-#### Image Service Only
-```bash
-cd image-service
-docker build -t see-it-image-service .
-docker run -p 8001:8001 see-it-image-service
-```
-
-## Environment Variables
-
-Create a `.env` file in the root directory:
-
-```env
-# Shopify App Variables
-SHOPIFY_APP_URL=your-app-url
-SHOPIFY_API_KEY=your-api-key
-SHOPIFY_API_SECRET=your-api-secret
-DATABASE_URL=file:./prisma/dev.sqlite
-
-# Image Service Variables
-GCP_PROJECT_ID=your-project-id
-GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
-```
+This project uses **Railway for production deployment**. The Docker files are used by Railway's Dockerfile builder, not for local development.
 
 ## Production Deployment
 
-Production uses Railway with Nixpacks (NOT Docker):
-- Configuration: `railway.json` and `nixpacks.toml`
-- No Dockerfile needed for Railway deployment
-- Railway automatically builds from source
+Railway automatically builds from the root `Dockerfile` when you push to GitHub.
 
-## Why Multiple Dockerfiles?
+**Do NOT use:**
+- `docker-compose.yml` (legacy, for reference only)
+- `app/Dockerfile` (legacy, superseded by root Dockerfile)
+- Any local Docker commands
 
-1. **app/Dockerfile**: Contains Shopify-specific dependencies and Prisma setup
-2. **image-service/Dockerfile**: Lightweight container for image processing with libvips
-3. **docker-compose.yml**: Orchestrates both services for local testing
+## Root Dockerfile
 
-## Common Issues & Solutions
+The root `Dockerfile` is the single source of truth for Railway deployments:
 
-### OpenSSL Error with Prisma
-Already fixed in `app/Dockerfile` with:
 ```dockerfile
-RUN apk add --no-cache openssl openssl-dev libc6-compat python3 make g++
+FROM node:20-slim AS base
+WORKDIR /usr/src/app
+# ... installs deps, builds app, generates Prisma client
+CMD ["npm", "run", "start"]
 ```
 
-### Port Conflicts
-Change ports in docker-compose.yml if defaults are in use:
-```yaml
-ports:
-  - "3001:3000"  # Change 3001 to any available port
+## Image Service
+
+The image service runs on **Google Cloud Run**, not Railway. See `image-service/Dockerfile` for its configuration.
+
+## Migration Strategy
+
+Database migrations are run manually, not on container startup:
+
+```bash
+# After pushing schema changes:
+railway run --service See-It npx prisma migrate deploy
 ```
 
-### Database Persistence
-SQLite database is mounted as a volume to persist between container restarts:
-```yaml
-volumes:
-  - ./app/prisma:/app/prisma
-```
+## Why Not Local Docker?
 
-## Best Practices
+1. **Shopify CLI requirements** - The app needs Shopify CLI tunnels for OAuth
+2. **Environment complexity** - Requires Shopify API keys, database, image service
+3. **Production parity** - Better to test directly on Railway staging if needed
 
-1. **Never commit .env files** - Use .env.example as template
-2. **Use docker-compose for local dev** - Ensures services can communicate
-3. **Production uses Railway** - Docker is for local testing only
-4. **Keep Dockerfiles in their service directories** - Clear ownership
+If you need to test changes, push to a branch and use Railway's preview environments.

@@ -27,6 +27,6 @@ EXPOSE 3000
 
 ENV NODE_ENV=production
 
-# Runs prisma migrate deploy + remix-serve
-CMD ["npm", "run", "docker-start"]
+# Start remix-serve (migrations are run manually, not on every boot)
+CMD ["npm", "run", "start"]
 
