@@ -2,9 +2,9 @@ FROM node:20-slim AS base
 
 WORKDIR /usr/src/app
 
-# Install system dependencies required by Prisma (OpenSSL and friends)
+# Install system dependencies required by Prisma and Sharp
 RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends openssl libssl-dev ca-certificates \
+    && apt-get install -y --no-install-recommends openssl libssl-dev ca-certificates libvips-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency manifests first to leverage Docker layer caching
