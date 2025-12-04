@@ -1,11 +1,11 @@
 -- CreateTable
 CREATE TABLE "Session" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop" TEXT NOT NULL,
     "state" TEXT NOT NULL,
     "isOnline" BOOLEAN NOT NULL DEFAULT false,
     "scope" TEXT,
-    "expires" DATETIME,
+    "expires" TIMESTAMP(3),
     "accessToken" TEXT NOT NULL,
     "userId" BIGINT,
     "firstName" TEXT,
@@ -14,25 +14,29 @@ CREATE TABLE "Session" (
     "accountOwner" BOOLEAN NOT NULL DEFAULT false,
     "locale" TEXT,
     "collaborator" BOOLEAN DEFAULT false,
-    "emailVerified" BOOLEAN DEFAULT false
+    "emailVerified" BOOLEAN DEFAULT false,
+
+    CONSTRAINT "Session_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "shops" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop_domain" TEXT NOT NULL,
     "shopify_shop_id" TEXT NOT NULL,
     "access_token" TEXT NOT NULL,
     "plan" TEXT NOT NULL,
     "monthly_quota" INTEGER NOT NULL,
     "daily_quota" INTEGER NOT NULL,
-    "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "uninstalled_at" DATETIME
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "uninstalled_at" TIMESTAMP(3),
+
+    CONSTRAINT "shops_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "product_assets" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop_id" TEXT NOT NULL,
     "product_id" TEXT NOT NULL,
     "variant_id" TEXT,
@@ -42,35 +46,37 @@ CREATE TABLE "product_assets" (
     "status" TEXT NOT NULL,
     "prep_strategy" TEXT NOT NULL,
     "prompt_version" INTEGER NOT NULL,
-    "created_at" DATETIME NOT NULL,
-    "updated_at" DATETIME NOT NULL,
-    CONSTRAINT "product_assets_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "created_at" TIMESTAMP(3) NOT NULL,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "product_assets_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "room_sessions" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop_id" TEXT NOT NULL,
     "original_room_image_url" TEXT,
     "cleaned_room_image_url" TEXT,
     "gemini_file_uri" TEXT,
-    "created_at" DATETIME NOT NULL,
-    "expires_at" DATETIME NOT NULL,
-    "last_used_at" DATETIME,
-    CONSTRAINT "room_sessions_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "created_at" TIMESTAMP(3) NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "last_used_at" TIMESTAMP(3),
+
+    CONSTRAINT "room_sessions_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "render_jobs" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop_id" TEXT NOT NULL,
     "product_id" TEXT NOT NULL,
     "variant_id" TEXT,
     "product_asset_id" TEXT,
     "room_session_id" TEXT,
-    "placement_x" REAL NOT NULL,
-    "placement_y" REAL NOT NULL,
-    "placement_scale" REAL NOT NULL,
+    "placement_x" DOUBLE PRECISION NOT NULL,
+    "placement_y" DOUBLE PRECISION NOT NULL,
+    "placement_scale" DOUBLE PRECISION NOT NULL,
     "style_preset" TEXT,
     "quality" TEXT,
     "config_json" TEXT,
@@ -81,22 +87,22 @@ CREATE TABLE "render_jobs" (
     "prompt_version" INTEGER,
     "error_code" TEXT,
     "error_message" TEXT,
-    "created_at" DATETIME NOT NULL,
-    "completed_at" DATETIME,
-    CONSTRAINT "render_jobs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "render_jobs_product_asset_id_fkey" FOREIGN KEY ("product_asset_id") REFERENCES "product_assets" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
-    CONSTRAINT "render_jobs_room_session_id_fkey" FOREIGN KEY ("room_session_id") REFERENCES "room_sessions" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "created_at" TIMESTAMP(3) NOT NULL,
+    "completed_at" TIMESTAMP(3),
+
+    CONSTRAINT "render_jobs_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "usage_daily" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "shop_id" TEXT NOT NULL,
-    "date" DATETIME NOT NULL,
+    "date" TIMESTAMP(3) NOT NULL,
     "prep_renders" INTEGER NOT NULL DEFAULT 0,
     "cleanup_renders" INTEGER NOT NULL DEFAULT 0,
     "composite_renders" INTEGER NOT NULL DEFAULT 0,
-    CONSTRAINT "usage_daily_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+
+    CONSTRAINT "usage_daily_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -107,3 +113,21 @@ CREATE INDEX "product_assets_shop_id_product_id_idx" ON "product_assets"("shop_i
 
 -- CreateIndex
 CREATE UNIQUE INDEX "usage_daily_shop_id_date_key" ON "usage_daily"("shop_id", "date");
+
+-- AddForeignKey
+ALTER TABLE "product_assets" ADD CONSTRAINT "product_assets_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "room_sessions" ADD CONSTRAINT "room_sessions_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "render_jobs" ADD CONSTRAINT "render_jobs_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "render_jobs" ADD CONSTRAINT "render_jobs_product_asset_id_fkey" FOREIGN KEY ("product_asset_id") REFERENCES "product_assets"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "render_jobs" ADD CONSTRAINT "render_jobs_room_session_id_fkey" FOREIGN KEY ("room_session_id") REFERENCES "room_sessions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "usage_daily" ADD CONSTRAINT "usage_daily_shop_id_fkey" FOREIGN KEY ("shop_id") REFERENCES "shops"("id") ON DELETE CASCADE ON UPDATE CASCADE;
