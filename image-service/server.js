@@ -27,7 +27,7 @@ const PORT = process.env.PORT || 8080;
 // Auth Middleware
 app.use((req, res, next) => {
     // Skip auth for healthcheck
-    if (req.path === '/healthz' || req.path === '/health' || req.path === '/') return next();
+    if (req.path === '/healthz' || req.path === '/') return next();
 
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -61,10 +61,6 @@ app.get('/', (req, res) => {
 });
 
 app.get('/healthz', (req, res) => {
-    res.json({ status: 'ok' });
-});
-
-app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });
 

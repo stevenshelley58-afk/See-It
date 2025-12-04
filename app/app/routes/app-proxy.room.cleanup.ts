@@ -1,6 +1,7 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { cleanupRoom } from "../services/gemini.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
@@ -38,44 +39,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ status: "error", message: "No room image found" }, { status: 400 });
     }
 
-    const imageServiceUrl = process.env.IMAGE_SERVICE_BASE_URL;
-    
     try {
-        console.log(`[Proxy] Mask-based cleanup for session ${room_session_id}`);
+        console.log(`[Cleanup] Processing mask-based cleanup for session ${room_session_id}`);
         
-        // Use Gemini file URI if available (FAST PATH)
-        // Note: geminiFileUri is only valid for the original room, not cleaned versions
-        const useGeminiFileUri = roomSession.geminiFileUri && !roomSession.cleanedRoomImageUrl;
-        
-        const response = await fetch(`${imageServiceUrl}/room/cleanup`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${process.env.IMAGE_SERVICE_TOKEN}`
-            },
-            body: JSON.stringify({
-                room_image_url: currentRoomUrl,
-                mask_data_url: mask_data_url,
-                // Pass the Gemini file URI for faster processing (if available)
-                gemini_file_uri: useGeminiFileUri ? roomSession.geminiFileUri : null
-            })
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`Image service error: ${errorText}`);
-            throw new Error(`Image service failed: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        const { cleaned_room_image_url } = data;
+        // Call Gemini directly - no more Cloud Run!
+        const cleanedRoomImageUrl = await cleanupRoom(currentRoomUrl, mask_data_url);
 
         // Update session with the new cleaned image
-        // Note: After cleanup, geminiFileUri is no longer valid for this new image
         await prisma.roomSession.update({
             where: { id: room_session_id },
             data: { 
-                cleanedRoomImageUrl: cleaned_room_image_url,
+                cleanedRoomImageUrl: cleanedRoomImageUrl,
                 geminiFileUri: null,  // Invalidate - new image needs new preload
                 lastUsedAt: new Date()
             }
@@ -83,11 +57,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         return json({
             room_session_id,
-            cleaned_room_image_url
+            cleaned_room_image_url: cleanedRoomImageUrl
         });
 
     } catch (error) {
-        console.error("Cleanup error:", error);
+        console.error("[Cleanup] Gemini error:", error);
         return json({ status: "error", message: "Cleanup failed" }, { status: 500 });
     }
 };

@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { enforceQuota } from "../quota.server";
 import { checkRateLimit } from "../rate-limit.server";
+import { compositeScene } from "../services/gemini.server";
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -96,46 +97,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ job_id: job.id, status: "failed" });
     }
 
-    const imageServiceUrl = process.env.IMAGE_SERVICE_BASE_URL;
-    console.log(`[Proxy] Sending render request to ${imageServiceUrl}/scene/composite`);
+    console.log(`[Render] Processing composite directly (no external service)`);
 
     try {
-        // CRITICAL Phase 2 logic: Use cleaned room if available, otherwise use original
+        // CRITICAL: Use cleaned room if available, otherwise use original
         const roomImageUrl = roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl;
-
-        const response = await fetch(`${imageServiceUrl}/scene/composite`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${process.env.IMAGE_SERVICE_TOKEN}`
-            },
-            body: JSON.stringify({
-                prepared_product_image_url: productAsset.preparedImageUrl || productAsset.sourceImageUrl,
-                room_image_url: roomImageUrl,
-                placement: { x: placement.x, y: placement.y, scale: placement.scale },
-                prompt: { id: "scene_composite", version: 1, style_preset: config.style_preset || "neutral" },
-                model: { id: "gemini-3-pro-image" }
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`Image service returned ${response.status}`);
+        
+        if (!roomImageUrl) {
+            throw new Error("No room image URL available");
         }
 
-        const data = await response.json();
-        const { image_url } = data;
+        // Call Gemini directly - no more Cloud Run!
+        const imageUrl = await compositeScene(
+            productAsset.preparedImageUrl || productAsset.sourceImageUrl,
+            roomImageUrl,
+            { x: placement.x, y: placement.y, scale: placement.scale || 1.0 },
+            config?.style_preset || "neutral"
+        );
 
         await prisma.renderJob.update({
             where: { id: job.id },
-            data: { status: "completed", imageUrl: image_url, completedAt: new Date() }
+            data: { status: "completed", imageUrl: imageUrl, completedAt: new Date() }
         });
     } catch (error) {
-        console.error("Image Service error:", error);
+        console.error("[Render] Gemini error:", error);
         await prisma.renderJob.update({
             where: { id: job.id },
             data: {
                 status: "failed",
-                errorCode: "IMAGE_SERVICE_ERROR",
+                errorCode: "GEMINI_ERROR",
                 errorMessage: error instanceof Error ? error.message : "Unknown error"
             }
         });

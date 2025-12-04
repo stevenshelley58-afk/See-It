@@ -1,85 +1,77 @@
 # Runbook: See It Shopify App
 
-## Production Deployment (Railway + Cloud Run)
+## 0. Prerequisites
 
-This app is deployed to production only. There is no local development workflow.
+Before you start, ensure you have the following:
 
-### Architecture
+1.  **Node.js**: Version 18.20+, 20.10+, or 21.0.0+. [Download Node.js](https://nodejs.org/)
+2.  **Shopify Partner Account**: You need an account at [partners.shopify.com](https://partners.shopify.com) to create and manage apps.
+3.  **Git**: [Download Git](https://git-scm.com/downloads)
 
-- **Main App**: Railway (`see-it-production.up.railway.app`)
-- **Database**: Railway PostgreSQL  
-- **Image Service**: Google Cloud Run (`see-it-image-service-433767365876.us-central1.run.app`)
-- **Storage**: Google Cloud Storage (`see-it-room` bucket)
+**Note on Shopify CLI**: You do **not** need to install the Shopify CLI globally. It is included in the project dependencies (`npm install` installs it locally).
 
-### Required Environment Variables (Railway)
+## 1. Environment Setup
 
-Set these in the Railway dashboard for the See-It service:
+1.  Copy `.env.example` to `.env` in the `c:\See It` directory (or `c:\See It\app` if running from there).
+2.  Fill in the required values:
+    *   `SHOPIFY_API_KEY`: From your Shopify Partner Dashboard.
+    *   `SHOPIFY_API_SECRET`: From your Shopify Partner Dashboard.
+    *   `SCOPES`: `write_products,read_products` (and any others needed).
+    *   `SHOPIFY_APP_URL`: The tunnel URL (e.g., from `npm run dev`) or your production URL.
+    *   `DATABASE_URL`: `file:dev.sqlite` (for local development).
 
-```
-DATABASE_URL=postgresql://postgres:xxx@postgres.railway.internal:5432/railway
-SHOPIFY_API_KEY=404b1dcd8562143be56b2dd81dec2270
-SHOPIFY_API_SECRET=shpss_xxx
-SHOPIFY_APP_URL=https://see-it-production.up.railway.app
-SCOPES=write_products,read_products
-IMAGE_SERVICE_BASE_URL=https://see-it-image-service-433767365876.us-central1.run.app
-IMAGE_SERVICE_TOKEN=xxx
-GCS_BUCKET=see-it-room
-GOOGLE_CREDENTIALS_JSON=<base64-encoded-service-account-json>
-```
+## 2. Installation & Database
 
-### Deployment Flow
-
-1. **Push changes** to the `main` branch on GitHub
-2. **Railway auto-deploys** from the root `Dockerfile`
-3. **Verify deployment** using Railway logs or the Railway dashboard
-
-### Database Migrations
-
-Migrations are **NOT** run automatically on container startup. When you change the Prisma schema:
-
-1. Update `app/prisma/schema.prisma`
-2. Create a new migration file in `app/prisma/migrations/`
-3. Push to GitHub and let Railway deploy
-4. Run migrations manually via Railway CLI:
+Open a terminal in `c:\See It\app`:
 
 ```bash
-railway run --service See-It npx prisma migrate deploy
+# Install dependencies
+npm install
+
+# Generate Prisma Client
+npx prisma generate
+
+# Run Database Migrations
+npx prisma migrate dev --name init
 ```
 
-### Shopify Configuration
+## 3. Running Locally
 
-All three `.toml` files must agree:
+```bash
+npm run dev
+```
 
-- `/shopify.app.toml` (root)
-- `/app/shopify.app.toml`
-- `/app/shopify.app.see-it.toml`
+This command will:
+1.  Start the Remix server.
+2.  Start the Shopify CLI (which handles the tunnel).
+3.  Output a URL to install the app.
 
-Run `node verify-config.js` to check consistency.
+## 4. Installing on a Dev Store
 
-**Partner Dashboard must match:**
-- App URL: `https://see-it-production.up.railway.app`
-- Redirect URL: `https://see-it-production.up.railway.app/auth/callback`
-- App Proxy: `apps/see-it` → `https://see-it-production.up.railway.app/app-proxy`
+1.  Look for the URL in the terminal output labeled "Preview your app". It will look like:
+    `https://admin.shopify.com/store/<your-store-name>/apps/<your-app-name>`
+    OR a direct tunnel URL like `https://<random-id>.trycloudflare.com`.
+2.  Click that URL.
+3.  **OAuth Flow**:
+    *   Shopify will ask you to install the app.
+    *   Click "Install app".
+    *   This hits the `/auth` route in `app/shopify.server.js`.
+    *   After approval, Shopify redirects to `/auth/callback`.
+    *   The app validates the session and redirects to `/app` (the Embedded Admin UI).
 
-### Verifying the Deployment
+## 5. Billing & Quotas
 
-1. Check Railway dashboard for service status
-2. Visit `https://see-it-production.up.railway.app` (should not 404)
-3. Install/reinstall app on dev store to refresh sessions
-4. Test Admin UI at `/app`
-5. Test storefront "See It" button flow
+*   **Billing Creation**:
+    *   The app checks for a valid plan in `app/routes/app._index.jsx` (or where the plan selection is).
+    *   To upgrade, the app posts to `/api/billing` with `plan=PRO`.
+    *   This calls `billing.request` in `app/routes/api.billing.jsx`.
+*   **Billing Callback**:
+    *   Shopify redirects to `/api/billing/callback` after payment approval.
+    *   The `loader` in `app/routes/api.billing.callback.jsx` verifies the payment and updates `Shop.plan`, `Shop.dailyQuota`, and `Shop.monthlyQuota` in the database.
 
-### Troubleshooting
+## 6. Verification
 
-**Service showing "Not Found":**
-- Check Railway deployment logs for startup errors
-- Verify DATABASE_URL is correct and Postgres service is running
-- Ensure migrations have been applied
-
-**Database connection errors:**
-- The internal Railway URL (`postgres.railway.internal`) only works from within Railway
-- For external access, use the public URL (`maglev.proxy.rlwy.net:21199`)
-
-**Image service errors:**
-- Check Cloud Run logs in Google Cloud Console
-- Verify `IMAGE_SERVICE_TOKEN` matches between Railway and Cloud Run
+To verify the wiring:
+1.  **Check Logs**: Ensure no errors during `npm run dev`.
+2.  **Check Database**: Open `dev.sqlite` (using a SQLite viewer or `npx prisma studio`) and verify the `Shop` table has an entry for your store.
+3.  **Check Quotas**: Trigger a render (if implemented) and verify `UsageDaily` is updated.

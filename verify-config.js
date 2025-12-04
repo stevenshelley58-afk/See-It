@@ -10,7 +10,10 @@ const CORRECT_CONFIG = {
     SCOPES: 'write_products,read_products',
     API_VERSION: '2026-01',
     REDIRECT_URLS: [
-        'https://see-it-production.up.railway.app/auth/callback'
+        'https://see-it-production.up.railway.app/auth/callback',
+        'https://see-it-production.up.railway.app/api/auth',
+        'https://see-it-production.up.railway.app/auth/login',
+        'https://see-it-production.up.railway.app/auth'
     ]
 };
 

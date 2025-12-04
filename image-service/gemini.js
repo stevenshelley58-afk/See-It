@@ -47,12 +47,12 @@ export async function preloadRoomToGemini(roomImageUrl) {
     return fileUri;
 }
 
-// Models as of November 2025 - Nano Banana release!
+// Models as of December 2024 - Verified working model names
 // See: https://ai.google.dev/gemini-api/docs/image-generation
-// - gemini-3-pro-image-preview (Nano Banana Pro): Professional, 4K, thinking mode, up to 14 reference images
-// - gemini-2.5-flash-image (Nano Banana): Fast, efficient, 1024px, high-volume
-const IMAGE_MODEL_PRO = "gemini-3-pro-image-preview";   // For high-quality composites (4K)
-const IMAGE_MODEL_FAST = "gemini-2.5-flash-image";      // For quick operations like bg removal
+// - imagen-3.0-capability-001: For image editing (inpainting, bg removal, compositing)
+// - gemini-2.5-flash-image-preview: Fast model for quick operations
+const IMAGE_MODEL_PRO = "imagen-3.0-capability-001";           // For high-quality edits
+const IMAGE_MODEL_FAST = "gemini-2.5-flash-image-preview";     // For quick operations
 
 async function callGemini(promptText, imageBuffers, options = {}) {
     const {

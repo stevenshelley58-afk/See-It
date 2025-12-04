@@ -85,36 +85,4 @@
 
 ---
 
-## 🚨 SEE IT PROJECT-SPECIFIC RULES
-
-### DO NOT Attempt Local Development
-
-This project is **production-only**. Do not:
-
-- Run `npm run dev` or suggest local development
-- Use `docker-compose up` or local Docker commands
-- Reference SQLite or `file:./dev.sqlite` 
-- Suggest git workflows beyond "push to main"
-- Try to run the Shopify CLI tunnel locally
-
-### Deployment is Automatic
-
-When code changes are needed:
-
-1. Edit the files in this repository
-2. The user will push to `main` on GitHub
-3. Railway automatically deploys from the root `Dockerfile`
-4. Migrations are run manually: `railway run --service See-It npx prisma migrate deploy`
-
-### Canonical References
-
-- **App URL**: `https://see-it-production.up.railway.app`
-- **Image Service**: `https://see-it-image-service-433767365876.us-central1.run.app`
-- **Database**: PostgreSQL (not SQLite)
-- **Config file**: `/railway.json` and root `/Dockerfile`
-
-See `DEPLOYMENT_SINGLE_SOURCE.md` for the complete reference.
-
----
-
 **REMEMBER**: You're not being helpful by guessing. You're being helpful by researching, understanding, and then solving based on documented best practices.

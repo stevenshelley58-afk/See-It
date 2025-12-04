@@ -1,73 +1,50 @@
-# Railway Environment Variables
+# Railway Environment Variables (Docker Deployment)
 
-## See-It Service Variables
-
-These must be set in the Railway dashboard for the `See-It` service:
-
-### Shopify Configuration
-
-```
-SHOPIFY_API_KEY=404b1dcd8562143be56b2dd81dec2270
-SHOPIFY_API_SECRET=<from Shopify Partner Dashboard>
-SHOPIFY_APP_URL=https://see-it-production.up.railway.app
-SCOPES=write_products,read_products
-```
-
-### Database
-
-Railway automatically provides `DATABASE_URL` when you link the Postgres service.
-
-```
-DATABASE_URL=postgresql://postgres:xxx@postgres.railway.internal:5432/railway
-```
-
-### Image Service
-
-```
-IMAGE_SERVICE_BASE_URL=https://see-it-image-service-433767365876.us-central1.run.app
-IMAGE_SERVICE_TOKEN=8x9cseqow0tv5hgnz4d16ily3fum2bak
-```
-
-### Google Cloud Storage
-
-```
-GCS_BUCKET=see-it-room
-GOOGLE_CREDENTIALS_JSON=<base64-encoded-service-account-json>
-```
-
-To encode your service account JSON:
-
-```bash
-# PowerShell
-[Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes((Get-Content -Raw gcs-key.json)))
-
-# Bash
-base64 -w 0 gcs-key.json
-```
-
-## Postgres Service Variables
-
-Railway auto-sets these. No manual configuration needed:
-
+## ✅ Required Variables (keep existing values)
+- `SHOPIFY_API_KEY`
+- `SHOPIFY_API_SECRET`
+- `SCOPES`
+- `IMAGE_SERVICE_TOKEN`
+- `IMAGE_SERVICE_BASE_URL`
 - `DATABASE_URL`
-- `PGHOST`
-- `PGPORT`
-- `PGUSER`
-- `PGPASSWORD`
-- `PGDATABASE`
+- `SHOPIFY_APP_URL`
+- `NODE_ENV`
 
-## Variable References
+## 🆕 Required for GCS Storage (ADD THESE)
+- `GCS_BUCKET` = `see-it-room` (your GCS bucket name - CORS configured)
+- `GOOGLE_CREDENTIALS_JSON` = (paste the ENTIRE contents of gcs-key.json as a single line)
 
-Railway supports variable references. The See-It service should reference Postgres:
+### How to set GOOGLE_CREDENTIALS_JSON:
+1. Open `image-service/gcs-key.json`
+2. Copy the entire JSON content
+3. In Railway → Variables, create `GOOGLE_CREDENTIALS_JSON`
+4. Paste the JSON as the value (Railway handles escaping)
 
-```
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-```
+These already live in Railway → Variables and should remain unchanged.
 
-## Verifying Variables
+## 🧹 Remove Old Nixpacks Variables
+Delete the following entries from Railway → Variables (they are no longer used once we switch to the Dockerfile builder):
+- `NIXPACKS_APT_PACKAGES`
+- `NIXPACKS_NODE_VERSION`
+- `NIXPACKS_INSTALL_CMD`
+- `NIXPACKS_BUILD_CMD`
+- `LD_LIBRARY_PATH`
+- `PRISMA_CLI_BINARY_TARGETS`
 
-Check that all variables are set:
+## 🆕 Nothing New To Add
+The new Dockerfile installs OpenSSL (`openssl`, `libssl-dev`, `ca-certificates`) and runs the full Prisma workflow during the image build, so no additional configuration variables are required.
 
-```bash
-railway variables --service See-It
-```
+## 🚀 Deploy Steps
+1. Remove the obsolete variables listed above.
+2. Commit & push the Dockerfile + `railway.json` changes:
+   ```bash
+   git add Dockerfile railway.json RAILWAY_ENV_VARS.md DEPLOY_TRIGGER.txt
+   git commit -m "Fix: Use Dockerfile build on Railway with OpenSSL"
+   git push origin main
+   ```
+3. Railway will rebuild automatically using the Dockerfile builder (Node 20 slim + OpenSSL).
+
+## ✅ Verification
+After the redeploy completes, tail the logs:
+- Expect **no** `Prisma failed to detect the libssl/openssl version` warnings
+- App should boot via `npm run docker-start` (which runs Prisma migrations + Remix serve)

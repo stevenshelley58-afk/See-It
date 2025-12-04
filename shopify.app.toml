@@ -13,8 +13,9 @@ api_version = "2026-01"
 scopes = "write_products,read_products"
 
 [auth]
-redirect_urls = [
-  "https://see-it-production.up.railway.app/auth/callback"
+redirect_urls = [ 
+  "https://see-it-production.up.railway.app/auth/callback",
+  "https://see-it-production.up.railway.app/api/auth"
 ]
 
 [app_proxy]
