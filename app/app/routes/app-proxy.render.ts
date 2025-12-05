@@ -1,3 +1,4 @@
+// Render endpoint - v1.0.18 - Fixed to allow product images without pre-prepared assets
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
