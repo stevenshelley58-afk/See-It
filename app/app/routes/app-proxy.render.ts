@@ -26,13 +26,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const body = await request.json();
     const { product_id, variant_id, room_session_id, placement, config } = body;
 
-    // Validate required placement data (NaN check - typeof NaN === 'number')
-    if (!placement || !Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
-        console.error('Invalid placement:', placement);
-        return json(
-            { error: "invalid_placement", message: "Placement x, y, and scale are required" },
-            { status: 400, headers: CORS_HEADERS }
-        );
+    // Validate and sanitize placement data
+    // Frontend may send null/NaN if images aren't fully loaded - use center as fallback
+    const sanitizedPlacement = {
+        x: Number.isFinite(placement?.x) ? placement.x : 0.5,
+        y: Number.isFinite(placement?.y) ? placement.y : 0.5,
+        scale: Number.isFinite(placement?.scale) ? placement.scale : 1.0
+    };
+    
+    if (!placement) {
+        console.warn('No placement provided, using center defaults');
+    } else if (!Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
+        console.warn('Invalid placement values, using defaults:', placement, '→', sanitizedPlacement);
     }
 
     // Validate room_session_id
@@ -70,9 +75,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             productId: product_id,
             variantId: variant_id || null,
             roomSession: room_session_id ? { connect: { id: room_session_id } } : undefined,
-            placementX: placement.x,
-            placementY: placement.y,
-            placementScale: placement.scale || 1.0,
+            placementX: sanitizedPlacement.x,
+            placementY: sanitizedPlacement.y,
+            placementScale: sanitizedPlacement.scale,
             stylePreset: config?.style_preset || "neutral",
             quality: config?.quality || "standard",
             configJson: JSON.stringify(config || {}),
@@ -111,7 +116,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const imageUrl = await compositeScene(
             productAsset.preparedImageUrl || productAsset.sourceImageUrl,
             roomImageUrl,
-            { x: placement.x, y: placement.y, scale: placement.scale || 1.0 },
+            sanitizedPlacement,
             config?.style_preset || "neutral"
         );
 

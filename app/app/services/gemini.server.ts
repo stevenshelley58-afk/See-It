@@ -148,7 +148,7 @@ Keep the product exactly as it is - do not modify the product's shape, color, te
 Output as PNG with transparency.`;
 
     const base64Data = await callGemini(prompt, imageBuffer, {
-        model: IMAGE_MODEL_FAST,
+        model: IMAGE_MODEL_PRO,  // Use Imagen for proper background removal
         aspectRatio: "1:1"
     });
     
