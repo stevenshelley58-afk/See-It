@@ -1,5 +1,23 @@
 # Google Gemini/Imagen Models Reference
 
+```
+╔════════════════════════════════════════════════════════════════════════════╗
+║                                                                            ║
+║   🔒 THIS FILE IS FOR REFERENCE ONLY - DO NOT EDIT MODEL NAMES HERE 🔒   ║
+║                                                                            ║
+║   All model names are defined in:                                         ║
+║   • app/config/ai-models.config.ts (Remix app)                            ║
+║   • image-service/ai-models.config.js (Image service)                     ║
+║                                                                            ║
+║   ⚠️  AGENTS: These config files are LOCKED. DO NOT MODIFY. ⚠️           ║
+║   If you think a model name needs updating:                               ║
+║   1. Check the official docs first (links below)                          ║
+║   2. Ask the user for permission                                          ║
+║   3. Update ONLY the config files, not individual service files           ║
+║                                                                            ║
+╚════════════════════════════════════════════════════════════════════════════╝
+```
+
 **Last Verified:** December 5, 2024  
 **Source:** https://ai.google.dev/gemini-api/docs/image-generation
 
@@ -26,7 +44,7 @@ These are the "Nano Banana" models for editing/compositing:
 ### Capabilities:
 - ✅ Text-to-image generation
 - ✅ Image editing (add/remove/modify elements)
-- ✅ Background removal (ask in prompt)
+- ✅ Background removal (ask in prompt) - **BUT outputs white bg, not transparent!**
 - ✅ Style transfer
 - ✅ Multi-image composition
 - ✅ Inpainting (semantic masking)
@@ -74,24 +92,34 @@ const response = await client.models.generateImages({
 
 ---
 
-## For See It App - Recommended Models
+## For See It App - Model Usage
 
-| Task | Model to Use | API Method |
-|------|--------------|------------|
-| Remove product background | `gemini-2.5-flash-image` | `generateContent` |
-| Clean up room (remove furniture) | `gemini-2.5-flash-image` | `generateContent` |
-| Composite product into room | `gemini-2.5-flash-image` | `generateContent` |
+| Task | Model Used | Config Import | Notes |
+|------|-----------|---------------|-------|
+| Remove product background | `@imgly/background-removal-node` | N/A | Gemini doesn't support transparency! |
+| Clean up room (eraser) | `GEMINI_IMAGE_MODEL_PRO` | `ai-models.config` | Uses inpainting |
+| Composite product into room | `GEMINI_IMAGE_MODEL_PRO` | `ai-models.config` | AI polish step |
 
 ---
 
-## DEPRECATED/INVALID Model Names
+## ❌ DEPRECATED/INVALID Model Names - DO NOT USE
 
-These model names DO NOT EXIST and will cause errors:
+These model names **DO NOT EXIST** and will cause errors:
 
-- ❌ `gemini-2.5-flash-image-preview` (wrong)
-- ❌ `gemini-3-pro-image` (wrong - needs `-preview`)
-- ❌ `imagen-3.0-capability-001` (doesn't exist)
-- ❌ `gemini-2.0-flash-preview-image-generation` (old preview name)
+| Invalid Name | Why It's Wrong |
+|--------------|----------------|
+| `gemini-2.5-flash-image-preview` | Remove the `-preview` suffix |
+| `gemini-3-pro-image` | Needs `-preview` at the end |
+| `imagen-3.0-capability-001` | This model doesn't exist |
+| `gemini-2.0-flash-preview-image-generation` | Old preview name, deprecated |
+
+---
+
+## Why Background Removal Uses imgly, Not Gemini
+
+**Gemini does NOT support transparent PNG output.** When you ask Gemini to "remove the background," it outputs a **white background**, not actual alpha transparency.
+
+For true transparency, we use `@imgly/background-removal-node` which outputs proper PNG with alpha channel.
 
 ---
 
@@ -101,3 +129,18 @@ These model names DO NOT EXIST and will cause errors:
 - Imagen: https://ai.google.dev/gemini-api/docs/imagen
 - All Models: https://ai.google.dev/gemini-api/docs/models
 
+---
+
+## Config File Locations
+
+```
+See It/
+├── app/
+│   └── app/
+│       └── config/
+│           └── ai-models.config.ts   ← 🔒 SINGLE SOURCE OF TRUTH (Remix)
+└── image-service/
+    └── ai-models.config.js           ← 🔒 SINGLE SOURCE OF TRUTH (Image Service)
+```
+
+**All AI model names are imported from these files. Do not define model names anywhere else.**

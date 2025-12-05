@@ -1,7 +1,22 @@
 // Gemini AI service - runs directly in Railway, no separate Cloud Run service
 import { GoogleGenAI } from "@google/genai";
+import { removeBackground } from "@imgly/background-removal-node";
 import sharp from "sharp";
 import { Storage } from "@google-cloud/storage";
+
+// ============================================================================
+// 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
+// Import from the centralized config to prevent accidental changes.
+// See: app/config/ai-models.config.ts
+// ============================================================================
+import { 
+    GEMINI_IMAGE_MODEL_PRO, 
+    GEMINI_IMAGE_MODEL_FAST 
+} from "~/config/ai-models.config";
+
+// Alias for local use (keeps existing code working)
+const IMAGE_MODEL_PRO = GEMINI_IMAGE_MODEL_PRO;
+const IMAGE_MODEL_FAST = GEMINI_IMAGE_MODEL_FAST;
 
 // Initialize Gemini
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -36,12 +51,6 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
 }
 
 const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
-
-// Verified working model names as of Dec 2024
-// gemini-2.5-flash-image: For image editing (inpainting, background removal, compositing)
-// gemini-2.0-flash-exp: Alternative for image generation
-const IMAGE_MODEL_PRO = "gemini-2.5-flash-image";
-const IMAGE_MODEL_FAST = "gemini-2.5-flash-image";
 
 async function downloadToBuffer(url: string): Promise<Buffer> {
     console.log(`[Gemini] Downloading: ${url.substring(0, 80)}...`);
@@ -107,7 +116,7 @@ async function callGemini(
         const candidates = response.candidates;
         if (candidates?.[0]?.content?.parts) {
             for (const part of candidates[0].content.parts) {
-                if (part.inlineData) {
+                if (part.inlineData?.data) {
                     return part.inlineData.data;
                 }
             }
@@ -144,17 +153,21 @@ export async function prepareProduct(
     console.log(`[Gemini] Preparing product: ${productId}`);
     const imageBuffer = await downloadToBuffer(sourceImageUrl);
 
-    const prompt = `Remove the background from this product image completely. 
-Make the background fully transparent (alpha = 0). 
-Keep the product exactly as it is - do not modify the product's shape, color, texture, or any details.
-Output as PNG with transparency.`;
-
-    const base64Data = await callGemini(prompt, imageBuffer, {
-        model: IMAGE_MODEL_PRO,  // Use Imagen for proper background removal
-        aspectRatio: "1:1"
+    // Use @imgly/background-removal-node for TRUE transparent background
+    // Gemini doesn't support alpha transparency - it outputs white backgrounds
+    console.log('[Gemini] Removing background with ML model...');
+    const resultBlob = await removeBackground(imageBuffer, {
+        output: {
+            format: 'image/png',
+            quality: 1.0
+        }
     });
     
-    const outputBuffer = Buffer.from(base64Data, 'base64');
+    // Convert Blob to Buffer
+    const arrayBuffer = await resultBlob.arrayBuffer();
+    const outputBuffer = Buffer.from(arrayBuffer);
+    console.log(`[Gemini] Background removed, output size: ${outputBuffer.length} bytes`);
+
     const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
     return await uploadToGCS(key, outputBuffer, 'image/png');
 }

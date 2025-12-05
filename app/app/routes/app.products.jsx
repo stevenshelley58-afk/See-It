@@ -219,46 +219,98 @@ export default function Products() {
                                     const { id, title, featuredImage } = item;
                                     const asset = assetsMap[id];
                                     const badgeInfo = getBadgeInfo(asset);
-                                    const hasPreparedImage = asset?.preparedImageUrl && asset?.status === "ready";
 
                                     return (
                                         <ResourceList.Item
                                             id={id}
-                                            media={
-                                                <InlineStack gap="200">
-                                                    <div style={{ position: 'relative' }}>
-                                                        <Thumbnail
-                                                            source={featuredImage?.url || ""}
-                                                            alt={featuredImage?.altText || title}
-                                                        />
-                                                        <Text variant="bodySm" tone="subdued" as="span">Original</Text>
-                                                    </div>
-                                                    {hasPreparedImage && (
-                                                        <div style={{ position: 'relative' }}>
-                                                            <div style={{ 
-                                                                background: 'repeating-conic-gradient(#e5e5e5 0% 25%, white 0% 50%) 50% / 10px 10px',
-                                                                borderRadius: '4px'
-                                                            }}>
-                                                                <Thumbnail
-                                                                    source={asset.preparedImageUrl}
-                                                                    alt={`${title} - prepared`}
-                                                                />
-                                                            </div>
-                                                            <Text variant="bodySm" tone="success" as="span">✓ Prepared</Text>
-                                                        </div>
-                                                    )}
-                                                </InlineStack>
-                                            }
                                             accessibilityLabel={`View details for ${title}`}
                                         >
-                                            <InlineStack align="space-between" blockAlign="center">
-                                                <BlockStack gap="200">
+                                            <InlineStack gap="400" align="start" blockAlign="start" wrap={false}>
+                                                {/* Image comparison section */}
+                                                <div style={{ 
+                                                    display: 'flex', 
+                                                    gap: '12px', 
+                                                    flexShrink: 0,
+                                                    padding: '8px',
+                                                    background: '#f6f6f7',
+                                                    borderRadius: '8px'
+                                                }}>
+                                                    {/* Original image */}
+                                                    <div style={{ textAlign: 'center' }}>
+                                                        <div style={{ 
+                                                            width: '80px', 
+                                                            height: '80px', 
+                                                            borderRadius: '6px',
+                                                            overflow: 'hidden',
+                                                            border: '1px solid #e1e3e5',
+                                                            background: 'white'
+                                                        }}>
+                                                            <img 
+                                                                src={featuredImage?.url || ""} 
+                                                                alt={featuredImage?.altText || title}
+                                                                style={{ 
+                                                                    width: '100%', 
+                                                                    height: '100%', 
+                                                                    objectFit: 'cover' 
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <Text variant="bodySm" tone="subdued" as="p">Original</Text>
+                                                    </div>
+
+                                                    {/* Arrow or separator */}
+                                                    <div style={{ 
+                                                        display: 'flex', 
+                                                        alignItems: 'center',
+                                                        color: '#8c9196',
+                                                        fontSize: '18px'
+                                                    }}>
+                                                        →
+                                                    </div>
+
+                                                    {/* Prepared image */}
+                                                    <div style={{ textAlign: 'center' }}>
+                                                        <div style={{ 
+                                                            width: '80px', 
+                                                            height: '80px', 
+                                                            borderRadius: '6px',
+                                                            overflow: 'hidden',
+                                                            border: asset?.status === 'ready' ? '2px solid #008060' : '1px dashed #8c9196',
+                                                            background: 'white',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center'
+                                                        }}>
+                                                            {asset?.processedImageUrl ? (
+                                                                <img 
+                                                                    src={asset.processedImageUrl} 
+                                                                    alt={`Prepared ${title}`}
+                                                                    style={{ 
+                                                                        width: '100%', 
+                                                                        height: '100%', 
+                                                                        objectFit: 'cover' 
+                                                                    }}
+                                                                />
+                                                            ) : (
+                                                                <Text variant="bodySm" tone="subdued" as="span">—</Text>
+                                                            )}
+                                                        </div>
+                                                        <Text variant="bodySm" tone={asset?.status === 'ready' ? 'success' : 'subdued'} as="p">
+                                                            {asset?.status === 'ready' ? '✓ Prepared' : 'Prepared'}
+                                                        </Text>
+                                                    </div>
+                                                </div>
+
+                                                {/* Product info section */}
+                                                <BlockStack gap="200" inlineAlign="start">
                                                     <Text variant="bodyMd" fontWeight="bold" as="h3">
                                                         {title}
                                                     </Text>
-                                                    <Badge tone={badgeInfo.tone}>
-                                                        {badgeInfo.label}
-                                                    </Badge>
+                                                    <InlineStack gap="200" align="start">
+                                                        <Badge tone={badgeInfo.tone}>
+                                                            {badgeInfo.label}
+                                                        </Badge>
+                                                    </InlineStack>
                                                     {badgeInfo.explanation && (
                                                         <Text variant="bodySm" tone="subdued">
                                                             {badgeInfo.explanation}
@@ -275,14 +327,18 @@ export default function Products() {
                                                         </Text>
                                                     )}
                                                 </BlockStack>
-                                                <fetcher.Form method="post" action="/api/products/prepare">
-                                                    <input type="hidden" name="productId" value={id} />
-                                                    <input type="hidden" name="imageUrl" value={featuredImage?.url || ""} />
-                                                    <input type="hidden" name="imageId" value={featuredImage?.id || ""} />
-                                                    <Button submit disabled={asset?.status === "pending" || !featuredImage}>
-                                                        {asset?.status === "ready" ? "Regenerate" : asset?.status === "pending" ? "Preparing..." : asset?.status === "failed" || asset?.status === "stale" ? "Retry" : "Prepare"}
-                                                    </Button>
-                                                </fetcher.Form>
+
+                                                {/* Action button - pushed to the right */}
+                                                <div style={{ marginLeft: 'auto' }}>
+                                                    <fetcher.Form method="post" action="/api/products/prepare">
+                                                        <input type="hidden" name="productId" value={id} />
+                                                        <input type="hidden" name="imageUrl" value={featuredImage?.url || ""} />
+                                                        <input type="hidden" name="imageId" value={featuredImage?.id || ""} />
+                                                        <Button submit disabled={asset?.status === "pending" || !featuredImage}>
+                                                            {asset?.status === "ready" ? "Regenerate" : asset?.status === "pending" ? "Preparing..." : asset?.status === "failed" || asset?.status === "stale" ? "Retry" : "Prepare"}
+                                                        </Button>
+                                                    </fetcher.Form>
+                                                </div>
                                             </InlineStack>
                                         </ResourceList.Item>
                                     );

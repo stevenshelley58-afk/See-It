@@ -26,18 +26,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const body = await request.json();
     const { product_id, variant_id, room_session_id, placement, config } = body;
 
-    // Validate and sanitize placement data
-    // Frontend may send null/NaN if images aren't fully loaded - use center as fallback
-    const sanitizedPlacement = {
-        x: Number.isFinite(placement?.x) ? placement.x : 0.5,
-        y: Number.isFinite(placement?.y) ? placement.y : 0.5,
-        scale: Number.isFinite(placement?.scale) ? placement.scale : 1.0
-    };
-    
-    if (!placement) {
-        console.warn('No placement provided, using center defaults');
-    } else if (!Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
-        console.warn('Invalid placement values, using defaults:', placement, '→', sanitizedPlacement);
+    // Validate required placement data (NaN check - typeof NaN === 'number')
+    if (!placement || !Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
+        console.error('Invalid placement:', placement);
+        return json(
+            { error: "invalid_placement", message: "Placement x, y, and scale are required" },
+            { status: 400, headers: CORS_HEADERS }
+        );
     }
 
     // Validate room_session_id
@@ -75,9 +70,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             productId: product_id,
             variantId: variant_id || null,
             roomSession: room_session_id ? { connect: { id: room_session_id } } : undefined,
-            placementX: sanitizedPlacement.x,
-            placementY: sanitizedPlacement.y,
-            placementScale: sanitizedPlacement.scale,
+            placementX: placement.x,
+            placementY: placement.y,
+            placementScale: placement.scale || 1.0,
             stylePreset: config?.style_preset || "neutral",
             quality: config?.quality || "standard",
             configJson: JSON.stringify(config || {}),
@@ -86,6 +81,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
     });
 
+    // Product asset is optional - we can render without background removal
     const productAsset = await prisma.productAsset.findFirst({
         where: { shopId: shop.id, productId: product_id }
     });
@@ -94,15 +90,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         where: { id: room_session_id }
     });
 
-    if (!productAsset || !roomSession) {
+    if (!roomSession) {
         await prisma.renderJob.update({
             where: { id: job.id },
-            data: { status: "failed", errorMessage: "Asset or Room not found" }
+            data: { status: "failed", errorMessage: "Room session not found" }
         });
-        return json({ job_id: job.id, status: "failed" });
+        return json({ job_id: job.id, status: "failed", error: "room_not_found" }, { headers: CORS_HEADERS });
     }
 
-    console.log(`[Render] Processing composite directly (no external service)`);
+    // Get product image URL - prefer prepared (bg removed), then fallback to original from Shopify
+    let productImageUrl: string | null = null;
+    
+    if (productAsset?.preparedImageUrl) {
+        productImageUrl = productAsset.preparedImageUrl;
+    } else if (productAsset?.sourceImageUrl) {
+        productImageUrl = productAsset.sourceImageUrl;
+    } else if (config?.product_image_url) {
+        // Fallback: use the product image URL sent from the frontend
+        productImageUrl = config.product_image_url;
+    }
+
+    if (!productImageUrl) {
+        await prisma.renderJob.update({
+            where: { id: job.id },
+            data: { status: "failed", errorMessage: "No product image available" }
+        });
+        return json({ job_id: job.id, status: "failed", error: "no_product_image" }, { headers: CORS_HEADERS });
+    }
+
+    console.log(`[Render] Processing composite:`, {
+        productImageUrl: productImageUrl.substring(0, 80),
+        roomSessionId: room_session_id,
+        hasProductAsset: !!productAsset,
+        placement
+    });
 
     try {
         // CRITICAL: Use cleaned room if available, otherwise use original
@@ -114,9 +135,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         // Call Gemini directly - no more Cloud Run!
         const imageUrl = await compositeScene(
-            productAsset.preparedImageUrl || productAsset.sourceImageUrl,
+            productImageUrl,
             roomImageUrl,
-            sanitizedPlacement,
+            { x: placement.x, y: placement.y, scale: placement.scale || 1.0 },
             config?.style_preset || "neutral"
         );
 

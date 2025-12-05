@@ -10,6 +10,7 @@
     "express": "^4.18.0",
     "@google/genai": "^1.0.0",
     "@google-cloud/storage": "^7.0.0",
+    "@imgly/background-removal-node": "^1.4.5",
     "sharp": "^0.33.0",
     "dotenv": "^16.0.0"
   }

@@ -1,0 +1,47 @@
+# See It App - Cursor Rules
+
+## 🔒 AI MODEL NAMES - DO NOT MODIFY
+
+The AI model names (Gemini, Imagen) are **LOCKED** and must not be changed without explicit user approval.
+
+### Why this matters
+Previous agents have repeatedly changed model names to incorrect values, breaking the app. The correct model names have been verified against Google's official documentation.
+
+### Model config locations (SINGLE SOURCE OF TRUTH)
+- `app/app/config/ai-models.config.ts` - Remix app
+- `image-service/ai-models.config.js` - Image service
+
+### Rules for AI models
+1. **NEVER** define model names directly in service files
+2. **ALWAYS** import from the config files above
+3. **NEVER** suggest changing model names without checking Google's docs first
+4. If you think a model name is outdated, ask the user first and cite your source
+
+### Current valid models (as of Dec 2024)
+- `gemini-2.5-flash-image` - Fast image editing
+- `gemini-3-pro-image-preview` - Pro image editing (supports 4K)
+- `imagen-4.0-generate-001` - Text-to-image (NOT for editing)
+
+### Invalid model names (DO NOT USE)
+- ❌ `gemini-2.5-flash-image-preview`
+- ❌ `gemini-3-pro-image`
+- ❌ `imagen-3.0-capability-001`
+- ❌ `gemini-2.0-flash-preview-image-generation`
+
+### Reference docs
+- https://ai.google.dev/gemini-api/docs/image-generation
+- https://ai.google.dev/gemini-api/docs/models
+- `app/docs/GEMINI_MODELS_REFERENCE.md`
+
+---
+
+## Background Removal
+The app uses `@imgly/background-removal-node` for product background removal, NOT Gemini.
+**Reason:** Gemini cannot output transparent PNGs - it outputs white backgrounds instead.
+
+---
+
+## General Rules
+- Follow existing code patterns and conventions
+- Don't refactor code unless specifically asked
+- Test changes before suggesting them as complete

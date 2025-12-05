@@ -27,6 +27,7 @@
   "dependencies": {
     "@google/genai": "^1.0.0",
     "@google-cloud/storage": "^7.0.0",
+    "@imgly/background-removal-node": "^1.4.5",
     "sharp": "^0.33.0",
     "@prisma/client": "^6.19.0",
     "@remix-run/dev": "^2.16.1",

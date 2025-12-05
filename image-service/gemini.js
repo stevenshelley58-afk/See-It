@@ -1,11 +1,24 @@
 // Updated to use the new @google/genai SDK (November 2025)
-// Using Gemini 3 Pro Image Preview (Nano Banana Pro) - the LATEST image model
 // See: https://ai.google.dev/gemini-api/docs/image-generation
-// Changelog: https://ai.google.dev/gemini-api/docs/changelog
 
 import { GoogleGenAI } from "@google/genai";
+import { removeBackground } from "@imgly/background-removal-node";
 import sharp from 'sharp';
 import { downloadToBuffer, uploadBufferToGCS } from './storage.js';
+
+// ============================================================================
+// 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
+// Import from the centralized config to prevent accidental changes.
+// See: ai-models.config.js
+// ============================================================================
+import { 
+    GEMINI_IMAGE_MODEL_PRO, 
+    GEMINI_IMAGE_MODEL_FAST 
+} from './ai-models.config.js';
+
+// Alias for local use (keeps existing code working)
+const IMAGE_MODEL_PRO = GEMINI_IMAGE_MODEL_PRO;
+const IMAGE_MODEL_FAST = GEMINI_IMAGE_MODEL_FAST;
 
 // Initialize the new GenAI client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -46,13 +59,6 @@ export async function preloadRoomToGemini(roomImageUrl) {
     
     return fileUri;
 }
-
-// Models as of December 2024 - Verified working model names
-// See: https://ai.google.dev/gemini-api/docs/image-generation
-// - imagen-3.0-capability-001: For image editing (inpainting, bg removal, compositing)
-// - gemini-2.5-flash-image-preview: Fast model for quick operations
-const IMAGE_MODEL_PRO = "imagen-3.0-capability-001";           // For high-quality edits
-const IMAGE_MODEL_FAST = "gemini-2.5-flash-image-preview";     // For quick operations
 
 async function callGemini(promptText, imageBuffers, options = {}) {
     const {
@@ -139,17 +145,20 @@ export async function prepareProduct(sourceImageUrl, shopId, productId, assetId)
     console.log(`Preparing product: ${shopId}/${productId}/${assetId}`);
     const imageBuffer = await downloadToBuffer(sourceImageUrl);
 
-    // Use the FAST model for background removal (high-volume, quick operation)
-    const prompt = `Remove the background from this product image completely. 
-Make the background fully transparent (alpha = 0). 
-Keep the product exactly as it is - do not modify the product's shape, color, texture, or any details.
-Output as PNG with transparency.`;
-
-    const base64Data = await callGemini(prompt, imageBuffer, {
-        model: IMAGE_MODEL_FAST,  // Nano Banana for fast bg removal
-        aspectRatio: "1:1"
+    // Use @imgly/background-removal-node for TRUE transparent background
+    // Gemini doesn't support alpha transparency - it outputs white backgrounds
+    console.log('Removing background with ML model...');
+    const resultBlob = await removeBackground(imageBuffer, {
+        output: {
+            format: 'image/png',
+            quality: 1.0
+        }
     });
-    const outputBuffer = Buffer.from(base64Data, 'base64');
+    
+    // Convert Blob to Buffer
+    const arrayBuffer = await resultBlob.arrayBuffer();
+    const outputBuffer = Buffer.from(arrayBuffer);
+    console.log(`Background removed, output size: ${outputBuffer.length} bytes`);
 
     const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
     return await uploadBufferToGCS(process.env.GCS_BUCKET, key, outputBuffer, 'image/png');
