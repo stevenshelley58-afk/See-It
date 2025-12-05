@@ -1,3 +1,4 @@
+# Build v1.0.18 - Force rebuild
 FROM node:20-slim AS base
 
 WORKDIR /usr/src/app
