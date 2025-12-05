@@ -61,7 +61,8 @@ document.addEventListener('DOMContentLoaded', function () {
         y: 0,
         isUploading: false,
         isCleaningUp: false,
-        isPrepared: false  // Track if product has background removed
+        isPrepared: false,  // Track if product has background removed
+        roomImageLoaded: false  // Track if room image has loaded in place step
     };
     
     // Canvas drawing state
@@ -436,6 +437,18 @@ document.addEventListener('DOMContentLoaded', function () {
     // 3. Edit Room
     if (btnBackToWelcome) btnBackToWelcome.addEventListener('click', () => showStep(stepWelcome));
 
+    // Track when room image loads in place step
+    if (roomImage) {
+        roomImage.onload = () => {
+            state.roomImageLoaded = true;
+            console.log('[See It] Room image loaded, dimensions:', roomImage.naturalWidth, 'x', roomImage.naturalHeight);
+        };
+        roomImage.onerror = () => {
+            console.error('[See It] Room image failed to load');
+            state.roomImageLoaded = false;
+        };
+    }
+
     if (btnConfirmRoom) {
         btnConfirmRoom.addEventListener('click', () => {
             if (state.isUploading || state.isCleaningUp) return;
@@ -446,6 +459,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 showError('Please upload an image first');
                 return;
             }
+            
+            // Reset loaded state when setting new src
+            state.roomImageLoaded = false;
             if (roomImage) roomImage.src = roomUrl;
             
             showStep(stepPlace);
@@ -617,7 +633,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // 5. Generate
     if (btnGenerate) {
-        btnGenerate.addEventListener('click', () => {
+        btnGenerate.addEventListener('click', async () => {
             // Validate required state
             if (!state.sessionId || !state.productId) {
                 showError('Missing session or product ID');
@@ -629,6 +645,26 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
 
+            // Wait for room image to load if needed
+            if (!state.roomImageLoaded) {
+                console.log('[See It] Waiting for room image to load...');
+                statusText.textContent = 'Loading image...';
+                
+                // Wait up to 5 seconds for image to load
+                for (let i = 0; i < 50; i++) {
+                    await new Promise(r => setTimeout(r, 100));
+                    if (state.roomImageLoaded || (roomImage.complete && roomImage.naturalWidth > 0)) {
+                        state.roomImageLoaded = true;
+                        break;
+                    }
+                }
+                
+                if (!state.roomImageLoaded && (!roomImage.complete || roomImage.naturalWidth === 0)) {
+                    showError('Room image failed to load. Please try again.');
+                    return;
+                }
+            }
+
             showStep(stepResult);
             resetError();
             statusText.textContent = 'Generating...';
@@ -638,8 +674,12 @@ document.addEventListener('DOMContentLoaded', function () {
             const roomRect = roomImage.getBoundingClientRect();
             const productRect = productImage.getBoundingClientRect();
 
-            if (!roomRect.width || !roomRect.height) {
-                showError('Room image dimensions invalid');
+            // Use natural dimensions as fallback if getBoundingClientRect returns 0
+            const roomWidth = roomRect.width || roomImage.naturalWidth || 800;
+            const roomHeight = roomRect.height || roomImage.naturalHeight || 600;
+
+            if (!roomWidth || !roomHeight) {
+                showError('Room image dimensions invalid - please try uploading again');
                 return;
             }
 
@@ -647,13 +687,13 @@ document.addEventListener('DOMContentLoaded', function () {
             const productCY = productRect.top + productRect.height / 2 - roomRect.top;
 
             // Calculate normalized coordinates (0-1 range)
-            // Use calculated position, or fallback to state.x/y if calculation fails
-            let normalizedX = Number.isFinite(productCX / roomRect.width) 
-                ? productCX / roomRect.width 
-                : (state.x / roomRect.width) || 0.5;
-            let normalizedY = Number.isFinite(productCY / roomRect.height)
-                ? productCY / roomRect.height
-                : (state.y / roomRect.height) || 0.5;
+            // Use roomWidth/roomHeight (which have fallbacks) instead of roomRect directly
+            let normalizedX = Number.isFinite(productCX / roomWidth) 
+                ? productCX / roomWidth 
+                : 0.5;  // Default to center
+            let normalizedY = Number.isFinite(productCY / roomHeight)
+                ? productCY / roomHeight
+                : 0.5;  // Default to center
 
             // Clamp to valid range (0-1)
             normalizedX = Math.max(0, Math.min(1, normalizedX));
@@ -661,7 +701,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
             console.log('[See It] Placement calculation:', {
                 productCX, productCY,
-                roomWidth: roomRect.width, roomHeight: roomRect.height,
+                roomWidth, roomHeight,
+                roomRectWidth: roomRect.width, roomRectHeight: roomRect.height,
                 normalizedX, normalizedY,
                 stateX: state.x, stateY: state.y
             });

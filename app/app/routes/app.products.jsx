@@ -219,15 +219,35 @@ export default function Products() {
                                     const { id, title, featuredImage } = item;
                                     const asset = assetsMap[id];
                                     const badgeInfo = getBadgeInfo(asset);
+                                    const hasPreparedImage = asset?.preparedImageUrl && asset?.status === "ready";
 
                                     return (
                                         <ResourceList.Item
                                             id={id}
                                             media={
-                                                <Thumbnail
-                                                    source={featuredImage?.url || ""}
-                                                    alt={featuredImage?.altText || title}
-                                                />
+                                                <InlineStack gap="200">
+                                                    <div style={{ position: 'relative' }}>
+                                                        <Thumbnail
+                                                            source={featuredImage?.url || ""}
+                                                            alt={featuredImage?.altText || title}
+                                                        />
+                                                        <Text variant="bodySm" tone="subdued" as="span">Original</Text>
+                                                    </div>
+                                                    {hasPreparedImage && (
+                                                        <div style={{ position: 'relative' }}>
+                                                            <div style={{ 
+                                                                background: 'repeating-conic-gradient(#e5e5e5 0% 25%, white 0% 50%) 50% / 10px 10px',
+                                                                borderRadius: '4px'
+                                                            }}>
+                                                                <Thumbnail
+                                                                    source={asset.preparedImageUrl}
+                                                                    alt={`${title} - prepared`}
+                                                                />
+                                                            </div>
+                                                            <Text variant="bodySm" tone="success" as="span">✓ Prepared</Text>
+                                                        </div>
+                                                    )}
+                                                </InlineStack>
                                             }
                                             accessibilityLabel={`View details for ${title}`}
                                         >
