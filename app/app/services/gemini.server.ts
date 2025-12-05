@@ -38,8 +38,10 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
 const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
 
 // Verified working model names as of Dec 2024
-const IMAGE_MODEL_PRO = "imagen-3.0-capability-001";
-const IMAGE_MODEL_FAST = "gemini-2.5-flash-image-preview";
+// gemini-2.5-flash-image: For image editing (inpainting, background removal, compositing)
+// gemini-2.0-flash-exp: Alternative for image generation
+const IMAGE_MODEL_PRO = "gemini-2.5-flash-image";
+const IMAGE_MODEL_FAST = "gemini-2.5-flash-image";
 
 async function downloadToBuffer(url: string): Promise<Buffer> {
     console.log(`[Gemini] Downloading: ${url.substring(0, 80)}...`);
