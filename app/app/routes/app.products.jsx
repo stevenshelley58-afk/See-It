@@ -21,28 +21,49 @@ import prisma from "../db.server";
 export const loader = async ({ request }) => {
     const { admin, session } = await authenticate.admin(request);
 
-    const response = await admin.graphql(
-        `#graphql
-      query {
-        products(first: 20) {
-          edges {
-            node {
-              id
-              title
-              handle
-              featuredImage {
-                id
-                url
-                altText
-              }
-            }
-          }
-        }
-      }`
-    );
+    // Fetch ALL products using pagination
+    let allProducts = [];
+    let hasNextPage = true;
+    let cursor = null;
 
-    const responseJson = await response.json();
-    const products = responseJson.data.products.edges.map((edge) => edge.node);
+    while (hasNextPage) {
+        const response = await admin.graphql(
+            `#graphql
+            query getProducts($cursor: String) {
+                products(first: 50, after: $cursor) {
+                    edges {
+                        node {
+                            id
+                            title
+                            handle
+                            featuredImage {
+                                id
+                                url
+                                altText
+                            }
+                        }
+                        cursor
+                    }
+                    pageInfo {
+                        hasNextPage
+                    }
+                }
+            }`,
+            { variables: { cursor } }
+        );
+
+        const responseJson = await response.json();
+        const { edges, pageInfo } = responseJson.data.products;
+        
+        allProducts = [...allProducts, ...edges.map((edge) => edge.node)];
+        hasNextPage = pageInfo.hasNextPage;
+        
+        if (edges.length > 0) {
+            cursor = edges[edges.length - 1].cursor;
+        }
+    }
+
+    const products = allProducts;
 
     let shop = await prisma.shop.findUnique({
         where: { shopDomain: session.shop },

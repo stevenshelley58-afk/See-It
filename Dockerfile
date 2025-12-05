@@ -1,4 +1,5 @@
-# Build v1.0.19 - Use local Gemini service, no external image service needed
+# Build v1.0.20 - Fetch ALL products with pagination, local Gemini service
+# Cache bust: 2024-12-05-v2
 FROM node:20-slim AS base
 
 WORKDIR /usr/src/app

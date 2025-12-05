@@ -1,14 +1,16 @@
 # Deploy See It - Quick Guide
 
-## Changes Made
+## Changes Made (v1.0.20)
 
-I've made the following improvements to simplify deployment:
+I've made the following improvements:
 
-1. **Removed external Image Service dependency** - The app now uses a local Gemini service built into the main app. No separate Cloud Run service needed!
+1. **Fixed product sync issue** - Now fetches ALL products from Shopify using pagination (was limited to 20 before)
 
-2. **Fixed theme extension warnings** - Added width/height attributes to img tags.
+2. **Removed external Image Service dependency** - The app now uses a local Gemini service built into the main app. No separate Cloud Run service needed!
 
-3. **Updated version to 1.0.19**
+3. **Fixed theme extension warnings** - Added width/height attributes to img tags.
+
+4. **Updated version to 1.0.20**
 
 ## Step 1: Commit and Push to Trigger Railway Deployment
 
@@ -17,7 +19,7 @@ Run these commands in PowerShell from the `c:\See It` directory:
 ```powershell
 cd "c:\See It"
 git add -A
-git commit -m "v1.0.19: Use local Gemini service, remove external image service dependency"
+git commit -m "v1.0.20: Fetch ALL products with pagination, use local Gemini service"
 git push origin main
 ```
 
@@ -85,11 +87,12 @@ When prompted, confirm "Yes, release this new version".
 - Check `GCS_BUCKET` is correct
 - Verify `GOOGLE_CREDENTIALS_JSON` has storage permissions
 
-## What Changed in v1.0.19
+## What Changed in v1.0.20
 
+- `app.products.jsx` - **Fixed: Now fetches ALL products using pagination** (was limited to 20)
 - `api.products.prepare.jsx` - Now uses local `gemini.server.ts` instead of external service
 - `api.products.batch-prepare.jsx` - Same, processes images locally
 - `app-proxy.room.confirm.ts` - Removed optional Gemini pre-upload call
 - `see-it-button.liquid` - Added width/height to img tags
 - `Dockerfile` - Updated version comment
-- `package.json` - Version bump to 1.0.19
+- `package.json` - Version bump to 1.0.20
