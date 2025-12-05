@@ -42,7 +42,7 @@
            <input type="file" id="see-it-upload" accept="image/*" style="display: none;" />
            <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
         </div>
-        <div class="see-it-version-badge">See It v1.0.18</div>
+        <div class="see-it-version-badge">See It v1.0.19</div>
       </div>
     </div>
 
@@ -52,7 +52,7 @@
       <p class="see-it-step-description">Paint over anything you want to remove, or skip to place the product.</p>
       
       <div class="see-it-canvas-wrapper" id="see-it-canvas-wrapper">
-        <img id="see-it-room-preview" src="" alt="Room Preview" />
+        <img id="see-it-room-preview" src="" alt="Room Preview" width="400" height="300" />
         <canvas id="see-it-mask-canvas"></canvas>
         <div id="see-it-cleanup-loading" class="see-it-loading-overlay hidden">
           <div class="see-it-spinner"></div>
@@ -88,10 +88,10 @@
     <!-- Step 2: Place Product -->
     <div id="see-it-step-place" class="see-it-step hidden">
       <div id="see-it-canvas-container" class="see-it-interactive-canvas">
-        <img id="see-it-room-image" src="" alt="Room" />
+        <img id="see-it-room-image" src="" alt="Room" width="400" height="300" />
         
         <div id="see-it-product-container" class="draggable-container">
-            <img id="see-it-product-image" src="" alt="Product" class="draggable-item" />
+            <img id="see-it-product-image" src="" alt="Product" class="draggable-item" width="200" height="200" />
             <!-- Resize Handles -->
             <div class="resize-handle handle-tl"></div>
             <div class="resize-handle handle-tr"></div>

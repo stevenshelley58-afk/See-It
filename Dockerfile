@@ -1,4 +1,4 @@
-# Build v1.0.18 - Force rebuild
+# Build v1.0.19 - Use local Gemini service, no external image service needed
 FROM node:20-slim AS base
 
 WORKDIR /usr/src/app

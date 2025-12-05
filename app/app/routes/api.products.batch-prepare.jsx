@@ -2,6 +2,7 @@ import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { enforceQuota } from "../quota.server";
+import { prepareProduct } from "../services/gemini.server";
 
 export const action = async ({ request }) => {
     const { admin, session } = await authenticate.admin(request);
@@ -42,7 +43,7 @@ export const action = async ({ request }) => {
         throw error;
     }
 
-    let queued = 0;
+    let processed = 0;
     const errors = [];
 
     for (const productId of productIds) {
@@ -76,6 +77,7 @@ export const action = async ({ request }) => {
             const imageUrl = product.featuredImage.url;
 
             // Check if asset already exists
+            let assetId;
             const existing = await prisma.productAsset.findFirst({
                 where: {
                     shopId: shop.id,
@@ -84,6 +86,7 @@ export const action = async ({ request }) => {
             });
 
             if (existing) {
+                assetId = existing.id;
                 // Update existing asset to pending with batch strategy
                 await prisma.productAsset.update({
                     where: { id: existing.id },
@@ -97,7 +100,7 @@ export const action = async ({ request }) => {
                 });
             } else {
                 // Create new asset with batch strategy
-                await prisma.productAsset.create({
+                const newAsset = await prisma.productAsset.create({
                     data: {
                         shopId: shop.id,
                         productId: String(productId),
@@ -109,12 +112,33 @@ export const action = async ({ request }) => {
                         createdAt: new Date()
                     }
                 });
+                assetId = newAsset.id;
             }
 
-            queued++;
+            // Process the image immediately using local Gemini service
+            console.log(`[BatchPrepare] Processing product ${productId}...`);
+            const preparedImageUrl = await prepareProduct(
+                String(imageUrl),
+                shop.id,
+                String(productId),
+                assetId
+            );
+
+            // Update as ready
+            await prisma.productAsset.update({
+                where: { id: assetId },
+                data: {
+                    status: "ready",
+                    preparedImageUrl: preparedImageUrl,
+                    updatedAt: new Date()
+                }
+            });
+
+            processed++;
+            console.log(`[BatchPrepare] Successfully processed ${productId}`);
 
         } catch (error) {
-            console.error(`Error processing product ${productId}:`, error);
+            console.error(`[BatchPrepare] Error processing product ${productId}:`, error);
             errors.push({
                 productId,
                 error: error.message || "Unknown error"
@@ -123,8 +147,8 @@ export const action = async ({ request }) => {
     }
 
     return json({
-        queued,
+        processed,
         errors,
-        message: `Queued ${queued} products for preparation${errors.length > 0 ? `, ${errors.length} failed` : ''}`
+        message: `Processed ${processed} products${errors.length > 0 ? `, ${errors.length} failed` : ''}`
     });
 };
