@@ -11,6 +11,11 @@ automatically_update_urls_on_dev = true
 [webhooks]
 api_version = "2026-01"
 
+# GDPR mandatory webhooks for App Store compliance
+[[webhooks.subscriptions]]
+topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/webhooks"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "write_products,read_products"

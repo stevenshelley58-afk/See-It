@@ -720,7 +720,20 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     const pollStatus = (jobId) => {
+        let attempts = 0;
+        const maxAttempts = 30; // 60 seconds max (30 * 2000ms)
+
         const interval = setInterval(() => {
+            attempts++;
+            if (attempts > maxAttempts) {
+                clearInterval(interval);
+                showError('Generation timed out. Please try again.');
+                statusText.textContent = '';
+                actionsDiv.classList.remove('hidden');
+                btnRetry.classList.remove('hidden');
+                return;
+            }
+
             fetch(`/apps/see-it/render/${jobId}`)
                 .then(res => res.json())
                 .then(data => {
@@ -742,7 +755,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 })
                 .catch(err => {
                     clearInterval(interval);
-                    showError('Polling error');
+                    showError('Connection error: ' + err.message);
+                    statusText.textContent = '';
+                    actionsDiv.classList.remove('hidden');
+                    btnRetry.classList.remove('hidden');
                 });
         }, 2000);
     };
