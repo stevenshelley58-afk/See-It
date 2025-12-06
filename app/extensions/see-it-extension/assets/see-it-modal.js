@@ -720,9 +720,31 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     const pollStatus = (jobId) => {
+        const POLL_INTERVAL_MS = 2000;
+        const MAX_POLL_DURATION_MS = 60000; // 60 seconds
+        const maxAttempts = Math.ceil(MAX_POLL_DURATION_MS / POLL_INTERVAL_MS);
+        let attemptCount = 0;
+
         const interval = setInterval(() => {
+            attemptCount++;
+
+            // Check if we've exceeded the maximum number of attempts
+            if (attemptCount > maxAttempts) {
+                clearInterval(interval);
+                showError('Request timed out. The image is taking longer than expected to generate. Please try again.');
+                statusText.textContent = '';
+                actionsDiv.classList.remove('hidden');
+                btnRetry.classList.remove('hidden');
+                return;
+            }
+
             fetch(`/apps/see-it/render/${jobId}`)
-                .then(res => res.json())
+                .then(res => {
+                    if (!res.ok) {
+                        throw new Error(`Server error: ${res.status}`);
+                    }
+                    return res.json();
+                })
                 .then(data => {
                     if (data.status === 'completed') {
                         clearInterval(interval);
@@ -739,12 +761,17 @@ document.addEventListener('DOMContentLoaded', function () {
                         actionsDiv.classList.remove('hidden');
                         btnRetry.classList.remove('hidden');
                     }
+                    // If status is 'pending' or 'processing', continue polling (next interval tick)
                 })
                 .catch(err => {
                     clearInterval(interval);
-                    showError('Polling error');
+                    console.error('Polling error:', err);
+                    showError('Network error while checking status. Please check your connection and try again.');
+                    statusText.textContent = '';
+                    actionsDiv.classList.remove('hidden');
+                    btnRetry.classList.remove('hidden');
                 });
-        }, 2000);
+        }, POLL_INTERVAL_MS);
     };
 
     if (btnAdjust) btnAdjust.addEventListener('click', () => showStep(stepPlace));
