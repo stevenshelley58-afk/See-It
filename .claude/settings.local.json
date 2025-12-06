@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git restore:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nFix: Restore package-lock.json and add deployment safety checks\n\n- Restored package-lock.json to ensure consistent dependency installation on Railway\n- Added GEMINI_API_KEY validation before starting prepare processor\n- Configured .npmrc to enforce package-lock.json generation\n- Simplified index route to redirect immediately\n- Updated deployment docs\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(railway logs:*)",
+      "Bash(cat:*)",
+      "Bash(railway link:*)",
+      "Bash(curl:*)",
+      "Bash(test:*)",
+      "Bash(railway service:*)",
+      "Bash(npm run build:*)",
+      "Bash(build.log)",
+      "Bash(echo:*)",
+      "Bash(railway status:*)",
+      "Bash(railway up:*)",
+      "Bash(railway.log)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -56,9 +56,10 @@ model ProductAsset {
   sourceImageId    String   @map("source_image_id")
   sourceImageUrl   String   @map("source_image_url")
   preparedImageUrl String?  @map("prepared_image_url")
-  status           String // "pending" | "ready" | "failed" | "stale" | "orphaned"
+  status           String // "pending" | "processing" | "ready" | "failed" | "stale" | "orphaned"
   prepStrategy     String   @map("prep_strategy") // "batch" | "fallback" | "manual"
   promptVersion    Int      @map("prompt_version")
+  errorMessage     String?  @map("error_message")
   createdAt        DateTime @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 

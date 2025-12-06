@@ -30,6 +30,7 @@ EXPOSE 3000
 
 ENV NODE_ENV=production
 
-# Runs prisma migrate deploy + remix-serve
+# Runtime: only generate Prisma client, no migrations
+# Migrations should be run manually or via deploy step, not on every container start
 CMD ["npm", "run", "docker-start"]
 

@@ -3,74 +3,132 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { enforceQuota } from "../quota.server";
 import { prepareProduct } from "../services/gemini.server";
+import { logger, createLogContext } from "../utils/logger.server";
+import { getRequestId, addRequestIdHeader } from "../utils/request-context.server";
+import { getShopFromSession } from "../utils/shop.server";
 
 export const action = async ({ request }) => {
-    const { session } = await authenticate.admin(request);
-    const formData = await request.formData();
-    const productId = formData.get("productId");
-    const imageUrl = formData.get("imageUrl");
-    const imageId = formData.get("imageId");
+    const requestId = getRequestId(request);
+    let shopId: string | null = null;
+    let productId: string | null = null;
+    let assetId: string | null = null;
 
-    if (!productId || !imageUrl) {
-        return json({ error: "Missing data" }, { status: 400 });
-    }
-
-    const shop = await prisma.shop.findUnique({
-        where: { shopDomain: session.shop }
-    });
-
-    if (!shop) {
-        return json({ error: "Shop not found" }, { status: 404 });
-    }
-
-    const existing = await prisma.productAsset.findFirst({
-        where: { shopId: shop.id, productId: String(productId) }
-    });
-
-    // Enforce quota
     try {
-        await enforceQuota(shop.id, "prep", 1);
-    } catch (error) {
-        if (error instanceof Response) {
-            const data = await error.json();
-            return json(data, { status: 429 });
+        const { session } = await authenticate.admin(request);
+        const { shopId: resolvedShopId } = await getShopFromSession(session, request, "prepare");
+        shopId = resolvedShopId;
+
+        const formData = await request.formData();
+        productId = formData.get("productId")?.toString() || null;
+        const imageUrl = formData.get("imageUrl")?.toString();
+        const imageId = formData.get("imageId")?.toString();
+
+        if (!productId || !imageUrl) {
+            logger.warn(
+                createLogContext("prepare", requestId, "validation", { shopId, productId }),
+                "Missing required fields: productId or imageUrl"
+            );
+            return addRequestIdHeader(
+                json({ error: "Missing data", requestId }, { status: 400 }),
+                requestId
+            );
         }
-        throw error;
-    }
 
-    // 1. Create/Update record as PENDING
-    let assetId;
-    if (existing) {
-        assetId = existing.id;
-        await prisma.productAsset.update({
-            where: { id: existing.id },
-            data: { status: "pending", sourceImageUrl: String(imageUrl) }
+        // Check for existing asset and idempotency
+        const existing = await prisma.productAsset.findFirst({
+            where: { shopId, productId: String(productId) }
         });
-    } else {
-        const newAsset = await prisma.productAsset.create({
-            data: {
-                shopId: shop.id,
-                productId: String(productId),
-                sourceImageId: String(imageId) || "unknown",
-                sourceImageUrl: String(imageUrl),
-                status: "pending",
-                prepStrategy: "manual",
-                promptVersion: 1,
-                createdAt: new Date()
+
+        // If asset is already ready, return it unless explicitly re-preparing
+        if (existing && existing.status === "ready" && existing.preparedImageUrl) {
+            logger.info(
+                createLogContext("prepare", requestId, "idempotency-check", {
+                    shopId,
+                    productId,
+                    assetId: existing.id,
+                }),
+                "Asset already prepared, returning existing"
+            );
+            return addRequestIdHeader(
+                json({
+                    success: true,
+                    preparedImageUrl: existing.preparedImageUrl,
+                    requestId,
+                    alreadyPrepared: true,
+                }),
+                requestId
+            );
+        }
+
+        // Enforce quota
+        try {
+            await enforceQuota(shopId, "prep", 1);
+        } catch (error) {
+            if (error instanceof Response) {
+                const data = await error.json();
+                logger.warn(
+                    createLogContext("prepare", requestId, "quota", { shopId, productId }),
+                    "Quota exceeded"
+                );
+                return addRequestIdHeader(
+                    json({ ...data, requestId }, { status: 429 }),
+                    requestId
+                );
             }
-        });
-        assetId = newAsset.id;
-    }
+            throw error;
+        }
 
-    // 2. Process image using local Gemini service (no external service needed)
-    try {
-        console.log(`[Prepare] Processing asset ${assetId} using local Gemini service...`);
-        
+        // 1. Create/Update record as PENDING
+        if (existing) {
+            assetId = existing.id;
+            // Only update if not already processing (avoid race conditions)
+            if (existing.status !== "processing") {
+                await prisma.productAsset.update({
+                    where: { id: existing.id },
+                    data: { status: "pending", sourceImageUrl: String(imageUrl) }
+                });
+            } else {
+                logger.info(
+                    createLogContext("prepare", requestId, "db-update", {
+                        shopId,
+                        productId,
+                        assetId,
+                    }),
+                    "Asset already processing, skipping update"
+                );
+            }
+        } else {
+            const newAsset = await prisma.productAsset.create({
+                data: {
+                    shopId,
+                    productId: String(productId),
+                    sourceImageId: String(imageId) || "unknown",
+                    sourceImageUrl: String(imageUrl),
+                    status: "pending",
+                    prepStrategy: "manual",
+                    promptVersion: 1,
+                    createdAt: new Date()
+                }
+            });
+            assetId = newAsset.id;
+        }
+
+        logger.info(
+            createLogContext("prepare", requestId, "db-update", {
+                shopId,
+                productId,
+                assetId,
+            }),
+            "Asset record created/updated, starting preparation"
+        );
+
+        // 2. Process image using local Gemini service
         const preparedImageUrl = await prepareProduct(
             String(imageUrl),
-            shop.id,
+            shopId,
             String(productId),
-            assetId
+            assetId,
+            requestId
         );
 
         if (!preparedImageUrl) {
@@ -86,20 +144,66 @@ export const action = async ({ request }) => {
             }
         });
 
-        console.log(`[Prepare] Successfully processed asset ${assetId}`);
-        return json({ success: true, preparedImageUrl: preparedImageUrl });
+        logger.info(
+            createLogContext("prepare", requestId, "complete", {
+                shopId,
+                productId,
+                assetId,
+            }),
+            "Asset preparation completed successfully"
+        );
+
+        return addRequestIdHeader(
+            json({ success: true, preparedImageUrl: preparedImageUrl, requestId }),
+            requestId
+        );
 
     } catch (error) {
-        console.error("[Prepare] Failed:", error);
+        logger.error(
+            createLogContext("prepare", requestId, "error-boundary", {
+                shopId,
+                productId,
+                assetId,
+            }),
+            "Prepare action failed",
+            error
+        );
 
-        // Update record as FAILED
-        await prisma.productAsset.update({
-            where: { id: assetId },
-            data: {
-                status: "failed"
+        // Update record as FAILED if we have an assetId
+        if (assetId) {
+            try {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                await prisma.productAsset.update({
+                    where: { id: assetId },
+                    data: {
+                        status: "failed",
+                        errorMessage: errorMessage.substring(0, 500) // Limit length
+                    }
+                });
+            } catch (dbError) {
+                logger.error(
+                    createLogContext("prepare", requestId, "db-update", {
+                        shopId,
+                        productId,
+                        assetId,
+                    }),
+                    "Failed to update asset status to failed",
+                    dbError
+                );
             }
-        });
+        }
 
-        return json({ error: error.message }, { status: 500 });
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        return addRequestIdHeader(
+            json(
+                {
+                    error: errorMessage,
+                    requestId,
+                    ...(assetId && { assetId }),
+                },
+                { status: 500 }
+            ),
+            requestId
+        );
     }
 };

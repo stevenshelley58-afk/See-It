@@ -3,38 +3,44 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { enforceQuota } from "../quota.server";
 import { prepareProduct } from "../services/gemini.server";
+import { logger, createLogContext } from "../utils/logger.server";
+import { getRequestId, addRequestIdHeader } from "../utils/request-context.server";
+import { getShopFromSession } from "../utils/shop.server";
 
 export const action = async ({ request }) => {
+    const requestId = getRequestId(request);
     const { admin, session } = await authenticate.admin(request);
+    const { shopId } = await getShopFromSession(session, request, "prepare");
     const formData = await request.formData();
     const productIdsJson = formData.get("productIds");
 
     if (!productIdsJson) {
-        return json({ error: "Missing productIds" }, { status: 400 });
+        return addRequestIdHeader(
+            json({ error: "Missing productIds", requestId }, { status: 400 }),
+            requestId
+        );
     }
 
     let productIds;
     try {
         productIds = JSON.parse(productIdsJson);
     } catch (e) {
-        return json({ error: "Invalid productIds format" }, { status: 400 });
+        return addRequestIdHeader(
+            json({ error: "Invalid productIds format", requestId }, { status: 400 }),
+            requestId
+        );
     }
 
     if (!Array.isArray(productIds) || productIds.length === 0) {
-        return json({ error: "productIds must be a non-empty array" }, { status: 400 });
-    }
-
-    const shop = await prisma.shop.findUnique({
-        where: { shopDomain: session.shop }
-    });
-
-    if (!shop) {
-        return json({ error: "Shop not found" }, { status: 404 });
+        return addRequestIdHeader(
+            json({ error: "productIds must be a non-empty array", requestId }, { status: 400 }),
+            requestId
+        );
     }
 
     // Enforce quota for the entire batch
     try {
-        await enforceQuota(shop.id, "prep", productIds.length);
+        await enforceQuota(shopId, "prep", productIds.length);
     } catch (error) {
         if (error instanceof Response) {
             const data = await error.json();
@@ -102,7 +108,7 @@ export const action = async ({ request }) => {
                 // Create new asset with batch strategy
                 const newAsset = await prisma.productAsset.create({
                     data: {
-                        shopId: shop.id,
+                        shopId,
                         productId: String(productId),
                         sourceImageId: String(imageId),
                         sourceImageUrl: String(imageUrl),
@@ -116,12 +122,12 @@ export const action = async ({ request }) => {
             }
 
             // Process the image immediately using local Gemini service
-            console.log(`[BatchPrepare] Processing product ${productId}...`);
             const preparedImageUrl = await prepareProduct(
                 String(imageUrl),
-                shop.id,
+                shopId,
                 String(productId),
-                assetId
+                assetId,
+                requestId
             );
 
             // Update as ready
@@ -135,20 +141,51 @@ export const action = async ({ request }) => {
             });
 
             processed++;
-            console.log(`[BatchPrepare] Successfully processed ${productId}`);
 
         } catch (error) {
-            console.error(`[BatchPrepare] Error processing product ${productId}:`, error);
+            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+            logger.error(
+                createLogContext("prepare", requestId, "batch-item", {
+                    shopId: shop.id,
+                    productId: String(productId),
+                    assetId,
+                }),
+                "Error processing product in batch",
+                error
+            );
+            
+            // Update asset status to failed
+            try {
+                await prisma.productAsset.update({
+                    where: { id: assetId },
+                    data: {
+                        status: "failed",
+                        errorMessage: errorMessage.substring(0, 500)
+                    }
+                });
+            } catch (dbError) {
+                // Ignore DB errors in batch context
+            }
+            
             errors.push({
                 productId,
-                error: error.message || "Unknown error"
+                error: errorMessage
             });
         }
     }
 
-    return json({
-        processed,
-        errors,
-        message: `Processed ${processed} products${errors.length > 0 ? `, ${errors.length} failed` : ''}`
-    });
+    logger.info(
+        createLogContext("prepare", requestId, "batch-complete", { shopId }),
+        `Batch prepare completed: ${processed} processed, ${errors.length} failed`
+    );
+
+    return addRequestIdHeader(
+        json({
+            processed,
+            errors,
+            message: `Processed ${processed} products${errors.length > 0 ? `, ${errors.length} failed` : ''}`,
+            requestId
+        }),
+        requestId
+    );
 };

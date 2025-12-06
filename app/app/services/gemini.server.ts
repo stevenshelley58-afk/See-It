@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { removeBackground } from "@imgly/background-removal-node";
 import sharp from "sharp";
 import { Storage } from "@google-cloud/storage";
+import { logger, createLogContext } from "../utils/logger.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -62,34 +63,103 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
 
 const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
 
-async function downloadToBuffer(url: string): Promise<Buffer> {
-    console.log(`[Gemini] Downloading: ${url.substring(0, 80)}...`);
+async function downloadToBuffer(
+    url: string,
+    logContext: ReturnType<typeof createLogContext>
+): Promise<Buffer> {
+    logger.info(
+        { ...logContext, stage: "download" },
+        `Downloading image from Shopify CDN: ${url.substring(0, 80)}...`
+    );
+    
     // Force PNG format from Shopify CDN
     const pngUrl = url.includes('?') ? `${url}&format=png` : `${url}?format=png`;
     const response = await fetch(pngUrl, {
         headers: { 'Accept': 'image/png' }
     });
+    
     if (!response.ok) {
-        throw new Error(`Failed to fetch: ${response.statusText}`);
+        const error = new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+        logger.error(
+            { ...logContext, stage: "download" },
+            "Failed to download image from CDN",
+            error
+        );
+        throw error;
     }
+    
+    const contentType = response.headers.get("content-type") || "unknown";
+    const contentLength = response.headers.get("content-length");
     const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+    const buffer = Buffer.from(arrayBuffer);
+    
+    logger.info(
+        { ...logContext, stage: "download" },
+        `Downloaded image: ${buffer.length} bytes, content-type: ${contentType}`
+    );
+    
+    // Guard: reject zero-size or suspiciously large files
+    if (buffer.length === 0) {
+        const error = new Error("Downloaded image is empty (0 bytes)");
+        logger.error(
+            { ...logContext, stage: "download" },
+            "Empty image buffer",
+            error
+        );
+        throw error;
+    }
+    
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (buffer.length > maxSize) {
+        const error = new Error(`Image too large: ${buffer.length} bytes (max ${maxSize})`);
+        logger.error(
+            { ...logContext, stage: "download" },
+            "Image exceeds size limit",
+            error
+        );
+        throw error;
+    }
+    
+    return buffer;
 }
 
-async function uploadToGCS(key: string, buffer: Buffer, contentType: string): Promise<string> {
-    console.log(`[Gemini] Uploading to GCS: ${key}`);
+async function uploadToGCS(
+    key: string,
+    buffer: Buffer,
+    contentType: string,
+    logContext: ReturnType<typeof createLogContext>
+): Promise<string> {
+    logger.info(
+        { ...logContext, stage: "upload" },
+        `Uploading to GCS bucket ${GCS_BUCKET}, key: ${key}, size: ${buffer.length} bytes`
+    );
+    
     const bucket = storage.bucket(GCS_BUCKET);
     const file = bucket.file(key);
     
-    await file.save(buffer, { contentType, resumable: false });
-    
-    const [signedUrl] = await file.getSignedUrl({
-        version: 'v4',
-        action: 'read',
-        expires: Date.now() + 60 * 60 * 1000, // 1 hour
-    });
-    
-    return signedUrl;
+    try {
+        await file.save(buffer, { contentType, resumable: false });
+        
+        const [signedUrl] = await file.getSignedUrl({
+            version: 'v4',
+            action: 'read',
+            expires: Date.now() + 60 * 60 * 1000, // 1 hour
+        });
+        
+        logger.info(
+            { ...logContext, stage: "upload" },
+            `Upload successful, signed URL generated: ${signedUrl.substring(0, 80)}...`
+        );
+        
+        return signedUrl;
+    } catch (error) {
+        logger.error(
+            { ...logContext, stage: "upload" },
+            `Failed to upload to GCS bucket ${GCS_BUCKET}, key: ${key}`,
+            error
+        );
+        throw error;
+    }
 }
 
 async function callGemini(
@@ -163,55 +233,173 @@ export async function prepareProduct(
     sourceImageUrl: string,
     shopId: string,
     productId: string,
-    assetId: string
+    assetId: string,
+    requestId: string = "background-processor"
 ): Promise<string> {
-    console.log(`[Gemini] Preparing product: ${productId}`);
-    console.log(`[Gemini] Source image URL: ${sourceImageUrl}`);
+    const logContext = createLogContext("prepare", requestId, "start", {
+        shopId,
+        productId,
+        assetId,
+    });
+
+    logger.info(logContext, `Starting product preparation: productId=${productId}, sourceImageUrl=${sourceImageUrl.substring(0, 80)}...`);
 
     try {
-        const imageBuffer = await downloadToBuffer(sourceImageUrl);
-        console.log(`[Gemini] Downloaded image, size: ${imageBuffer.length} bytes`);
+        const imageBuffer = await downloadToBuffer(sourceImageUrl, logContext);
 
         // Convert to PNG format - force PNG output even if input was WebP/AVIF
-        console.log('[Gemini] Converting image to PNG format...');
+        logger.info(
+            { ...logContext, stage: "convert" },
+            "Converting image to PNG format"
+        );
+        
         const pngBuffer = await sharp(imageBuffer)
             .png({ force: true })
             .toBuffer();
-        console.log(`[Gemini] Converted to PNG, size: ${pngBuffer.length} bytes`);
+        
+        logger.info(
+            { ...logContext, stage: "convert" },
+            `Converted to PNG: ${pngBuffer.length} bytes`
+        );
 
         if (pngBuffer.length === 0) {
-            throw new Error('PNG conversion produced empty buffer');
+            const error = new Error('PNG conversion produced empty buffer');
+            logger.error(
+                { ...logContext, stage: "convert" },
+                "PNG conversion failed: empty buffer",
+                error
+            );
+            throw error;
+        }
+
+        // Extra visibility: log decoded metadata of the PNG we will send to @imgly
+        try {
+            const signature = pngBuffer.slice(0, 8).toString('hex');
+            const meta = await sharp(pngBuffer).metadata();
+            logger.debug(
+                { ...logContext, stage: "convert" },
+                `PNG metadata: signature=${signature}, format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
+            );
+        } catch (metaErr) {
+            logger.warn(
+                { ...logContext, stage: "convert" },
+                "Failed to read PNG metadata",
+                metaErr
+            );
         }
 
         // Use @imgly/background-removal-node for TRUE transparent background
         // Pass explicit mimeType so decoder knows it's PNG
-        console.log('[Gemini] Removing background with ML model...');
-        const resultBlob = await removeBackground(pngBuffer, {
-            mimeType: 'image/png',
-            output: {
-                format: 'image/png',
-                quality: 1.0
-            }
-        } as any);
+        logger.info(
+            { ...logContext, stage: "bg-remove" },
+            "Removing background with ML model (@imgly)"
+        );
+        
+        let outputBuffer: Buffer | null = null;
+        let lastError: unknown = null;
 
-        // Convert Blob to Buffer
-        const arrayBuffer = await resultBlob.arrayBuffer();
-        const outputBuffer = Buffer.from(arrayBuffer);
-        console.log(`[Gemini] Background removed, output size: ${outputBuffer.length} bytes`);
+        // Attempt with PNG first, then fallback to JPEG if decoder rejects it
+        const attempts: Array<{
+            label: string;
+            buffer: Buffer;
+            mimeType: 'image/png' | 'image/jpeg';
+            prep?: () => Promise<Buffer>;
+        }> = [
+            { label: 'png', buffer: pngBuffer, mimeType: 'image/png' },
+            {
+                label: 'jpeg-fallback',
+                buffer: pngBuffer, // will be replaced lazily
+                mimeType: 'image/jpeg',
+                prep: async () => {
+                    console.log('[Gemini] Fallback: converting to JPEG before removal...');
+                    const jpegBuffer = await sharp(imageBuffer).jpeg({ quality: 95 }).toBuffer();
+                    const meta = await sharp(jpegBuffer).metadata();
+                    console.log('[Gemini] JPEG metadata for fallback:', {
+                        format: meta.format,
+                        width: meta.width,
+                        height: meta.height,
+                        channels: meta.channels,
+                        hasAlpha: meta.hasAlpha
+                    });
+                    return jpegBuffer;
+                }
+            }
+        ];
+
+        for (const attempt of attempts) {
+            try {
+                const bufferToUse = attempt.prep ? await attempt.prep() : attempt.buffer;
+                
+                logger.debug(
+                    { ...logContext, stage: "bg-remove" },
+                    `Attempting background removal with ${attempt.label}, mimeType: ${attempt.mimeType}`
+                );
+                
+                const resultBlob = await removeBackground(bufferToUse, {
+                    // Not in types, but accepted by runtime
+                    mimeType: attempt.mimeType,
+                    output: {
+                        format: 'image/png',
+                        quality: 1.0
+                    }
+                } as any);
+
+                const arrayBuffer = await resultBlob.arrayBuffer();
+                outputBuffer = Buffer.from(arrayBuffer);
+                
+                logger.info(
+                    { ...logContext, stage: "bg-remove" },
+                    `Background removed successfully (${attempt.label}), output size: ${outputBuffer.length} bytes`
+                );
+                break;
+            } catch (err) {
+                lastError = err;
+                logger.warn(
+                    { ...logContext, stage: "bg-remove" },
+                    `Background removal failed on ${attempt.label}`,
+                    err
+                );
+            }
+        }
+
+        if (!outputBuffer) {
+            const error = lastError instanceof Error 
+                ? lastError 
+                : new Error('Background removal failed on all attempts');
+            logger.error(
+                { ...logContext, stage: "bg-remove" },
+                "Background removal failed on all attempts",
+                error
+            );
+            throw error;
+        }
+
+        // Guard: ensure output buffer is valid
+        if (outputBuffer.length === 0) {
+            const error = new Error("Background removal produced empty buffer");
+            logger.error(
+                { ...logContext, stage: "bg-remove" },
+                "Empty output buffer after background removal",
+                error
+            );
+            throw error;
+        }
 
         const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
-        console.log(`[Gemini] Uploading to GCS: ${key}`);
-        const url = await uploadToGCS(key, outputBuffer, 'image/png');
-        console.log(`[Gemini] Upload successful: ${url}`);
+        const url = await uploadToGCS(key, outputBuffer, 'image/png', logContext);
+        
+        logger.info(
+            { ...logContext, stage: "complete" },
+            `Product preparation completed successfully: ${url.substring(0, 80)}...`
+        );
+        
         return url;
     } catch (error: any) {
-        console.error(`[Gemini] prepareProduct failed:`, {
-            error: error.message,
-            stack: error.stack,
-            productId,
-            shopId,
-            assetId
-        });
+        logger.error(
+            logContext,
+            "prepareProduct failed",
+            error
+        );
         throw error;
     }
 }

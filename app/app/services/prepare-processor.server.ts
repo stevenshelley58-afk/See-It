@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { prepareProduct } from "./gemini.server";
+import { logger, createLogContext, generateRequestId } from "../utils/logger.server";
 
 // Process pending product assets
 export async function processPendingAssets() {
@@ -8,24 +9,82 @@ export async function processPendingAssets() {
         take: 5 // Process 5 at a time
     });
 
+    if (pendingAssets.length === 0) {
+        return; // No work to do
+    }
+
+    const batchRequestId = generateRequestId();
+    logger.info(
+        createLogContext("prepare", batchRequestId, "batch-start", {}),
+        `Processing batch of ${pendingAssets.length} pending assets`
+    );
+
     for (const asset of pendingAssets) {
+        const requestId = generateRequestId();
+        const logContext = createLogContext("prepare", requestId, "processor", {
+            shopId: asset.shopId,
+            productId: asset.productId,
+            assetId: asset.id,
+        });
+
         try {
-            await processAsset(asset);
-        } catch (error) {
-            console.error(`[Prepare] Error processing asset ${asset.id}:`, error);
+            // Check idempotency: skip if already ready
+            const current = await prisma.productAsset.findUnique({
+                where: { id: asset.id },
+                select: { status: true, preparedImageUrl: true }
+            });
+
+            if (current?.status === "ready" && current?.preparedImageUrl) {
+                logger.info(
+                    logContext,
+                    "Asset already ready, skipping (idempotency check)"
+                );
+                continue;
+            }
+
+            // Mark as processing to prevent duplicate work
             await prisma.productAsset.update({
                 where: { id: asset.id },
-                data: { 
-                    status: "failed",
-                    updatedAt: new Date()
-                }
+                data: { status: "processing", updatedAt: new Date() }
             });
+
+            await processAsset(asset, requestId);
+        } catch (error) {
+            logger.error(
+                logContext,
+                "Error processing asset in batch",
+                error
+            );
+            
+            try {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                await prisma.productAsset.update({
+                    where: { id: asset.id },
+                    data: { 
+                        status: "failed",
+                        errorMessage: errorMessage.substring(0, 500), // Limit length
+                        updatedAt: new Date()
+                    }
+                });
+            } catch (dbError) {
+                logger.error(
+                    logContext,
+                    "Failed to update asset status to failed",
+                    dbError
+                );
+            }
         }
     }
 }
 
-async function processAsset(asset: any) {
-    console.log(`[Prepare] Processing asset ${asset.id} for product ${asset.productId}`);
+async function processAsset(asset: any, requestId: string) {
+    const logContext = createLogContext("prepare", requestId, "processor", {
+        shopId: asset.shopId,
+        productId: asset.productId,
+        assetId: asset.id,
+    });
+
+    logger.info(logContext, "Processing asset in background processor");
     
     try {
         // Call Gemini directly - no more Cloud Run!
@@ -33,7 +92,8 @@ async function processAsset(asset: any) {
             asset.sourceImageUrl,
             asset.shopId,
             asset.productId,
-            asset.id
+            asset.id,
+            requestId
         );
         
         await prisma.productAsset.update({
@@ -45,9 +105,9 @@ async function processAsset(asset: any) {
             }
         });
         
-        console.log(`[Prepare] Successfully processed asset ${asset.id}`);
+        logger.info(logContext, "Asset processed successfully");
     } catch (error) {
-        console.error(`[Prepare] Failed to process asset ${asset.id}:`, error);
+        logger.error(logContext, "Failed to process asset", error);
         throw error;
     }
 }
@@ -58,7 +118,11 @@ let processorInterval: ReturnType<typeof setInterval> | null = null;
 export function startPrepareProcessor() {
     if (!processorInterval) {
         processorInterval = setInterval(processPendingAssets, 10000);
-        console.log("[Prepare] Processor started");
+        const requestId = generateRequestId();
+        logger.info(
+            createLogContext("prepare", requestId, "processor-start", {}),
+            "Background prepare processor started (interval: 10s)"
+        );
         // Process immediately on start
         processPendingAssets();
     }
@@ -68,7 +132,11 @@ export function stopPrepareProcessor() {
     if (processorInterval) {
         clearInterval(processorInterval);
         processorInterval = null;
-        console.log("[Prepare] Processor stopped");
+        const requestId = generateRequestId();
+        logger.info(
+            createLogContext("prepare", requestId, "processor-stop", {}),
+            "Background prepare processor stopped"
+        );
     }
 }
 

@@ -1,6 +1,6 @@
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher, useSubmit } from "@remix-run/react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
     Page,
     Layout,
@@ -17,6 +17,7 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getStatusInfo, formatErrorMessage, type AssetStatus } from "../utils/status-mapping";
 
 export const loader = async ({ request }) => {
     const { admin, session } = await authenticate.admin(request);
@@ -163,41 +164,13 @@ export default function Products() {
         { label: `Unprepared (${statusCounts.unprepared})`, value: "unprepared" },
     ];
 
-    const getBadgeInfo = (asset) => {
-        if (!asset) return { tone: "new", label: "unprepared", explanation: null };
-
-        const status = asset.status;
-
-        // Check if asset is orphaned (stale + configJson.orphaned flag)
-        let configJson = {};
-        try {
-            configJson = asset.configJson ? JSON.parse(asset.configJson) : {};
-        } catch (e) {
-            console.error("Failed to parse configJson:", e);
+    // Show error toast if prepare action failed
+    useEffect(() => {
+        if (fetcher.data?.error) {
+            // Error is already shown in Banner, but we could add a toast here if needed
+            console.error("Prepare action error:", fetcher.data.error, "Request ID:", fetcher.data.requestId);
         }
-
-        if (status === "stale" && configJson.orphaned) {
-            return {
-                tone: "info",
-                label: "Orphaned",
-                explanation: "Source image no longer exists"
-            };
-        }
-
-        if (status === "stale") {
-            return {
-                tone: "warning",
-                label: "Stale",
-                explanation: "Product image has changed"
-            };
-        }
-
-        if (status === "ready") return { tone: "success", label: "ready", explanation: null };
-        if (status === "pending") return { tone: "attention", label: "pending", explanation: null };
-        if (status === "failed") return { tone: "critical", label: "failed", explanation: null };
-
-        return { tone: "new", label: status, explanation: null };
-    };
+    }, [fetcher.data]);
 
     return (
         <Page
@@ -218,8 +191,24 @@ export default function Products() {
             <Layout>
                 <Layout.Section>
                     {fetcher.data?.message || fetcher.data?.error ? (
-                        <Banner tone={fetcher.data.errors?.length > 0 || fetcher.data.error ? "warning" : "success"}>
-                            <p>{fetcher.data.message || fetcher.data.error}</p>
+                        <Banner tone={fetcher.data.errors?.length > 0 || fetcher.data.error ? "critical" : "success"}>
+                            <BlockStack gap="200">
+                                <p>{fetcher.data.message || fetcher.data.error}</p>
+                                {fetcher.data.requestId && (
+                                    <Text variant="bodySm" tone="subdued">
+                                        Request ID: {fetcher.data.requestId} (use this to correlate with backend logs)
+                                    </Text>
+                                )}
+                                {fetcher.data.errors?.length > 0 && (
+                                    <BlockStack gap="100">
+                                        {fetcher.data.errors.map((err: any, idx: number) => (
+                                            <Text key={idx} variant="bodySm" tone="critical">
+                                                Product {err.productId}: {err.error}
+                                            </Text>
+                                        ))}
+                                    </BlockStack>
+                                )}
+                            </BlockStack>
                         </Banner>
                     ) : null}
                     <Card>
@@ -239,7 +228,7 @@ export default function Products() {
                                 renderItem={(item) => {
                                     const { id, title, featuredImage } = item;
                                     const asset = assetsMap[id];
-                                    const badgeInfo = getBadgeInfo(asset);
+                                    const statusInfo = getStatusInfo(asset?.status);
 
                                     return (
                                         <ResourceList.Item
@@ -302,9 +291,9 @@ export default function Products() {
                                                             alignItems: 'center',
                                                             justifyContent: 'center'
                                                         }}>
-                                                            {asset?.processedImageUrl ? (
+                                                            {asset?.preparedImageUrl ? (
                                                                 <img 
-                                                                    src={asset.processedImageUrl} 
+                                                                    src={asset.preparedImageUrl} 
                                                                     alt={`Prepared ${title}`}
                                                                     style={{ 
                                                                         width: '100%', 
@@ -328,19 +317,26 @@ export default function Products() {
                                                         {title}
                                                     </Text>
                                                     <InlineStack gap="200" align="start">
-                                                        <Badge tone={badgeInfo.tone}>
-                                                            {badgeInfo.label}
+                                                        <Badge tone={statusInfo.tone}>
+                                                            {statusInfo.label}
                                                         </Badge>
                                                     </InlineStack>
-                                                    {badgeInfo.explanation && (
+                                                    {statusInfo.explanation && (
                                                         <Text variant="bodySm" tone="subdued">
-                                                            {badgeInfo.explanation}
+                                                            {statusInfo.explanation}
                                                         </Text>
                                                     )}
                                                     {asset?.status === "failed" && asset?.errorMessage && (
-                                                        <Text variant="bodySm" tone="critical">
-                                                            Error: {asset.errorMessage}
-                                                        </Text>
+                                                        <BlockStack gap="100">
+                                                            <Text variant="bodySm" tone="critical" fontWeight="medium">
+                                                                Error: {formatErrorMessage(asset.errorMessage)}
+                                                            </Text>
+                                                            {fetcher.data?.requestId && (
+                                                                <Text variant="bodySm" tone="subdued">
+                                                                    Request ID: {fetcher.data.requestId}
+                                                                </Text>
+                                                            )}
+                                                        </BlockStack>
                                                     )}
                                                     {asset?.updatedAt && (
                                                         <Text variant="bodySm" tone="subdued">
@@ -355,8 +351,12 @@ export default function Products() {
                                                         <input type="hidden" name="productId" value={id} />
                                                         <input type="hidden" name="imageUrl" value={featuredImage?.url || ""} />
                                                         <input type="hidden" name="imageId" value={featuredImage?.id || ""} />
-                                                        <Button submit disabled={asset?.status === "pending" || !featuredImage}>
-                                                            {asset?.status === "ready" ? "Regenerate" : asset?.status === "pending" ? "Preparing..." : asset?.status === "failed" || asset?.status === "stale" ? "Retry" : "Prepare"}
+                                                        <Button 
+                                                            submit 
+                                                            disabled={statusInfo.buttonDisabled || !featuredImage}
+                                                            loading={statusInfo.showSpinner && fetcher.state === "submitting"}
+                                                        >
+                                                            {statusInfo.buttonLabel}
                                                         </Button>
                                                     </fetcher.Form>
                                                 </div>
