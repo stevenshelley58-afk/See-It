@@ -1,5 +1,5 @@
-# Build v1.0.20 - Fetch ALL products with pagination, local Gemini service
-# Cache bust: 2024-12-05-v2
+# Build v1.0.21 - Fix deployment issues, restore package-lock.json
+# Cache bust: 2024-12-06-v1
 FROM node:20-slim AS base
 
 WORKDIR /usr/src/app
