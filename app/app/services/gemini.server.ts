@@ -64,7 +64,11 @@ const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
 
 async function downloadToBuffer(url: string): Promise<Buffer> {
     console.log(`[Gemini] Downloading: ${url.substring(0, 80)}...`);
-    const response = await fetch(url);
+    // Force PNG format from Shopify CDN
+    const pngUrl = url.includes('?') ? `${url}&format=png` : `${url}?format=png`;
+    const response = await fetch(pngUrl, {
+        headers: { 'Accept': 'image/png' }
+    });
     if (!response.ok) {
         throw new Error(`Failed to fetch: ${response.statusText}`);
     }
@@ -168,26 +172,27 @@ export async function prepareProduct(
         const imageBuffer = await downloadToBuffer(sourceImageUrl);
         console.log(`[Gemini] Downloaded image, size: ${imageBuffer.length} bytes`);
 
-        // Convert to PNG format first - @imgly/background-removal-node requires specific formats
+        // Convert to PNG format - force PNG output even if input was WebP/AVIF
         console.log('[Gemini] Converting image to PNG format...');
         const pngBuffer = await sharp(imageBuffer)
-            .png()
+            .png({ force: true })
             .toBuffer();
         console.log(`[Gemini] Converted to PNG, size: ${pngBuffer.length} bytes`);
 
-        // Convert to data URL so the library can detect the format
-        const dataUrl = `data:image/png;base64,${pngBuffer.toString('base64')}`;
-        console.log('[Gemini] Created PNG data URL for background removal');
+        if (pngBuffer.length === 0) {
+            throw new Error('PNG conversion produced empty buffer');
+        }
 
         // Use @imgly/background-removal-node for TRUE transparent background
-        // Gemini doesn't support alpha transparency - it outputs white backgrounds
+        // Pass explicit mimeType so decoder knows it's PNG
         console.log('[Gemini] Removing background with ML model...');
-        const resultBlob = await removeBackground(dataUrl, {
+        const resultBlob = await removeBackground(pngBuffer, {
+            mimeType: 'image/png',
             output: {
                 format: 'image/png',
                 quality: 1.0
             }
-        });
+        } as any);
 
         // Convert Blob to Buffer
         const arrayBuffer = await resultBlob.arrayBuffer();
