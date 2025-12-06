@@ -9,48 +9,50 @@ import { getShopFromSession } from "../utils/shop.server";
 
 export const action = async ({ request }) => {
     const requestId = getRequestId(request);
-    const { admin, session } = await authenticate.admin(request);
-    const { shopId } = await getShopFromSession(session, request, "prepare");
-    const formData = await request.formData();
-    const productIdsJson = formData.get("productIds");
 
-    if (!productIdsJson) {
-        return addRequestIdHeader(
-            json({ error: "Missing productIds", requestId }, { status: 400 }),
-            requestId
-        );
-    }
-
-    let productIds;
     try {
-        productIds = JSON.parse(productIdsJson);
-    } catch (e) {
-        return addRequestIdHeader(
-            json({ error: "Invalid productIds format", requestId }, { status: 400 }),
-            requestId
-        );
-    }
+        const { admin, session } = await authenticate.admin(request);
+        const { shopId } = await getShopFromSession(session, request, "prepare");
+        const formData = await request.formData();
+        const productIdsJson = formData.get("productIds");
 
-    if (!Array.isArray(productIds) || productIds.length === 0) {
-        return addRequestIdHeader(
-            json({ error: "productIds must be a non-empty array", requestId }, { status: 400 }),
-            requestId
-        );
-    }
-
-    // Enforce quota for the entire batch
-    try {
-        await enforceQuota(shopId, "prep", productIds.length);
-    } catch (error) {
-        if (error instanceof Response) {
-            const data = await error.json();
-            return json(data, { status: 429 });
+        if (!productIdsJson) {
+            return addRequestIdHeader(
+                json({ error: "Missing productIds", requestId }, { status: 400 }),
+                requestId
+            );
         }
-        throw error;
-    }
 
-    let processed = 0;
-    const errors = [];
+        let productIds;
+        try {
+            productIds = JSON.parse(productIdsJson);
+        } catch (e) {
+            return addRequestIdHeader(
+                json({ error: "Invalid productIds format", requestId }, { status: 400 }),
+                requestId
+            );
+        }
+
+        if (!Array.isArray(productIds) || productIds.length === 0) {
+            return addRequestIdHeader(
+                json({ error: "productIds must be a non-empty array", requestId }, { status: 400 }),
+                requestId
+            );
+        }
+
+        // Enforce quota for the entire batch
+        try {
+            await enforceQuota(shopId, "prep", productIds.length);
+        } catch (error) {
+            if (error instanceof Response) {
+                const data = await error.json();
+                return json(data, { status: 429 });
+            }
+            throw error;
+        }
+
+        let processed = 0;
+        const errors = [];
 
     for (const productId of productIds) {
         try {
@@ -86,7 +88,7 @@ export const action = async ({ request }) => {
             let assetId;
             const existing = await prisma.productAsset.findFirst({
                 where: {
-                    shopId: shop.id,
+                    shopId,
                     productId: String(productId)
                 }
             });
@@ -146,7 +148,7 @@ export const action = async ({ request }) => {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
             logger.error(
                 createLogContext("prepare", requestId, "batch-item", {
-                    shopId: shop.id,
+                    shopId,
                     productId: String(productId),
                     assetId,
                 }),
@@ -174,18 +176,35 @@ export const action = async ({ request }) => {
         }
     }
 
-    logger.info(
-        createLogContext("prepare", requestId, "batch-complete", { shopId }),
-        `Batch prepare completed: ${processed} processed, ${errors.length} failed`
-    );
+        logger.info(
+            createLogContext("prepare", requestId, "batch-complete", { shopId }),
+            `Batch prepare completed: ${processed} processed, ${errors.length} failed`
+        );
 
-    return addRequestIdHeader(
-        json({
-            processed,
-            errors,
-            message: `Processed ${processed} products${errors.length > 0 ? `, ${errors.length} failed` : ''}`,
+        return addRequestIdHeader(
+            json({
+                processed,
+                errors,
+                message: `Processed ${processed} products${errors.length > 0 ? `, ${errors.length} failed` : ''}`,
+                requestId
+            }),
             requestId
-        }),
-        requestId
-    );
+        );
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        logger.error(
+            createLogContext("prepare", requestId, "batch-error", {}),
+            "Batch prepare route failed with unhandled error",
+            error
+        );
+
+        return addRequestIdHeader(
+            json({
+                error: errorMessage,
+                message: "Batch preparation failed",
+                requestId
+            }, { status: 500 }),
+            requestId
+        );
+    }
 };

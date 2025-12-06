@@ -27,7 +27,10 @@ function getGeminiClient(): GoogleGenAI {
             throw new Error('GEMINI_API_KEY environment variable is not set');
         }
         ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        console.log('[Gemini] Client initialized');
+        logger.info(
+            createLogContext("system", "init", "gemini-client", {}),
+            "Gemini client initialized"
+        );
     }
     return ai;
 }
@@ -52,9 +55,16 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
             credentials = JSON.parse(jsonString);
         }
         storage = new Storage({ credentials });
-        console.log('[Gemini] GCS initialized with credentials');
+        logger.info(
+            createLogContext("system", "init", "gcs-storage", {}),
+            "GCS storage initialized with credentials"
+        );
     } catch (error) {
-        console.error('[Gemini] Failed to parse GCS credentials:', error);
+        logger.error(
+            createLogContext("system", "init", "gcs-storage", {}),
+            "Failed to parse GCS credentials",
+            error
+        );
         storage = new Storage();
     }
 } else {
@@ -163,12 +173,13 @@ async function uploadToGCS(
 }
 
 async function callGemini(
-    prompt: string, 
-    imageBuffers: Buffer | Buffer[], 
-    options: { model?: string; aspectRatio?: string } = {}
+    prompt: string,
+    imageBuffers: Buffer | Buffer[],
+    options: { model?: string; aspectRatio?: string; logContext?: ReturnType<typeof createLogContext> } = {}
 ): Promise<string> {
-    const { model = IMAGE_MODEL_FAST, aspectRatio } = options;
-    console.log(`[Gemini] Calling model: ${model}`);
+    const { model = IMAGE_MODEL_FAST, aspectRatio, logContext } = options;
+    const context = logContext || createLogContext("gemini", "api-call", "start", {});
+    logger.info(context, `Calling Gemini model: ${model}`);
 
     const parts: any[] = [{ text: prompt }];
     
@@ -218,11 +229,11 @@ async function callGemini(
         
         throw new Error("No image in response");
     } catch (error: any) {
-        console.error(`[Gemini] Error with ${model}:`, error.message);
-        
+        logger.error(context, `Gemini error with ${model}`, error);
+
         // Fallback to fast model if pro fails
         if (model === IMAGE_MODEL_PRO) {
-            console.log('[Gemini] Falling back to fast model');
+            logger.info(context, "Falling back to fast model");
             return callGemini(prompt, imageBuffers, { ...options, model: IMAGE_MODEL_FAST });
         }
         throw error;
@@ -294,11 +305,13 @@ export async function prepareProduct(
             { ...logContext, stage: "bg-remove" },
             "Removing background with ML model (@imgly)"
         );
-        
+
         let outputBuffer: Buffer | null = null;
         let lastError: unknown = null;
 
-        // Attempt with PNG first, then fallback to JPEG if decoder rejects it
+        // Hard limit: MAX 2 attempts (PNG, then JPEG fallback)
+        // Do not extend this array without careful consideration of cost/performance
+        const MAX_BG_REMOVAL_ATTEMPTS = 2;
         const attempts: Array<{
             label: string;
             buffer: Buffer;
@@ -311,20 +324,29 @@ export async function prepareProduct(
                 buffer: pngBuffer, // will be replaced lazily
                 mimeType: 'image/jpeg',
                 prep: async () => {
-                    console.log('[Gemini] Fallback: converting to JPEG before removal...');
+                    logger.info(
+                        { ...logContext, stage: "bg-remove" },
+                        "Fallback: converting to JPEG before background removal"
+                    );
                     const jpegBuffer = await sharp(imageBuffer).jpeg({ quality: 95 }).toBuffer();
                     const meta = await sharp(jpegBuffer).metadata();
-                    console.log('[Gemini] JPEG metadata for fallback:', {
-                        format: meta.format,
-                        width: meta.width,
-                        height: meta.height,
-                        channels: meta.channels,
-                        hasAlpha: meta.hasAlpha
-                    });
+                    logger.debug(
+                        { ...logContext, stage: "bg-remove" },
+                        `JPEG fallback metadata: format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
+                    );
                     return jpegBuffer;
                 }
             }
         ];
+
+        // Enforce max attempts guard
+        if (attempts.length > MAX_BG_REMOVAL_ATTEMPTS) {
+            logger.error(
+                { ...logContext, stage: "bg-remove" },
+                `CONFIGURATION ERROR: Background removal attempts (${attempts.length}) exceeds maximum allowed (${MAX_BG_REMOVAL_ATTEMPTS})`
+            );
+            throw new Error(`Too many background removal attempts configured: ${attempts.length} > ${MAX_BG_REMOVAL_ATTEMPTS}`);
+        }
 
         for (const attempt of attempts) {
             try {
@@ -405,14 +427,16 @@ export async function prepareProduct(
 }
 
 export async function cleanupRoom(
-    roomImageUrl: string, 
-    maskDataUrl: string
+    roomImageUrl: string,
+    maskDataUrl: string,
+    requestId: string = "cleanup"
 ): Promise<string> {
-    console.log('[Gemini] Processing room cleanup');
+    const logContext = createLogContext("cleanup", requestId, "start", {});
+    logger.info(logContext, "Processing room cleanup with Gemini");
     
     const maskBase64 = maskDataUrl.split(',')[1];
     const maskBuffer = Buffer.from(maskBase64, 'base64');
-    const roomBuffer = await downloadToBuffer(roomImageUrl);
+    const roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
 
     const prompt = `Using the provided room image and mask image:
 The white regions in the mask indicate objects to be removed.
@@ -423,24 +447,27 @@ Maintain consistent lighting and perspective.
 The result should look natural, as if nothing was ever there.`;
 
     const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
-        model: IMAGE_MODEL_PRO
+        model: IMAGE_MODEL_PRO,
+        logContext
     });
-    
+
     const outputBuffer = Buffer.from(base64Data, 'base64');
     const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    return await uploadToGCS(key, outputBuffer, 'image/jpeg');
+    return await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
 }
 
 export async function compositeScene(
-    preparedProductImageUrl: string, 
-    roomImageUrl: string, 
+    preparedProductImageUrl: string,
+    roomImageUrl: string,
     placement: { x: number; y: number; scale: number },
-    stylePreset: string = 'neutral'
+    stylePreset: string = 'neutral',
+    requestId: string = "composite"
 ): Promise<string> {
-    console.log('[Gemini] Processing scene composite');
+    const logContext = createLogContext("render", requestId, "start", {});
+    logger.info(logContext, "Processing scene composite with Gemini");
     
-    const productBuffer = await downloadToBuffer(preparedProductImageUrl);
-    const roomBuffer = await downloadToBuffer(roomImageUrl);
+    const productBuffer = await downloadToBuffer(preparedProductImageUrl, logContext);
+    const roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
 
     // Step 1: Mechanical placement with Sharp
     const roomMetadata = await sharp(roomBuffer).metadata();
@@ -481,11 +508,12 @@ Keep the product's exact position, size, and shape unchanged.`;
     
     const base64Data = await callGemini(prompt, guideImageBuffer, {
         model: IMAGE_MODEL_PRO,
-        aspectRatio
+        aspectRatio,
+        logContext
     });
-    
+
     const outputBuffer = Buffer.from(base64Data, 'base64');
     const key = `composite/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    return await uploadToGCS(key, outputBuffer, 'image/jpeg');
+    return await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
 }
 

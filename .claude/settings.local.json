@@ -19,7 +19,9 @@
       "Bash(echo:*)",
       "Bash(railway status:*)",
       "Bash(railway up:*)",
-      "Bash(railway.log)"
+      "Bash(railway.log)",
+      "Bash(dir:*)",
+      "Bash(nul)"
     ],
     "deny": [],
     "ask": []

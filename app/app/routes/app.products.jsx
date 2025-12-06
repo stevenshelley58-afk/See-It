@@ -17,7 +17,7 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getStatusInfo, formatErrorMessage, type AssetStatus } from "../utils/status-mapping";
+import { getStatusInfo, formatErrorMessage } from "../utils/status-mapping";
 
 export const loader = async ({ request }) => {
     const { admin, session } = await authenticate.admin(request);

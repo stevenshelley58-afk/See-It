@@ -5,6 +5,8 @@ import prisma from "../db.server";
 import { enforceQuota } from "../quota.server";
 import { checkRateLimit } from "../rate-limit.server";
 import { compositeScene } from "../services/gemini.server";
+import { logger, createLogContext } from "../utils/logger.server";
+import { getRequestId } from "../utils/request-context.server";
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -13,6 +15,9 @@ const CORS_HEADERS = {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+    const requestId = getRequestId(request);
+    const logContext = createLogContext("render", requestId, "start", {});
+
     // Handle preflight
     if (request.method === "OPTIONS") {
         return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -21,6 +26,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
 
     if (!session) {
+        logger.warn(
+            { ...logContext, stage: "auth" },
+            `App proxy auth failed: no session. URL: ${request.url}`
+        );
         return json({ status: "forbidden" }, { status: 403, headers: CORS_HEADERS });
     }
 
@@ -29,7 +38,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Validate required placement data (NaN check - typeof NaN === 'number')
     if (!placement || !Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
-        console.error('Invalid placement:', placement);
+        logger.error(
+            { ...logContext, stage: "validation" },
+            `Invalid placement data: ${JSON.stringify(placement)}`
+        );
         return json(
             { error: "invalid_placement", message: "Placement x, y, and scale are required" },
             { status: 400, headers: CORS_HEADERS }
@@ -53,7 +65,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
-    if (!shop) return json({ error: "Shop not found" }, { status: 404, headers: CORS_HEADERS });
+    if (!shop) {
+        logger.error(
+            { ...logContext, stage: "shop-lookup" },
+            `Shop not found in database: ${session.shop}`
+        );
+        return json({ error: "Shop not found" }, { status: 404, headers: CORS_HEADERS });
+    }
+
+    // Update log context with shop info
+    const shopLogContext = { ...logContext, shopId: shop.id, productId: product_id };
 
     // Quota Check & Increment
     try {
@@ -119,12 +140,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ job_id: job.id, status: "failed", error: "no_product_image" }, { headers: CORS_HEADERS });
     }
 
-    console.log(`[Render] Processing composite:`, {
-        productImageUrl: productImageUrl.substring(0, 80),
-        roomSessionId: room_session_id,
-        hasProductAsset: !!productAsset,
-        placement
-    });
+    logger.info(
+        { ...shopLogContext, stage: "composite-start" },
+        `Processing composite: productImageUrl=${productImageUrl.substring(0, 80)}, roomSessionId=${room_session_id}, hasProductAsset=${!!productAsset}`
+    );
 
     try {
         // CRITICAL: Use cleaned room if available, otherwise use original
@@ -139,15 +158,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             productImageUrl,
             roomImageUrl,
             { x: placement.x, y: placement.y, scale: placement.scale || 1.0 },
-            config?.style_preset || "neutral"
+            config?.style_preset || "neutral",
+            requestId
         );
 
         await prisma.renderJob.update({
             where: { id: job.id },
             data: { status: "completed", imageUrl: imageUrl, completedAt: new Date() }
         });
+
+        logger.info(
+            { ...shopLogContext, stage: "complete" },
+            `Render completed successfully: jobId=${job.id}`
+        );
     } catch (error) {
-        console.error("[Render] Gemini error:", error);
+        logger.error(
+            { ...shopLogContext, stage: "composite-error" },
+            "Gemini composite failed",
+            error
+        );
         await prisma.renderJob.update({
             where: { id: job.id },
             data: {

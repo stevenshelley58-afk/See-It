@@ -13,20 +13,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // No body needed for this endpoint
     const shopDomain = session.shop;
 
-    // Find or create shop record (Stub logic for MVP)
-    let shop = await prisma.shop.findUnique({ where: { shopDomain } });
+    // Shop must exist from installation - do not create stubs
+    const shop = await prisma.shop.findUnique({ where: { shopDomain } });
     if (!shop) {
-        // In a real app, this should be created during installation
-        shop = await prisma.shop.create({
-            data: {
-                shopDomain,
-                shopifyShopId: "stub-id", // We don't have this from app proxy easily without querying Shopify
-                accessToken: "stub-token",
-                plan: "free",
-                monthlyQuota: 100,
-                dailyQuota: 10,
-            }
-        });
+        console.error(`[RoomStart] Shop not found in database: ${shopDomain}. App may not be properly installed.`);
+        return json({
+            status: "error",
+            message: "Shop not found. Please reinstall the app."
+        }, { status: 404 });
     }
 
     const roomSession = await prisma.roomSession.create({

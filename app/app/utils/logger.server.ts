@@ -1,8 +1,8 @@
 /**
  * Structured logger for See It app
- * 
+ *
  * Every log must include:
- * - flow: "prepare" | "render" | "auth" | "shopify-sync"
+ * - flow: "prepare" | "render" | "auth" | "shopify-sync" | "cleanup" | "system"
  * - shopId: string | null
  * - productId: string | null
  * - assetId: string | null
@@ -13,7 +13,7 @@
 type LogLevel = "info" | "warn" | "error" | "debug";
 
 type LogContext = {
-  flow: "prepare" | "render" | "auth" | "shopify-sync";
+  flow: "prepare" | "render" | "auth" | "shopify-sync" | "cleanup" | "system";
   shopId?: string | null;
   productId?: string | null;
   assetId?: string | null;

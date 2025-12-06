@@ -10,13 +10,23 @@ RUN apt-get update -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency manifests first to leverage Docker layer caching
-# package-lock.json may be absent; install without lockfile
 COPY app/package.json ./app/
 
 WORKDIR /usr/src/app/app
 
+# Copy .npmrc if it exists
+COPY .npmrc* ./
+
+# Copy package-lock.json if it exists for deterministic builds
+COPY package-lock.json* ./
+
 # Install all dependencies (dev deps required for building Remix + Prisma)
-RUN npm install
+# Use npm ci if package-lock.json exists, otherwise npm install
+RUN if [ -f package-lock.json ]; then \
+        echo "✓ Using package-lock.json for deterministic build" && npm ci; \
+    else \
+        echo "⚠ WARNING: No package-lock.json - using npm install (non-deterministic)" && npm install; \
+    fi
 
 # Copy the remainder of the application source
 COPY app/ .
