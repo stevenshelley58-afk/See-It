@@ -18,8 +18,18 @@ import {
 const IMAGE_MODEL_PRO = GEMINI_IMAGE_MODEL_PRO;
 const IMAGE_MODEL_FAST = GEMINI_IMAGE_MODEL_FAST;
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Lazy initialize Gemini (prevents crash if API key missing at module load time)
+let ai: GoogleGenAI | null = null;
+function getGeminiClient(): GoogleGenAI {
+    if (!ai) {
+        if (!process.env.GEMINI_API_KEY) {
+            throw new Error('GEMINI_API_KEY environment variable is not set');
+        }
+        ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        console.log('[Gemini] Client initialized');
+    }
+    return ai;
+}
 
 // Initialize GCS
 let storage: Storage;
@@ -106,7 +116,8 @@ async function callGemini(
     }
 
     try {
-        const response = await ai.models.generateContent({
+        const client = getGeminiClient();
+        const response = await client.models.generateContent({
             model,
             contents: parts,
             config,
