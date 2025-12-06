@@ -6,9 +6,18 @@ import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 import { startPrepareProcessor } from "./services/prepare-processor.server";
 
-// Start the background processor when the server starts
-if (process.env.NODE_ENV === "production") {
-  startPrepareProcessor();
+// Start the background processor for pending prepares in all environments.
+// Can be disabled with DISABLE_PREPARE_PROCESSOR=true.
+const shouldStartPrepareProcessor =
+  process.env.DISABLE_PREPARE_PROCESSOR !== "true" &&
+  process.env.ENABLE_PREPARE_PROCESSOR !== "false";
+
+if (shouldStartPrepareProcessor) {
+  if (!process.env.GEMINI_API_KEY) {
+    console.warn("[Prepare] Processor not started: GEMINI_API_KEY missing");
+  } else {
+    startPrepareProcessor();
+  }
 }
 
 export const streamTimeout = 5000;

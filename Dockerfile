@@ -10,12 +10,13 @@ RUN apt-get update -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency manifests first to leverage Docker layer caching
-COPY app/package.json app/package-lock.json* ./app/
+# package-lock.json may be absent; install without lockfile
+COPY app/package.json ./app/
 
 WORKDIR /usr/src/app/app
 
 # Install all dependencies (dev deps required for building Remix + Prisma)
-RUN npm ci
+RUN npm install
 
 # Copy the remainder of the application source
 COPY app/ .
