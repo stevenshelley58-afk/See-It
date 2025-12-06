@@ -9,9 +9,9 @@ import { getShopFromSession } from "../utils/shop.server";
 
 export const action = async ({ request }) => {
     const requestId = getRequestId(request);
-    let shopId: string | null = null;
-    let productId: string | null = null;
-    let assetId: string | null = null;
+    let shopId = null;
+    let productId = null;
+    let assetId = null;
 
     try {
         const { session } = await authenticate.admin(request);

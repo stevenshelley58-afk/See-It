@@ -21,7 +21,9 @@
       "Bash(railway up:*)",
       "Bash(railway.log)",
       "Bash(dir:*)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "Bash(railway whoami:*)",
+      "Bash(railway variables:*)"
     ],
     "deny": [],
     "ask": []
