@@ -156,31 +156,48 @@ async function callGemini(
 }
 
 export async function prepareProduct(
-    sourceImageUrl: string, 
-    shopId: string, 
-    productId: string, 
+    sourceImageUrl: string,
+    shopId: string,
+    productId: string,
     assetId: string
 ): Promise<string> {
     console.log(`[Gemini] Preparing product: ${productId}`);
-    const imageBuffer = await downloadToBuffer(sourceImageUrl);
+    console.log(`[Gemini] Source image URL: ${sourceImageUrl}`);
 
-    // Use @imgly/background-removal-node for TRUE transparent background
-    // Gemini doesn't support alpha transparency - it outputs white backgrounds
-    console.log('[Gemini] Removing background with ML model...');
-    const resultBlob = await removeBackground(imageBuffer, {
-        output: {
-            format: 'image/png',
-            quality: 1.0
-        }
-    });
-    
-    // Convert Blob to Buffer
-    const arrayBuffer = await resultBlob.arrayBuffer();
-    const outputBuffer = Buffer.from(arrayBuffer);
-    console.log(`[Gemini] Background removed, output size: ${outputBuffer.length} bytes`);
+    try {
+        const imageBuffer = await downloadToBuffer(sourceImageUrl);
+        console.log(`[Gemini] Downloaded image, size: ${imageBuffer.length} bytes`);
 
-    const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
-    return await uploadToGCS(key, outputBuffer, 'image/png');
+        // Use @imgly/background-removal-node for TRUE transparent background
+        // Gemini doesn't support alpha transparency - it outputs white backgrounds
+        console.log('[Gemini] Removing background with ML model...');
+        const resultBlob = await removeBackground(imageBuffer, {
+            output: {
+                format: 'image/png',
+                quality: 1.0
+            }
+        });
+
+        // Convert Blob to Buffer
+        const arrayBuffer = await resultBlob.arrayBuffer();
+        const outputBuffer = Buffer.from(arrayBuffer);
+        console.log(`[Gemini] Background removed, output size: ${outputBuffer.length} bytes`);
+
+        const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
+        console.log(`[Gemini] Uploading to GCS: ${key}`);
+        const url = await uploadToGCS(key, outputBuffer, 'image/png');
+        console.log(`[Gemini] Upload successful: ${url}`);
+        return url;
+    } catch (error: any) {
+        console.error(`[Gemini] prepareProduct failed:`, {
+            error: error.message,
+            stack: error.stack,
+            productId,
+            shopId,
+            assetId
+        });
+        throw error;
+    }
 }
 
 export async function cleanupRoom(
