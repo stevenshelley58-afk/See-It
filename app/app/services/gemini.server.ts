@@ -168,10 +168,17 @@ export async function prepareProduct(
         const imageBuffer = await downloadToBuffer(sourceImageUrl);
         console.log(`[Gemini] Downloaded image, size: ${imageBuffer.length} bytes`);
 
+        // Convert to PNG format first - @imgly/background-removal-node requires specific formats
+        console.log('[Gemini] Converting image to PNG format...');
+        const pngBuffer = await sharp(imageBuffer)
+            .png()
+            .toBuffer();
+        console.log(`[Gemini] Converted to PNG, size: ${pngBuffer.length} bytes`);
+
         // Use @imgly/background-removal-node for TRUE transparent background
         // Gemini doesn't support alpha transparency - it outputs white backgrounds
         console.log('[Gemini] Removing background with ML model...');
-        const resultBlob = await removeBackground(imageBuffer, {
+        const resultBlob = await removeBackground(pngBuffer, {
             output: {
                 format: 'image/png',
                 quality: 1.0

@@ -91,13 +91,12 @@ export const action = async ({ request }) => {
 
     } catch (error) {
         console.error("[Prepare] Failed:", error);
-        
-        // Update record as FAILED with error message
+
+        // Update record as FAILED
         await prisma.productAsset.update({
             where: { id: assetId },
-            data: { 
-                status: "failed",
-                errorMessage: error.message || "Unknown error"
+            data: {
+                status: "failed"
             }
         });
 
