@@ -1,5 +1,5 @@
-# Build v1.0.21 - Fix deployment issues, restore package-lock.json
-# Cache bust: 2024-12-06-v1
+# Build v1.0.21 - Fix Vite build externalization
+# Cache bust: 2024-12-06-v2
 FROM node:20-slim AS base
 
 WORKDIR /usr/src/app
