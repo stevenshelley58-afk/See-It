@@ -43,6 +43,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const statusText = $('see-it-status');
     const errorDiv = $('see-it-error');
     const actionsDiv = $('see-it-actions');
+    const btnEnhanceHD = $('see-it-enhance-hd');
     const btnAdjust = $('see-it-adjust-placement');
     const btnRetry = $('see-it-retry');
     const btnStartOver = $('see-it-start-over');
@@ -61,7 +62,9 @@ document.addEventListener('DOMContentLoaded', function () {
         y: 0,
         isUploading: false,
         isCleaningUp: false,
-        isPrepared: false  // Track if product has background removed
+        isPrepared: false,  // Track if product has background removed
+        lastJobId: null,    // Track last render job for HD upscale
+        lastPlacement: null // Cache placement for HD re-render
     };
     
     // Canvas drawing state
@@ -666,22 +669,25 @@ document.addEventListener('DOMContentLoaded', function () {
                 stateX: state.x, stateY: state.y
             });
 
+            // Save placement for potential HD upscale
+            state.lastPlacement = {
+                x: normalizedX,
+                y: normalizedY,
+                scale: state.scale || 1.0
+            };
+
             const payload = {
                 room_session_id: state.sessionId,
                 product_id: state.productId,
-                placement: {
-                    x: normalizedX,
-                    y: normalizedY,
-                    scale: state.scale || 1.0
-                },
+                placement: state.lastPlacement,
+                quality: 'fast',  // Default: fast (3-6 sec), can request 'hd' for upscale
                 config: {
                     style_preset: 'neutral',
-                    quality: 'standard',
                     product_image_url: state.productImageUrl  // Fallback image URL
                 }
             };
 
-            console.log('[See It] Render payload:', payload);
+            console.log('[See It] Render payload (fast mode):', payload);
 
             fetch('/apps/see-it/render', {
                 method: 'POST',
@@ -732,6 +738,12 @@ document.addEventListener('DOMContentLoaded', function () {
                         resultDiv.appendChild(img);
                         actionsDiv.classList.remove('hidden');
                         btnRetry.classList.add('hidden');
+                        // Show Enhance HD button for fast renders
+                        if (btnEnhanceHD) {
+                            btnEnhanceHD.classList.remove('hidden');
+                            btnEnhanceHD.disabled = false;
+                            btnEnhanceHD.textContent = 'Enhance HD';
+                        }
                     } else if (data.status === 'failed') {
                         clearInterval(interval);
                         showError(data.errorMessage || 'Render failed');
@@ -749,5 +761,87 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (btnAdjust) btnAdjust.addEventListener('click', () => showStep(stepPlace));
     if (btnStartOver) btnStartOver.addEventListener('click', () => showStep(stepWelcome));
+
+    // Enhance HD - re-render with high quality model
+    if (btnEnhanceHD) {
+        btnEnhanceHD.addEventListener('click', () => {
+            if (!state.sessionId || !state.lastPlacement) {
+                showError('Cannot enhance - missing session data');
+                return;
+            }
+
+            // Disable button and show progress
+            btnEnhanceHD.disabled = true;
+            btnEnhanceHD.textContent = 'Enhancing...';
+            statusText.textContent = 'Generating HD version...';
+            resetError();
+
+            const payload = {
+                room_session_id: state.sessionId,
+                product_id: state.productId,
+                placement: state.lastPlacement,
+                quality: 'hd',  // Use Pro model for HD
+                config: {
+                    style_preset: 'neutral',
+                    product_image_url: state.productImageUrl
+                }
+            };
+
+            console.log('[See It] HD enhance payload:', payload);
+
+            fetch('/apps/see-it/render', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.job_id) {
+                        pollStatusHD(data.job_id);
+                    } else {
+                        throw new Error('No job ID returned');
+                    }
+                })
+                .catch(err => {
+                    showError('HD enhance failed: ' + err.message);
+                    btnEnhanceHD.disabled = false;
+                    btnEnhanceHD.textContent = 'Enhance HD';
+                    statusText.textContent = '';
+                });
+        });
+    }
+
+    // Poll for HD result
+    const pollStatusHD = (jobId) => {
+        const interval = setInterval(() => {
+            fetch(`/apps/see-it/render/${jobId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'completed') {
+                        clearInterval(interval);
+                        statusText.textContent = 'HD Ready!';
+                        // Replace image with HD version
+                        resultDiv.innerHTML = '';
+                        const img = document.createElement('img');
+                        img.src = data.imageUrl;
+                        resultDiv.appendChild(img);
+                        // Hide enhance button (already enhanced)
+                        btnEnhanceHD.classList.add('hidden');
+                    } else if (data.status === 'failed') {
+                        clearInterval(interval);
+                        showError(data.errorMessage || 'HD render failed');
+                        btnEnhanceHD.disabled = false;
+                        btnEnhanceHD.textContent = 'Enhance HD';
+                        statusText.textContent = '';
+                    }
+                })
+                .catch(err => {
+                    clearInterval(interval);
+                    showError('HD polling error');
+                    btnEnhanceHD.disabled = false;
+                    btnEnhanceHD.textContent = 'Enhance HD';
+                });
+        }, 2000);
+    };
 
 });

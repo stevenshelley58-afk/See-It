@@ -4,6 +4,7 @@ import { removeBackground } from "@imgly/background-removal-node";
 import sharp from "sharp";
 import { Storage } from "@google-cloud/storage";
 import { logger, createLogContext } from "../utils/logger.server";
+import { imageCache } from "../utils/image-cache.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -72,6 +73,34 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
 }
 
 const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
+
+/**
+ * Get image from cache or download and cache it
+ */
+async function getCachedOrDownload(
+    cacheKey: string,
+    url: string,
+    logContext: ReturnType<typeof createLogContext>
+): Promise<Buffer> {
+    // Check cache first
+    const cached = imageCache.get(cacheKey);
+    if (cached) {
+        logger.info(
+            { ...logContext, stage: "cache-hit" },
+            `Cache hit for ${cacheKey}: ${(cached.length / 1024).toFixed(1)}KB`
+        );
+        return cached;
+    }
+
+    // Download and cache
+    logger.info(
+        { ...logContext, stage: "cache-miss" },
+        `Cache miss for ${cacheKey}, downloading...`
+    );
+    const buffer = await downloadToBuffer(url, logContext);
+    imageCache.set(cacheKey, buffer);
+    return buffer;
+}
 
 async function downloadToBuffer(
     url: string,
@@ -461,13 +490,22 @@ export async function compositeScene(
     roomImageUrl: string,
     placement: { x: number; y: number; scale: number },
     stylePreset: string = 'neutral',
-    requestId: string = "composite"
+    requestId: string = "composite",
+    quality: 'fast' | 'hd' = 'fast',
+    cacheKeys?: { product?: string; room?: string }
 ): Promise<string> {
     const logContext = createLogContext("render", requestId, "start", {});
-    logger.info(logContext, "Processing scene composite with Gemini");
-    
-    const productBuffer = await downloadToBuffer(preparedProductImageUrl, logContext);
-    const roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
+    logger.info(logContext, `Processing scene composite (quality: ${quality})`);
+
+    // Use cache if keys provided, otherwise download directly
+    const [productBuffer, roomBuffer] = await Promise.all([
+        cacheKeys?.product
+            ? getCachedOrDownload(cacheKeys.product, preparedProductImageUrl, logContext)
+            : downloadToBuffer(preparedProductImageUrl, logContext),
+        cacheKeys?.room
+            ? getCachedOrDownload(cacheKeys.room, roomImageUrl, logContext)
+            : downloadToBuffer(roomImageUrl, logContext)
+    ]);
 
     // Step 1: Mechanical placement with Sharp
     const roomMetadata = await sharp(roomBuffer).metadata();
@@ -505,9 +543,13 @@ Style: ${styleDescription}
 Keep the product's exact position, size, and shape unchanged.`;
 
     const aspectRatio = roomWidth > roomHeight ? "16:9" : roomHeight > roomWidth ? "9:16" : "1:1";
-    
+
+    // Use fast model by default (3-6 sec), HD model for enhanced quality (10-20 sec)
+    const selectedModel = quality === 'hd' ? IMAGE_MODEL_PRO : IMAGE_MODEL_FAST;
+    logger.info(logContext, `Using model: ${selectedModel} (quality: ${quality})`);
+
     const base64Data = await callGemini(prompt, guideImageBuffer, {
-        model: IMAGE_MODEL_PRO,
+        model: selectedModel,
         aspectRatio,
         logContext
     });
@@ -516,4 +558,69 @@ Keep the product's exact position, size, and shape unchanged.`;
     const key = `composite/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
     return await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
 }
+
+/**
+ * Eagerly cache a room image (call after room upload confirmed)
+ * This pre-downloads and caches the image so render is faster
+ */
+export async function eagerCacheRoomImage(
+    sessionId: string,
+    roomImageUrl: string
+): Promise<void> {
+    const logContext = createLogContext("cache", "eager", "room", { sessionId });
+
+    try {
+        logger.info(logContext, `Eager caching room image for session ${sessionId}`);
+
+        // Download and cache
+        const buffer = await downloadToBuffer(roomImageUrl, logContext);
+        imageCache.set(`room:${sessionId}`, buffer);
+
+        // Also pre-resize for Gemini (async, don't await)
+        sharp(buffer)
+            .resize({ width: 1920, withoutEnlargement: true })
+            .toBuffer()
+            .then(optimized => {
+                imageCache.set(`room:${sessionId}:optimized`, optimized);
+                logger.info(logContext, `Room image optimized and cached: ${(optimized.length / 1024).toFixed(1)}KB`);
+            })
+            .catch(err => {
+                logger.warn(logContext, `Failed to optimize room image: ${err.message}`);
+            });
+
+        logger.info(logContext, `Room image cached: ${(buffer.length / 1024).toFixed(1)}KB`);
+    } catch (error) {
+        logger.warn(
+            logContext,
+            `Failed to eager cache room image: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+        // Don't throw - this is an optimization, not critical
+    }
+}
+
+/**
+ * Cache a product image (call when product asset is accessed)
+ */
+export async function cacheProductImage(
+    productId: string,
+    imageUrl: string
+): Promise<void> {
+    const logContext = createLogContext("cache", "product", "set", { productId });
+
+    try {
+        const buffer = await downloadToBuffer(imageUrl, logContext);
+        imageCache.set(`product:${productId}`, buffer);
+        logger.info(logContext, `Product image cached: ${(buffer.length / 1024).toFixed(1)}KB`);
+    } catch (error) {
+        logger.warn(logContext, `Failed to cache product image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+}
+
+// Export cache key helpers for use in routes
+export const getCacheKey = {
+    room: (sessionId: string) => `room:${sessionId}`,
+    roomOptimized: (sessionId: string) => `room:${sessionId}:optimized`,
+    roomCleaned: (sessionId: string) => `room:${sessionId}:cleaned`,
+    product: (productId: string) => `product:${productId}`
+};
 

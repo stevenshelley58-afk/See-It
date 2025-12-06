@@ -17,7 +17,7 @@
 {% endschema %}
 
 <div class="see-it-button-container" style="margin: 20px 0;">
-  <button id="see-it-trigger" class="button see-it-btn" data-product-id="{{ product.id }}" data-product-image="{{ product.featured_image | image_url: width: 800 }}">
+  <button id="see-it-trigger" class="button see-it-btn" data-product-id="gid://shopify/Product/{{ product.id }}" data-product-image="{{ product.featured_image | image_url: width: 800 }}">
     {{ block.settings.button_label }}
   </button>
 </div>
@@ -42,7 +42,7 @@
            <input type="file" id="see-it-upload" accept="image/*" style="display: none;" />
            <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
         </div>
-        <div class="see-it-version-badge">See It v1.0.20</div>
+        <div class="see-it-version-badge">See It v1.0.22</div>
       </div>
     </div>
 
@@ -123,6 +123,7 @@
       <div id="see-it-result"></div>
       
       <div id="see-it-actions" class="hidden see-it-actions-row">
+        <button id="see-it-enhance-hd" class="button see-it-secondary-btn">Enhance HD</button>
         <button id="see-it-adjust-placement" class="button">Adjust Placement</button>
         <button id="see-it-retry" class="button see-it-retry-btn hidden">Retry</button>
         <button id="see-it-start-over" class="button see-it-text-btn">Start Over</button>

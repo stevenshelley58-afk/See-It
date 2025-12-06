@@ -2,6 +2,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { StorageService } from "../services/storage.server";
 import prisma from "../db.server";
+import { eagerCacheRoomImage } from "../services/gemini.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
@@ -43,8 +44,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
     });
 
-    return json({ 
-        ok: true, 
-        roomImageUrl: publicUrl 
+    // Eagerly cache the room image for faster rendering (async, don't block response)
+    eagerCacheRoomImage(room_session_id, publicUrl).catch(() => {
+        // Silent fail - caching is an optimization, not critical
+    });
+
+    return json({
+        ok: true,
+        roomImageUrl: publicUrl
     });
 };

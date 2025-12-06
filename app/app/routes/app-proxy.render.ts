@@ -4,7 +4,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { enforceQuota } from "../quota.server";
 import { checkRateLimit } from "../rate-limit.server";
-import { compositeScene } from "../services/gemini.server";
+import { compositeScene, getCacheKey } from "../services/gemini.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
 
@@ -34,7 +34,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const body = await request.json();
-    const { product_id, variant_id, room_session_id, placement, config } = body;
+    const { product_id, variant_id, room_session_id, placement, config, quality } = body;
+
+    // Quality: 'fast' (default, 3-6 sec) or 'hd' (10-20 sec)
+    const renderQuality: 'fast' | 'hd' = quality === 'hd' ? 'hd' : 'fast';
 
     // Validate required placement data (NaN check - typeof NaN === 'number')
     if (!placement || !Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
@@ -154,12 +157,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         // Call Gemini directly - no more Cloud Run!
+        // Default: fast model (3-6 sec), HD available via quality param
+        // Pass cache keys so images are fetched from cache if available
         const imageUrl = await compositeScene(
             productImageUrl,
             roomImageUrl,
             { x: placement.x, y: placement.y, scale: placement.scale || 1.0 },
             config?.style_preset || "neutral",
-            requestId
+            requestId,
+            renderQuality,
+            {
+                product: getCacheKey.product(product_id),
+                room: getCacheKey.room(room_session_id)
+            }
         );
 
         await prisma.renderJob.update({
