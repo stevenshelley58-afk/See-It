@@ -201,7 +201,7 @@ export default function Products() {
                                 )}
                                 {fetcher.data.errors?.length > 0 && (
                                     <BlockStack gap="100">
-                                        {fetcher.data.errors.map((err: any, idx: number) => (
+                                        {fetcher.data.errors.map((err, idx) => (
                                             <Text key={idx} variant="bodySm" tone="critical">
                                                 Product {err.productId}: {err.error}
                                             </Text>
