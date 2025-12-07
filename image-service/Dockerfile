@@ -1,9 +1,0 @@
-FROM node:20-slim
-WORKDIR /app
-# Install sharp dependencies
-RUN apt-get update && apt-get install -y libvips-dev && rm -rf /var/lib/apt/lists/*
-COPY package.json ./
-RUN npm install
-COPY . .
-ENV NODE_ENV=production
-CMD ["node", "server.js"]

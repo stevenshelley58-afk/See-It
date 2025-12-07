@@ -1,0 +1,69 @@
+diff --git a/app/prisma/schema.prisma b/app/prisma/schema.prisma
+index b1f1bd8..0a76e45 100644
+--- a/app/prisma/schema.prisma
++++ b/app/prisma/schema.prisma
+@@ -71,14 +71,16 @@ model ProductAsset {
+ }
+ 
+ model RoomSession {
+-  id                   String    @id @default(uuid())
+-  shopId               String    @map("shop_id")
+-  originalRoomImageUrl String?   @map("original_room_image_url")
+-  cleanedRoomImageUrl  String?   @map("cleaned_room_image_url")
+-  geminiFileUri        String?   @map("gemini_file_uri")
+-  createdAt            DateTime  @map("created_at")
+-  expiresAt            DateTime  @map("expires_at")
+-  lastUsedAt           DateTime? @map("last_used_at")
++  id                    String    @id @default(uuid())
++  shopId                String    @map("shop_id")
++  originalRoomImageUrl  String?   @map("original_room_image_url") // Legacy: Signed URL (expires in 24h)
++  cleanedRoomImageUrl   String?   @map("cleaned_room_image_url")  // Legacy: Signed URL (expires in 24h)
++  originalRoomImageKey  String?   @map("original_room_image_key") // Stable GCS key (e.g. rooms/{shopId}/{sessionId}/room.jpg)
++  cleanedRoomImageKey   String?   @map("cleaned_room_image_key")  // Stable GCS key for cleaned image
++  geminiFileUri         String?   @map("gemini_file_uri")
++  createdAt             DateTime  @map("created_at")
++  expiresAt             DateTime  @map("expires_at")
++  lastUsedAt            DateTime? @map("last_used_at")
+ 
+   shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+   renderJobs RenderJob[]
+@@ -91,14 +93,14 @@ model RenderJob {
+   shopId         String    @map("shop_id")
+   productId      String    @map("product_id")
+   variantId      String?   @map("variant_id")
+-  productAssetId String?   @map("product_asset_id")
+-  roomSessionId  String?   @map("room_session_id")
++  productAssetId String    @map("product_asset_id")
++  roomSessionId  String    @map("room_session_id")
+   placementX     Float     @map("placement_x")
+   placementY     Float     @map("placement_y")
+   placementScale Float     @map("placement_scale")
+   stylePreset    String?   @map("style_preset")
+   quality        String?   @map("quality")
+-  configJson     String?   @map("config_json") // Stored as JSON string in SQLite
++  configJson     Json?     @map("config_json")
+   status         String // "queued" | "processing" | "completed" | "failed"
+   imageUrl       String?   @map("image_url")
+   modelId        String?   @map("model_id")
+@@ -109,9 +111,9 @@ model RenderJob {
+   createdAt      DateTime  @map("created_at")
+   completedAt    DateTime? @map("completed_at")
+ 
+-  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+-  productAsset ProductAsset? @relation(fields: [productAssetId], references: [id])
+-  roomSession  RoomSession?  @relation(fields: [roomSessionId], references: [id])
++  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
++  productAsset ProductAsset @relation(fields: [productAssetId], references: [id])
++  roomSession  RoomSession  @relation(fields: [roomSessionId], references: [id])
+ 
+   @@map("render_jobs")
+ }
+@@ -119,7 +121,7 @@ model RenderJob {
+ model UsageDaily {
+   id               String   @id @default(uuid())
+   shopId           String   @map("shop_id")
+-  date             DateTime
++  date             DateTime @db.Date
+   prepRenders      Int      @default(0) @map("prep_renders")
+   cleanupRenders   Int      @default(0) @map("cleanup_renders")
+   compositeRenders Int      @default(0) @map("composite_renders")

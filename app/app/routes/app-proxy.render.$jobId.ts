@@ -27,8 +27,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     }
 
     return json({
-        jobId: job.id,
+        job_id: job.id,
         status: job.status,
+        image_url: job.imageUrl,
+        error_code: job.errorCode,
+        error_message: job.errorMessage,
+        // CamelCase kept for existing callers
+        jobId: job.id,
         imageUrl: job.imageUrl,
         errorCode: job.errorCode,
         errorMessage: job.errorMessage

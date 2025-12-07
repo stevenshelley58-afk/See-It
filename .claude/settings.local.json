@@ -23,7 +23,14 @@
       "Bash(dir:*)",
       "Bash(nul)",
       "Bash(railway whoami:*)",
-      "Bash(railway variables:*)"
+      "Bash(railway variables:*)",
+      "Bash(npx prisma migrate:*)",
+      "Bash(schema_full_diff.txt)",
+      "Bash(railway run npx prisma migrate deploy:*)",
+      "Bash(railway run:*)",
+      "Bash(railway shell:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git fetch:*)"
     ],
     "deny": [],
     "ask": []
