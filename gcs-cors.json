@@ -1,6 +1,9 @@
 [
   {
-    "origin": ["*"],
+    "origin": [
+      "https://*.myshopify.com",
+      "https://see-it-production.up.railway.app"
+    ],
     "method": ["GET", "HEAD", "PUT", "POST", "DELETE"],
     "responseHeader": ["Content-Type", "x-goog-resumable", "Content-Length"],
     "maxAgeSeconds": 3600
