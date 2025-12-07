@@ -2,6 +2,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { cleanupRoom } from "../services/gemini.server";
+import { StorageService } from "../services/storage.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
@@ -17,10 +18,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ status: "error", message: "room_session_id is required" }, { status: 400 });
     }
 
-    if (!mask_data_url) {
-        return json({ status: "error", message: "mask_data_url is required" }, { status: 400 });
-    }
-
     const roomSession = await prisma.roomSession.findFirst({
         where: {
             id: room_session_id,
@@ -32,20 +29,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ status: "error", message: "Invalid session" }, { status: 404 });
     }
 
-    // Use the most recent room image (cleaned if available, otherwise original)
-    const currentRoomUrl = roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl;
-    
-    if (!currentRoomUrl) {
+    // Use the most recent room image key (cleaned if available, otherwise original)
+    // For legacy sessions without keys, fall back to stored URLs
+    let currentRoomUrl: string;
+
+    if (roomSession.cleanedRoomImageKey) {
+        // Generate fresh URL from cleaned image key
+        currentRoomUrl = await StorageService.getSignedReadUrl(roomSession.cleanedRoomImageKey, 60 * 60 * 1000);
+    } else if (roomSession.originalRoomImageKey) {
+        // Generate fresh URL from original image key
+        currentRoomUrl = await StorageService.getSignedReadUrl(roomSession.originalRoomImageKey, 60 * 60 * 1000);
+    } else if (roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl) {
+        // Legacy: use stored URL if no keys available
+        currentRoomUrl = roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl;
+    } else {
         return json({ status: "error", message: "No room image found" }, { status: 400 });
     }
 
     try {
-        console.log(`[Cleanup] Processing mask-based cleanup for session ${room_session_id}`);
-        
-        // Call Gemini directly - no more Cloud Run!
-        const cleanedRoomImageUrl = await cleanupRoom(currentRoomUrl, mask_data_url);
+        console.log(`[Cleanup] Processing cleanup for session ${room_session_id}`);
 
-        // Update session with the new cleaned image
+        // If mask data is provided, attempt cleanup; otherwise echo the current image per spec stub allowance.
+        const cleanedRoomImageUrl = mask_data_url
+            ? await cleanupRoom(currentRoomUrl, mask_data_url)
+            : currentRoomUrl;
+
+        // Update session with the new cleaned image (no-op if echo)
         await prisma.roomSession.update({
             where: { id: room_session_id },
             data: { 
@@ -57,7 +66,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         return json({
             room_session_id,
-            cleaned_room_image_url: cleanedRoomImageUrl
+            cleaned_room_image_url: cleanedRoomImageUrl,
+            cleanedRoomImageUrl: cleanedRoomImageUrl
         });
 
     } catch (error) {

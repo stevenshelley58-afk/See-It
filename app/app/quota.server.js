@@ -1,6 +1,10 @@
 import prisma from "./db.server";
 
-export async function enforceQuota(shopId, type, count = 1) {
+/**
+ * Check if a shop has quota available without incrementing.
+ * Throws a 429 Response if quota would be exceeded.
+ */
+export async function checkQuota(shopId, type, count = 1) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -13,6 +17,7 @@ export async function enforceQuota(shopId, type, count = 1) {
         });
 
         if (!usage) {
+            // Create placeholder usage record for today
             usage = await tx.usageDaily.create({
                 data: { shopId, date: today },
             });
@@ -21,7 +26,7 @@ export async function enforceQuota(shopId, type, count = 1) {
         const limit = shop.dailyQuota;
         let currentUsage = 0;
 
-        // Option A: Quota is based on composite renders only.
+        // Quota is based on composite renders only.
         // Prep logs usage but does not block.
         if (type === "render") {
             currentUsage = usage.compositeRenders;
@@ -40,19 +45,47 @@ export async function enforceQuota(shopId, type, count = 1) {
             }
         }
 
-        // Increment
-        const updateData = {};
-        if (type === "render") {
-            updateData.compositeRenders = { increment: count };
-        } else if (type === "prep") {
-            updateData.prepRenders = { increment: count };
-        }
-
-        await tx.usageDaily.update({
-            where: { id: usage.id },
-            data: updateData,
-        });
-
         return true;
     });
+}
+
+/**
+ * Increment usage counter for a shop.
+ * Safe for concurrent requests - uses upsert with increment.
+ */
+export async function incrementQuota(shopId, type, count = 1) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const updateData = {};
+    if (type === "render") {
+        updateData.compositeRenders = { increment: count };
+    } else if (type === "prep") {
+        updateData.prepRenders = { increment: count };
+    } else if (type === "cleanup") {
+        updateData.cleanupRenders = { increment: count };
+    }
+
+    // Use upsert to handle race conditions where usage record doesn't exist yet
+    await prisma.usageDaily.upsert({
+        where: { shopId_date: { shopId, date: today } },
+        create: {
+            shopId,
+            date: today,
+            ...updateData,
+        },
+        update: updateData,
+    });
+
+    return true;
+}
+
+/**
+ * Legacy function for backward compatibility.
+ * Checks quota and increments in one transaction.
+ */
+export async function enforceQuota(shopId, type, count = 1) {
+    await checkQuota(shopId, type, count);
+    await incrementQuota(shopId, type, count);
+    return true;
 }

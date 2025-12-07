@@ -22,29 +22,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ error: "Session not found" }, { status: 404 });
     }
 
-    // Generate the public URL for the uploaded room image
-    const key = `rooms/${roomSession.shopId}/${roomSession.id}/room.jpg`;
-    
+    // Use stored key if available, otherwise construct it (for legacy sessions)
+    const key = roomSession.originalRoomImageKey || `rooms/${roomSession.shopId}/${roomSession.id}/room.jpg`;
+
     // Check if file exists and get a fresh signed URL
     const fileExists = await StorageService.fileExists(key);
     if (!fileExists) {
         return json({ error: "Room image not uploaded yet" }, { status: 400 });
     }
 
-    // Get a 24-hour signed read URL
-    const publicUrl = await StorageService.getSignedReadUrl(key, 24 * 60 * 60 * 1000);
+    // Get a fresh 1-hour signed read URL (shorter TTL since we can regenerate anytime)
+    const publicUrl = await StorageService.getSignedReadUrl(key, 60 * 60 * 1000);
 
-    // Update room session with the confirmed image URL
+    // Update room session with the key (if not already set) and update last used timestamp
+    // Keep URL for backward compatibility but it's now derived from key
     await prisma.roomSession.update({
         where: { id: room_session_id },
         data: {
-            originalRoomImageUrl: publicUrl,
+            originalRoomImageKey: key, // Ensure key is always set
+            originalRoomImageUrl: publicUrl, // Legacy field - keep for compatibility
             lastUsedAt: new Date()
         }
     });
 
+    // Spec: returns { "ok": true } (Routes → Storefront app proxy routes). Keep URL fields for caller compatibility.
     return json({ 
-        ok: true, 
+        ok: true,
+        room_image_url: publicUrl,
         roomImageUrl: publicUrl 
     });
 };

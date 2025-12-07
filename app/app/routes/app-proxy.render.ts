@@ -2,9 +2,10 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { enforceQuota } from "../quota.server";
+import { checkQuota, incrementQuota } from "../quota.server";
 import { checkRateLimit } from "../rate-limit.server";
 import { compositeScene } from "../services/gemini.server";
+import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
 
@@ -76,12 +77,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Update log context with shop info
     const shopLogContext = { ...logContext, shopId: shop.id, productId: product_id };
 
-    // Quota Check & Increment
+    // Quota Check (before starting render)
     try {
-        await enforceQuota(shop.id, "render", 1);
+        await checkQuota(shop.id, "render", 1);
     } catch (error) {
         if (error instanceof Response) {
-            throw error;
+            // Return 429 with proper headers
+            const headers = { ...CORS_HEADERS, "Content-Type": "application/json" };
+            return new Response(error.body, { status: error.status, headers });
         }
         throw error;
     }
@@ -146,11 +149,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
 
     try {
-        // CRITICAL: Use cleaned room if available, otherwise use original
-        const roomImageUrl = roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl;
-        
-        if (!roomImageUrl) {
-            throw new Error("No room image URL available");
+        // Generate fresh room image URL from stored key (cleaned if available, otherwise original)
+        // For legacy sessions without keys, fall back to stored URLs
+        let roomImageUrl: string;
+
+        if (roomSession.cleanedRoomImageKey) {
+            // Generate fresh URL from cleaned image key
+            roomImageUrl = await StorageService.getSignedReadUrl(roomSession.cleanedRoomImageKey, 60 * 60 * 1000);
+        } else if (roomSession.originalRoomImageKey) {
+            // Generate fresh URL from original image key
+            roomImageUrl = await StorageService.getSignedReadUrl(roomSession.originalRoomImageKey, 60 * 60 * 1000);
+        } else if (roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl) {
+            // Legacy: use stored URL if no keys available
+            roomImageUrl = roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl;
+        } else {
+            throw new Error("No room image available");
         }
 
         // Call Gemini directly - no more Cloud Run!
@@ -166,6 +179,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             where: { id: job.id },
             data: { status: "completed", imageUrl: imageUrl, completedAt: new Date() }
         });
+
+        // Increment quota only after successful render
+        await incrementQuota(shop.id, "render", 1);
 
         logger.info(
             { ...shopLogContext, stage: "complete" },
