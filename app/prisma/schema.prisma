@@ -105,7 +105,7 @@ model RenderJob {
   placementScale Float     @map("placement_scale")
   stylePreset    String?   @map("style_preset")
   quality        String?   @map("quality")
-  configJson     String?   @map("config_json") // Stored as JSON string in SQLite
+  configJson     String?   @map("config_json") // Stored as JSON string
   status         String // "queued" | "processing" | "completed" | "failed"
   imageUrl       String?   @map("image_url")
   imageKey       String?   @map("image_key") // GCS key for on-demand URL generation

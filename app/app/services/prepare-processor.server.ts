@@ -296,7 +296,12 @@ async function processPendingRenderJobs(batchRequestId: string) {
                     });
 
                     let productImageUrl: string | null = null;
-                    const config = JSON.parse(job.configJson || '{}');
+                    let config: Record<string, unknown> = {};
+                    try {
+                        config = JSON.parse(job.configJson || '{}');
+                    } catch {
+                        // Invalid JSON in configJson - use empty config
+                    }
 
                     if (productAsset?.preparedImageKey) {
                         // Generate fresh URL from stored key
