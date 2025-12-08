@@ -1,42 +1,8 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { Storage } from '@google-cloud/storage';
+import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 
-// Initialize GCS client (same pattern as storage.server.ts)
-let storage;
-
-if (process.env.GOOGLE_CREDENTIALS_JSON) {
-    try {
-        let jsonString = process.env.GOOGLE_CREDENTIALS_JSON.trim();
-        if (jsonString.startsWith('"') && jsonString.endsWith('"')) {
-            jsonString = jsonString.slice(1, -1);
-        }
-
-        let credentials;
-        try {
-            const decoded = Buffer.from(jsonString, 'base64').toString('utf-8');
-            if (decoded.startsWith('{')) {
-                credentials = JSON.parse(decoded);
-            } else {
-                credentials = JSON.parse(jsonString);
-            }
-        } catch {
-            credentials = JSON.parse(jsonString);
-        }
-
-        storage = new Storage({ credentials });
-    } catch (error) {
-        console.error('[GDPR] Failed to initialize GCS client:', error);
-        storage = new Storage();
-    }
-} else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    storage = new Storage();
-} else {
-    console.warn('[GDPR] No GCS credentials found');
-    storage = new Storage();
-}
-
-const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
+const storage = getGcsClient();
 
 /**
  * GDPR Webhook: shop/redact

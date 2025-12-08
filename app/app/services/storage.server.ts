@@ -1,59 +1,6 @@
-import { Storage } from '@google-cloud/storage';
+import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 
-// Initialize GCS client with credentials from environment variable
-// Railway stores the JSON as a string in GOOGLE_CREDENTIALS_JSON
-let storage: Storage;
-
-if (process.env.GOOGLE_CREDENTIALS_JSON) {
-    try {
-        // Railway may wrap in quotes - remove them if present
-        let jsonString = process.env.GOOGLE_CREDENTIALS_JSON.trim();
-        if (jsonString.startsWith('"') && jsonString.endsWith('"')) {
-            jsonString = jsonString.slice(1, -1);
-        }
-        
-        // Try base64 decode first (if Railway truncates, use base64)
-        let credentials;
-        try {
-            const decoded = Buffer.from(jsonString, 'base64').toString('utf-8');
-            if (decoded.startsWith('{')) {
-                // Valid JSON after base64 decode
-                credentials = JSON.parse(decoded);
-                console.log('[Storage] Decoded GOOGLE_CREDENTIALS_JSON from base64');
-            } else {
-                // Not base64, parse as direct JSON
-                credentials = JSON.parse(jsonString);
-                console.log('[Storage] Parsed GOOGLE_CREDENTIALS_JSON as direct JSON');
-            }
-        } catch {
-            // Fallback: try direct JSON parse
-            credentials = JSON.parse(jsonString);
-            console.log('[Storage] Parsed GOOGLE_CREDENTIALS_JSON as direct JSON (base64 failed)');
-        }
-        
-        storage = new Storage({ credentials });
-        console.log('[Storage] Successfully initialized with GOOGLE_CREDENTIALS_JSON');
-    } catch (error) {
-        console.error('[Storage] Failed to parse GOOGLE_CREDENTIALS_JSON:', error instanceof Error ? error.message : error);
-        console.error(`[Storage] JSON length: ${process.env.GOOGLE_CREDENTIALS_JSON?.length || 0}`);
-        // Security: DO NOT log credential content, even partial
-        console.error('[Storage] Falling back to default credentials (may fail)');
-        storage = new Storage();
-    }
-} else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    // File path to credentials (local dev)
-    storage = new Storage();
-    console.log('[Storage] Using GOOGLE_APPLICATION_CREDENTIALS file');
-} else {
-    console.warn('[Storage] No GCS credentials found - uploads will fail');
-    storage = new Storage();
-}
-
-const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
-
-// Log configuration on module load
-console.log(`[Storage] GCS Bucket: ${GCS_BUCKET}`);
-console.log(`[Storage] Credentials: ${process.env.GOOGLE_CREDENTIALS_JSON ? 'GOOGLE_CREDENTIALS_JSON' : process.env.GOOGLE_APPLICATION_CREDENTIALS ? 'GOOGLE_APPLICATION_CREDENTIALS file' : 'DEFAULT (may fail)'}`);
+const storage = getGcsClient();
 
 export class StorageService {
     /**
