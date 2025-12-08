@@ -6,6 +6,7 @@ import { prepareProduct } from "../services/gemini.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId, addRequestIdHeader } from "../utils/request-context.server";
 import { getShopFromSession } from "../utils/shop.server";
+import { validateShopifyUrl } from "../utils/validate-shopify-url.server";
 
 export const action = async ({ request }) => {
     const requestId = getRequestId(request);
@@ -55,6 +56,7 @@ export const action = async ({ request }) => {
         const errors = [];
 
     for (const productId of productIds) {
+        let assetId; // Declare outside try block so catch can access it
         try {
             // Fetch product details from Shopify GraphQL
             const response = await admin.graphql(
@@ -84,8 +86,20 @@ export const action = async ({ request }) => {
             const imageId = product.featuredImage.id;
             const imageUrl = product.featuredImage.url;
 
+            // Validate image URL to prevent SSRF attacks (defense in depth)
+            try {
+                validateShopifyUrl(imageUrl, "product image URL");
+            } catch (urlError) {
+                logger.error(
+                    createLogContext("prepare", requestId, "batch-validation", { shopId, productId }),
+                    "Invalid image URL from Shopify GraphQL (unexpected)",
+                    urlError
+                );
+                errors.push({ productId, error: "Invalid image URL from Shopify" });
+                continue;
+            }
+
             // Check if asset already exists
-            let assetId;
             const existing = await prisma.productAsset.findFirst({
                 where: {
                     shopId,
@@ -156,17 +170,23 @@ export const action = async ({ request }) => {
                 error
             );
             
-            // Update asset status to failed
-            try {
-                await prisma.productAsset.update({
-                    where: { id: assetId },
-                    data: {
-                        status: "failed",
-                        errorMessage: errorMessage.substring(0, 500)
-                    }
-                });
-            } catch (dbError) {
-                // Ignore DB errors in batch context
+            // Update asset status to failed (only if assetId was assigned)
+            if (assetId) {
+                try {
+                    await prisma.productAsset.update({
+                        where: { id: assetId },
+                        data: {
+                            status: "failed",
+                            errorMessage: errorMessage.substring(0, 500)
+                        }
+                    });
+                } catch (dbError) {
+                    logger.error(
+                        createLogContext("prepare", requestId, "batch-db-update", { shopId, productId, assetId }),
+                        "Failed to update asset to failed status",
+                        dbError
+                    );
+                }
             }
             
             errors.push({

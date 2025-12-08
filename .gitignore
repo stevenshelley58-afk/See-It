@@ -24,6 +24,7 @@ lerna-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+nul  # Windows reserved device name - prevent accidental creation
 
 # IDE
 .vscode/

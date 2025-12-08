@@ -60,6 +60,7 @@ model ProductAsset {
   prepStrategy     String   @map("prep_strategy") // "batch" | "fallback" | "manual"
   promptVersion    Int      @map("prompt_version")
   errorMessage     String?  @map("error_message")
+  isDefault        Boolean  @default(false) @map("is_default") // Only one default per shop+product
   createdAt        DateTime @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -67,6 +68,7 @@ model ProductAsset {
   renderJobs RenderJob[]
 
   @@index([shopId, productId])
+  @@index([shopId, productId, isDefault]) // Index for finding default assets
   @@map("product_assets")
 }
 

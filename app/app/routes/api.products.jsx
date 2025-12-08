@@ -38,6 +38,29 @@ export const loader = async ({ request }) => {
         );
 
         const responseJson = await response.json();
+
+        // Handle GraphQL errors
+        if (!responseJson.data || !responseJson.data.products) {
+            const errorMessage = responseJson.errors
+                ? responseJson.errors.map(e => e.message).join(', ')
+                : 'Unknown GraphQL error';
+
+            console.error('[Products] GraphQL query failed:', {
+                errors: responseJson.errors,
+                hasData: !!responseJson.data
+            });
+
+            return json(
+                {
+                    error: 'Failed to fetch products from Shopify',
+                    message: errorMessage,
+                    products: [],
+                    status_counts: { ready: 0, pending: 0, failed: 0, stale: 0, unprepared: 0 }
+                },
+                { status: responseJson.errors ? 502 : 500 }
+            );
+        }
+
         const { edges, pageInfo } = responseJson.data.products;
 
         allProducts = [...allProducts, ...edges.map((edge) => edge.node)];

@@ -117,14 +117,28 @@ let processorInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startPrepareProcessor() {
     if (!processorInterval) {
-        processorInterval = setInterval(processPendingAssets, 10000);
+        // Wrap async function to handle errors and prevent crashes
+        const wrappedProcessor = async () => {
+            try {
+                await processPendingAssets();
+            } catch (error) {
+                const requestId = generateRequestId();
+                logger.error(
+                    createLogContext("prepare", requestId, "processor-error", {}),
+                    "Unhandled error in prepare processor interval",
+                    error
+                );
+            }
+        };
+
+        processorInterval = setInterval(wrappedProcessor, 10000);
         const requestId = generateRequestId();
         logger.info(
             createLogContext("prepare", requestId, "processor-start", {}),
             "Background prepare processor started (interval: 10s)"
         );
-        // Process immediately on start
-        processPendingAssets();
+        // Process immediately on start (with error handling)
+        wrappedProcessor();
     }
 }
 

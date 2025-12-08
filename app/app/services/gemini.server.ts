@@ -4,6 +4,7 @@ import { removeBackground } from "@imgly/background-removal-node";
 import sharp from "sharp";
 import { Storage } from "@google-cloud/storage";
 import { logger, createLogContext } from "../utils/logger.server";
+import { validateShopifyUrl } from "../utils/validate-shopify-url.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -77,11 +78,23 @@ async function downloadToBuffer(
     url: string,
     logContext: ReturnType<typeof createLogContext>
 ): Promise<Buffer> {
+    // Validate URL to prevent SSRF attacks
+    try {
+        validateShopifyUrl(url, "product image URL");
+    } catch (error) {
+        logger.error(
+            { ...logContext, stage: "download" },
+            "URL validation failed (potential SSRF attempt)",
+            error
+        );
+        throw error;
+    }
+
     logger.info(
         { ...logContext, stage: "download" },
         `Downloading image from Shopify CDN: ${url.substring(0, 80)}...`
     );
-    
+
     // Force PNG format from Shopify CDN
     const pngUrl = url.includes('?') ? `${url}&format=png` : `${url}?format=png`;
     const response = await fetch(pngUrl, {

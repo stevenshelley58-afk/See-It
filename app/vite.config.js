@@ -68,8 +68,16 @@ export default defineConfig({
     assetsInlineLimit: 0,
     rollupOptions: {
       external: [
+        // Node.js-only image processing libraries
         "@imgly/background-removal-node",
         "sharp",
+        // Google Cloud services (server-only)
+        "@google-cloud/storage",
+        "google-auth-library",
+        "@google/genai",
+        // Database client (server-only)
+        "@prisma/client",
+        ".prisma/client",
       ],
     },
   },

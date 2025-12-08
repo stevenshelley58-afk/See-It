@@ -27,6 +27,33 @@ export const action = async ({ request, params }) => {
         return json({ error: "asset_not_found" }, { status: 404 });
     }
 
-    // Placeholder: no dedicated default field in schema; acknowledge request for now.
-    return json({ ok: true, asset_id: assetId, product_id: productId });
+    // Set this asset as default and unset all other defaults for this product
+    // Use transaction to ensure atomicity
+    await prisma.$transaction([
+        // First, unset all defaults for this shop+product combination
+        prisma.productAsset.updateMany({
+            where: {
+                shopId: shop.id,
+                productId: productId
+            },
+            data: {
+                isDefault: false
+            }
+        }),
+        // Then set this asset as the default
+        prisma.productAsset.update({
+            where: { id: assetId },
+            data: {
+                isDefault: true,
+                updatedAt: new Date()
+            }
+        })
+    ]);
+
+    return json({
+        ok: true,
+        asset_id: assetId,
+        product_id: productId,
+        message: "Default asset updated successfully"
+    });
 };

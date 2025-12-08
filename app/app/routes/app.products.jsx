@@ -6,7 +6,6 @@ import {
     Layout,
     Card,
     ResourceList,
-    Thumbnail,
     Text,
     Button,
     Badge,

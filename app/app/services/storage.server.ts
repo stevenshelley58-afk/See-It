@@ -36,7 +36,7 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
     } catch (error) {
         console.error('[Storage] Failed to parse GOOGLE_CREDENTIALS_JSON:', error instanceof Error ? error.message : error);
         console.error(`[Storage] JSON length: ${process.env.GOOGLE_CREDENTIALS_JSON?.length || 0}`);
-        console.error(`[Storage] First 100 chars: ${process.env.GOOGLE_CREDENTIALS_JSON?.substring(0, 100)}`);
+        // Security: DO NOT log credential content, even partial
         console.error('[Storage] Falling back to default credentials (may fail)');
         storage = new Storage();
     }
