@@ -57,6 +57,11 @@ export const action = async ({ request }) => {
 
         for (const productId of productIds) {
             try {
+                // Convert numeric ID to GID format if needed
+                const productGid = String(productId).startsWith('gid://')
+                    ? productId
+                    : `gid://shopify/Product/${productId}`;
+
                 // Fetch product details from Shopify GraphQL
                 const response = await admin.graphql(
                     `#graphql
@@ -70,7 +75,7 @@ export const action = async ({ request }) => {
                   }
                 }`,
                     {
-                        variables: { id: productId }
+                        variables: { id: productGid }
                     }
                 );
 
