@@ -128,9 +128,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Get product image URL - prefer prepared (bg removed), then fallback to original from Shopify
+    // Generate fresh signed URL from key if available to prevent 403 from expired URLs
     let productImageUrl: string | null = null;
-    
-    if (productAsset?.preparedImageUrl) {
+
+    if (productAsset?.preparedImageKey) {
+        // Generate fresh signed URL from stored key
+        try {
+            productImageUrl = await StorageService.getSignedReadUrl(
+                productAsset.preparedImageKey,
+                60 * 60 * 1000 // 1 hour
+            );
+        } catch (error) {
+            logger.warn(
+                { ...shopLogContext, stage: "product-url-fallback" },
+                "Failed to generate signed URL from key, falling back to stored URL",
+                error
+            );
+            productImageUrl = productAsset.preparedImageUrl ?? null;
+        }
+    } else if (productAsset?.preparedImageUrl) {
         productImageUrl = productAsset.preparedImageUrl;
     } else if (productAsset?.sourceImageUrl) {
         productImageUrl = productAsset.sourceImageUrl;

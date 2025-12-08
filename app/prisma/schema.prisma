@@ -57,10 +57,12 @@ model ProductAsset {
   sourceImageId    String   @map("source_image_id")
   sourceImageUrl   String   @map("source_image_url")
   preparedImageUrl String?  @map("prepared_image_url")
+  preparedImageKey String?  @map("prepared_image_key") // GCS key for on-demand URL generation
   status           String // "pending" | "processing" | "ready" | "failed" | "stale" | "orphaned"
   prepStrategy     String   @map("prep_strategy") // "batch" | "fallback" | "manual"
   promptVersion    Int      @map("prompt_version")
   errorMessage     String?  @map("error_message")
+  retryCount       Int      @default(0) @map("retry_count") // Track retry attempts
   isDefault        Boolean  @default(false) @map("is_default") // Only one default per shop+product
   createdAt        DateTime @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
@@ -106,11 +108,13 @@ model RenderJob {
   configJson     String?   @map("config_json") // Stored as JSON string in SQLite
   status         String // "queued" | "processing" | "completed" | "failed"
   imageUrl       String?   @map("image_url")
+  imageKey       String?   @map("image_key") // GCS key for on-demand URL generation
   modelId        String?   @map("model_id")
   promptId       String?   @map("prompt_id")
   promptVersion  Int?      @map("prompt_version")
   errorCode      String?   @map("error_code")
   errorMessage   String?   @map("error_message")
+  retryCount     Int       @default(0) @map("retry_count") // Track retry attempts
   createdAt      DateTime  @map("created_at")
   completedAt    DateTime? @map("completed_at")
 

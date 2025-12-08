@@ -7,10 +7,63 @@ import { incrementQuota } from "../quota.server";
 let processorInterval: NodeJS.Timeout | null = null;
 let isProcessing = false;
 
+// Configuration for retry logic
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 5000; // 5 seconds base delay
+
+/**
+ * Calculate exponential backoff delay
+ * Delay = baseDelay * 2^retryCount (5s, 10s, 20s for retries 0, 1, 2)
+ */
+function getRetryDelay(retryCount: number): number {
+    return RETRY_BASE_DELAY_MS * Math.pow(2, retryCount);
+}
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Check if an error is retryable (transient errors that may succeed on retry)
+ */
+function isRetryableError(error: unknown): boolean {
+    if (!(error instanceof Error)) return false;
+
+    const message = error.message.toLowerCase();
+
+    // Retryable errors: network issues, rate limits, temporary failures
+    const retryablePatterns = [
+        'network',
+        'timeout',
+        'econnreset',
+        'econnrefused',
+        'etimedout',
+        'rate limit',
+        'too many requests',
+        '429',
+        '503',
+        '502',
+        '504',
+        'temporarily unavailable',
+        'service unavailable',
+        'internal server error',
+        'aborted',
+    ];
+
+    return retryablePatterns.some(pattern => message.includes(pattern));
+}
+
 async function processPendingAssets(batchRequestId: string) {
     try {
+        // Fetch pending assets that haven't exceeded retry limit
         const pendingAssets = await prisma.productAsset.findMany({
-            where: { status: "pending" },
+            where: {
+                status: "pending",
+                retryCount: { lt: MAX_RETRY_ATTEMPTS }
+            },
             take: 5,
             orderBy: { createdAt: "asc" }
         });
@@ -23,8 +76,10 @@ async function processPendingAssets(batchRequestId: string) {
 
             for (const asset of pendingAssets) {
                 const itemRequestId = generateRequestId();
+                const currentRetryCount = asset.retryCount ?? 0;
+
                 try {
-                    // Lock
+                    // Lock the asset for processing
                     const updated = await prisma.productAsset.updateMany({
                         where: { id: asset.id, status: "pending" },
                         data: { status: "processing", updatedAt: new Date() }
@@ -32,38 +87,140 @@ async function processPendingAssets(batchRequestId: string) {
 
                     if (updated.count === 0) continue; // Lost race
 
-                    const preparedImageUrl = await prepareProduct(
-                        asset.sourceImageUrl,
-                        asset.shopId,
-                        asset.productId,
-                        asset.id,
-                        itemRequestId
+                    logger.info(
+                        createLogContext("prepare", itemRequestId, "asset-start", {
+                            assetId: asset.id,
+                            retryCount: currentRetryCount
+                        }),
+                        `Starting asset processing (attempt ${currentRetryCount + 1}/${MAX_RETRY_ATTEMPTS})`
                     );
 
-                    await prisma.productAsset.update({
-                        where: { id: asset.id },
-                        data: {
-                            status: "ready",
-                            preparedImageUrl: preparedImageUrl,
-                            updatedAt: new Date()
-                        }
-                    });
+                    // Attempt processing with inline retry for transient errors
+                    let lastError: unknown = null;
+                    let success = false;
+                    let preparedImageUrl: string | null = null;
 
+                    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !success; attempt++) {
+                        try {
+                            if (attempt > 0) {
+                                const delay = getRetryDelay(attempt - 1);
+                                logger.info(
+                                    createLogContext("prepare", itemRequestId, "asset-retry", {
+                                        assetId: asset.id,
+                                        attempt: attempt + 1,
+                                        delay
+                                    }),
+                                    `Retry attempt ${attempt + 1}/${MAX_RETRY_ATTEMPTS} after ${delay}ms delay`
+                                );
+                                await sleep(delay);
+                            }
+
+                            preparedImageUrl = await prepareProduct(
+                                asset.sourceImageUrl,
+                                asset.shopId,
+                                asset.productId,
+                                asset.id,
+                                itemRequestId
+                            );
+                            success = true;
+                        } catch (error) {
+                            lastError = error;
+                            const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+                            // Only retry for transient errors
+                            if (!isRetryableError(error)) {
+                                logger.warn(
+                                    createLogContext("prepare", itemRequestId, "asset-non-retryable", {
+                                        assetId: asset.id,
+                                        attempt: attempt + 1
+                                    }),
+                                    `Non-retryable error: ${errorMessage}`
+                                );
+                                break; // Exit retry loop for permanent errors
+                            }
+
+                            logger.warn(
+                                createLogContext("prepare", itemRequestId, "asset-attempt-failed", {
+                                    assetId: asset.id,
+                                    attempt: attempt + 1
+                                }),
+                                `Attempt ${attempt + 1} failed with retryable error: ${errorMessage}`
+                            );
+                        }
+                    }
+
+                    if (success && preparedImageUrl) {
+                        // Extract GCS key from the signed URL for on-demand URL generation
+                        const preparedImageKey = extractGcsKeyFromUrl(preparedImageUrl);
+
+                        await prisma.productAsset.update({
+                            where: { id: asset.id },
+                            data: {
+                                status: "ready",
+                                preparedImageUrl: preparedImageUrl,
+                                preparedImageKey: preparedImageKey,
+                                retryCount: 0, // Reset retry count on success
+                                errorMessage: null,
+                                updatedAt: new Date()
+                            }
+                        });
+
+                        logger.info(
+                            createLogContext("prepare", itemRequestId, "asset-complete", { assetId: asset.id }),
+                            "Asset processing completed successfully"
+                        );
+                    } else {
+                        // All retries exhausted or permanent error
+                        const newRetryCount = currentRetryCount + 1;
+                        const errorMessage = lastError instanceof Error ? lastError.message : "Unknown error";
+                        const isFinalFailure = newRetryCount >= MAX_RETRY_ATTEMPTS || !isRetryableError(lastError);
+
+                        logger.error(
+                            createLogContext("prepare", itemRequestId, "asset-error", {
+                                assetId: asset.id,
+                                retryCount: newRetryCount,
+                                isFinal: isFinalFailure
+                            }),
+                            `Error processing asset${isFinalFailure ? " (final failure)" : " (will retry)"}`,
+                            lastError
+                        );
+
+                        await prisma.productAsset.update({
+                            where: { id: asset.id },
+                            data: {
+                                status: isFinalFailure ? "failed" : "pending",
+                                errorMessage: errorMessage.substring(0, 500),
+                                retryCount: newRetryCount,
+                                updatedAt: new Date()
+                            }
+                        });
+                    }
                 } catch (error) {
+                    // Outer error handler for unexpected errors (DB errors, etc.)
                     const errorMessage = error instanceof Error ? error.message : "Unknown error";
                     logger.error(
-                        createLogContext("prepare", itemRequestId, "asset-error", { assetId: asset.id }),
-                        "Error processing asset",
+                        createLogContext("prepare", itemRequestId, "asset-critical-error", { assetId: asset.id }),
+                        "Critical error processing asset",
                         error
                     );
-                    await prisma.productAsset.update({
-                        where: { id: asset.id },
-                        data: {
-                            status: "failed",
-                            errorMessage: errorMessage.substring(0, 500),
-                            updatedAt: new Date()
-                        }
-                    });
+
+                    // Mark as failed without retry for critical errors
+                    try {
+                        await prisma.productAsset.update({
+                            where: { id: asset.id },
+                            data: {
+                                status: "failed",
+                                errorMessage: `Critical error: ${errorMessage.substring(0, 450)}`,
+                                updatedAt: new Date()
+                            }
+                        });
+                    } catch (updateError) {
+                        logger.error(
+                            createLogContext("prepare", itemRequestId, "asset-update-failed", { assetId: asset.id }),
+                            "Failed to update asset status after critical error",
+                            updateError
+                        );
+                    }
                 }
             }
         }
@@ -72,10 +229,35 @@ async function processPendingAssets(batchRequestId: string) {
     }
 }
 
+/**
+ * Extract the GCS key from a signed URL
+ * Example: https://storage.googleapis.com/bucket/products/shop/product/asset_prepared.png?X-Goog-...
+ * Returns: products/shop/product/asset_prepared.png
+ */
+function extractGcsKeyFromUrl(signedUrl: string): string | null {
+    try {
+        const url = new URL(signedUrl);
+        // GCS signed URLs have the format: /bucket-name/key
+        // Remove the leading slash and bucket name
+        const pathParts = url.pathname.split('/');
+        if (pathParts.length >= 3) {
+            // Skip empty string and bucket name, join the rest
+            return pathParts.slice(2).join('/');
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 async function processPendingRenderJobs(batchRequestId: string) {
     try {
+        // Fetch queued jobs that haven't exceeded retry limit
         const pendingJobs = await prisma.renderJob.findMany({
-            where: { status: "queued" },
+            where: {
+                status: "queued",
+                retryCount: { lt: MAX_RETRY_ATTEMPTS }
+            },
             take: 5,
             orderBy: { createdAt: "asc" },
             include: { roomSession: true }
@@ -89,16 +271,26 @@ async function processPendingRenderJobs(batchRequestId: string) {
 
             for (const job of pendingJobs) {
                 const itemRequestId = generateRequestId();
+                const currentRetryCount = job.retryCount ?? 0;
+
                 try {
                     // Lock
                     const updated = await prisma.renderJob.updateMany({
                         where: { id: job.id, status: "queued" },
-                        data: { status: "processing" } // Add updatedAt if schema supports
+                        data: { status: "processing" }
                     });
 
                     if (updated.count === 0) continue;
 
-                    // 1. Get Product Image URL
+                    logger.info(
+                        createLogContext("prepare", itemRequestId, "job-start", {
+                            jobId: job.id,
+                            retryCount: currentRetryCount
+                        }),
+                        `Starting render job (attempt ${currentRetryCount + 1}/${MAX_RETRY_ATTEMPTS})`
+                    );
+
+                    // 1. Get Product Image URL (generate fresh URL if key is available)
                     const productAsset = await prisma.productAsset.findFirst({
                         where: { shopId: job.shopId, productId: job.productId }
                     });
@@ -106,7 +298,10 @@ async function processPendingRenderJobs(batchRequestId: string) {
                     let productImageUrl: string | null = null;
                     const config = JSON.parse(job.configJson || '{}');
 
-                    if (productAsset?.preparedImageUrl) {
+                    if (productAsset?.preparedImageKey) {
+                        // Generate fresh URL from stored key
+                        productImageUrl = await StorageService.getSignedReadUrl(productAsset.preparedImageKey, 60 * 60 * 1000);
+                    } else if (productAsset?.preparedImageUrl) {
                         productImageUrl = productAsset.preparedImageUrl;
                     } else if (productAsset?.sourceImageUrl) {
                         productImageUrl = productAsset.sourceImageUrl;
@@ -117,7 +312,11 @@ async function processPendingRenderJobs(batchRequestId: string) {
                     if (!productImageUrl) {
                         await prisma.renderJob.update({
                             where: { id: job.id },
-                            data: { status: "failed", errorMessage: "No product image available" }
+                            data: {
+                                status: "failed",
+                                errorMessage: "No product image available",
+                                errorCode: "NO_PRODUCT_IMAGE"
+                            }
                         });
                         continue;
                     }
@@ -127,7 +326,11 @@ async function processPendingRenderJobs(batchRequestId: string) {
                     if (!roomSession) {
                         await prisma.renderJob.update({
                             where: { id: job.id },
-                            data: { status: "failed", errorMessage: "Room session not found" }
+                            data: {
+                                status: "failed",
+                                errorMessage: "Room session not found",
+                                errorCode: "NO_ROOM_SESSION"
+                            }
                         });
                         continue;
                     }
@@ -143,38 +346,131 @@ async function processPendingRenderJobs(batchRequestId: string) {
                         throw new Error("No room image available");
                     }
 
-                    // 3. Render
-                    const finalImageUrl = await compositeScene(
-                        productImageUrl,
-                        roomImageUrl,
-                        { x: job.placementX, y: job.placementY, scale: job.placementScale },
-                        job.stylePreset,
-                        itemRequestId
-                    );
+                    // 3. Render with retry logic
+                    let lastError: unknown = null;
+                    let success = false;
+                    let finalImageUrl: string | null = null;
 
-                    // 4. Success
-                    await prisma.renderJob.update({
-                        where: { id: job.id },
-                        data: { status: "completed", imageUrl: finalImageUrl, completedAt: new Date() }
-                    });
+                    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !success; attempt++) {
+                        try {
+                            if (attempt > 0) {
+                                const delay = getRetryDelay(attempt - 1);
+                                logger.info(
+                                    createLogContext("prepare", itemRequestId, "job-retry", {
+                                        jobId: job.id,
+                                        attempt: attempt + 1,
+                                        delay
+                                    }),
+                                    `Retry attempt ${attempt + 1}/${MAX_RETRY_ATTEMPTS} after ${delay}ms delay`
+                                );
+                                await sleep(delay);
+                            }
 
-                    await incrementQuota(job.shopId, "render", 1);
+                            finalImageUrl = await compositeScene(
+                                productImageUrl,
+                                roomImageUrl,
+                                { x: job.placementX, y: job.placementY, scale: job.placementScale },
+                                job.stylePreset ?? "neutral",
+                                itemRequestId
+                            );
+                            success = true;
+                        } catch (error) {
+                            lastError = error;
+                            const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
+                            if (!isRetryableError(error)) {
+                                logger.warn(
+                                    createLogContext("prepare", itemRequestId, "job-non-retryable", {
+                                        jobId: job.id,
+                                        attempt: attempt + 1
+                                    }),
+                                    `Non-retryable error: ${errorMessage}`
+                                );
+                                break;
+                            }
+
+                            logger.warn(
+                                createLogContext("prepare", itemRequestId, "job-attempt-failed", {
+                                    jobId: job.id,
+                                    attempt: attempt + 1
+                                }),
+                                `Attempt ${attempt + 1} failed with retryable error: ${errorMessage}`
+                            );
+                        }
+                    }
+
+                    if (success && finalImageUrl) {
+                        // Extract GCS key for on-demand URL generation
+                        const imageKey = extractGcsKeyFromUrl(finalImageUrl);
+
+                        await prisma.renderJob.update({
+                            where: { id: job.id },
+                            data: {
+                                status: "completed",
+                                imageUrl: finalImageUrl,
+                                imageKey: imageKey,
+                                retryCount: 0,
+                                completedAt: new Date()
+                            }
+                        });
+
+                        await incrementQuota(job.shopId, "render", 1);
+
+                        logger.info(
+                            createLogContext("prepare", itemRequestId, "job-complete", { jobId: job.id }),
+                            "Render job completed successfully"
+                        );
+                    } else {
+                        // All retries exhausted or permanent error
+                        const newRetryCount = currentRetryCount + 1;
+                        const errorMessage = lastError instanceof Error ? lastError.message : "Unknown error";
+                        const isFinalFailure = newRetryCount >= MAX_RETRY_ATTEMPTS || !isRetryableError(lastError);
+
+                        logger.error(
+                            createLogContext("prepare", itemRequestId, "job-error", {
+                                jobId: job.id,
+                                retryCount: newRetryCount,
+                                isFinal: isFinalFailure
+                            }),
+                            `Error processing render job${isFinalFailure ? " (final failure)" : " (will retry)"}`,
+                            lastError
+                        );
+
+                        await prisma.renderJob.update({
+                            where: { id: job.id },
+                            data: {
+                                status: isFinalFailure ? "failed" : "queued",
+                                errorMessage: errorMessage.substring(0, 500),
+                                errorCode: "PROCESSING_ERROR",
+                                retryCount: newRetryCount
+                            }
+                        });
+                    }
                 } catch (error) {
+                    // Outer error handler for unexpected errors
                     const errorMessage = error instanceof Error ? error.message : "Unknown error";
                     logger.error(
-                        createLogContext("prepare", itemRequestId, "job-error", { jobId: job.id }),
-                        "Error processing render job",
+                        createLogContext("prepare", itemRequestId, "job-critical-error", { jobId: job.id }),
+                        "Critical error processing render job",
                         error
                     );
-                    await prisma.renderJob.update({
-                        where: { id: job.id },
-                        data: {
-                            status: "failed",
-                            errorMessage: errorMessage,
-                            errorCode: "PROCESSING_ERROR"
-                        }
-                    });
+
+                    try {
+                        await prisma.renderJob.update({
+                            where: { id: job.id },
+                            data: {
+                                status: "failed",
+                                errorMessage: `Critical error: ${errorMessage.substring(0, 450)}`,
+                                errorCode: "CRITICAL_ERROR"
+                            }
+                        });
+                    } catch (updateError) {
+                        logger.error(
+                            createLogContext("prepare", itemRequestId, "job-update-failed", { jobId: job.id }),
+                            "Failed to update job status after critical error",
+                            updateError
+                        );
+                    }
                 }
             }
         }
@@ -190,14 +486,17 @@ async function runProcessorCycle() {
 
     const batchRequestId = generateRequestId();
 
-    // Stale Lock Recovery
+    // Stale Lock Recovery - reset items stuck in "processing" state
+    // Only reset items that haven't exceeded retry limit
     try {
         const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-        // Reset ProductAssets
+
+        // Reset ProductAssets (increment retry count for each reset)
         const staleAssets = await prisma.productAsset.updateMany({
             where: {
                 status: "processing",
-                updatedAt: { lt: fifteenMinutesAgo }
+                updatedAt: { lt: fifteenMinutesAgo },
+                retryCount: { lt: MAX_RETRY_ATTEMPTS }
             },
             data: {
                 status: "pending",
@@ -206,21 +505,50 @@ async function runProcessorCycle() {
             }
         });
 
-        // Reset RenderJobs
+        // Mark assets that have exceeded retry limit as failed
+        const exhaustedAssets = await prisma.productAsset.updateMany({
+            where: {
+                status: "processing",
+                updatedAt: { lt: fifteenMinutesAgo },
+                retryCount: { gte: MAX_RETRY_ATTEMPTS }
+            },
+            data: {
+                status: "failed",
+                updatedAt: new Date(),
+                errorMessage: "Maximum retry attempts exceeded (stale recovery)"
+            }
+        });
+
+        // Reset RenderJobs (only those under retry limit)
         const staleJobs = await prisma.renderJob.updateMany({
             where: {
                 status: "processing",
-                createdAt: { lt: fifteenMinutesAgo }
+                createdAt: { lt: fifteenMinutesAgo },
+                retryCount: { lt: MAX_RETRY_ATTEMPTS }
             },
             data: {
                 status: "queued"
             }
         });
 
-        if (staleAssets.count > 0 || staleJobs.count > 0) {
+        // Mark jobs that have exceeded retry limit as failed
+        const exhaustedJobs = await prisma.renderJob.updateMany({
+            where: {
+                status: "processing",
+                createdAt: { lt: fifteenMinutesAgo },
+                retryCount: { gte: MAX_RETRY_ATTEMPTS }
+            },
+            data: {
+                status: "failed",
+                errorMessage: "Maximum retry attempts exceeded (stale recovery)",
+                errorCode: "MAX_RETRIES_EXCEEDED"
+            }
+        });
+
+        if (staleAssets.count > 0 || staleJobs.count > 0 || exhaustedAssets.count > 0 || exhaustedJobs.count > 0) {
             logger.warn(
                 createLogContext("prepare", batchRequestId, "stale-recovery", {}),
-                `Reset stale items: ${staleAssets.count} assets, ${staleJobs.count} jobs`
+                `Stale recovery: reset ${staleAssets.count} assets, ${staleJobs.count} jobs; marked failed: ${exhaustedAssets.count} assets, ${exhaustedJobs.count} jobs`
             );
         }
     } catch (error) {
