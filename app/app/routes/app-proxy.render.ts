@@ -9,29 +9,33 @@ import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
 
-const CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
+function getCorsHeaders(shopDomain: string | null): Record<string, string> {
+    const origin = shopDomain ? `https://${shopDomain}` : "";
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    };
+}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const requestId = getRequestId(request);
     const logContext = createLogContext("render", requestId, "start", {});
 
+    const { session } = await authenticate.public.appProxy(request);
+    const corsHeaders = getCorsHeaders(session?.shop ?? null);
+
     // Handle preflight
     if (request.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: CORS_HEADERS });
+        return new Response(null, { status: 204, headers: corsHeaders });
     }
-
-    const { session } = await authenticate.public.appProxy(request);
 
     if (!session) {
         logger.warn(
             { ...logContext, stage: "auth" },
             `App proxy auth failed: no session. URL: ${request.url}`
         );
-        return json({ status: "forbidden" }, { status: 403, headers: CORS_HEADERS });
+        return json({ status: "forbidden" }, { status: 403, headers: corsHeaders });
     }
 
     const body = await request.json();
@@ -45,7 +49,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
         return json(
             { error: "invalid_placement", message: "Placement x, y, and scale are required" },
-            { status: 400, headers: CORS_HEADERS }
+            { status: 400, headers: corsHeaders }
         );
     }
 
@@ -53,7 +57,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!room_session_id) {
         return json(
             { error: "missing_session", message: "room_session_id is required" },
-            { status: 400, headers: CORS_HEADERS }
+            { status: 400, headers: corsHeaders }
         );
     }
 
@@ -61,7 +65,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!checkRateLimit(room_session_id || 'anonymous')) {
         return json(
             { error: "rate_limit_exceeded", message: "Too many requests. Please wait a moment." },
-            { status: 429, headers: CORS_HEADERS }
+            { status: 429, headers: corsHeaders }
         );
     }
 
@@ -71,7 +75,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             { ...logContext, stage: "shop-lookup" },
             `Shop not found in database: ${session.shop}`
         );
-        return json({ error: "Shop not found" }, { status: 404, headers: CORS_HEADERS });
+        return json({ error: "Shop not found" }, { status: 404, headers: corsHeaders });
     }
 
     // Update log context with shop info
@@ -83,7 +87,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     } catch (error) {
         if (error instanceof Response) {
             // Return 429 with proper headers
-            const headers = { ...CORS_HEADERS, "Content-Type": "application/json" };
+            const headers = { ...corsHeaders, "Content-Type": "application/json" };
             return new Response(error.body, { status: error.status, headers });
         }
         throw error;
@@ -120,7 +124,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             where: { id: job.id },
             data: { status: "failed", errorMessage: "Room session not found" }
         });
-        return json({ job_id: job.id, status: "failed", error: "room_not_found" }, { headers: CORS_HEADERS });
+        return json({ job_id: job.id, status: "failed", error: "room_not_found" }, { headers: corsHeaders });
     }
 
     // Get product image URL - prefer prepared (bg removed), then fallback to original from Shopify
@@ -140,7 +144,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             where: { id: job.id },
             data: { status: "failed", errorMessage: "No product image available" }
         });
-        return json({ job_id: job.id, status: "failed", error: "no_product_image" }, { headers: CORS_HEADERS });
+        return json({ job_id: job.id, status: "failed", error: "no_product_image" }, { headers: corsHeaders });
     }
 
     logger.info(
