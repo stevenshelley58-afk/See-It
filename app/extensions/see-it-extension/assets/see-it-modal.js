@@ -5,6 +5,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const modal = $('see-it-modal');
     const closeBtn = document.querySelector('.see-it-close');
 
+    // Early exit if essential elements not found (e.g., product has no featured image)
+    if (!trigger || !modal) {
+        console.log('[See It] Button not rendered - product may not have a featured image');
+        return;
+    }
+
     // Steps
     const stepWelcome = $('see-it-step-welcome');
     const stepEdit = $('see-it-step-edit-room');

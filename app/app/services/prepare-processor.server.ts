@@ -237,7 +237,23 @@ async function runProcessorCycle() {
     isProcessing = false;
 }
 
+// Flag to track if processor is disabled due to missing configuration
+let processorDisabled = false;
+
 export function startPrepareProcessor() {
+    // Validate required environment variables before starting
+    if (!process.env.GEMINI_API_KEY) {
+        if (!processorDisabled) {
+            logger.warn(
+                createLogContext("system", "startup", "processor-disabled", {}),
+                "GEMINI_API_KEY not configured. Background processor disabled. " +
+                "Product preparation and render jobs will not be processed until API key is set."
+            );
+            processorDisabled = true;
+        }
+        return; // Gracefully exit without starting processor
+    }
+
     if (!processorInterval) {
         const wrappedProcessor = async () => {
             try {
@@ -247,11 +263,15 @@ export function startPrepareProcessor() {
                 isProcessing = false;
             }
         };
-        // Run every 5 seconds 
+        // Run every 5 seconds
         processorInterval = setInterval(wrappedProcessor, 5000);
         logger.info(createLogContext("system", "startup", "processor-start", {}), "Started background processor");
         wrappedProcessor();
     }
+}
+
+export function isProcessorEnabled(): boolean {
+    return !processorDisabled && processorInterval !== null;
 }
 
 export function stopPrepareProcessor() {

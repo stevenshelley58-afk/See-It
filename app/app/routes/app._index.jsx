@@ -1,4 +1,4 @@
-import { useLoaderData, useSubmit } from "@remix-run/react";
+import { useLoaderData, useSubmit, useRouteError, isRouteErrorResponse } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -11,6 +11,7 @@ import {
   ProgressBar,
   Divider,
   Badge,
+  Banner,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -418,6 +419,46 @@ export default function Index() {
           </InlineStack>
         </Box>
       </BlockStack>
+    </Page>
+  );
+}
+
+// Error boundary to catch and display errors gracefully
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  let title = "Something went wrong";
+  let message = "An unexpected error occurred. Please try refreshing the page.";
+
+  if (isRouteErrorResponse(error)) {
+    title = `${error.status} ${error.statusText}`;
+    message = error.data?.message || "The requested resource could not be loaded.";
+  } else if (error instanceof Error) {
+    message = error.message;
+  }
+
+  return (
+    <Page>
+      <TitleBar title="See It Dashboard" />
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Banner title={title} tone="critical">
+                <p>{message}</p>
+              </Banner>
+              <InlineStack gap="300">
+                <Button onClick={() => window.location.reload()}>
+                  Refresh Page
+                </Button>
+                <Button url="/app" variant="plain">
+                  Go to Dashboard
+                </Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }

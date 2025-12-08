@@ -4,7 +4,7 @@ import { removeBackground } from "@imgly/background-removal-node";
 import sharp from "sharp";
 import { Storage } from "@google-cloud/storage";
 import { logger, createLogContext } from "../utils/logger.server";
-import { validateShopifyUrl } from "../utils/validate-shopify-url.server";
+import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -95,12 +95,13 @@ async function downloadToBuffer(
     maxDimension: number = 2048
 ): Promise<Buffer> {
     // Validate URL to prevent SSRF attacks
+    // Allow both Shopify CDN (product images) and GCS (processed/room images)
     try {
-        validateShopifyUrl(url, "product image URL");
+        validateTrustedUrl(url, "image URL");
     } catch (error) {
         logger.error(
             { ...logContext, stage: "download" },
-            "URL validation failed",
+            "URL validation failed - must be from Shopify CDN or GCS",
             error
         );
         throw error;
@@ -108,7 +109,7 @@ async function downloadToBuffer(
 
     logger.info(
         { ...logContext, stage: "download" },
-        `Downloading image stream from Shopify CDN: ${url.substring(0, 80)}...`
+        `Downloading image from trusted source: ${url.substring(0, 80)}...`
     );
 
     const response = await fetch(url);

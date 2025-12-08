@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { cleanupRoom } from "../services/gemini.server";
 import { StorageService } from "../services/storage.server";
+import { validateSessionId, validateMaskDataUrl } from "../utils/validation.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
@@ -14,13 +15,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const body = await request.json();
     const { room_session_id, mask_data_url } = body;
 
-    if (!room_session_id) {
-        return json({ status: "error", message: "room_session_id is required" }, { status: 400 });
+    // Validate session ID
+    const sessionResult = validateSessionId(room_session_id);
+    if (!sessionResult.valid) {
+        return json({ status: "error", message: sessionResult.error }, { status: 400 });
+    }
+    const sanitizedSessionId = sessionResult.sanitized!;
+
+    // Validate mask data URL if provided (limit to 10MB)
+    let sanitizedMaskUrl: string | undefined;
+    if (mask_data_url) {
+        const maskResult = validateMaskDataUrl(mask_data_url, 10 * 1024 * 1024);
+        if (!maskResult.valid) {
+            return json({ status: "error", message: maskResult.error }, { status: 400 });
+        }
+        sanitizedMaskUrl = maskResult.sanitized;
     }
 
     const roomSession = await prisma.roomSession.findFirst({
         where: {
-            id: room_session_id,
+            id: sanitizedSessionId,
             shop: { shopDomain: session.shop }
         }
     });
@@ -47,17 +61,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     try {
-        console.log(`[Cleanup] Processing cleanup for session ${room_session_id}`);
+        console.log(`[Cleanup] Processing cleanup for session ${sanitizedSessionId}`);
 
         // If mask data is provided, attempt cleanup; otherwise echo the current image per spec stub allowance.
-        const cleanedRoomImageUrl = mask_data_url
-            ? await cleanupRoom(currentRoomUrl, mask_data_url)
+        const cleanedRoomImageUrl = sanitizedMaskUrl
+            ? await cleanupRoom(currentRoomUrl, sanitizedMaskUrl)
             : currentRoomUrl;
 
         // Update session with the new cleaned image (no-op if echo)
         await prisma.roomSession.update({
-            where: { id: room_session_id },
-            data: { 
+            where: { id: sanitizedSessionId },
+            data: {
                 cleanedRoomImageUrl: cleanedRoomImageUrl,
                 geminiFileUri: null,  // Invalidate - new image needs new preload
                 lastUsedAt: new Date()
@@ -65,7 +79,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
 
         return json({
-            room_session_id,
+            room_session_id: sanitizedSessionId,
             cleaned_room_image_url: cleanedRoomImageUrl,
             cleanedRoomImageUrl: cleanedRoomImageUrl
         });

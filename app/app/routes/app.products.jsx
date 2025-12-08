@@ -1,5 +1,5 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, useSubmit, useSearchParams, useNavigation } from "@remix-run/react";
+import { useLoaderData, useFetcher, useSubmit, useSearchParams, useNavigation, useRouteError, isRouteErrorResponse } from "@remix-run/react";
 import { useState, useCallback, useEffect } from "react";
 import {
     Page,
@@ -334,6 +334,51 @@ export default function Products() {
                                     hasNext={pageInfo.hasNextPage}
                                     onNext={() => handlePagination("next")}
                                 />
+                            </InlineStack>
+                        </BlockStack>
+                    </Card>
+                </Layout.Section>
+            </Layout>
+        </Page>
+    );
+}
+
+// Error boundary to catch and display errors gracefully
+export function ErrorBoundary() {
+    const error = useRouteError();
+
+    let title = "Something went wrong";
+    let message = "An unexpected error occurred while loading products. Please try refreshing the page.";
+
+    if (isRouteErrorResponse(error)) {
+        title = `${error.status} ${error.statusText}`;
+        if (error.status === 401 || error.status === 403) {
+            message = "You don't have permission to view this page. Please check your app installation.";
+        } else if (error.status === 404) {
+            message = "The products page could not be found.";
+        } else {
+            message = error.data?.message || "Failed to load products data.";
+        }
+    } else if (error instanceof Error) {
+        message = error.message;
+    }
+
+    return (
+        <Page title="Products">
+            <Layout>
+                <Layout.Section>
+                    <Card>
+                        <BlockStack gap="400">
+                            <Banner title={title} tone="critical">
+                                <p>{message}</p>
+                            </Banner>
+                            <InlineStack gap="300">
+                                <Button onClick={() => window.location.reload()}>
+                                    Refresh Page
+                                </Button>
+                                <Button url="/app" variant="plain">
+                                    Go to Dashboard
+                                </Button>
                             </InlineStack>
                         </BlockStack>
                     </Card>
