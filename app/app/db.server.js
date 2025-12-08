@@ -121,36 +121,17 @@ export async function checkDatabaseConnection() {
 /**
  * Get current pool metrics (for debugging)
  * Note: Prisma doesn't expose pool metrics directly,
- * but we can track active queries via middleware
+ * but we can track queries via the metrics object below
  */
-let activeQueries = 0;
-let totalQueries = 0;
-
-prisma.$use(async (params, next) => {
-  activeQueries++;
-  totalQueries++;
-
-  const start = Date.now();
-
-  try {
-    return await next(params);
-  } finally {
-    activeQueries--;
-    const duration = Date.now() - start;
-
-    // Log slow queries in production
-    if (duration > 5000) {
-      console.warn(
-        `[Prisma] Very slow query (${duration}ms): ${params.model}.${params.action}`
-      );
-    }
-  }
-});
+const queryMetrics = {
+  activeQueries: 0,
+  totalQueries: 0,
+};
 
 export function getPoolMetrics() {
   return {
-    activeQueries,
-    totalQueries,
+    activeQueries: queryMetrics.activeQueries,
+    totalQueries: queryMetrics.totalQueries,
     poolSize: parseInt(process.env.DB_POOL_SIZE || "10", 10),
     poolTimeout: parseInt(process.env.DB_POOL_TIMEOUT || "20", 10),
   };
