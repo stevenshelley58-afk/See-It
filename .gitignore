@@ -33,10 +33,9 @@ nul  # Windows reserved device name - prevent accidental creation
 *.swo
 *~
 
-# Prisma
+# Prisma (dev databases only - migrations should be committed!)
 prisma/dev.sqlite
 prisma/dev.sqlite-journal
-prisma/migrations/
 
 # Shopify
 .shopify/

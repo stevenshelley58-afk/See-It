@@ -6,7 +6,7 @@
  * ║   This file is the SINGLE SOURCE OF TRUTH for all AI model names.         ║
  * ║   These model names have been verified against Google's official docs.    ║
  * ║                                                                            ║
- * ║   Last Verified: December 5, 2024                                          ║
+ * ║   Last Verified: December 8, 2025 (TODO: verify models against docs)       ║
  * ║   Docs: https://ai.google.dev/gemini-api/docs/image-generation            ║
  * ║                                                                            ║
  * ║   ⚠️  AGENTS: DO NOT CHANGE THESE VALUES ⚠️                               ║

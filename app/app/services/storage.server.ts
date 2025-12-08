@@ -28,8 +28,6 @@ export class StorageService {
             expires: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
         });
 
-        console.log(`[Storage] Generated presigned URLs for ${key}`);
-        
         return { 
             uploadUrl, 
             publicUrl,

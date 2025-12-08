@@ -6,9 +6,16 @@ import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
 
 function getCorsHeaders(shopDomain: string | null): Record<string, string> {
-    const origin = shopDomain ? `https://${shopDomain}` : "";
+    // Only set CORS origin if we have a valid shop domain
+    // Empty origin or "*" would be a security risk
+    if (!shopDomain) {
+        return {
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        };
+    }
     return {
-        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Origin": `https://${shopDomain}`,
         "Access-Control-Allow-Methods": "GET, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
     };
