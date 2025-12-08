@@ -1,4 +1,4 @@
-// Render endpoint - v1.0.19 - Async Queue Implementation
+// Render endpoint - v1.0.20 - With Input Validation
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -6,6 +6,13 @@ import { checkQuota } from "../quota.server";
 import { checkRateLimit } from "../rate-limit.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
+import {
+    validatePlacement,
+    validateSessionId,
+    validateProductId,
+    validateStylePreset,
+    validateQuality
+} from "../utils/validation.server";
 
 export const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -36,28 +43,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const body = await request.json();
         const { product_id, variant_id, room_session_id, placement, config } = body;
 
-        // Validate required placement data
-        if (!placement || !Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
+        // Validate placement data with sanitization
+        const placementResult = validatePlacement(placement);
+        if (!placementResult.valid) {
             logger.error(
                 { ...logContext, stage: "validation" },
-                `Invalid placement data: ${JSON.stringify(placement)}`
+                `Invalid placement data: ${placementResult.error}`
             );
             return json(
-                { error: "invalid_placement", message: "Placement x, y, and scale are required" },
+                { error: "invalid_placement", message: placementResult.error },
                 { status: 400, headers: CORS_HEADERS }
             );
         }
+        const sanitizedPlacement = placementResult.sanitized!;
 
         // Validate room_session_id
-        if (!room_session_id) {
+        const sessionResult = validateSessionId(room_session_id);
+        if (!sessionResult.valid) {
             return json(
-                { error: "missing_session", message: "room_session_id is required" },
+                { error: "invalid_session", message: sessionResult.error },
                 { status: 400, headers: CORS_HEADERS }
             );
         }
+        const sanitizedSessionId = sessionResult.sanitized!;
+
+        // Validate product_id
+        const productResult = validateProductId(product_id);
+        if (!productResult.valid) {
+            return json(
+                { error: "invalid_product", message: productResult.error },
+                { status: 400, headers: CORS_HEADERS }
+            );
+        }
+        const sanitizedProductId = productResult.sanitized!;
 
         // Rate limiting check
-        if (!checkRateLimit(room_session_id || 'anonymous')) {
+        if (!checkRateLimit(sanitizedSessionId)) {
             return json(
                 { error: "rate_limit_exceeded", message: "Too many requests. Please wait a moment." },
                 { status: 429, headers: CORS_HEADERS }
@@ -74,7 +95,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         // Update log context
-        const shopLogContext = { ...logContext, shopId: shop.id, productId: product_id };
+        const shopLogContext = { ...logContext, shopId: shop.id, productId: sanitizedProductId };
 
         // Quota Check
         try {
@@ -88,18 +109,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             throw error;
         }
 
-        // Create Job - Queued
+        // Validate and sanitize style/quality from config
+        const stylePreset = validateStylePreset(config?.style_preset);
+        const quality = validateQuality(config?.quality);
+
+        // Create Job - Queued with sanitized inputs
         const job = await prisma.renderJob.create({
             data: {
                 shop: { connect: { id: shop.id } },
-                productId: product_id,
-                variantId: variant_id || null,
-                roomSession: room_session_id ? { connect: { id: room_session_id } } : undefined,
-                placementX: placement.x,
-                placementY: placement.y,
-                placementScale: placement.scale || 1.0,
-                stylePreset: config?.style_preset || "neutral",
-                quality: config?.quality || "standard",
+                productId: sanitizedProductId,
+                variantId: variant_id ? String(variant_id) : null,
+                roomSession: { connect: { id: sanitizedSessionId } },
+                placementX: sanitizedPlacement.x,
+                placementY: sanitizedPlacement.y,
+                placementScale: sanitizedPlacement.scale,
+                stylePreset,
+                quality,
                 configJson: JSON.stringify(config || {}),
                 status: "queued",
                 createdAt: new Date(),

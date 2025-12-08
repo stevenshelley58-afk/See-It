@@ -2,6 +2,7 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { StorageService } from "../services/storage.server";
 import prisma from "../db.server";
+import { validateSessionId } from "../utils/validation.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
@@ -13,8 +14,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const body = await request.json();
     const { room_session_id } = body;
 
+    // Validate session ID
+    const sessionResult = validateSessionId(room_session_id);
+    if (!sessionResult.valid) {
+        return json({ error: sessionResult.error }, { status: 400 });
+    }
+    const sanitizedSessionId = sessionResult.sanitized!;
+
     const roomSession = await prisma.roomSession.findUnique({
-        where: { id: room_session_id },
+        where: { id: sanitizedSessionId },
         include: { shop: true }
     });
 
@@ -37,7 +45,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Update room session with the key (if not already set) and update last used timestamp
     // Keep URL for backward compatibility but it's now derived from key
     await prisma.roomSession.update({
-        where: { id: room_session_id },
+        where: { id: sanitizedSessionId },
         data: {
             originalRoomImageKey: key, // Ensure key is always set
             originalRoomImageUrl: publicUrl, // Legacy field - keep for compatibility
@@ -46,9 +54,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     // Spec: returns { "ok": true } (Routes → Storefront app proxy routes). Keep URL fields for caller compatibility.
-    return json({ 
+    return json({
         ok: true,
         room_image_url: publicUrl,
-        roomImageUrl: publicUrl 
+        roomImageUrl: publicUrl
     });
 };
