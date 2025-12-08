@@ -4,24 +4,29 @@ import db from "../db.server";
 export const action = async ({ request }) => {
   const { shop, session, topic } = await authenticate.webhook(request);
 
-  console.log(`Received ${topic} webhook for ${shop}`);
+  console.log(`[webhook:uninstalled] Received ${topic} for ${shop}`);
 
   try {
-    // Mark shop as uninstalled instead of deleting
-    await db.shop.update({
+    // Use updateMany which doesn't throw if no records match
+    // This handles the case where shop doesn't exist (e.g., partial install)
+    const result = await db.shop.updateMany({
       where: { shopDomain: shop },
       data: { uninstalledAt: new Date() }
     });
 
-    // Delete sessions
-    if (session) {
-      await db.session.deleteMany({ where: { shop } });
+    // Delete sessions regardless of whether shop existed
+    await db.session.deleteMany({ where: { shop } });
+
+    if (result.count > 0) {
+      console.log(`[webhook:uninstalled] Marked shop ${shop} as uninstalled`);
+    } else {
+      console.log(`[webhook:uninstalled] Shop ${shop} not found, sessions cleaned up`);
     }
 
-    console.log(`Marked shop ${shop} as uninstalled`);
     return new Response();
   } catch (error) {
-    console.error(`Error handling APP_UNINSTALLED webhook for ${shop}:`, error);
+    console.error(`[webhook:uninstalled] Error for ${shop}:`, error);
+    // Return 200 to prevent Shopify from retrying
     return new Response();
   }
 };
