@@ -65,3 +65,4 @@ export async function getShopFromSession(
     shopId: shop.id,
   };
 }
+

@@ -1,5 +1,5 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, useSubmit } from "@remix-run/react";
+import { useLoaderData, useFetcher, useSubmit, useSearchParams, useNavigation } from "@remix-run/react";
 import { useState, useCallback, useEffect } from "react";
 import {
     Page,
@@ -12,66 +12,94 @@ import {
     BlockStack,
     InlineStack,
     Select,
-    Banner
+    Banner,
+    Pagination
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getStatusInfo, formatErrorMessage } from "../utils/status-mapping";
 
+import { PLANS } from "../billing";
+
 export const loader = async ({ request }) => {
-    const { admin, session } = await authenticate.admin(request);
+    const { admin, session, billing } = await authenticate.admin(request);
+    const url = new URL(request.url);
+    const cursor = url.searchParams.get("cursor");
+    const direction = url.searchParams.get("direction") || "next";
 
-    // Fetch ALL products using pagination
-    let allProducts = [];
-    let hasNextPage = true;
-    let cursor = null;
+    // Pagination parameters
+    const pageSize = 20;
+    let queryArgs = { first: pageSize };
 
-    while (hasNextPage) {
-        const response = await admin.graphql(
-            `#graphql
-            query getProducts($cursor: String) {
-                products(first: 50, after: $cursor) {
-                    edges {
-                        node {
-                            id
-                            title
-                            handle
-                            featuredImage {
-                                id
-                                url
-                                altText
-                            }
-                        }
-                        cursor
-                    }
-                    pageInfo {
-                        hasNextPage
-                    }
-                }
-            }`,
-            { variables: { cursor } }
-        );
-
-        const responseJson = await response.json();
-        const { edges, pageInfo } = responseJson.data.products;
-        
-        allProducts = [...allProducts, ...edges.map((edge) => edge.node)];
-        hasNextPage = pageInfo.hasNextPage;
-        
-        if (edges.length > 0) {
-            cursor = edges[edges.length - 1].cursor;
+    if (cursor) {
+        if (direction === "previous") {
+            queryArgs = { last: pageSize, before: cursor };
+        } else {
+            queryArgs = { first: pageSize, after: cursor };
         }
     }
 
-    const products = allProducts;
+    // 1. Fetch Page of Products
+    const response = await admin.graphql(
+        `#graphql
+        query getProducts($first: Int, $last: Int, $after: String, $before: String) {
+            products(first: $first, last: $last, after: $after, before: $before) {
+                edges {
+                    node {
+                        id
+                        title
+                        handle
+                        featuredImage {
+                            id
+                            url
+                            altText
+                        }
+                    }
+                    cursor
+                }
+                pageInfo {
+                    hasNextPage
+                    hasPreviousPage
+                    startCursor
+                    endCursor
+                }
+            }
+        }`,
+        { variables: queryArgs }
+    );
 
+    const responseJson = await response.json();
+    const { edges, pageInfo } = responseJson.data.products;
+    const products = edges.map((edge) => edge.node);
+
+    // 2. Billing Check & Shop Sync
+    // Check if store has active PRO subscription
+    let planId = PLANS.FREE.id;
+    let dailyQuota = PLANS.FREE.dailyQuota;
+    let monthlyQuota = PLANS.FREE.monthlyQuota;
+
+    try {
+        const { hasActivePayment } = await billing.check({
+            plans: [PLANS.PRO.name],
+            isTest: true, // Always allow test charges
+        });
+
+        if (hasActivePayment) {
+            planId = PLANS.PRO.id;
+            dailyQuota = PLANS.PRO.dailyQuota;
+            monthlyQuota = PLANS.PRO.monthlyQuota;
+        }
+    } catch (error) {
+        console.error("Billing check failed", error);
+        // Fallback to FREE default safe
+    }
+
+    // Ensure Shop Record Exists & Is Synced
     let shop = await prisma.shop.findUnique({
         where: { shopDomain: session.shop },
     });
 
-    // Create shop if it doesn't exist
     if (!shop) {
-        // Get shop details from Shopify
         const shopResponse = await admin.graphql(
             `#graphql
                 query {
@@ -83,45 +111,88 @@ export const loader = async ({ request }) => {
         );
         const shopData = await shopResponse.json();
         const shopifyShopId = shopData.data.shop.id.replace('gid://shopify/Shop/', '');
-        
-        const { PLANS } = await import("../billing");
+
         shop = await prisma.shop.create({
             data: {
                 shopDomain: session.shop,
                 shopifyShopId: shopifyShopId,
                 accessToken: session.accessToken || "pending",
-                plan: PLANS.FREE.id,
-                dailyQuota: PLANS.FREE.dailyQuota,
-                monthlyQuota: PLANS.FREE.monthlyQuota
+                plan: planId,
+                dailyQuota: dailyQuota,
+                monthlyQuota: monthlyQuota
             }
         });
+    } else {
+        // Sync plan if changed
+        if (shop.plan !== planId) {
+            shop = await prisma.shop.update({
+                where: { id: shop.id },
+                data: {
+                    plan: planId,
+                    dailyQuota: dailyQuota,
+                    monthlyQuota: monthlyQuota
+                }
+            });
+        }
     }
 
+    // 3. Get Asset Status for Current Page Only
     let assetsMap = {};
-    let statusCounts = { ready: 0, pending: 0, failed: 0, stale: 0, unprepared: 0 };
-
-    if (shop) {
-        const assets = await prisma.productAsset.findMany({
-            where: { shopId: shop.id }
+    if (shop && products.length > 0) {
+        const productIds = products.map(p => p.id.split('/').pop()); // Handle both gid and raw id if needed, usually gid in response
+        // Note: product.id from GraphQL is "gid://shopify/Product/123456"
+        // Database stores "123456" usually. Let's normalize.
+        const normalizedIds = products.map(p => {
+            return p.id.split('/').pop();
         });
+
+        const assets = await prisma.productAsset.findMany({
+            where: {
+                shopId: shop.id,
+                productId: { in: normalizedIds }
+            }
+        });
+
         assets.forEach(a => {
-            assetsMap[a.productId] = a;
-            statusCounts[a.status] = (statusCounts[a.status] || 0) + 1;
+            assetsMap[`gid://shopify/Product/${a.productId}`] = a;
         });
     }
 
-    // Count unprepared products
-    statusCounts.unprepared = products.length - Object.keys(assetsMap).length;
+    // 4. Get Global Status Counts (Aggregated)
+    // This is cheap in SQL
+    const statusGroups = await prisma.productAsset.groupBy({
+        by: ['status'],
+        where: { shopId: shop.id },
+        _count: { status: true }
+    });
 
-    return json({ products, assetsMap, statusCounts });
+    const statusCounts = { ready: 0, pending: 0, failed: 0, stale: 0, processing: 0, unprepared: 0 };
+    statusGroups.forEach(group => {
+        statusCounts[group.status] = group._count.status;
+    });
+
+    // Note: statusCounts.unprepared cannot be accurately calculated without total shop product count
+    // We will omit it or set it to "many"
+    statusCounts.unprepared = -1; // Indicator for "Unknown/Many"
+
+    return json({
+        products,
+        assetsMap,
+        statusCounts,
+        pageInfo
+    });
 };
 
 export default function Products() {
-    const { products, assetsMap, statusCounts } = useLoaderData();
+    const { products, assetsMap, statusCounts, pageInfo } = useLoaderData();
     const fetcher = useFetcher();
     const submit = useSubmit();
     const [selectedItems, setSelectedItems] = useState([]);
     const [statusFilter, setStatusFilter] = useState("all");
+    const [params, setParams] = useSearchParams();
+    const navigation = useNavigation();
+
+    const isLoading = navigation.state === "loading";
 
     const handleSelectionChange = useCallback((selection) => {
         setSelectedItems(selection);
@@ -129,47 +200,39 @@ export default function Products() {
 
     const handleBatchPrepare = useCallback(() => {
         const formData = new FormData();
-        formData.append("productIds", JSON.stringify(selectedItems));
+        // Extract numeric IDs from GIDs for the backend
+        const numericIds = selectedItems.map(id => id.split('/').pop());
+        formData.append("productIds", JSON.stringify(numericIds));
         submit(formData, { method: "post", action: "/api/products/batch-prepare" });
         setSelectedItems([]);
     }, [selectedItems, submit]);
 
-    const handleBatchRegenerateStale = useCallback(() => {
-        const staleProductIds = products
-            .filter(p => assetsMap[p.id]?.status === "stale")
-            .map(p => p.id);
-
-        const formData = new FormData();
-        formData.append("productIds", JSON.stringify(staleProductIds));
-        submit(formData, { method: "post", action: "/api/products/batch-prepare" });
-    }, [products, assetsMap, submit]);
-
-    // Filter products based on selected status
+    // Client-side filtering only affects the current page view, 
+    // but useful for quick visual check on the page.
     const filteredProducts = products.filter((item) => {
         if (statusFilter === "all") return true;
-
         const asset = assetsMap[item.id];
         const status = asset ? asset.status : "unprepared";
-
         return status === statusFilter;
     });
 
     const filterOptions = [
-        { label: `All (${products.length})`, value: "all" },
+        { label: `All`, value: "all" },
         { label: `Ready (${statusCounts.ready})`, value: "ready" },
         { label: `Pending (${statusCounts.pending})`, value: "pending" },
+        { label: `Processing (${statusCounts.processing || 0})`, value: "processing" },
         { label: `Failed (${statusCounts.failed})`, value: "failed" },
-        { label: `Stale (${statusCounts.stale})`, value: "stale" },
-        { label: `Unprepared (${statusCounts.unprepared})`, value: "unprepared" },
     ];
 
-    // Show error toast if prepare action failed
-    useEffect(() => {
-        if (fetcher.data?.error) {
-            // Error is already shown in Banner, but we could add a toast here if needed
-            console.error("Prepare action error:", fetcher.data.error, "Request ID:", fetcher.data.requestId);
-        }
-    }, [fetcher.data]);
+    const handlePagination = (direction) => {
+        const cursor = direction === "next" ? pageInfo.endCursor : pageInfo.startCursor;
+        setParams(prev => {
+            prev.set("cursor", cursor);
+            prev.set("direction", direction);
+            return prev;
+        });
+        setSelectedItems([]); // Clear selection on page change
+    };
 
     return (
         <Page
@@ -178,52 +241,44 @@ export default function Products() {
                 selectedItems.length > 0 ? {
                     content: `Batch Prepare Selected (${selectedItems.length})`,
                     onAction: handleBatchPrepare,
+                    loading: navigation.state === "submitting" // Show spinner on button
                 } : undefined
-            }
-            secondaryActions={
-                statusCounts.stale > 0 ? [{
-                    content: `Batch Regenerate Stale (${statusCounts.stale})`,
-                    onAction: handleBatchRegenerateStale,
-                }] : []
             }
         >
             <Layout>
                 <Layout.Section>
-                    {fetcher.data?.message || fetcher.data?.error ? (
-                        <Banner tone={fetcher.data.errors?.length > 0 || fetcher.data.error ? "critical" : "success"}>
-                            <BlockStack gap="200">
-                                <p>{fetcher.data.message || fetcher.data.error}</p>
-                                {fetcher.data.requestId && (
-                                    <Text variant="bodySm" tone="subdued">
-                                        Request ID: {fetcher.data.requestId} (use this to correlate with backend logs)
-                                    </Text>
-                                )}
-                                {fetcher.data.errors?.length > 0 && (
-                                    <BlockStack gap="100">
-                                        {fetcher.data.errors.map((err, idx) => (
-                                            <Text key={idx} variant="bodySm" tone="critical">
-                                                Product {err.productId}: {err.error}
-                                            </Text>
-                                        ))}
-                                    </BlockStack>
-                                )}
-                            </BlockStack>
+                    {/* Show queued message from batch prepare action */}
+                    {fetcher.data?.message && (
+                        <Banner tone={fetcher.data.errors?.length > 0 ? "warning" : "success"}>
+                            <p>{fetcher.data.message}</p>
                         </Banner>
-                    ) : null}
+                    )}
+
                     <Card>
                         <BlockStack gap="400">
-                            <Select
-                                label="Filter by status"
-                                options={filterOptions}
-                                value={statusFilter}
-                                onChange={setStatusFilter}
-                            />
+                            <InlineStack align="spaceBetween">
+                                <Select
+                                    label="Filter page by status"
+                                    options={filterOptions}
+                                    value={statusFilter}
+                                    onChange={setStatusFilter}
+                                    labelInline
+                                />
+                                <Pagination
+                                    hasPrevious={pageInfo.hasPreviousPage}
+                                    onPrevious={() => handlePagination("previous")}
+                                    hasNext={pageInfo.hasNextPage}
+                                    onNext={() => handlePagination("next")}
+                                />
+                            </InlineStack>
+
                             <ResourceList
                                 resourceName={{ singular: "product", plural: "products" }}
                                 items={filteredProducts}
                                 selectedItems={selectedItems}
                                 onSelectionChange={handleSelectionChange}
                                 selectable
+                                loading={isLoading}
                                 renderItem={(item) => {
                                     const { id, title, featuredImage } = item;
                                     const asset = assetsMap[id];
@@ -235,135 +290,51 @@ export default function Products() {
                                             accessibilityLabel={`View details for ${title}`}
                                         >
                                             <InlineStack gap="400" align="start" blockAlign="start" wrap={false}>
-                                                {/* Image comparison section */}
-                                                <div style={{ 
-                                                    display: 'flex', 
-                                                    gap: '12px', 
-                                                    flexShrink: 0,
-                                                    padding: '8px',
-                                                    background: '#f6f6f7',
-                                                    borderRadius: '8px'
-                                                }}>
-                                                    {/* Original image */}
-                                                    <div style={{ textAlign: 'center' }}>
-                                                        <div style={{ 
-                                                            width: '80px', 
-                                                            height: '80px', 
-                                                            borderRadius: '6px',
-                                                            overflow: 'hidden',
-                                                            border: '1px solid #e1e3e5',
-                                                            background: 'white'
-                                                        }}>
-                                                            <img 
-                                                                src={featuredImage?.url || ""} 
-                                                                alt={featuredImage?.altText || title}
-                                                                style={{ 
-                                                                    width: '100%', 
-                                                                    height: '100%', 
-                                                                    objectFit: 'cover' 
-                                                                }}
-                                                            />
-                                                        </div>
-                                                        <Text variant="bodySm" tone="subdued" as="p">Original</Text>
-                                                    </div>
-
-                                                    {/* Arrow or separator */}
-                                                    <div style={{ 
-                                                        display: 'flex', 
-                                                        alignItems: 'center',
-                                                        color: '#8c9196',
-                                                        fontSize: '18px'
-                                                    }}>
-                                                        →
-                                                    </div>
-
-                                                    {/* Prepared image */}
-                                                    <div style={{ textAlign: 'center' }}>
-                                                        <div style={{ 
-                                                            width: '80px', 
-                                                            height: '80px', 
-                                                            borderRadius: '6px',
-                                                            overflow: 'hidden',
-                                                            border: asset?.status === 'ready' ? '2px solid #008060' : '1px dashed #8c9196',
-                                                            background: 'white',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center'
-                                                        }}>
-                                                            {asset?.preparedImageUrl ? (
-                                                                <img 
-                                                                    src={asset.preparedImageUrl} 
-                                                                    alt={`Prepared ${title}`}
-                                                                    style={{ 
-                                                                        width: '100%', 
-                                                                        height: '100%', 
-                                                                        objectFit: 'cover' 
-                                                                    }}
-                                                                />
-                                                            ) : (
-                                                                <Text variant="bodySm" tone="subdued" as="span">—</Text>
-                                                            )}
-                                                        </div>
-                                                        <Text variant="bodySm" tone={asset?.status === 'ready' ? 'success' : 'subdued'} as="p">
-                                                            {asset?.status === 'ready' ? '✓ Prepared' : 'Prepared'}
-                                                        </Text>
-                                                    </div>
+                                                <div style={{ width: '60px', height: '60px', flexShrink: 0 }}>
+                                                    {featuredImage ? (
+                                                        <img
+                                                            src={featuredImage.url}
+                                                            alt={featuredImage.altText || title}
+                                                            style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px' }}
+                                                        />
+                                                    ) : (
+                                                        <div style={{ width: '100%', height: '100%', background: '#eee', borderRadius: '4px' }} />
+                                                    )}
                                                 </div>
 
-                                                {/* Product info section */}
                                                 <BlockStack gap="200" inlineAlign="start">
                                                     <Text variant="bodyMd" fontWeight="bold" as="h3">
                                                         {title}
                                                     </Text>
-                                                    <InlineStack gap="200" align="start">
-                                                        <Badge tone={statusInfo.tone}>
-                                                            {statusInfo.label}
-                                                        </Badge>
-                                                    </InlineStack>
-                                                    {statusInfo.explanation && (
-                                                        <Text variant="bodySm" tone="subdued">
-                                                            {statusInfo.explanation}
-                                                        </Text>
-                                                    )}
-                                                    {asset?.status === "failed" && asset?.errorMessage && (
-                                                        <BlockStack gap="100">
-                                                            <Text variant="bodySm" tone="critical" fontWeight="medium">
-                                                                Error: {formatErrorMessage(asset.errorMessage)}
+                                                    <InlineStack gap="200">
+                                                        <Badge tone={statusInfo.tone}>{statusInfo.label}</Badge>
+                                                        {asset?.updatedAt && (
+                                                            <Text variant="bodySm" tone="subdued">
+                                                                {new Date(asset.updatedAt).toLocaleDateString()}
                                                             </Text>
-                                                            {fetcher.data?.requestId && (
-                                                                <Text variant="bodySm" tone="subdued">
-                                                                    Request ID: {fetcher.data.requestId}
-                                                                </Text>
-                                                            )}
-                                                        </BlockStack>
-                                                    )}
-                                                    {asset?.updatedAt && (
-                                                        <Text variant="bodySm" tone="subdued">
-                                                            Updated: {new Date(asset.updatedAt).toLocaleString()}
+                                                        )}
+                                                    </InlineStack>
+                                                    {/* Processing indicator */}
+                                                    {asset?.status === 'processing' && (
+                                                        <Text variant="bodySm" tone="attention">
+                                                            Processing in background...
                                                         </Text>
                                                     )}
                                                 </BlockStack>
-
-                                                {/* Action button - pushed to the right */}
-                                                <div style={{ marginLeft: 'auto' }}>
-                                                    <fetcher.Form method="post" action="/api/products/prepare">
-                                                        <input type="hidden" name="productId" value={id} />
-                                                        <input type="hidden" name="imageUrl" value={featuredImage?.url || ""} />
-                                                        <input type="hidden" name="imageId" value={featuredImage?.id || ""} />
-                                                        <Button 
-                                                            submit 
-                                                            disabled={statusInfo.buttonDisabled || !featuredImage}
-                                                            loading={statusInfo.showSpinner && fetcher.state === "submitting"}
-                                                        >
-                                                            {statusInfo.buttonLabel}
-                                                        </Button>
-                                                    </fetcher.Form>
-                                                </div>
                                             </InlineStack>
                                         </ResourceList.Item>
                                     );
                                 }}
                             />
+
+                            <InlineStack align="center">
+                                <Pagination
+                                    hasPrevious={pageInfo.hasPreviousPage}
+                                    onPrevious={() => handlePagination("previous")}
+                                    hasNext={pageInfo.hasNextPage}
+                                    onNext={() => handlePagination("next")}
+                                />
+                            </InlineStack>
                         </BlockStack>
                     </Card>
                 </Layout.Section>

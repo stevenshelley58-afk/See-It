@@ -2,7 +2,7 @@ import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { enforceQuota } from "../quota.server";
-import { prepareProduct } from "../services/gemini.server";
+
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId, addRequestIdHeader } from "../utils/request-context.server";
 import { getShopFromSession } from "../utils/shop.server";
@@ -52,15 +52,14 @@ export const action = async ({ request }) => {
             throw error;
         }
 
-        let processed = 0;
+        let queued = 0;
         const errors = [];
 
-    for (const productId of productIds) {
-        let assetId; // Declare outside try block so catch can access it
-        try {
-            // Fetch product details from Shopify GraphQL
-            const response = await admin.graphql(
-                `#graphql
+        for (const productId of productIds) {
+            try {
+                // Fetch product details from Shopify GraphQL
+                const response = await admin.graphql(
+                    `#graphql
                 query getProduct($id: ID!) {
                   product(id: $id) {
                     id
@@ -70,142 +69,100 @@ export const action = async ({ request }) => {
                     }
                   }
                 }`,
-                {
-                    variables: { id: productId }
-                }
-            );
-
-            const responseJson = await response.json();
-            const product = responseJson.data?.product;
-
-            if (!product || !product.featuredImage) {
-                errors.push({ productId, error: "No featured image found" });
-                continue;
-            }
-
-            const imageId = product.featuredImage.id;
-            const imageUrl = product.featuredImage.url;
-
-            // Validate image URL to prevent SSRF attacks (defense in depth)
-            try {
-                validateShopifyUrl(imageUrl, "product image URL");
-            } catch (urlError) {
-                logger.error(
-                    createLogContext("prepare", requestId, "batch-validation", { shopId, productId }),
-                    "Invalid image URL from Shopify GraphQL (unexpected)",
-                    urlError
+                    {
+                        variables: { id: productId }
+                    }
                 );
-                errors.push({ productId, error: "Invalid image URL from Shopify" });
-                continue;
-            }
 
-            // Check if asset already exists
-            const existing = await prisma.productAsset.findFirst({
-                where: {
-                    shopId,
-                    productId: String(productId)
+                const responseJson = await response.json();
+                const product = responseJson.data?.product;
+
+                if (!product || !product.featuredImage) {
+                    errors.push({ productId, error: "No featured image found" });
+                    continue;
                 }
-            });
 
-            if (existing) {
-                assetId = existing.id;
-                // Update existing asset to pending with batch strategy
-                await prisma.productAsset.update({
-                    where: { id: existing.id },
-                    data: {
-                        status: "pending",
-                        prepStrategy: "batch",
-                        sourceImageUrl: String(imageUrl),
-                        sourceImageId: String(imageId),
-                        updatedAt: new Date()
-                    }
-                });
-            } else {
-                // Create new asset with batch strategy
-                const newAsset = await prisma.productAsset.create({
-                    data: {
-                        shopId,
-                        productId: String(productId),
-                        sourceImageId: String(imageId),
-                        sourceImageUrl: String(imageUrl),
-                        status: "pending",
-                        prepStrategy: "batch",
-                        promptVersion: 1,
-                        createdAt: new Date()
-                    }
-                });
-                assetId = newAsset.id;
-            }
+                const imageId = product.featuredImage.id;
+                const imageUrl = product.featuredImage.url;
 
-            // Process the image immediately using local Gemini service
-            const preparedImageUrl = await prepareProduct(
-                String(imageUrl),
-                shopId,
-                String(productId),
-                assetId,
-                requestId
-            );
-
-            // Update as ready
-            await prisma.productAsset.update({
-                where: { id: assetId },
-                data: {
-                    status: "ready",
-                    preparedImageUrl: preparedImageUrl,
-                    updatedAt: new Date()
-                }
-            });
-
-            processed++;
-
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "Unknown error";
-            logger.error(
-                createLogContext("prepare", requestId, "batch-item", {
-                    shopId,
-                    productId: String(productId),
-                    assetId,
-                }),
-                "Error processing product in batch",
-                error
-            );
-            
-            // Update asset status to failed (only if assetId was assigned)
-            if (assetId) {
+                // Validate image URL
                 try {
+                    validateShopifyUrl(imageUrl, "product image URL");
+                } catch (urlError) {
+                    logger.error(
+                        createLogContext("prepare", requestId, "batch-validation", { shopId, productId }),
+                        "Invalid image URL from Shopify GraphQL (unexpected)",
+                        urlError
+                    );
+                    errors.push({ productId, error: "Invalid image URL from Shopify" });
+                    continue;
+                }
+
+                // Create or Update asset to "pending"
+                // Upsert logic
+                const existing = await prisma.productAsset.findFirst({
+                    where: {
+                        shopId,
+                        productId: String(productId)
+                    }
+                });
+
+                if (existing) {
                     await prisma.productAsset.update({
-                        where: { id: assetId },
+                        where: { id: existing.id },
                         data: {
-                            status: "failed",
-                            errorMessage: errorMessage.substring(0, 500)
+                            status: "pending",
+                            prepStrategy: "batch",
+                            sourceImageUrl: String(imageUrl),
+                            sourceImageId: String(imageId),
+                            updatedAt: new Date()
                         }
                     });
-                } catch (dbError) {
-                    logger.error(
-                        createLogContext("prepare", requestId, "batch-db-update", { shopId, productId, assetId }),
-                        "Failed to update asset to failed status",
-                        dbError
-                    );
+                } else {
+                    await prisma.productAsset.create({
+                        data: {
+                            shopId,
+                            productId: String(productId),
+                            sourceImageId: String(imageId),
+                            sourceImageUrl: String(imageUrl),
+                            status: "pending",
+                            prepStrategy: "batch",
+                            promptVersion: 1,
+                            createdAt: new Date()
+                        }
+                    });
                 }
+
+                queued++;
+
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : "Unknown error";
+                logger.error(
+                    createLogContext("prepare", requestId, "batch-item-queue", {
+                        shopId,
+                        productId: String(productId),
+                    }),
+                    "Error queuing product for batch",
+                    error
+                );
+                errors.push({
+                    productId,
+                    error: errorMessage
+                });
             }
-            
-            errors.push({
-                productId,
-                error: errorMessage
-            });
         }
-    }
 
         logger.info(
             createLogContext("prepare", requestId, "batch-complete", { shopId }),
-            `Batch prepare completed: ${processed} processed, ${errors.length} failed`
+            `Batch queued: ${queued} queued, ${errors.length} failed init`
         );
 
         return addRequestIdHeader(
             json({
-                processed,
+                processed: queued, // Keep 'processed' key for frontend compatibility logic
+                queued,
                 errors,
-                message: `Processed ${processed} products${errors.length > 0 ? `, ${errors.length} failed` : ''}`,
+                message: `Queued ${queued} products for background processing${errors.length > 0 ? `, ${errors.length} failed to queue` : ''}`,
                 requestId
             }),
             requestId

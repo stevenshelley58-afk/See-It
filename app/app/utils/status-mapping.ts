@@ -111,3 +111,4 @@ export function formatErrorMessage(errorMessage: string | null | undefined, maxL
     if (errorMessage.length <= maxLength) return errorMessage;
     return errorMessage.substring(0, maxLength) + "...";
 }
+

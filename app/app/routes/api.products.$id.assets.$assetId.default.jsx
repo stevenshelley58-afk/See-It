@@ -57,3 +57,4 @@ export const action = async ({ request, params }) => {
         message: "Default asset updated successfully"
     });
 };
+

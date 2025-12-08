@@ -130,3 +130,4 @@
 - **Input:** assetId, status, preparedImageUrl (or errorMessage)
 - **Output:** Updated ProductAsset record
 - **Failure:** Throw Error, log with stage="db-update", attempt recovery
+

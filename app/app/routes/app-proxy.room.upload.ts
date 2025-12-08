@@ -51,3 +51,4 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         roomImageFutureUrl: publicUrl
     });
 };
+

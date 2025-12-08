@@ -11,9 +11,9 @@ import { validateShopifyUrl } from "../utils/validate-shopify-url.server";
 // Import from the centralized config to prevent accidental changes.
 // See: app/config/ai-models.config.ts
 // ============================================================================
-import { 
-    GEMINI_IMAGE_MODEL_PRO, 
-    GEMINI_IMAGE_MODEL_FAST 
+import {
+    GEMINI_IMAGE_MODEL_PRO,
+    GEMINI_IMAGE_MODEL_FAST
 } from "~/config/ai-models.config";
 
 // Alias for local use (keeps existing code working)
@@ -74,9 +74,25 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
 
 const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
 
+import { Readable } from 'stream';
+
+// Helper to convert Web Stream to Node Stream if needed
+function streamFromResponse(response: Response): Readable {
+    if (response.body && typeof (response.body as any).getReader === 'function') {
+        // Web Stream (standard fetch)
+        // @ts-ignore - Readable.fromWeb exists in Node 18+
+        return Readable.fromWeb(response.body as any);
+    } else if (response.body && typeof (response.body as any).pipe === 'function') {
+        // Node Stream (node-fetch)
+        return response.body as any;
+    }
+    throw new Error("Response body is not a stream");
+}
+
 async function downloadToBuffer(
     url: string,
-    logContext: ReturnType<typeof createLogContext>
+    logContext: ReturnType<typeof createLogContext>,
+    maxDimension: number = 2048
 ): Promise<Buffer> {
     // Validate URL to prevent SSRF attacks
     try {
@@ -84,7 +100,7 @@ async function downloadToBuffer(
     } catch (error) {
         logger.error(
             { ...logContext, stage: "download" },
-            "URL validation failed (potential SSRF attempt)",
+            "URL validation failed",
             error
         );
         throw error;
@@ -92,15 +108,11 @@ async function downloadToBuffer(
 
     logger.info(
         { ...logContext, stage: "download" },
-        `Downloading image from Shopify CDN: ${url.substring(0, 80)}...`
+        `Downloading image stream from Shopify CDN: ${url.substring(0, 80)}...`
     );
 
-    // Force PNG format from Shopify CDN
-    const pngUrl = url.includes('?') ? `${url}&format=png` : `${url}?format=png`;
-    const response = await fetch(pngUrl, {
-        headers: { 'Accept': 'image/png' }
-    });
-    
+    const response = await fetch(url);
+
     if (!response.ok) {
         const error = new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
         logger.error(
@@ -110,40 +122,39 @@ async function downloadToBuffer(
         );
         throw error;
     }
-    
-    const contentType = response.headers.get("content-type") || "unknown";
-    const contentLength = response.headers.get("content-length");
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    
-    logger.info(
-        { ...logContext, stage: "download" },
-        `Downloaded image: ${buffer.length} bytes, content-type: ${contentType}`
-    );
-    
-    // Guard: reject zero-size or suspiciously large files
-    if (buffer.length === 0) {
-        const error = new Error("Downloaded image is empty (0 bytes)");
+
+    // Stream resize pipeline: Response -> Sharp (Resize) -> Buffer
+    // This avoids loading the full original image into memory
+    try {
+        const inputStream = streamFromResponse(response);
+        const pipeline = sharp()
+            .resize({
+                width: maxDimension,
+                height: maxDimension,
+                fit: 'inside',
+                withoutEnlargement: true
+            })
+            // Convert to PNG by default to standardize internal processing
+            .png({ force: true });
+
+        inputStream.pipe(pipeline);
+
+        const buffer = await pipeline.toBuffer();
+
+        logger.info(
+            { ...logContext, stage: "download-optimize" },
+            `Downloaded & Optimized: ${buffer.length} bytes (max ${maxDimension}px)`
+        );
+
+        return buffer;
+    } catch (error) {
         logger.error(
-            { ...logContext, stage: "download" },
-            "Empty image buffer",
+            { ...logContext, stage: "download-error" },
+            "Failed to process download stream",
             error
         );
         throw error;
     }
-    
-    const maxSize = 50 * 1024 * 1024; // 50MB
-    if (buffer.length > maxSize) {
-        const error = new Error(`Image too large: ${buffer.length} bytes (max ${maxSize})`);
-        logger.error(
-            { ...logContext, stage: "download" },
-            "Image exceeds size limit",
-            error
-        );
-        throw error;
-    }
-    
-    return buffer;
 }
 
 async function uploadToGCS(
@@ -156,24 +167,24 @@ async function uploadToGCS(
         { ...logContext, stage: "upload" },
         `Uploading to GCS bucket ${GCS_BUCKET}, key: ${key}, size: ${buffer.length} bytes`
     );
-    
+
     const bucket = storage.bucket(GCS_BUCKET);
     const file = bucket.file(key);
-    
+
     try {
         await file.save(buffer, { contentType, resumable: false });
-        
+
         const [signedUrl] = await file.getSignedUrl({
             version: 'v4',
             action: 'read',
             expires: Date.now() + 60 * 60 * 1000, // 1 hour
         });
-        
+
         logger.info(
             { ...logContext, stage: "upload" },
             `Upload successful, signed URL generated: ${signedUrl.substring(0, 80)}...`
         );
-        
+
         return signedUrl;
     } catch (error) {
         logger.error(
@@ -191,11 +202,11 @@ async function callGemini(
     options: { model?: string; aspectRatio?: string; logContext?: ReturnType<typeof createLogContext> } = {}
 ): Promise<string> {
     const { model = IMAGE_MODEL_FAST, aspectRatio, logContext } = options;
-    const context = logContext || createLogContext("gemini", "api-call", "start", {});
+    const context = logContext || createLogContext("system", "api-call", "start", {});
     logger.info(context, `Calling Gemini model: ${model}`);
 
     const parts: any[] = [{ text: prompt }];
-    
+
     const buffers = Array.isArray(imageBuffers) ? imageBuffers : [imageBuffers];
     for (const buffer of buffers) {
         if (buffer) {
@@ -230,7 +241,7 @@ async function callGemini(
                 }
             }
         }
-        
+
         // Try alternate structure
         if ((response as any).parts) {
             for (const part of (response as any).parts) {
@@ -239,7 +250,7 @@ async function callGemini(
                 }
             }
         }
-        
+
         throw new Error("No image in response");
     } catch (error: any) {
         logger.error(context, `Gemini error with ${model}`, error);
@@ -276,11 +287,11 @@ export async function prepareProduct(
             { ...logContext, stage: "convert" },
             "Converting image to PNG format"
         );
-        
+
         const pngBuffer = await sharp(imageBuffer)
             .png({ force: true })
             .toBuffer();
-        
+
         logger.info(
             { ...logContext, stage: "convert" },
             `Converted to PNG: ${pngBuffer.length} bytes`
@@ -331,26 +342,26 @@ export async function prepareProduct(
             mimeType: 'image/png' | 'image/jpeg';
             prep?: () => Promise<Buffer>;
         }> = [
-            { label: 'png', buffer: pngBuffer, mimeType: 'image/png' },
-            {
-                label: 'jpeg-fallback',
-                buffer: pngBuffer, // will be replaced lazily
-                mimeType: 'image/jpeg',
-                prep: async () => {
-                    logger.info(
-                        { ...logContext, stage: "bg-remove" },
-                        "Fallback: converting to JPEG before background removal"
-                    );
-                    const jpegBuffer = await sharp(imageBuffer).jpeg({ quality: 95 }).toBuffer();
-                    const meta = await sharp(jpegBuffer).metadata();
-                    logger.debug(
-                        { ...logContext, stage: "bg-remove" },
-                        `JPEG fallback metadata: format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
-                    );
-                    return jpegBuffer;
+                { label: 'png', buffer: pngBuffer, mimeType: 'image/png' },
+                {
+                    label: 'jpeg-fallback',
+                    buffer: pngBuffer, // will be replaced lazily
+                    mimeType: 'image/jpeg',
+                    prep: async () => {
+                        logger.info(
+                            { ...logContext, stage: "bg-remove" },
+                            "Fallback: converting to JPEG before background removal"
+                        );
+                        const jpegBuffer = await sharp(imageBuffer).jpeg({ quality: 95 }).toBuffer();
+                        const meta = await sharp(jpegBuffer).metadata();
+                        logger.debug(
+                            { ...logContext, stage: "bg-remove" },
+                            `JPEG fallback metadata: format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
+                        );
+                        return jpegBuffer;
+                    }
                 }
-            }
-        ];
+            ];
 
         // Enforce max attempts guard
         if (attempts.length > MAX_BG_REMOVAL_ATTEMPTS) {
@@ -364,12 +375,12 @@ export async function prepareProduct(
         for (const attempt of attempts) {
             try {
                 const bufferToUse = attempt.prep ? await attempt.prep() : attempt.buffer;
-                
+
                 logger.debug(
                     { ...logContext, stage: "bg-remove" },
                     `Attempting background removal with ${attempt.label}, mimeType: ${attempt.mimeType}`
                 );
-                
+
                 const resultBlob = await removeBackground(bufferToUse, {
                     // Not in types, but accepted by runtime
                     mimeType: attempt.mimeType,
@@ -381,7 +392,7 @@ export async function prepareProduct(
 
                 const arrayBuffer = await resultBlob.arrayBuffer();
                 outputBuffer = Buffer.from(arrayBuffer);
-                
+
                 logger.info(
                     { ...logContext, stage: "bg-remove" },
                     `Background removed successfully (${attempt.label}), output size: ${outputBuffer.length} bytes`
@@ -398,8 +409,8 @@ export async function prepareProduct(
         }
 
         if (!outputBuffer) {
-            const error = lastError instanceof Error 
-                ? lastError 
+            const error = lastError instanceof Error
+                ? lastError
                 : new Error('Background removal failed on all attempts');
             logger.error(
                 { ...logContext, stage: "bg-remove" },
@@ -422,12 +433,12 @@ export async function prepareProduct(
 
         const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
         const url = await uploadToGCS(key, outputBuffer, 'image/png', logContext);
-        
+
         logger.info(
             { ...logContext, stage: "complete" },
             `Product preparation completed successfully: ${url.substring(0, 80)}...`
         );
-        
+
         return url;
     } catch (error: any) {
         logger.error(
@@ -446,7 +457,7 @@ export async function cleanupRoom(
 ): Promise<string> {
     const logContext = createLogContext("cleanup", requestId, "start", {});
     logger.info(logContext, "Processing room cleanup with Gemini");
-    
+
     const maskBase64 = maskDataUrl.split(',')[1];
     const maskBuffer = Buffer.from(maskBase64, 'base64');
     const roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
@@ -478,7 +489,7 @@ export async function compositeScene(
 ): Promise<string> {
     const logContext = createLogContext("render", requestId, "start", {});
     logger.info(logContext, "Processing scene composite with Gemini");
-    
+
     const productBuffer = await downloadToBuffer(preparedProductImageUrl, logContext);
     const roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
 
@@ -518,7 +529,7 @@ Style: ${styleDescription}
 Keep the product's exact position, size, and shape unchanged.`;
 
     const aspectRatio = roomWidth > roomHeight ? "16:9" : roomHeight > roomWidth ? "9:16" : "1:1";
-    
+
     const base64Data = await callGemini(prompt, guideImageBuffer, {
         model: IMAGE_MODEL_PRO,
         aspectRatio,

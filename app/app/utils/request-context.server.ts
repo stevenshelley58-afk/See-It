@@ -23,3 +23,4 @@ export function addRequestIdHeader(response: Response, requestId: string): Respo
   response.headers.set("X-Request-ID", requestId);
   return response;
 }
+

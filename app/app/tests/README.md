@@ -78,3 +78,4 @@ node -r ts-node/register app/tests/pipeline/imagePipeline.test.ts
 - Failure scenarios are simulated via options, not by mocking external services
 - All tests use the structured logger for consistent output
 - Tests clean up after themselves (or should be run in a test database)
+

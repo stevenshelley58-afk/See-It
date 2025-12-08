@@ -186,3 +186,4 @@ export async function runAllPipelineTests(): Promise<{
     console.log("Pipeline test results:", results);
     return results;
 }
+
