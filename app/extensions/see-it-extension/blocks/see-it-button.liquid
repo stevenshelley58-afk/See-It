@@ -11,122 +11,158 @@
       "id": "button_label",
       "label": "Button Label",
       "default": "See it in your room"
+    },
+    {
+      "type": "select",
+      "id": "button_style",
+      "label": "Button Style",
+      "options": [
+        { "value": "primary", "label": "Primary" },
+        { "value": "secondary", "label": "Secondary" }
+      ],
+      "default": "primary"
     }
   ]
 }
 {% endschema %}
 
-<div class="see-it-button-container" style="margin: 20px 0;">
-  <button id="see-it-trigger" class="button see-it-btn" data-product-id="{{ product.id }}" data-product-image="{{ product.featured_image | image_url: width: 800 }}">
-    {{ block.settings.button_label }}
-  </button>
-</div>
+{% comment %}
+  See It Button - Allows customers to visualize products in their room
+  Requirements:
+  - Must be on a product template
+  - Product must have a featured image
+{% endcomment %}
 
-<div id="see-it-modal" class="see-it-modal hidden">
-  <div class="see-it-modal-content">
-    <span class="see-it-close">&times;</span>
-    
-    <!-- Step 0: Welcome -->
-    <div id="see-it-step-welcome" class="see-it-step">
-      <div class="see-it-welcome-container">
-        <h2>See it in Your Home</h2>
-        <p>Visualize this product in your own space using AI-powered image generation.</p>
-        
-        <div class="see-it-welcome-actions">
-           <button id="see-it-btn-upload" class="button see-it-primary-btn">
-             <span class="icon">📂</span> Upload Image
-           </button>
-           <button id="see-it-btn-camera" class="button see-it-secondary-btn">
-             <span class="icon">📷</span> Take Photo
-           </button>
-           <input type="file" id="see-it-upload" accept="image/*" style="display: none;" />
-           <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
-        </div>
-        <div class="see-it-version-badge">See It v1.0.20</div>
-      </div>
-    </div>
+{% if product != blank and product.featured_image != blank %}
+  {% assign product_image_url = product.featured_image | image_url: width: 800 %}
+  {% assign button_class = 'see-it-primary-btn' %}
+  {% if block.settings.button_style == 'secondary' %}
+    {% assign button_class = 'see-it-secondary-btn' %}
+  {% endif %}
 
-    <!-- Step 1: Edit Room -->
-    <div id="see-it-step-edit-room" class="see-it-step hidden">
-      <h3>Prepare Your Room</h3>
-      <p class="see-it-step-description">Paint over anything you want to remove, or skip to place the product.</p>
-      
-      <div class="see-it-canvas-wrapper" id="see-it-canvas-wrapper">
-        <img id="see-it-room-preview" src="" alt="Room Preview" width="400" height="300" />
-        <canvas id="see-it-mask-canvas"></canvas>
-        <div id="see-it-cleanup-loading" class="see-it-loading-overlay hidden">
-          <div class="see-it-spinner"></div>
-          <p>Removing...</p>
-        </div>
-      </div>
-      
-      <!-- Simple Eraser Controls -->
-      <div class="see-it-eraser-controls">
-        <div class="see-it-eraser-hint">
-          <span class="see-it-eraser-icon">🖌️</span>
-          <span>Draw over what to remove</span>
-        </div>
-        <div class="see-it-eraser-actions">
-          <button id="see-it-undo-btn" class="see-it-tool-btn" disabled>
-            ↩️ Undo
-          </button>
-          <button id="see-it-clear-btn" class="see-it-tool-btn" disabled>
-            🗑️ Clear
-          </button>
-          <button id="see-it-remove-btn" class="button see-it-primary-btn see-it-remove-btn" disabled>
-            Remove
-          </button>
+  <div class="see-it-button-container" style="margin: 20px 0;">
+    <button
+      id="see-it-trigger"
+      class="button {{ button_class }} see-it-btn"
+      data-product-id="{{ product.id }}"
+      data-product-handle="{{ product.handle }}"
+      data-product-image="{{ product_image_url }}"
+      data-shop-domain="{{ shop.domain }}"
+    >
+      {{ block.settings.button_label }}
+    </button>
+  </div>
+
+  <div id="see-it-modal" class="see-it-modal hidden">
+    <div class="see-it-modal-content">
+      <span class="see-it-close">&times;</span>
+
+      <!-- Step 0: Welcome -->
+      <div id="see-it-step-welcome" class="see-it-step">
+        <div class="see-it-welcome-container">
+          <h2>See it in Your Home</h2>
+          <p>Visualize this product in your own space using AI-powered image generation.</p>
+
+          <div class="see-it-welcome-actions">
+             <button id="see-it-btn-upload" class="button see-it-primary-btn">
+               <span class="icon">Upload Image</span>
+             </button>
+             <button id="see-it-btn-camera" class="button see-it-secondary-btn">
+               <span class="icon">Take Photo</span>
+             </button>
+             <input type="file" id="see-it-upload" accept="image/*" style="display: none;" />
+             <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
+          </div>
+          <div class="see-it-version-badge">See It v1.0.21</div>
         </div>
       </div>
 
-      <div class="see-it-actions-row">
-        <button id="see-it-back-to-welcome" class="button see-it-text-btn">Back</button>
-        <button id="see-it-confirm-room" class="button see-it-primary-btn">Continue →</button>
-      </div>
-    </div>
+      <!-- Step 1: Edit Room -->
+      <div id="see-it-step-edit-room" class="see-it-step hidden">
+        <h3>Prepare Your Room</h3>
+        <p class="see-it-step-description">Paint over anything you want to remove, or skip to place the product.</p>
 
-    <!-- Step 2: Place Product -->
-    <div id="see-it-step-place" class="see-it-step hidden">
-      <div id="see-it-canvas-container" class="see-it-interactive-canvas">
-        <img id="see-it-room-image" src="" alt="Room" width="400" height="300" />
-        
-        <div id="see-it-product-container" class="draggable-container">
-            <img id="see-it-product-image" src="" alt="Product" class="draggable-item" width="200" height="200" />
-            <!-- Resize Handles -->
-            <div class="resize-handle handle-tl"></div>
-            <div class="resize-handle handle-tr"></div>
-            <div class="resize-handle handle-bl"></div>
-            <div class="resize-handle handle-br"></div>
+        <div class="see-it-canvas-wrapper" id="see-it-canvas-wrapper">
+          <img id="see-it-room-preview" src="" alt="Room Preview" width="400" height="300" />
+          <canvas id="see-it-mask-canvas"></canvas>
+          <div id="see-it-cleanup-loading" class="see-it-loading-overlay hidden">
+            <div class="see-it-spinner"></div>
+            <p>Removing...</p>
+          </div>
         </div>
-      </div>
 
-      <div class="see-it-controls-panel">
-        <!-- Desktop Slider (Hidden on mobile if pinch works well, but good to keep as fallback) -->
-        <div class="see-it-slider-control">
-            <label for="see-it-scale-slider">Size: <span id="see-it-scale-value">1.0</span>x</label>
-            <input type="range" id="see-it-scale-slider" min="0.5" max="2.0" step="0.1" value="1.0" />
+        <!-- Simple Eraser Controls -->
+        <div class="see-it-eraser-controls">
+          <div class="see-it-eraser-hint">
+            <span class="see-it-eraser-icon">Draw over what to remove</span>
+          </div>
+          <div class="see-it-eraser-actions">
+            <button id="see-it-undo-btn" class="see-it-tool-btn" disabled>
+              Undo
+            </button>
+            <button id="see-it-clear-btn" class="see-it-tool-btn" disabled>
+              Clear
+            </button>
+            <button id="see-it-remove-btn" class="button see-it-primary-btn see-it-remove-btn" disabled>
+              Remove
+            </button>
+          </div>
         </div>
-        
+
         <div class="see-it-actions-row">
-            <button id="see-it-save-room" class="button see-it-secondary-btn">Save Room</button>
-            <button id="see-it-generate" class="button see-it-primary-btn">Generate View</button>
+          <button id="see-it-back-to-welcome" class="button see-it-text-btn">Back</button>
+          <button id="see-it-confirm-room" class="button see-it-primary-btn">Continue</button>
         </div>
       </div>
-      
-      <div id="see-it-saved-rooms-list" class="saved-rooms-scroll"></div>
-    </div>
 
-    <!-- Step 3: Result -->
-    <div id="see-it-step-result" class="see-it-step hidden">
-      <p id="see-it-status">Generating...</p>
-      <div id="see-it-error" class="see-it-error hidden"></div>
-      <div id="see-it-result"></div>
-      
-      <div id="see-it-actions" class="hidden see-it-actions-row">
-        <button id="see-it-adjust-placement" class="button">Adjust Placement</button>
-        <button id="see-it-retry" class="button see-it-retry-btn hidden">Retry</button>
-        <button id="see-it-start-over" class="button see-it-text-btn">Start Over</button>
+      <!-- Step 2: Place Product -->
+      <div id="see-it-step-place" class="see-it-step hidden">
+        <div id="see-it-canvas-container" class="see-it-interactive-canvas">
+          <img id="see-it-room-image" src="" alt="Room" width="400" height="300" />
+
+          <div id="see-it-product-container" class="draggable-container">
+              <img id="see-it-product-image" src="" alt="Product" class="draggable-item" width="200" height="200" />
+              <!-- Resize Handles -->
+              <div class="resize-handle handle-tl"></div>
+              <div class="resize-handle handle-tr"></div>
+              <div class="resize-handle handle-bl"></div>
+              <div class="resize-handle handle-br"></div>
+          </div>
+        </div>
+
+        <div class="see-it-controls-panel">
+          <!-- Desktop Slider (Hidden on mobile if pinch works well, but good to keep as fallback) -->
+          <div class="see-it-slider-control">
+              <label for="see-it-scale-slider">Size: <span id="see-it-scale-value">1.0</span>x</label>
+              <input type="range" id="see-it-scale-slider" min="0.5" max="2.0" step="0.1" value="1.0" />
+          </div>
+
+          <div class="see-it-actions-row">
+              <button id="see-it-save-room" class="button see-it-secondary-btn">Save Room</button>
+              <button id="see-it-generate" class="button see-it-primary-btn">Generate View</button>
+          </div>
+        </div>
+
+        <div id="see-it-saved-rooms-list" class="saved-rooms-scroll"></div>
+      </div>
+
+      <!-- Step 3: Result -->
+      <div id="see-it-step-result" class="see-it-step hidden">
+        <p id="see-it-status">Generating...</p>
+        <div id="see-it-error" class="see-it-error hidden"></div>
+        <div id="see-it-result"></div>
+
+        <div id="see-it-actions" class="hidden see-it-actions-row">
+          <button id="see-it-adjust-placement" class="button">Adjust Placement</button>
+          <button id="see-it-retry" class="button see-it-retry-btn hidden">Retry</button>
+          <button id="see-it-start-over" class="button see-it-text-btn">Start Over</button>
+        </div>
       </div>
     </div>
   </div>
-</div>
+{% else %}
+  {% comment %}
+    Product or featured image not available - render nothing
+    This prevents JavaScript errors from missing DOM elements
+  {% endcomment %}
+{% endif %}
