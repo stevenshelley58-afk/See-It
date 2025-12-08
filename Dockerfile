@@ -18,7 +18,7 @@ WORKDIR /usr/src/app/app
 COPY .npmrc* ./
 
 # Copy package-lock.json if it exists for deterministic builds
-COPY package-lock.json* ./
+COPY app/package-lock.json* ./
 
 # Install all dependencies (dev deps required for building Remix + Prisma)
 # Use npm ci if package-lock.json exists, otherwise npm install
