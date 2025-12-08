@@ -13,7 +13,7 @@ export const action = async ({ request }) => {
         // This will redirect the user to Shopify to approve the charge
         await billing.request({
             plan: PLANS.PRO.name,
-            isTest: true, // TODO: Make this configurable or dependent on env
+            isTest: process.env.SHOPIFY_BILLING_TEST_MODE !== 'false',
             returnUrl: `${process.env.SHOPIFY_APP_URL}/api/billing/callback`,
         });
         return null; // billing.request redirects
@@ -27,7 +27,7 @@ export const action = async ({ request }) => {
             // 2. Cancel active subscription
             await billing.cancel({
                 subscriptionId: subscription.id,
-                isTest: true,
+                isTest: process.env.SHOPIFY_BILLING_TEST_MODE !== 'false',
                 prune: true,
             });
         }
