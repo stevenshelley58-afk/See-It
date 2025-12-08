@@ -309,8 +309,13 @@ export async function prepareProduct(
 
     logger.info(logContext, `Starting product preparation: productId=${productId}, sourceImageUrl=${sourceImageUrl.substring(0, 80)}...`);
 
+    // Track buffers for explicit cleanup to prevent memory leaks
+    let imageBuffer: Buffer | null = null;
+    let pngBuffer: Buffer | null = null;
+    let outputBuffer: Buffer | null = null;
+
     try {
-        const imageBuffer = await downloadToBuffer(sourceImageUrl, logContext);
+        imageBuffer = await downloadToBuffer(sourceImageUrl, logContext);
 
         // Convert to PNG format - force PNG output even if input was WebP/AVIF
         logger.info(
@@ -318,7 +323,7 @@ export async function prepareProduct(
             "Converting image to PNG format"
         );
 
-        const pngBuffer = await sharp(imageBuffer)
+        pngBuffer = await sharp(imageBuffer)
             .png({ force: true })
             .toBuffer();
 
@@ -360,38 +365,43 @@ export async function prepareProduct(
             "Removing background with ML model (@imgly)"
         );
 
-        let outputBuffer: Buffer | null = null;
         let lastError: unknown = null;
 
         // Hard limit: MAX 2 attempts (PNG, then JPEG fallback)
         // Do not extend this array without careful consideration of cost/performance
         const MAX_BG_REMOVAL_ATTEMPTS = 2;
+
+        // Store reference to imageBuffer for JPEG fallback (captured before potential null)
+        const originalImageBuffer = imageBuffer;
+
         const attempts: Array<{
             label: string;
-            buffer: Buffer;
             mimeType: 'image/png' | 'image/jpeg';
-            prep?: () => Promise<Buffer>;
+            getBuffer: () => Promise<Buffer>;
         }> = [
-                { label: 'png', buffer: pngBuffer, mimeType: 'image/png' },
-                {
-                    label: 'jpeg-fallback',
-                    buffer: pngBuffer, // will be replaced lazily
-                    mimeType: 'image/jpeg',
-                    prep: async () => {
-                        logger.info(
-                            { ...logContext, stage: "bg-remove" },
-                            "Fallback: converting to JPEG before background removal"
-                        );
-                        const jpegBuffer = await sharp(imageBuffer).jpeg({ quality: 95 }).toBuffer();
-                        const meta = await sharp(jpegBuffer).metadata();
-                        logger.debug(
-                            { ...logContext, stage: "bg-remove" },
-                            `JPEG fallback metadata: format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
-                        );
-                        return jpegBuffer;
-                    }
+            {
+                label: 'png',
+                mimeType: 'image/png',
+                getBuffer: async () => pngBuffer!
+            },
+            {
+                label: 'jpeg-fallback',
+                mimeType: 'image/jpeg',
+                getBuffer: async () => {
+                    logger.info(
+                        { ...logContext, stage: "bg-remove" },
+                        "Fallback: converting to JPEG before background removal"
+                    );
+                    const jpegBuffer = await sharp(originalImageBuffer).jpeg({ quality: 95 }).toBuffer();
+                    const meta = await sharp(jpegBuffer).metadata();
+                    logger.debug(
+                        { ...logContext, stage: "bg-remove" },
+                        `JPEG fallback metadata: format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
+                    );
+                    return jpegBuffer;
                 }
-            ];
+            }
+        ];
 
         // Enforce max attempts guard
         if (attempts.length > MAX_BG_REMOVAL_ATTEMPTS) {
@@ -403,15 +413,16 @@ export async function prepareProduct(
         }
 
         for (const attempt of attempts) {
+            let attemptBuffer: Buffer | null = null;
             try {
-                const bufferToUse = attempt.prep ? await attempt.prep() : attempt.buffer;
+                attemptBuffer = await attempt.getBuffer();
 
                 logger.debug(
                     { ...logContext, stage: "bg-remove" },
                     `Attempting background removal with ${attempt.label}, mimeType: ${attempt.mimeType}`
                 );
 
-                const resultBlob = await removeBackground(bufferToUse, {
+                const resultBlob = await removeBackground(attemptBuffer, {
                     // Not in types, but accepted by runtime
                     mimeType: attempt.mimeType,
                     output: {
@@ -419,6 +430,9 @@ export async function prepareProduct(
                         quality: 1.0
                     }
                 } as any);
+
+                // Clean up attempt buffer immediately after background removal
+                attemptBuffer = null;
 
                 const arrayBuffer = await resultBlob.arrayBuffer();
                 outputBuffer = Buffer.from(arrayBuffer);
@@ -430,6 +444,8 @@ export async function prepareProduct(
                 break;
             } catch (err) {
                 lastError = err;
+                // Clean up attempt buffer on error
+                attemptBuffer = null;
                 logger.warn(
                     { ...logContext, stage: "bg-remove" },
                     `Background removal failed on ${attempt.label}`,
@@ -437,6 +453,10 @@ export async function prepareProduct(
                 );
             }
         }
+
+        // Clean up input buffers after background removal - no longer needed
+        imageBuffer = null;
+        pngBuffer = null;
 
         if (!outputBuffer) {
             const error = lastError instanceof Error
@@ -464,6 +484,9 @@ export async function prepareProduct(
         const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
         const url = await uploadToGCS(key, outputBuffer, 'image/png', logContext);
 
+        // Clean up output buffer after upload
+        outputBuffer = null;
+
         logger.info(
             { ...logContext, stage: "complete" },
             `Product preparation completed successfully: ${url.substring(0, 80)}...`
@@ -477,6 +500,11 @@ export async function prepareProduct(
             error
         );
         throw error;
+    } finally {
+        // Explicit cleanup in finally block to help garbage collector
+        imageBuffer = null;
+        pngBuffer = null;
+        outputBuffer = null;
     }
 }
 
@@ -488,11 +516,17 @@ export async function cleanupRoom(
     const logContext = createLogContext("cleanup", requestId, "start", {});
     logger.info(logContext, "Processing room cleanup with Gemini");
 
-    const maskBase64 = maskDataUrl.split(',')[1];
-    const maskBuffer = Buffer.from(maskBase64, 'base64');
-    const roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
+    // Track buffers for explicit cleanup
+    let maskBuffer: Buffer | null = null;
+    let roomBuffer: Buffer | null = null;
+    let outputBuffer: Buffer | null = null;
 
-    const prompt = `Using the provided room image and mask image:
+    try {
+        const maskBase64 = maskDataUrl.split(',')[1];
+        maskBuffer = Buffer.from(maskBase64, 'base64');
+        roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
+
+        const prompt = `Using the provided room image and mask image:
 The white regions in the mask indicate objects to be removed.
 Remove objects in the masked (white) areas and fill with appropriate background.
 Match the surrounding context - floor, wall, or whatever is around the masked area.
@@ -500,14 +534,29 @@ Do NOT alter any pixels outside the masked region.
 Maintain consistent lighting and perspective.
 The result should look natural, as if nothing was ever there.`;
 
-    const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
-        model: IMAGE_MODEL_PRO,
-        logContext
-    });
+        const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
+            model: IMAGE_MODEL_PRO,
+            logContext
+        });
 
-    const outputBuffer = Buffer.from(base64Data, 'base64');
-    const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    return await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
+        // Clean up input buffers after Gemini call
+        roomBuffer = null;
+        maskBuffer = null;
+
+        outputBuffer = Buffer.from(base64Data, 'base64');
+        const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+        const url = await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
+
+        // Clean up output buffer after upload
+        outputBuffer = null;
+
+        return url;
+    } finally {
+        // Explicit cleanup in finally block
+        maskBuffer = null;
+        roomBuffer = null;
+        outputBuffer = null;
+    }
 }
 
 export async function compositeScene(
@@ -520,35 +569,50 @@ export async function compositeScene(
     const logContext = createLogContext("render", requestId, "start", {});
     logger.info(logContext, "Processing scene composite with Gemini");
 
-    const productBuffer = await downloadToBuffer(preparedProductImageUrl, logContext);
-    const roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
+    // Track buffers for explicit cleanup
+    let productBuffer: Buffer | null = null;
+    let roomBuffer: Buffer | null = null;
+    let resizedProduct: Buffer | null = null;
+    let guideImageBuffer: Buffer | null = null;
+    let outputBuffer: Buffer | null = null;
 
-    // Step 1: Mechanical placement with Sharp
-    const roomMetadata = await sharp(roomBuffer).metadata();
-    const roomWidth = roomMetadata.width || 1920;
-    const roomHeight = roomMetadata.height || 1080;
+    try {
+        productBuffer = await downloadToBuffer(preparedProductImageUrl, logContext);
+        roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
 
-    const pixelX = Math.round(roomWidth * placement.x);
-    const pixelY = Math.round(roomHeight * placement.y);
+        // Step 1: Mechanical placement with Sharp
+        const roomMetadata = await sharp(roomBuffer).metadata();
+        const roomWidth = roomMetadata.width || 1920;
+        const roomHeight = roomMetadata.height || 1080;
 
-    const productMetadata = await sharp(productBuffer).metadata();
-    const newWidth = Math.round((productMetadata.width || 500) * placement.scale);
+        const pixelX = Math.round(roomWidth * placement.x);
+        const pixelY = Math.round(roomHeight * placement.y);
 
-    const resizedProduct = await sharp(productBuffer)
-        .resize({ width: newWidth })
-        .toBuffer();
+        const productMetadata = await sharp(productBuffer).metadata();
+        const newWidth = Math.round((productMetadata.width || 500) * placement.scale);
 
-    const resizedMeta = await sharp(resizedProduct).metadata();
-    const adjustedX = Math.max(0, pixelX - Math.round((resizedMeta.width || 0) / 2));
-    const adjustedY = Math.max(0, pixelY - Math.round((resizedMeta.height || 0) / 2));
+        resizedProduct = await sharp(productBuffer)
+            .resize({ width: newWidth })
+            .toBuffer();
 
-    const guideImageBuffer = await sharp(roomBuffer)
-        .composite([{ input: resizedProduct, top: adjustedY, left: adjustedX }])
-        .toBuffer();
+        // Clean up original product buffer - no longer needed after resize
+        productBuffer = null;
 
-    // Step 2: AI polish
-    const styleDescription = stylePreset === 'neutral' ? 'natural and realistic' : stylePreset;
-    const prompt = `This image shows a product placed into a room scene.
+        const resizedMeta = await sharp(resizedProduct).metadata();
+        const adjustedX = Math.max(0, pixelX - Math.round((resizedMeta.width || 0) / 2));
+        const adjustedY = Math.max(0, pixelY - Math.round((resizedMeta.height || 0) / 2));
+
+        guideImageBuffer = await sharp(roomBuffer)
+            .composite([{ input: resizedProduct, top: adjustedY, left: adjustedX }])
+            .toBuffer();
+
+        // Clean up intermediate buffers - no longer needed after composite
+        roomBuffer = null;
+        resizedProduct = null;
+
+        // Step 2: AI polish
+        const styleDescription = stylePreset === 'neutral' ? 'natural and realistic' : stylePreset;
+        const prompt = `This image shows a product placed into a room scene.
 The product is already positioned - do NOT move, resize, reposition, or warp the product.
 Make the composite look photorealistic by:
 1. Harmonizing the lighting on the product to match the room's light sources
@@ -558,16 +622,32 @@ Make the composite look photorealistic by:
 Style: ${styleDescription}
 Keep the product's exact position, size, and shape unchanged.`;
 
-    const aspectRatio = roomWidth > roomHeight ? "16:9" : roomHeight > roomWidth ? "9:16" : "1:1";
+        const aspectRatio = roomWidth > roomHeight ? "16:9" : roomHeight > roomWidth ? "9:16" : "1:1";
 
-    const base64Data = await callGemini(prompt, guideImageBuffer, {
-        model: IMAGE_MODEL_PRO,
-        aspectRatio,
-        logContext
-    });
+        const base64Data = await callGemini(prompt, guideImageBuffer, {
+            model: IMAGE_MODEL_PRO,
+            aspectRatio,
+            logContext
+        });
 
-    const outputBuffer = Buffer.from(base64Data, 'base64');
-    const key = `composite/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-    return await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
+        // Clean up guide image buffer after Gemini call
+        guideImageBuffer = null;
+
+        outputBuffer = Buffer.from(base64Data, 'base64');
+        const key = `composite/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+        const url = await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
+
+        // Clean up output buffer after upload
+        outputBuffer = null;
+
+        return url;
+    } finally {
+        // Explicit cleanup in finally block to help garbage collector
+        productBuffer = null;
+        roomBuffer = null;
+        resizedProduct = null;
+        guideImageBuffer = null;
+        outputBuffer = null;
+    }
 }
 
