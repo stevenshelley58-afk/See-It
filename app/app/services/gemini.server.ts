@@ -78,21 +78,6 @@ function getGeminiClient(): GoogleGenAI {
 // Use centralized GCS client
 const storage = getGcsClient();
 
-import { Readable } from 'stream';
-
-// Helper to convert Web Stream to Node Stream if needed
-function streamFromResponse(response: Response): Readable {
-    if (response.body && typeof (response.body as any).getReader === 'function') {
-        // Web Stream (standard fetch)
-        // @ts-ignore - Readable.fromWeb exists in Node 18+
-        return Readable.fromWeb(response.body as any);
-    } else if (response.body && typeof (response.body as any).pipe === 'function') {
-        // Node Stream (node-fetch)
-        return response.body as any;
-    }
-    throw new Error("Response body is not a stream");
-}
-
 async function downloadToBuffer(
     url: string,
     logContext: ReturnType<typeof createLogContext>,
@@ -128,11 +113,14 @@ async function downloadToBuffer(
         throw error;
     }
 
-    // Stream resize pipeline: Response -> Sharp (Resize) -> Buffer
-    // This avoids loading the full original image into memory
     try {
-        const inputStream = streamFromResponse(response);
-        const pipeline = sharp()
+        // Use arrayBuffer() to avoid ReadableStream compatibility issues
+        // between Node.js and Web Streams APIs
+        const arrayBuffer = await response.arrayBuffer();
+        const inputBuffer = Buffer.from(arrayBuffer);
+
+        // Resize pipeline: Buffer -> Sharp (Resize) -> Buffer
+        const buffer = await sharp(inputBuffer)
             .resize({
                 width: maxDimension,
                 height: maxDimension,
@@ -140,11 +128,8 @@ async function downloadToBuffer(
                 withoutEnlargement: true
             })
             // Convert to PNG by default to standardize internal processing
-            .png({ force: true });
-
-        inputStream.pipe(pipeline);
-
-        const buffer = await pipeline.toBuffer();
+            .png({ force: true })
+            .toBuffer();
 
         logger.info(
             { ...logContext, stage: "download-optimize" },
