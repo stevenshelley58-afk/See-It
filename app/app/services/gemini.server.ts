@@ -20,6 +20,45 @@ import {
 const IMAGE_MODEL_PRO = GEMINI_IMAGE_MODEL_PRO;
 const IMAGE_MODEL_FAST = GEMINI_IMAGE_MODEL_FAST;
 
+// Timeout configuration for Gemini API calls
+const GEMINI_TIMEOUT_MS = 60000; // 60 seconds
+
+/**
+ * Error thrown when a Gemini API call times out
+ */
+export class GeminiTimeoutError extends Error {
+    constructor(timeoutMs: number) {
+        super(`Gemini API call timed out after ${timeoutMs}ms`);
+        this.name = 'GeminiTimeoutError';
+    }
+}
+
+/**
+ * Wrap a promise with a timeout
+ * @param promise The promise to wrap
+ * @param timeoutMs Timeout in milliseconds
+ * @param operation Description of the operation for error messages
+ */
+function withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    operation: string = "operation"
+): Promise<T> {
+    let timeoutId: NodeJS.Timeout | undefined;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+            reject(new GeminiTimeoutError(timeoutMs));
+        }, timeoutMs);
+    });
+
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
+    });
+}
+
 // Lazy initialize Gemini (prevents crash if API key missing at module load time)
 let ai: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
@@ -165,11 +204,11 @@ async function uploadToGCS(
 async function callGemini(
     prompt: string,
     imageBuffers: Buffer | Buffer[],
-    options: { model?: string; aspectRatio?: string; logContext?: ReturnType<typeof createLogContext> } = {}
+    options: { model?: string; aspectRatio?: string; logContext?: ReturnType<typeof createLogContext>; timeoutMs?: number } = {}
 ): Promise<string> {
-    const { model = IMAGE_MODEL_FAST, aspectRatio, logContext } = options;
+    const { model = IMAGE_MODEL_FAST, aspectRatio, logContext, timeoutMs = GEMINI_TIMEOUT_MS } = options;
     const context = logContext || createLogContext("system", "api-call", "start", {});
-    logger.info(context, `Calling Gemini model: ${model}`);
+    logger.info(context, `Calling Gemini model: ${model} (timeout: ${timeoutMs}ms)`);
 
     const parts: any[] = [{ text: prompt }];
 
@@ -190,13 +229,27 @@ async function callGemini(
         config.imageConfig = { aspectRatio };
     }
 
+    const startTime = Date.now();
+
     try {
         const client = getGeminiClient();
-        const response = await client.models.generateContent({
-            model,
-            contents: parts,
-            config,
-        });
+
+        // Wrap the API call with a timeout to prevent indefinite hangs
+        const response = await withTimeout(
+            client.models.generateContent({
+                model,
+                contents: parts,
+                config,
+            }),
+            timeoutMs,
+            `Gemini ${model} API call`
+        );
+
+        const duration = Date.now() - startTime;
+        logger.info(
+            { ...context, stage: "api-complete" },
+            `Gemini API call completed in ${duration}ms`
+        );
 
         // Extract image from response
         const candidates = response.candidates;
@@ -219,10 +272,21 @@ async function callGemini(
 
         throw new Error("No image in response");
     } catch (error: any) {
-        logger.error(context, `Gemini error with ${model}`, error);
+        const duration = Date.now() - startTime;
 
-        // Fallback to fast model if pro fails
-        if (model === IMAGE_MODEL_PRO) {
+        // Log timeout errors with extra context
+        if (error instanceof GeminiTimeoutError) {
+            logger.error(
+                { ...context, stage: "timeout" },
+                `Gemini API call timed out after ${duration}ms (limit: ${timeoutMs}ms)`,
+                error
+            );
+        } else {
+            logger.error(context, `Gemini error with ${model} after ${duration}ms`, error);
+        }
+
+        // Fallback to fast model if pro fails (except for timeouts - let them propagate)
+        if (model === IMAGE_MODEL_PRO && !(error instanceof GeminiTimeoutError)) {
             logger.info(context, "Falling back to fast model");
             return callGemini(prompt, imageBuffers, { ...options, model: IMAGE_MODEL_FAST });
         }
