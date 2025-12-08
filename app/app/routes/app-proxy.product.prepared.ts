@@ -2,22 +2,26 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
-const CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
+function getCorsHeaders(shopDomain: string | null): Record<string, string> {
+    const origin = shopDomain ? `https://${shopDomain}` : "";
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    };
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+    const { session } = await authenticate.public.appProxy(request);
+    const corsHeaders = getCorsHeaders(session?.shop ?? null);
+
     // Handle preflight
     if (request.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: CORS_HEADERS });
+        return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    const { session } = await authenticate.public.appProxy(request);
-
     if (!session) {
-        return json({ status: "forbidden" }, { status: 403, headers: CORS_HEADERS });
+        return json({ status: "forbidden" }, { status: 403, headers: corsHeaders });
     }
 
     const url = new URL(request.url);
@@ -26,13 +30,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     if (!productId) {
         return json(
             { error: "missing_product_id", message: "product_id is required" },
-            { status: 400, headers: CORS_HEADERS }
+            { status: 400, headers: corsHeaders }
         );
     }
 
     const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
     if (!shop) {
-        return json({ error: "Shop not found" }, { status: 404, headers: CORS_HEADERS });
+        return json({ error: "Shop not found" }, { status: 404, headers: corsHeaders });
     }
 
     // Find the prepared product asset
@@ -53,7 +57,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 source_image_url: productAsset?.sourceImageUrl || null,
                 status: productAsset?.status || "not_found"
             },
-            { headers: CORS_HEADERS }
+            { headers: corsHeaders }
         );
     }
 
@@ -63,7 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             source_image_url: productAsset.sourceImageUrl,
             status: productAsset.status
         },
-        { headers: CORS_HEADERS }
+        { headers: corsHeaders }
     );
 };
 

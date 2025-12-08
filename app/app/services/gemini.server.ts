@@ -2,7 +2,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { removeBackground } from "@imgly/background-removal-node";
 import sharp from "sharp";
-import { Storage } from "@google-cloud/storage";
+import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
 
@@ -36,43 +36,8 @@ function getGeminiClient(): GoogleGenAI {
     return ai;
 }
 
-// Initialize GCS
-let storage: Storage;
-if (process.env.GOOGLE_CREDENTIALS_JSON) {
-    try {
-        let jsonString = process.env.GOOGLE_CREDENTIALS_JSON.trim();
-        if (jsonString.startsWith('"') && jsonString.endsWith('"')) {
-            jsonString = jsonString.slice(1, -1);
-        }
-        let credentials;
-        try {
-            const decoded = Buffer.from(jsonString, 'base64').toString('utf-8');
-            if (decoded.startsWith('{')) {
-                credentials = JSON.parse(decoded);
-            } else {
-                credentials = JSON.parse(jsonString);
-            }
-        } catch {
-            credentials = JSON.parse(jsonString);
-        }
-        storage = new Storage({ credentials });
-        logger.info(
-            createLogContext("system", "init", "gcs-storage", {}),
-            "GCS storage initialized with credentials"
-        );
-    } catch (error) {
-        logger.error(
-            createLogContext("system", "init", "gcs-storage", {}),
-            "Failed to parse GCS credentials",
-            error
-        );
-        storage = new Storage();
-    }
-} else {
-    storage = new Storage();
-}
-
-const GCS_BUCKET = process.env.GCS_BUCKET || 'see-it-room';
+// Use centralized GCS client
+const storage = getGcsClient();
 
 import { Readable } from 'stream';
 

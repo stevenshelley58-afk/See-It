@@ -37,6 +37,7 @@ model Shop {
   plan          String
   monthlyQuota  Int       @map("monthly_quota")
   dailyQuota    Int       @map("daily_quota")
+  settingsJson  String?   @map("settings_json")
   createdAt     DateTime  @default(now()) @map("created_at")
   uninstalledAt DateTime? @map("uninstalled_at")
 

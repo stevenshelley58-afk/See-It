@@ -47,7 +47,11 @@ prisma/migrations/
 # Test files
 test-*.js
 
-# Google Cloud credentials (NEVER commit these!)
+# Secrets - NEVER commit
+*.credentials*.txt
+env.txt
+postgres_vars*.txt
 **/gcs-key.json
 **/*-credentials.json
 **/service-account*.json
+**/*service-account*.json

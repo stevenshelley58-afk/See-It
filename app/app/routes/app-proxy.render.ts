@@ -1,154 +1,211 @@
-// Render endpoint - v1.0.20 - With Input Validation
+// Render endpoint - v1.0.18 - Fixed to allow product images without pre-prepared assets
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { checkQuota } from "../quota.server";
+import { checkQuota, incrementQuota } from "../quota.server";
 import { checkRateLimit } from "../rate-limit.server";
+import { compositeScene } from "../services/gemini.server";
+import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
-import {
-    validatePlacement,
-    validateSessionId,
-    validateProductId,
-    validateStylePreset,
-    validateQuality
-} from "../utils/validation.server";
 
-export const CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
+function getCorsHeaders(shopDomain: string | null): Record<string, string> {
+    const origin = shopDomain ? `https://${shopDomain}` : "";
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    };
+}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const requestId = getRequestId(request);
     const logContext = createLogContext("render", requestId, "start", {});
 
+    const { session } = await authenticate.public.appProxy(request);
+    const corsHeaders = getCorsHeaders(session?.shop ?? null);
+
     // Handle preflight
     if (request.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: CORS_HEADERS });
+        return new Response(null, { status: 204, headers: corsHeaders });
     }
-
-    const { session } = await authenticate.public.appProxy(request);
 
     if (!session) {
         logger.warn(
             { ...logContext, stage: "auth" },
             `App proxy auth failed: no session. URL: ${request.url}`
         );
-        return json({ status: "forbidden" }, { status: 403, headers: CORS_HEADERS });
+        return json({ status: "forbidden" }, { status: 403, headers: corsHeaders });
     }
 
-    try {
-        const body = await request.json();
-        const { product_id, variant_id, room_session_id, placement, config } = body;
+    const body = await request.json();
+    const { product_id, variant_id, room_session_id, placement, config } = body;
 
-        // Validate placement data with sanitization
-        const placementResult = validatePlacement(placement);
-        if (!placementResult.valid) {
-            logger.error(
-                { ...logContext, stage: "validation" },
-                `Invalid placement data: ${placementResult.error}`
-            );
-            return json(
-                { error: "invalid_placement", message: placementResult.error },
-                { status: 400, headers: CORS_HEADERS }
-            );
-        }
-        const sanitizedPlacement = placementResult.sanitized!;
-
-        // Validate room_session_id
-        const sessionResult = validateSessionId(room_session_id);
-        if (!sessionResult.valid) {
-            return json(
-                { error: "invalid_session", message: sessionResult.error },
-                { status: 400, headers: CORS_HEADERS }
-            );
-        }
-        const sanitizedSessionId = sessionResult.sanitized!;
-
-        // Validate product_id
-        const productResult = validateProductId(product_id);
-        if (!productResult.valid) {
-            return json(
-                { error: "invalid_product", message: productResult.error },
-                { status: 400, headers: CORS_HEADERS }
-            );
-        }
-        const sanitizedProductId = productResult.sanitized!;
-
-        // Rate limiting check
-        if (!checkRateLimit(sanitizedSessionId)) {
-            return json(
-                { error: "rate_limit_exceeded", message: "Too many requests. Please wait a moment." },
-                { status: 429, headers: CORS_HEADERS }
-            );
-        }
-
-        const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
-        if (!shop) {
-            logger.error(
-                { ...logContext, stage: "shop-lookup" },
-                `Shop not found in database: ${session.shop}`
-            );
-            return json({ error: "Shop not found" }, { status: 404, headers: CORS_HEADERS });
-        }
-
-        // Update log context
-        const shopLogContext = { ...logContext, shopId: shop.id, productId: sanitizedProductId };
-
-        // Quota Check
-        try {
-            await checkQuota(shop.id, "render", 1);
-        } catch (error) {
-            if (error instanceof Response) {
-                // Return 429 with proper headers
-                const headers = { ...CORS_HEADERS, "Content-Type": "application/json" };
-                return new Response(error.body, { status: error.status, headers });
-            }
-            throw error;
-        }
-
-        // Validate and sanitize style/quality from config
-        const stylePreset = validateStylePreset(config?.style_preset);
-        const quality = validateQuality(config?.quality);
-
-        // Create Job - Queued with sanitized inputs
-        const job = await prisma.renderJob.create({
-            data: {
-                shop: { connect: { id: shop.id } },
-                productId: sanitizedProductId,
-                variantId: variant_id ? String(variant_id) : null,
-                roomSession: { connect: { id: sanitizedSessionId } },
-                placementX: sanitizedPlacement.x,
-                placementY: sanitizedPlacement.y,
-                placementScale: sanitizedPlacement.scale,
-                stylePreset,
-                quality,
-                configJson: JSON.stringify(config || {}),
-                status: "queued",
-                createdAt: new Date(),
-            }
-        });
-
-        // Log that we queued it
-        logger.info(
-            { ...shopLogContext, stage: "queued" },
-            `Render job queued: ${job.id}`
-        );
-
-        // Return immediately
-        return json({ job_id: job.id }, { headers: CORS_HEADERS });
-
-    } catch (error) {
+    // Validate required placement data (NaN check - typeof NaN === 'number')
+    if (!placement || !Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
         logger.error(
-            { ...logContext, stage: "handler-error" },
-            "Render endpoint failed",
-            error
+            { ...logContext, stage: "validation" },
+            `Invalid placement data: ${JSON.stringify(placement)}`
         );
         return json(
-            { error: "server_error", message: "Failed to process request" },
-            { status: 500, headers: CORS_HEADERS }
+            { error: "invalid_placement", message: "Placement x, y, and scale are required" },
+            { status: 400, headers: corsHeaders }
         );
     }
+
+    // Validate room_session_id
+    if (!room_session_id) {
+        return json(
+            { error: "missing_session", message: "room_session_id is required" },
+            { status: 400, headers: corsHeaders }
+        );
+    }
+
+    // Rate limiting check
+    if (!checkRateLimit(room_session_id || 'anonymous')) {
+        return json(
+            { error: "rate_limit_exceeded", message: "Too many requests. Please wait a moment." },
+            { status: 429, headers: corsHeaders }
+        );
+    }
+
+    const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+    if (!shop) {
+        logger.error(
+            { ...logContext, stage: "shop-lookup" },
+            `Shop not found in database: ${session.shop}`
+        );
+        return json({ error: "Shop not found" }, { status: 404, headers: corsHeaders });
+    }
+
+    // Update log context with shop info
+    const shopLogContext = { ...logContext, shopId: shop.id, productId: product_id };
+
+    // Quota Check (before starting render)
+    try {
+        await checkQuota(shop.id, "render", 1);
+    } catch (error) {
+        if (error instanceof Response) {
+            // Return 429 with proper headers
+            const headers = { ...corsHeaders, "Content-Type": "application/json" };
+            return new Response(error.body, { status: error.status, headers });
+        }
+        throw error;
+    }
+
+    const job = await prisma.renderJob.create({
+        data: {
+            shop: { connect: { id: shop.id } },
+            productId: product_id,
+            variantId: variant_id || null,
+            roomSession: room_session_id ? { connect: { id: room_session_id } } : undefined,
+            placementX: placement.x,
+            placementY: placement.y,
+            placementScale: placement.scale || 1.0,
+            stylePreset: config?.style_preset || "neutral",
+            quality: config?.quality || "standard",
+            configJson: JSON.stringify(config || {}),
+            status: "queued",
+            createdAt: new Date(),
+        }
+    });
+
+    // Product asset is optional - we can render without background removal
+    const productAsset = await prisma.productAsset.findFirst({
+        where: { shopId: shop.id, productId: product_id }
+    });
+
+    const roomSession = await prisma.roomSession.findUnique({
+        where: { id: room_session_id }
+    });
+
+    if (!roomSession) {
+        await prisma.renderJob.update({
+            where: { id: job.id },
+            data: { status: "failed", errorMessage: "Room session not found" }
+        });
+        return json({ job_id: job.id, status: "failed", error: "room_not_found" }, { headers: corsHeaders });
+    }
+
+    // Get product image URL - prefer prepared (bg removed), then fallback to original from Shopify
+    let productImageUrl: string | null = null;
+    
+    if (productAsset?.preparedImageUrl) {
+        productImageUrl = productAsset.preparedImageUrl;
+    } else if (productAsset?.sourceImageUrl) {
+        productImageUrl = productAsset.sourceImageUrl;
+    } else if (config?.product_image_url) {
+        // Fallback: use the product image URL sent from the frontend
+        productImageUrl = config.product_image_url;
+    }
+
+    if (!productImageUrl) {
+        await prisma.renderJob.update({
+            where: { id: job.id },
+            data: { status: "failed", errorMessage: "No product image available" }
+        });
+        return json({ job_id: job.id, status: "failed", error: "no_product_image" }, { headers: corsHeaders });
+    }
+
+    logger.info(
+        { ...shopLogContext, stage: "composite-start" },
+        `Processing composite: productImageUrl=${productImageUrl.substring(0, 80)}, roomSessionId=${room_session_id}, hasProductAsset=${!!productAsset}`
+    );
+
+    try {
+        // Generate fresh room image URL from stored key (cleaned if available, otherwise original)
+        // For legacy sessions without keys, fall back to stored URLs
+        let roomImageUrl: string;
+
+        if (roomSession.cleanedRoomImageKey) {
+            // Generate fresh URL from cleaned image key
+            roomImageUrl = await StorageService.getSignedReadUrl(roomSession.cleanedRoomImageKey, 60 * 60 * 1000);
+        } else if (roomSession.originalRoomImageKey) {
+            // Generate fresh URL from original image key
+            roomImageUrl = await StorageService.getSignedReadUrl(roomSession.originalRoomImageKey, 60 * 60 * 1000);
+        } else if (roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl) {
+            // Legacy: use stored URL if no keys available
+            roomImageUrl = roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl;
+        } else {
+            throw new Error("No room image available");
+        }
+
+        // Call Gemini directly - no more Cloud Run!
+        const imageUrl = await compositeScene(
+            productImageUrl,
+            roomImageUrl,
+            { x: placement.x, y: placement.y, scale: placement.scale || 1.0 },
+            config?.style_preset || "neutral",
+            requestId
+        );
+
+        await prisma.renderJob.update({
+            where: { id: job.id },
+            data: { status: "completed", imageUrl: imageUrl, completedAt: new Date() }
+        });
+
+        // Increment quota only after successful render
+        await incrementQuota(shop.id, "render", 1);
+
+        logger.info(
+            { ...shopLogContext, stage: "complete" },
+            `Render completed successfully: jobId=${job.id}`
+        );
+    } catch (error) {
+        logger.error(
+            { ...shopLogContext, stage: "composite-error" },
+            "Gemini composite failed",
+            error
+        );
+        await prisma.renderJob.update({
+            where: { id: job.id },
+            data: {
+                status: "failed",
+                errorCode: "GEMINI_ERROR",
+                errorMessage: error instanceof Error ? error.message : "Unknown error"
+            }
+        });
+    }
+
+    return json({ job_id: job.id });
 };
