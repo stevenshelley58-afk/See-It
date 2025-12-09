@@ -18,6 +18,7 @@ import {
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getStatusInfo, formatErrorMessage } from "../utils/status-mapping";
+import { StorageService } from "../services/storage.server";
 
 import { PLANS } from "../billing";
 
@@ -153,9 +154,25 @@ export const loader = async ({ request }) => {
             }
         });
 
-        assets.forEach(a => {
-            assetsMap[`gid://shopify/Product/${a.productId}`] = a;
-        });
+        // Generate fresh signed URLs for ready assets with preparedImageKey
+        for (const a of assets) {
+            let preparedImageUrlFresh = a.preparedImageUrl;
+
+            // If we have a stable GCS key, generate a fresh signed URL (1 hour expiry)
+            if (a.status === "ready" && a.preparedImageKey) {
+                try {
+                    preparedImageUrlFresh = await StorageService.getSignedReadUrl(a.preparedImageKey, 60 * 60 * 1000);
+                } catch (err) {
+                    console.error(`Failed to generate signed URL for asset ${a.id}:`, err);
+                    // Fall back to stored URL (may be expired)
+                }
+            }
+
+            assetsMap[`gid://shopify/Product/${a.productId}`] = {
+                ...a,
+                preparedImageUrlFresh
+            };
+        }
     }
 
     // 4. Get Global Status Counts (Aggregated)
@@ -284,12 +301,16 @@ export default function Products() {
                                     const asset = assetsMap[id];
                                     const statusInfo = getStatusInfo(asset?.status);
 
+                                    // Show prepared image for ready products
+                                    const showPreparedImage = asset?.status === "ready" && asset?.preparedImageUrlFresh;
+
                                     return (
                                         <ResourceList.Item
                                             id={id}
                                             accessibilityLabel={`View details for ${title}`}
                                         >
                                             <InlineStack gap="400" align="start" blockAlign="start" wrap={false}>
+                                                {/* Original product image */}
                                                 <div style={{ width: '60px', height: '60px', flexShrink: 0 }}>
                                                     {featuredImage ? (
                                                         <img
@@ -301,6 +322,33 @@ export default function Products() {
                                                         <div style={{ width: '100%', height: '100%', background: '#eee', borderRadius: '4px' }} />
                                                     )}
                                                 </div>
+
+                                                {/* Prepared image preview (background removed) - only for ready products */}
+                                                {showPreparedImage && (
+                                                    <div style={{ width: '60px', height: '60px', flexShrink: 0, position: 'relative' }}>
+                                                        <img
+                                                            src={asset.preparedImageUrlFresh}
+                                                            alt={`${title} - prepared`}
+                                                            style={{
+                                                                width: '100%',
+                                                                height: '100%',
+                                                                objectFit: 'contain',
+                                                                borderRadius: '4px',
+                                                                background: 'repeating-conic-gradient(#ddd 0% 25%, transparent 0% 50%) 50% / 10px 10px'
+                                                            }}
+                                                        />
+                                                        <span style={{
+                                                            position: 'absolute',
+                                                            bottom: '2px',
+                                                            right: '2px',
+                                                            fontSize: '8px',
+                                                            background: 'rgba(0,0,0,0.6)',
+                                                            color: 'white',
+                                                            padding: '1px 3px',
+                                                            borderRadius: '2px'
+                                                        }}>BG Removed</span>
+                                                    </div>
+                                                )}
 
                                                 <BlockStack gap="200" inlineAlign="start">
                                                     <Text variant="bodyMd" fontWeight="bold" as="h3">
