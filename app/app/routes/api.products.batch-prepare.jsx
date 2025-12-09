@@ -150,6 +150,8 @@ export const action = async ({ request }) => {
                             prepStrategy: "batch",
                             sourceImageUrl: String(imageUrl),
                             sourceImageId: String(imageId),
+                            retryCount: 0, // Reset retry count so processor picks it up
+                            errorMessage: null, // Clear previous error
                             updatedAt: new Date()
                         }
                     });
