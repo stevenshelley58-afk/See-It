@@ -133,40 +133,43 @@ export const action = async ({ request }) => {
                     continue;
                 }
 
-                // Create or Update asset to "pending"
-                // Upsert logic
-                const existing = await prisma.productAsset.findFirst({
-                    where: {
-                        shopId,
-                        productId: String(productId)
+                // Create or Update asset to "pending" - use transaction for atomicity
+                await prisma.$transaction(async (tx) => {
+                    const existing = await tx.productAsset.findFirst({
+                        where: {
+                            shopId,
+                            productId: String(productId)
+                        }
+                    });
+
+                    if (existing) {
+                        await tx.productAsset.update({
+                            where: { id: existing.id },
+                            data: {
+                                status: "pending",
+                                prepStrategy: "batch",
+                                sourceImageUrl: String(imageUrl),
+                                sourceImageId: String(imageId),
+                                retryCount: 0, // Reset retry count so processor picks it up
+                                errorMessage: null, // Clear previous error
+                                updatedAt: new Date()
+                            }
+                        });
+                    } else {
+                        await tx.productAsset.create({
+                            data: {
+                                shopId,
+                                productId: String(productId),
+                                sourceImageId: String(imageId),
+                                sourceImageUrl: String(imageUrl),
+                                status: "pending",
+                                prepStrategy: "batch",
+                                promptVersion: 1,
+                                createdAt: new Date()
+                            }
+                        });
                     }
                 });
-
-                if (existing) {
-                    await prisma.productAsset.update({
-                        where: { id: existing.id },
-                        data: {
-                            status: "pending",
-                            prepStrategy: "batch",
-                            sourceImageUrl: String(imageUrl),
-                            sourceImageId: String(imageId),
-                            updatedAt: new Date()
-                        }
-                    });
-                } else {
-                    await prisma.productAsset.create({
-                        data: {
-                            shopId,
-                            productId: String(productId),
-                            sourceImageId: String(imageId),
-                            sourceImageUrl: String(imageUrl),
-                            status: "pending",
-                            prepStrategy: "batch",
-                            promptVersion: 1,
-                            createdAt: new Date()
-                        }
-                    });
-                }
 
                 queued++;
 

@@ -55,7 +55,7 @@ export const loader = async ({ request }) => {
                     error: 'Failed to fetch products from Shopify',
                     message: errorMessage,
                     products: [],
-                    status_counts: { ready: 0, pending: 0, failed: 0, stale: 0, unprepared: 0 }
+                    status_counts: { ready: 0, pending: 0, processing: 0, failed: 0, stale: 0, unprepared: 0 }
                 },
                 { status: responseJson.errors ? 502 : 500 }
             );
@@ -76,7 +76,7 @@ export const loader = async ({ request }) => {
     });
 
     let assetsMap = {};
-    let statusCounts = { ready: 0, pending: 0, failed: 0, stale: 0, unprepared: 0 };
+    let statusCounts = { ready: 0, pending: 0, processing: 0, failed: 0, stale: 0, unprepared: 0 };
 
     if (shop) {
         const assets = await prisma.productAsset.findMany({

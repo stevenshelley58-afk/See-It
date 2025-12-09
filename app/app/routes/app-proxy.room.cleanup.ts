@@ -5,6 +5,27 @@ import { cleanupRoom } from "../services/gemini.server";
 import { StorageService } from "../services/storage.server";
 import { validateSessionId, validateMaskDataUrl } from "../utils/validation.server";
 
+/**
+ * Extract the GCS key from a signed URL
+ * Example: https://storage.googleapis.com/bucket/cleaned/123_abc.jpg?X-Goog-...
+ * Returns: cleaned/123_abc.jpg
+ */
+function extractGcsKeyFromUrl(signedUrl: string): string | null {
+    try {
+        const url = new URL(signedUrl);
+        // GCS signed URLs have the format: /bucket-name/key
+        // Remove the leading slash and bucket name
+        const pathParts = url.pathname.split('/');
+        if (pathParts.length >= 3) {
+            // Skip empty string and bucket name, join the rest
+            return pathParts.slice(2).join('/');
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
 
@@ -68,11 +89,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             ? await cleanupRoom(currentRoomUrl, sanitizedMaskUrl)
             : currentRoomUrl;
 
-        // Update session with the new cleaned image (no-op if echo)
+        // Extract GCS key from the returned URL for future URL regeneration
+        const cleanedRoomImageKey = extractGcsKeyFromUrl(cleanedRoomImageUrl);
+
+        // Update session with the new cleaned image and key (no-op if echo)
         await prisma.roomSession.update({
             where: { id: sanitizedSessionId },
             data: {
                 cleanedRoomImageUrl: cleanedRoomImageUrl,
+                cleanedRoomImageKey: cleanedRoomImageKey, // Store key for URL regeneration
                 geminiFileUri: null,  // Invalidate - new image needs new preload
                 lastUsedAt: new Date()
             }
