@@ -1,5 +1,5 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, useSubmit, useSearchParams, useNavigation, useRouteError, isRouteErrorResponse } from "@remix-run/react";
+import { useLoaderData, useFetcher, useSearchParams, useNavigation, useRouteError, isRouteErrorResponse } from "@remix-run/react";
 import { useState, useCallback, useEffect } from "react";
 import {
     Page,
@@ -186,7 +186,6 @@ export const loader = async ({ request }) => {
 export default function Products() {
     const { products, assetsMap, statusCounts, pageInfo } = useLoaderData();
     const fetcher = useFetcher();
-    const submit = useSubmit();
     const [selectedItems, setSelectedItems] = useState([]);
     const [statusFilter, setStatusFilter] = useState("all");
     const [params, setParams] = useSearchParams();
@@ -203,9 +202,10 @@ export default function Products() {
         // Extract numeric IDs from GIDs for the backend
         const numericIds = selectedItems.map(id => id.split('/').pop());
         formData.append("productIds", JSON.stringify(numericIds));
-        submit(formData, { method: "post", action: "/api/products/batch-prepare" });
+        // Use fetcher.submit instead of submit to stay on the page (no navigation)
+        fetcher.submit(formData, { method: "post", action: "/api/products/batch-prepare" });
         setSelectedItems([]);
-    }, [selectedItems, submit]);
+    }, [selectedItems, fetcher]);
 
     // Client-side filtering only affects the current page view, 
     // but useful for quick visual check on the page.
@@ -241,7 +241,7 @@ export default function Products() {
                 selectedItems.length > 0 ? {
                     content: `Batch Prepare Selected (${selectedItems.length})`,
                     onAction: handleBatchPrepare,
-                    loading: navigation.state === "submitting" // Show spinner on button
+                    loading: fetcher.state === "submitting" // Show spinner on button
                 } : undefined
             }
         >
