@@ -407,14 +407,15 @@ export async function prepareProduct(
                     `Attempting background removal with ${attempt.label}, mimeType: ${attempt.mimeType}`
                 );
 
-                const resultBlob = await removeBackground(attemptBuffer, {
-                    // Not in types, but accepted by runtime
-                    mimeType: attempt.mimeType,
+                // Convert Buffer to Blob - @imgly/background-removal-node expects web-standard Blob, not Node Buffer
+                const inputBlob = new Blob([attemptBuffer], { type: attempt.mimeType });
+
+                const resultBlob = await removeBackground(inputBlob, {
                     output: {
                         format: 'image/png',
                         quality: 1.0
                     }
-                } as any);
+                });
 
                 // Clean up attempt buffer immediately after background removal
                 attemptBuffer = null;
