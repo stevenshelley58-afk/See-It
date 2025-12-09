@@ -1,6 +1,6 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, useSearchParams, useNavigation, useRouteError, isRouteErrorResponse } from "@remix-run/react";
-import { useState, useCallback, useEffect } from "react";
+import { useLoaderData, useFetcher, useSearchParams, useNavigation, useRouteError, isRouteErrorResponse, useRevalidator } from "@remix-run/react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
     Page,
     Layout,
@@ -203,12 +203,27 @@ export const loader = async ({ request }) => {
 export default function Products() {
     const { products, assetsMap, statusCounts, pageInfo } = useLoaderData();
     const fetcher = useFetcher();
+    const revalidator = useRevalidator();
     const [selectedItems, setSelectedItems] = useState([]);
     const [statusFilter, setStatusFilter] = useState("all");
     const [params, setParams] = useSearchParams();
     const navigation = useNavigation();
+    const prevFetcherState = useRef(fetcher.state);
 
-    const isLoading = navigation.state === "loading";
+    const isLoading = navigation.state === "loading" || revalidator.state === "loading";
+
+    // Revalidate page data after batch-prepare completes to show updated statuses
+    useEffect(() => {
+        // Detect transition from submitting/loading to idle (fetcher completed)
+        if (prevFetcherState.current !== "idle" && fetcher.state === "idle" && fetcher.data) {
+            // Revalidate after a short delay to let processor pick up the items
+            const timer = setTimeout(() => {
+                revalidator.revalidate();
+            }, 1000);
+            return () => clearTimeout(timer);
+        }
+        prevFetcherState.current = fetcher.state;
+    }, [fetcher.state, fetcher.data, revalidator]);
 
     const handleSelectionChange = useCallback((selection) => {
         setSelectedItems(selection);
