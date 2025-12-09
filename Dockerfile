@@ -1,5 +1,5 @@
-# Build v1.0.21 - Fix Vite build externalization
-# Cache bust: 2025-12-08
+# Build v1.0.22 - Fix ReadableStream compatibility
+# Cache bust: 2025-12-08-v2
 FROM node:20-slim AS base
 
 WORKDIR /usr/src/app
