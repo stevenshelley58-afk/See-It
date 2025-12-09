@@ -41,6 +41,11 @@ export const action = async ({ request }) => {
             );
         }
 
+        logger.info(
+            createLogContext("prepare", requestId, "batch-start", { shopId, count: productIds.length }),
+            `Batch prepare started: ${productIds.length} products [${productIds.slice(0, 3).join(', ')}${productIds.length > 3 ? '...' : ''}]`
+        );
+
         // Enforce quota for the entire batch
         try {
             await enforceQuota(shopId, "prep", productIds.length);
@@ -82,8 +87,33 @@ export const action = async ({ request }) => {
                 const responseJson = await response.json();
                 const product = responseJson.data?.product;
 
-                if (!product || !product.featuredImage) {
-                    errors.push({ productId, error: "No featured image found" });
+                // Check for GraphQL errors
+                if (responseJson.errors?.length > 0) {
+                    const gqlError = responseJson.errors[0]?.message || "GraphQL error";
+                    logger.error(
+                        createLogContext("prepare", requestId, "batch-graphql-error", { shopId, productId, productGid }),
+                        `Shopify GraphQL error: ${gqlError}`,
+                        { graphqlErrors: responseJson.errors }
+                    );
+                    errors.push({ productId, error: `GraphQL: ${gqlError}` });
+                    continue;
+                }
+
+                if (!product) {
+                    logger.warn(
+                        createLogContext("prepare", requestId, "batch-product-not-found", { shopId, productId, productGid }),
+                        `Product not found in Shopify (may be deleted or ID mismatch)`
+                    );
+                    errors.push({ productId, error: "Product not found in Shopify" });
+                    continue;
+                }
+
+                if (!product.featuredImage) {
+                    logger.warn(
+                        createLogContext("prepare", requestId, "batch-no-image", { shopId, productId }),
+                        `Product has no featured image - cannot prepare`
+                    );
+                    errors.push({ productId, error: "No featured image - upload an image first" });
                     continue;
                 }
 

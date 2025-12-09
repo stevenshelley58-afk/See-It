@@ -68,164 +68,205 @@ async function processPendingAssets(batchRequestId: string) {
             orderBy: { createdAt: "asc" }
         });
 
-        if (pendingAssets.length > 0) {
-            logger.info(
-                createLogContext("prepare", batchRequestId, "batch-start-assets", {}),
-                `Processing batch of ${pendingAssets.length} pending assets`
+        if (pendingAssets.length === 0) {
+            // Log periodically that processor is running but idle (helpful for debugging)
+            logger.debug(
+                createLogContext("prepare", batchRequestId, "batch-idle", {}),
+                "No pending assets to process"
             );
+            return;
+        }
 
-            for (const asset of pendingAssets) {
-                const itemRequestId = generateRequestId();
-                const currentRetryCount = asset.retryCount ?? 0;
+        logger.info(
+            createLogContext("prepare", batchRequestId, "batch-start-assets", {
+                count: pendingAssets.length,
+                assetIds: pendingAssets.map(a => a.id).join(',')
+            }),
+            `Processing ${pendingAssets.length} pending assets: [${pendingAssets.map(a => `${a.productId}(retry:${a.retryCount})`).join(', ')}]`
+        );
 
-                try {
-                    // Lock the asset for processing
-                    const updated = await prisma.productAsset.updateMany({
-                        where: { id: asset.id, status: "pending" },
-                        data: { status: "processing", updatedAt: new Date() }
+        for (const asset of pendingAssets) {
+            const itemRequestId = generateRequestId();
+            const currentRetryCount = asset.retryCount ?? 0;
+
+            try {
+                // Lock the asset for processing
+                const updated = await prisma.productAsset.updateMany({
+                    where: { id: asset.id, status: "pending" },
+                    data: { status: "processing", updatedAt: new Date() }
+                });
+
+                if (updated.count === 0) continue; // Lost race
+
+                logger.info(
+                    createLogContext("prepare", itemRequestId, "asset-start", {
+                        assetId: asset.id,
+                        productId: asset.productId,
+                        shopId: asset.shopId,
+                        sourceUrl: asset.sourceImageUrl?.substring(0, 60),
+                        retryCount: currentRetryCount
+                    }),
+                    `Starting asset ${asset.productId} (attempt ${currentRetryCount + 1}/${MAX_RETRY_ATTEMPTS})`
+                );
+
+                // Attempt processing with inline retry for transient errors
+                let lastError: unknown = null;
+                let success = false;
+                let preparedImageUrl: string | null = null;
+
+                for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !success; attempt++) {
+                    try {
+                        if (attempt > 0) {
+                            const delay = getRetryDelay(attempt - 1);
+                            logger.info(
+                                createLogContext("prepare", itemRequestId, "asset-retry", {
+                                    assetId: asset.id,
+                                    attempt: attempt + 1,
+                                    delay
+                                }),
+                                `Retry attempt ${attempt + 1}/${MAX_RETRY_ATTEMPTS} after ${delay}ms delay`
+                            );
+                            await sleep(delay);
+                        }
+
+                        preparedImageUrl = await prepareProduct(
+                            asset.sourceImageUrl,
+                            asset.shopId,
+                            asset.productId,
+                            asset.id,
+                            itemRequestId
+                        );
+                        success = true;
+                    } catch (error) {
+                        lastError = error;
+                        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+                        // Only retry for transient errors
+                        if (!isRetryableError(error)) {
+                            logger.warn(
+                                createLogContext("prepare", itemRequestId, "asset-non-retryable", {
+                                    assetId: asset.id,
+                                    productId: asset.productId,
+                                    attempt: attempt + 1,
+                                    errorType: error?.constructor?.name || 'Unknown'
+                                }),
+                                `Non-retryable error for product ${asset.productId}: ${errorMessage}`
+                            );
+                            break; // Exit retry loop for permanent errors
+                        }
+
+                        logger.warn(
+                            createLogContext("prepare", itemRequestId, "asset-attempt-failed", {
+                                assetId: asset.id,
+                                productId: asset.productId,
+                                attempt: attempt + 1
+                            }),
+                            `Attempt ${attempt + 1} failed for product ${asset.productId}: ${errorMessage}`
+                        );
+                    }
+                }
+
+                if (success && preparedImageUrl) {
+                    // Extract GCS key from the signed URL for on-demand URL generation
+                    const preparedImageKey = extractGcsKeyFromUrl(preparedImageUrl);
+
+                    await prisma.productAsset.update({
+                        where: { id: asset.id },
+                        data: {
+                            status: "ready",
+                            preparedImageUrl: preparedImageUrl,
+                            preparedImageKey: preparedImageKey,
+                            retryCount: 0, // Reset retry count on success
+                            errorMessage: null,
+                            updatedAt: new Date()
+                        }
                     });
 
-                    if (updated.count === 0) continue; // Lost race
-
                     logger.info(
-                        createLogContext("prepare", itemRequestId, "asset-start", {
+                        createLogContext("prepare", itemRequestId, "asset-complete", {
                             assetId: asset.id,
-                            retryCount: currentRetryCount
+                            productId: asset.productId,
+                            gcsKey: preparedImageKey
                         }),
-                        `Starting asset processing (attempt ${currentRetryCount + 1}/${MAX_RETRY_ATTEMPTS})`
+                        `Product ${asset.productId} prepared successfully -> ${preparedImageKey}`
                     );
+                } else {
+                    // All retries exhausted or permanent error
+                    const newRetryCount = currentRetryCount + 1;
+                    const errorMessage = lastError instanceof Error ? lastError.message : "Unknown error";
+                    const errorStack = lastError instanceof Error ? lastError.stack?.split('\n').slice(0, 3).join(' | ') : '';
+                    const isFinalFailure = newRetryCount >= MAX_RETRY_ATTEMPTS || !isRetryableError(lastError);
 
-                    // Attempt processing with inline retry for transient errors
-                    let lastError: unknown = null;
-                    let success = false;
-                    let preparedImageUrl: string | null = null;
-
-                    for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !success; attempt++) {
-                        try {
-                            if (attempt > 0) {
-                                const delay = getRetryDelay(attempt - 1);
-                                logger.info(
-                                    createLogContext("prepare", itemRequestId, "asset-retry", {
-                                        assetId: asset.id,
-                                        attempt: attempt + 1,
-                                        delay
-                                    }),
-                                    `Retry attempt ${attempt + 1}/${MAX_RETRY_ATTEMPTS} after ${delay}ms delay`
-                                );
-                                await sleep(delay);
-                            }
-
-                            preparedImageUrl = await prepareProduct(
-                                asset.sourceImageUrl,
-                                asset.shopId,
-                                asset.productId,
-                                asset.id,
-                                itemRequestId
-                            );
-                            success = true;
-                        } catch (error) {
-                            lastError = error;
-                            const errorMessage = error instanceof Error ? error.message : "Unknown error";
-
-                            // Only retry for transient errors
-                            if (!isRetryableError(error)) {
-                                logger.warn(
-                                    createLogContext("prepare", itemRequestId, "asset-non-retryable", {
-                                        assetId: asset.id,
-                                        attempt: attempt + 1
-                                    }),
-                                    `Non-retryable error: ${errorMessage}`
-                                );
-                                break; // Exit retry loop for permanent errors
-                            }
-
-                            logger.warn(
-                                createLogContext("prepare", itemRequestId, "asset-attempt-failed", {
-                                    assetId: asset.id,
-                                    attempt: attempt + 1
-                                }),
-                                `Attempt ${attempt + 1} failed with retryable error: ${errorMessage}`
-                            );
-                        }
-                    }
-
-                    if (success && preparedImageUrl) {
-                        // Extract GCS key from the signed URL for on-demand URL generation
-                        const preparedImageKey = extractGcsKeyFromUrl(preparedImageUrl);
-
-                        await prisma.productAsset.update({
-                            where: { id: asset.id },
-                            data: {
-                                status: "ready",
-                                preparedImageUrl: preparedImageUrl,
-                                preparedImageKey: preparedImageKey,
-                                retryCount: 0, // Reset retry count on success
-                                errorMessage: null,
-                                updatedAt: new Date()
-                            }
-                        });
-
-                        logger.info(
-                            createLogContext("prepare", itemRequestId, "asset-complete", { assetId: asset.id }),
-                            "Asset processing completed successfully"
-                        );
-                    } else {
-                        // All retries exhausted or permanent error
-                        const newRetryCount = currentRetryCount + 1;
-                        const errorMessage = lastError instanceof Error ? lastError.message : "Unknown error";
-                        const isFinalFailure = newRetryCount >= MAX_RETRY_ATTEMPTS || !isRetryableError(lastError);
-
-                        logger.error(
-                            createLogContext("prepare", itemRequestId, "asset-error", {
-                                assetId: asset.id,
-                                retryCount: newRetryCount,
-                                isFinal: isFinalFailure
-                            }),
-                            `Error processing asset${isFinalFailure ? " (final failure)" : " (will retry)"}`,
-                            lastError
-                        );
-
-                        await prisma.productAsset.update({
-                            where: { id: asset.id },
-                            data: {
-                                status: isFinalFailure ? "failed" : "pending",
-                                errorMessage: errorMessage.substring(0, 500),
-                                retryCount: newRetryCount,
-                                updatedAt: new Date()
-                            }
-                        });
-                    }
-                } catch (error) {
-                    // Outer error handler for unexpected errors (DB errors, etc.)
-                    const errorMessage = error instanceof Error ? error.message : "Unknown error";
                     logger.error(
-                        createLogContext("prepare", itemRequestId, "asset-critical-error", { assetId: asset.id }),
-                        "Critical error processing asset",
-                        error
+                        createLogContext("prepare", itemRequestId, "asset-error", {
+                            assetId: asset.id,
+                            productId: asset.productId,
+                            retryCount: newRetryCount,
+                            isFinal: isFinalFailure,
+                            errorType: lastError?.constructor?.name || 'Unknown',
+                            stackPreview: errorStack
+                        }),
+                        `FAILED product ${asset.productId}${isFinalFailure ? " (FINAL - giving up)" : " (will retry)"}: ${errorMessage}`,
+                        lastError
                     );
 
-                    // Mark as failed without retry for critical errors
-                    try {
-                        await prisma.productAsset.update({
-                            where: { id: asset.id },
-                            data: {
-                                status: "failed",
-                                errorMessage: `Critical error: ${errorMessage.substring(0, 450)}`,
-                                updatedAt: new Date()
-                            }
-                        });
-                    } catch (updateError) {
-                        logger.error(
-                            createLogContext("prepare", itemRequestId, "asset-update-failed", { assetId: asset.id }),
-                            "Failed to update asset status after critical error",
-                            updateError
-                        );
-                    }
+                    await prisma.productAsset.update({
+                        where: { id: asset.id },
+                        data: {
+                            status: isFinalFailure ? "failed" : "pending",
+                            errorMessage: errorMessage.substring(0, 500),
+                            retryCount: newRetryCount,
+                            updatedAt: new Date()
+                        }
+                    });
+                }
+            } catch (error) {
+                // Outer error handler for unexpected errors (DB errors, etc.)
+                const errorMessage = error instanceof Error ? error.message : "Unknown error";
+                const errorStack = error instanceof Error ? error.stack?.split('\n').slice(0, 5).join(' | ') : '';
+
+                logger.error(
+                    createLogContext("prepare", itemRequestId, "asset-critical-error", {
+                        assetId: asset.id,
+                        productId: asset.productId,
+                        errorType: error?.constructor?.name || 'Unknown',
+                        stackPreview: errorStack
+                    }),
+                    `CRITICAL ERROR processing product ${asset.productId}: ${errorMessage}`,
+                    error
+                );
+
+                // Mark as failed without retry for critical errors
+                try {
+                    await prisma.productAsset.update({
+                        where: { id: asset.id },
+                        data: {
+                            status: "failed",
+                            errorMessage: `Critical: ${errorMessage.substring(0, 450)}`,
+                            updatedAt: new Date()
+                        }
+                    });
+                } catch (updateError) {
+                    logger.error(
+                        createLogContext("prepare", itemRequestId, "asset-update-failed", {
+                            assetId: asset.id,
+                            productId: asset.productId
+                        }),
+                        `Failed to update asset status after critical error: ${updateError instanceof Error ? updateError.message : 'Unknown'}`,
+                        updateError
+                    );
                 }
             }
         }
     } catch (error) {
-        logger.error(createLogContext("prepare", batchRequestId, "asset-loop-error", {}), "Error in asset loop", error);
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        logger.error(
+            createLogContext("prepare", batchRequestId, "asset-loop-error", {
+                errorType: error?.constructor?.name || 'Unknown'
+            }),
+            `Asset processing loop crashed: ${errorMessage}`,
+            error
+        );
     }
 }
 
