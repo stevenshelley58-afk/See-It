@@ -274,14 +274,14 @@ export async function segmentWithPointPrompt(
         );
 
         // Use official Meta SAM 2 model with point prompt
-        // Model: meta/sam-2 on Replicate
+        // Full model ID with version hash from https://replicate.com/meta/sam-2/versions
         const output = await client.run(
-            "meta/sam-2",
+            "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
             {
                 input: {
                     image: imageUrl,
-                    point_coords: [[pixelX, pixelY]], // Array of [x, y] points
-                    point_labels: [1], // 1 = foreground point
+                    point_coords: `[${pixelX},${pixelY}]`, // String format: "[x,y]"
+                    point_labels: "1", // 1 = foreground point
                 }
             }
         );
