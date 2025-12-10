@@ -1,12 +1,12 @@
-// Legacy single-product prepare endpoint
+// Single-product prepare endpoint
 // Path: POST /api/products/prepare
 // Used by app.products.jsx for individual product preparation
+// Accepts just productId and fetches image details from Shopify
 
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { enforceQuota } from "../quota.server";
-import { prepareProduct } from "../services/gemini.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId, addRequestIdHeader } from "../utils/request-context.server";
 import { getShopFromSession } from "../utils/shop.server";
@@ -20,15 +20,83 @@ export const action = async ({ request }) => {
         const { shopId } = await getShopFromSession(session, request, "prepare");
         const formData = await request.formData();
         const productId = formData.get("productId");
-        const imageUrl = formData.get("imageUrl");
-        const imageId = formData.get("imageId");
 
-        if (!productId || !imageUrl || !imageId) {
+        if (!productId) {
             return addRequestIdHeader(
-                json({ error: "Missing required fields: productId, imageUrl, imageId", requestId }, { status: 400 }),
+                json({ error: "Missing required field: productId", message: "Product ID is required", requestId }, { status: 400 }),
                 requestId
             );
         }
+
+        logger.info(
+            createLogContext("prepare", requestId, "single-start", { shopId, productId }),
+            `Single prepare started for product ${productId}`
+        );
+
+        // Convert numeric ID to GID format if needed
+        const productGid = String(productId).startsWith('gid://')
+            ? productId
+            : `gid://shopify/Product/${productId}`;
+
+        // Fetch product details from Shopify GraphQL
+        const response = await admin.graphql(
+            `#graphql
+            query getProduct($id: ID!) {
+              product(id: $id) {
+                id
+                title
+                featuredImage {
+                  id
+                  url
+                }
+              }
+            }`,
+            {
+                variables: { id: productGid }
+            }
+        );
+
+        const responseJson = await response.json();
+        const product = responseJson.data?.product;
+
+        // Check for GraphQL errors
+        if (responseJson.errors?.length > 0) {
+            const gqlError = responseJson.errors[0]?.message || "GraphQL error";
+            logger.error(
+                createLogContext("prepare", requestId, "graphql-error", { shopId, productId, productGid }),
+                `Shopify GraphQL error: ${gqlError}`,
+                { graphqlErrors: responseJson.errors }
+            );
+            return addRequestIdHeader(
+                json({ error: gqlError, message: "Failed to fetch product from Shopify", requestId }, { status: 400 }),
+                requestId
+            );
+        }
+
+        if (!product) {
+            logger.warn(
+                createLogContext("prepare", requestId, "product-not-found", { shopId, productId, productGid }),
+                `Product not found in Shopify (may be deleted or ID mismatch)`
+            );
+            return addRequestIdHeader(
+                json({ error: "Product not found", message: "Product not found in Shopify", requestId }, { status: 404 }),
+                requestId
+            );
+        }
+
+        if (!product.featuredImage) {
+            logger.warn(
+                createLogContext("prepare", requestId, "no-image", { shopId, productId }),
+                `Product has no featured image - cannot prepare`
+            );
+            return addRequestIdHeader(
+                json({ error: "No image", message: "Product has no featured image - upload an image first", requestId }, { status: 400 }),
+                requestId
+            );
+        }
+
+        const imageId = product.featuredImage.id;
+        const imageUrl = product.featuredImage.url;
 
         // Validate image URL to prevent SSRF attacks
         try {
@@ -60,74 +128,54 @@ export const action = async ({ request }) => {
             throw error;
         }
 
-        // Check if asset already exists
-        let assetId;
-        const existing = await prisma.productAsset.findFirst({
-            where: {
-                shopId,
-                productId: String(productId)
-            }
-        });
-
-        if (existing) {
-            assetId = existing.id;
-            // Update existing asset to pending with manual strategy
-            await prisma.productAsset.update({
-                where: { id: existing.id },
-                data: {
-                    status: "pending",
-                    prepStrategy: "manual",
-                    sourceImageUrl: String(imageUrl),
-                    sourceImageId: String(imageId),
-                    updatedAt: new Date()
-                }
-            });
-        } else {
-            // Create new asset with manual strategy
-            const newAsset = await prisma.productAsset.create({
-                data: {
+        // Create or Update asset to "pending" - use transaction for atomicity
+        await prisma.$transaction(async (tx) => {
+            const existing = await tx.productAsset.findFirst({
+                where: {
                     shopId,
-                    productId: String(productId),
-                    sourceImageId: String(imageId),
-                    sourceImageUrl: String(imageUrl),
-                    status: "pending",
-                    prepStrategy: "manual",
-                    promptVersion: 1,
-                    createdAt: new Date()
+                    productId: String(productId)
                 }
             });
-            assetId = newAsset.id;
-        }
 
-        // Process the image immediately using local Gemini service
-        const preparedImageUrl = await prepareProduct(
-            String(imageUrl),
-            shopId,
-            String(productId),
-            assetId,
-            requestId
-        );
-
-        // Update as ready
-        await prisma.productAsset.update({
-            where: { id: assetId },
-            data: {
-                status: "ready",
-                preparedImageUrl: preparedImageUrl,
-                updatedAt: new Date()
+            if (existing) {
+                await tx.productAsset.update({
+                    where: { id: existing.id },
+                    data: {
+                        status: "pending",
+                        prepStrategy: "manual",
+                        sourceImageUrl: String(imageUrl),
+                        sourceImageId: String(imageId),
+                        retryCount: 0, // Reset retry count so processor picks it up
+                        errorMessage: null, // Clear previous error
+                        updatedAt: new Date()
+                    }
+                });
+            } else {
+                await tx.productAsset.create({
+                    data: {
+                        shopId,
+                        productId: String(productId),
+                        sourceImageId: String(imageId),
+                        sourceImageUrl: String(imageUrl),
+                        status: "pending",
+                        prepStrategy: "manual",
+                        promptVersion: 1,
+                        createdAt: new Date()
+                    }
+                });
             }
         });
 
         logger.info(
-            createLogContext("prepare", requestId, "complete", { shopId, productId, assetId }),
-            "Product preparation completed successfully"
+            createLogContext("prepare", requestId, "queued", { shopId, productId }),
+            `Product ${productId} queued for background processing`
         );
 
         return addRequestIdHeader(
             json({
                 success: true,
-                assetId,
-                preparedImageUrl,
+                queued: 1,
+                message: `Queued "${product.title}" for background removal`,
                 requestId
             }),
             requestId
@@ -144,7 +192,7 @@ export const action = async ({ request }) => {
         return addRequestIdHeader(
             json({
                 error: errorMessage,
-                message: "Preparation failed",
+                message: "Failed to queue product for processing",
                 requestId
             }, { status: 500 }),
             requestId
