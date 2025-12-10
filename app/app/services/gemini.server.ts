@@ -5,7 +5,7 @@ import sharp from "sharp";
 import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
-import { segmentWithGroundedSam, isGroundedSamAvailable } from "./grounded-sam.server";
+import { segmentWithGroundedSam, isGroundedSamAvailable, extractObjectType } from "./grounded-sam.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -358,15 +358,19 @@ export async function prepareProduct(
 
         // Strategy 1: Grounded SAM (text-prompted segmentation)
         if (productTitle && isGroundedSamAvailable()) {
+            // Extract simplified object type from title for better detection
+            // "Mirror 2" -> "mirror", "Luxury Snowboard Pro" -> "snowboard"
+            const simplifiedPrompt = extractObjectType(productTitle);
+
             logger.info(
                 { ...logContext, stage: "bg-remove-grounded-sam" },
-                `Attempting Grounded SAM with prompt: "${productTitle}"`
+                `Attempting Grounded SAM with prompt: "${simplifiedPrompt}" (from title: "${productTitle}")`
             );
 
             try {
                 const result = await segmentWithGroundedSam(
                     sourceImageUrl, // Pass original URL - Replicate can fetch it directly
-                    productTitle,
+                    simplifiedPrompt,
                     requestId
                 );
 

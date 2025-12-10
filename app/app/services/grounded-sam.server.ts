@@ -2,7 +2,96 @@
 // This replaces @imgly/background-removal-node for more accurate product isolation
 
 import Replicate from "replicate";
+import sharp from "sharp";
 import { logger, createLogContext } from "../utils/logger.server";
+
+/**
+ * Validate that an image has actual content (not just transparent pixels).
+ * Returns false if the image is mostly/entirely transparent.
+ */
+async function validateImageHasContent(
+    imageBuffer: Buffer,
+    logContext: ReturnType<typeof createLogContext>
+): Promise<boolean> {
+    try {
+        const { data, info } = await sharp(imageBuffer)
+            .ensureAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+        const pixelCount = info.width * info.height;
+        let opaquePixels = 0;
+
+        // Count pixels that have some opacity (alpha > 10)
+        // Data is in RGBA format, so every 4th byte is alpha
+        for (let i = 3; i < data.length; i += 4) {
+            if (data[i] > 10) {
+                opaquePixels++;
+            }
+        }
+
+        const opaquePercentage = (opaquePixels / pixelCount) * 100;
+
+        logger.info(
+            { ...logContext, stage: "validate" },
+            `Image validation: ${opaquePixels}/${pixelCount} opaque pixels (${opaquePercentage.toFixed(1)}%)`
+        );
+
+        // If less than 1% of pixels are opaque, consider it empty/failed
+        if (opaquePercentage < 1) {
+            logger.warn(
+                { ...logContext, stage: "validate" },
+                `Image appears empty/transparent (${opaquePercentage.toFixed(1)}% opaque)`
+            );
+            return false;
+        }
+
+        return true;
+    } catch (error) {
+        logger.warn(
+            { ...logContext, stage: "validate" },
+            "Failed to validate image content, assuming valid",
+            error
+        );
+        return true; // Assume valid if we can't check
+    }
+}
+
+/**
+ * Clean up product title to create a better prompt for Grounded SAM.
+ *
+ * Strategy: Remove trailing numbers, SKUs, and common suffixes while
+ * preserving the meaningful product description.
+ *
+ * Examples:
+ *   "Mirror 2" -> "mirror"
+ *   "Snowboard Pro 500" -> "snowboard pro"
+ *   "Beautiful Wall Clock" -> "beautiful wall clock"
+ *   "SKU-12345 Lamp" -> "lamp"
+ */
+export function extractObjectType(productTitle: string): string {
+    let cleaned = productTitle
+        .toLowerCase()
+        .trim()
+        // Remove common SKU patterns at start (SKU-123, PROD-456, etc.)
+        .replace(/^[a-z]{2,4}[-_]?\d+\s*/i, '')
+        // Remove trailing numbers (Mirror 2, Chair 3, etc.)
+        .replace(/\s+\d+$/, '')
+        // Remove common size/variant suffixes
+        .replace(/\s+(small|medium|large|xl|xxl|xs|s|m|l)$/i, '')
+        // Remove trailing parentheses content (Chair (Red), Mirror (Large))
+        .replace(/\s*\([^)]*\)\s*$/, '')
+        // Remove extra whitespace
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    // If we stripped everything, fall back to original
+    if (!cleaned || cleaned.length < 2) {
+        cleaned = productTitle.toLowerCase().trim();
+    }
+
+    return cleaned;
+}
 
 // Lazy initialize Replicate client
 let replicate: Replicate | null = null;
@@ -110,7 +199,15 @@ export async function segmentWithGroundedSam(
         }
 
         const arrayBuffer = await response.arrayBuffer();
-        const imageBase64 = Buffer.from(arrayBuffer).toString('base64');
+        const imageBuffer = Buffer.from(arrayBuffer);
+
+        // Validate the image has actual content (not just transparent)
+        const isValid = await validateImageHasContent(imageBuffer, logContext);
+        if (!isValid) {
+            throw new Error("Grounded SAM returned an empty/transparent image - object not detected");
+        }
+
+        const imageBase64 = imageBuffer.toString('base64');
 
         logger.info(
             { ...logContext, stage: "complete" },
