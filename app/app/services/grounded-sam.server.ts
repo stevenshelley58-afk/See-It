@@ -260,19 +260,28 @@ export async function segmentWithPointPrompt(
     const client = getReplicateClient();
 
     try {
-        // Use Meta's SAM model with point prompt
-        // Format: "x,y" where x,y are normalized coordinates (0-1)
-        const pointStr = `${clickX.toFixed(4)},${clickY.toFixed(4)}`;
+        // Download image to get dimensions for converting normalized coords to pixels
+        const imgResponse = await fetch(imageUrl);
+        const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
+        const metadata = await sharp(imgBuffer).metadata();
 
+        const pixelX = Math.round(clickX * (metadata.width || 1000));
+        const pixelY = Math.round(clickY * (metadata.height || 1000));
+
+        logger.info(
+            { ...logContext, stage: "coords" },
+            `Converted normalized (${clickX}, ${clickY}) to pixels (${pixelX}, ${pixelY}) for image ${metadata.width}x${metadata.height}`
+        );
+
+        // Use SAM 2 model with point prompt
+        // Model: lucataco/segment-anything-2 on Replicate
         const output = await client.run(
-            "meta/sam-2-base:4c262c1ab752fe3a5fd0c559905b6c3db9341ce872a4027e3f2eb53f5d5b5b60",
+            "lucataco/segment-anything-2",
             {
                 input: {
                     image: imageUrl,
-                    point_coords: pointStr,
-                    point_labels: "1", // 1 = foreground point
-                    multimask_output: false, // Single best mask
-                    return_postprocessed: true, // Get cleaned mask
+                    input_points: [[pixelX, pixelY]], // Array of [x, y] points
+                    input_labels: [1], // 1 = foreground point
                 }
             }
         );
