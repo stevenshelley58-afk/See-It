@@ -73,6 +73,7 @@ export const action = async ({ request }) => {
                 query getProduct($id: ID!) {
                   product(id: $id) {
                     id
+                    title
                     featuredImage {
                       id
                       url
@@ -119,6 +120,7 @@ export const action = async ({ request }) => {
 
                 const imageId = product.featuredImage.id;
                 const imageUrl = product.featuredImage.url;
+                const productTitle = product.title; // For Grounded SAM text-prompted segmentation
 
                 // Validate image URL
                 try {
@@ -150,6 +152,7 @@ export const action = async ({ request }) => {
                                 prepStrategy: "batch",
                                 sourceImageUrl: String(imageUrl),
                                 sourceImageId: String(imageId),
+                                productTitle: productTitle, // Store for Grounded SAM
                                 retryCount: 0, // Reset retry count so processor picks it up
                                 errorMessage: null, // Clear previous error
                                 updatedAt: new Date()
@@ -160,6 +163,7 @@ export const action = async ({ request }) => {
                             data: {
                                 shopId,
                                 productId: String(productId),
+                                productTitle: productTitle, // Store for Grounded SAM
                                 sourceImageId: String(imageId),
                                 sourceImageUrl: String(imageUrl),
                                 status: "pending",

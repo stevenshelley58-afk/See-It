@@ -38,7 +38,7 @@ export const action = async ({ request }) => {
             ? productId
             : `gid://shopify/Product/${productId}`;
 
-        // Fetch product details from Shopify GraphQL
+        // Fetch product details from Shopify GraphQL (includes title for Grounded SAM)
         const response = await admin.graphql(
             `#graphql
             query getProduct($id: ID!) {
@@ -97,7 +97,7 @@ export const action = async ({ request }) => {
 
         const imageId = product.featuredImage.id;
         const imageUrl = product.featuredImage.url;
-        const productTitle = product.title || null;
+        const productTitle = product.title || null; // For Grounded SAM text-prompted segmentation
 
         logger.info(
             createLogContext("prepare", requestId, "fetch-title", { shopId, productId }),
