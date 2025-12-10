@@ -294,42 +294,64 @@ export async function segmentWithPointPrompt(
         // SAM 2 returns: { combined_mask: string, individual_masks: string[] }
         let maskUrl: string | null = null;
 
-        if (output && typeof output === 'object') {
+        // Log raw output for debugging
+        logger.info(
+            { ...logContext, stage: "parse-output" },
+            `SAM raw output type: ${typeof output}, value: ${JSON.stringify(output).substring(0, 500)}`
+        );
+
+        if (output && typeof output === 'object' && !Array.isArray(output)) {
             const outputObj = output as Record<string, unknown>;
-            // Log the actual output structure for debugging
             logger.info(
                 { ...logContext, stage: "parse-output" },
-                `SAM output structure: ${JSON.stringify(Object.keys(outputObj))}`
+                `SAM output keys: ${JSON.stringify(Object.keys(outputObj))}`
             );
 
-            // SAM 2 specific output format
-            if (outputObj.combined_mask) {
-                maskUrl = outputObj.combined_mask as string;
+            // SAM 2 specific output format - validate types before assignment
+            if (outputObj.combined_mask && typeof outputObj.combined_mask === 'string') {
+                maskUrl = outputObj.combined_mask;
             } else if (outputObj.individual_masks && Array.isArray(outputObj.individual_masks) && outputObj.individual_masks.length > 0) {
-                maskUrl = outputObj.individual_masks[0] as string;
+                const firstMask = outputObj.individual_masks[0];
+                if (typeof firstMask === 'string') {
+                    maskUrl = firstMask;
+                }
             }
-            // Fallback for other possible field names
+
+            // Fallback for other possible field names - validate each is a string
             if (!maskUrl) {
-                maskUrl = (outputObj.mask || outputObj.masks || outputObj.output || outputObj.image) as string;
+                const possibleFields = ['mask', 'masks', 'output', 'image', 'segmentation'];
+                for (const field of possibleFields) {
+                    const value = outputObj[field];
+                    if (typeof value === 'string') {
+                        maskUrl = value;
+                        break;
+                    } else if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'string') {
+                        maskUrl = value[0];
+                        break;
+                    }
+                }
             }
         } else if (Array.isArray(output) && output.length > 0) {
-            maskUrl = output[0];
+            const firstItem = output[0];
+            if (typeof firstItem === 'string') {
+                maskUrl = firstItem;
+            }
         } else if (typeof output === 'string') {
             maskUrl = output;
         }
 
-        if (!maskUrl) {
+        if (!maskUrl || typeof maskUrl !== 'string') {
             logger.error(
                 { ...logContext, stage: "parse-error" },
-                `Unexpected output format from SAM`,
-                { output: JSON.stringify(output) }
+                `Could not extract mask URL from SAM output`,
+                { output: JSON.stringify(output), maskUrlType: typeof maskUrl }
             );
-            throw new Error("No output returned from SAM point segmentation");
+            throw new Error("No valid mask URL returned from SAM point segmentation");
         }
 
         logger.info(
             { ...logContext, stage: "download" },
-            `Downloading mask from: ${maskUrl.substring(0, 80)}...`
+            `Downloading mask from: ${maskUrl.substring(0, 100)}...`
         );
 
         // SAM 2 returns masks (white = object, black = background)
