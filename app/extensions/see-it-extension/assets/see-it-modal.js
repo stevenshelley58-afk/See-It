@@ -90,6 +90,13 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     };
 
+    // Keep canvas aligned if the modal resizes (e.g., viewport change)
+    window.addEventListener('resize', () => {
+        if (stepEdit && !stepEdit.classList.contains('hidden')) {
+            initCanvas();
+        }
+    });
+
     const showError = (msg) => {
         if (errorDiv) {
             errorDiv.textContent = msg;
@@ -113,7 +120,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Canvas Drawing ---
     const initCanvas = () => {
-        if (!maskCanvas || !roomPreview) return;
+        if (!maskCanvas || !roomPreview || !canvasWrapper) return;
         
         // Wait for image to load
         if (!roomPreview.complete) {
@@ -121,12 +128,18 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         
-        // Size canvas to match image display size
+        // Size canvas to match the rendered image and align it over the centered preview
         const rect = roomPreview.getBoundingClientRect();
+        const wrapperRect = canvasWrapper.getBoundingClientRect();
+        const offsetLeft = rect.left - wrapperRect.left;
+        const offsetTop = rect.top - wrapperRect.top;
+
         maskCanvas.width = rect.width;
         maskCanvas.height = rect.height;
         maskCanvas.style.width = rect.width + 'px';
         maskCanvas.style.height = rect.height + 'px';
+        maskCanvas.style.left = offsetLeft + 'px';
+        maskCanvas.style.top = offsetTop + 'px';
         
         ctx = maskCanvas.getContext('2d');
         ctx.lineCap = 'round';
