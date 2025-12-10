@@ -57,33 +57,40 @@ async function validateImageHasContent(
     }
 }
 
+/**
+ * Clean up product title to create a better prompt for Grounded SAM.
+ *
+ * Strategy: Remove trailing numbers, SKUs, and common suffixes while
+ * preserving the meaningful product description.
+ *
+ * Examples:
+ *   "Mirror 2" -> "mirror"
+ *   "Snowboard Pro 500" -> "snowboard pro"
+ *   "Beautiful Wall Clock" -> "beautiful wall clock"
+ *   "SKU-12345 Lamp" -> "lamp"
+ */
 export function extractObjectType(productTitle: string): string {
-    // Common object types we want to detect
-    const knownObjects = [
-        'mirror', 'snowboard', 'skateboard', 'surfboard', 'table', 'chair',
-        'lamp', 'clock', 'vase', 'plant', 'shelf', 'cabinet', 'desk', 'sofa',
-        'couch', 'bed', 'frame', 'art', 'painting', 'sculpture', 'rug', 'carpet',
-        'bench', 'stool', 'ottoman', 'bookshelf', 'dresser', 'nightstand',
-        'archway', 'door', 'window', 'curtain', 'pillow', 'blanket', 'basket'
-    ];
+    let cleaned = productTitle
+        .toLowerCase()
+        .trim()
+        // Remove common SKU patterns at start (SKU-123, PROD-456, etc.)
+        .replace(/^[a-z]{2,4}[-_]?\d+\s*/i, '')
+        // Remove trailing numbers (Mirror 2, Chair 3, etc.)
+        .replace(/\s+\d+$/, '')
+        // Remove common size/variant suffixes
+        .replace(/\s+(small|medium|large|xl|xxl|xs|s|m|l)$/i, '')
+        // Remove trailing parentheses content (Chair (Red), Mirror (Large))
+        .replace(/\s*\([^)]*\)\s*$/, '')
+        // Remove extra whitespace
+        .replace(/\s+/g, ' ')
+        .trim();
 
-    const lowerTitle = productTitle.toLowerCase();
-
-    // Check if any known object type is in the title
-    for (const obj of knownObjects) {
-        if (lowerTitle.includes(obj)) {
-            return obj;
-        }
+    // If we stripped everything, fall back to original
+    if (!cleaned || cleaned.length < 2) {
+        cleaned = productTitle.toLowerCase().trim();
     }
 
-    // Fallback: use first word (stripped of numbers and special chars)
-    const firstWord = productTitle.split(/[\s\d-_]+/)[0];
-    if (firstWord && firstWord.length > 2) {
-        return firstWord.toLowerCase();
-    }
-
-    // Last resort: use full title
-    return productTitle.toLowerCase();
+    return cleaned;
 }
 
 // Lazy initialize Replicate client
