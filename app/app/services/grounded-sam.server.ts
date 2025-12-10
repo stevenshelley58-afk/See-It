@@ -291,106 +291,87 @@ export async function segmentWithPointPrompt(
             `SAM point API call completed`
         );
 
-        // SAM returns different output formats
+        // SAM 2 returns: { combined_mask: string, individual_masks: string[] }
         let maskUrl: string | null = null;
-        let combinedUrl: string | null = null;
 
-        if (Array.isArray(output)) {
-            // Array format: [mask_url, combined_url] or just [url]
-            if (output.length >= 2) {
-                combinedUrl = output[1]; // Second is usually combined/cutout
-            }
-            maskUrl = output[0];
-        } else if (output && typeof output === 'object') {
+        if (output && typeof output === 'object') {
             const outputObj = output as Record<string, unknown>;
-            maskUrl = (outputObj.mask || outputObj.masks) as string;
-            combinedUrl = (outputObj.combined || outputObj.cutout || outputObj.output) as string;
+            // Log the actual output structure for debugging
+            logger.info(
+                { ...logContext, stage: "parse-output" },
+                `SAM output structure: ${JSON.stringify(Object.keys(outputObj))}`
+            );
+
+            // SAM 2 specific output format
+            if (outputObj.combined_mask) {
+                maskUrl = outputObj.combined_mask as string;
+            } else if (outputObj.individual_masks && Array.isArray(outputObj.individual_masks) && outputObj.individual_masks.length > 0) {
+                maskUrl = outputObj.individual_masks[0] as string;
+            }
+            // Fallback for other possible field names
+            if (!maskUrl) {
+                maskUrl = (outputObj.mask || outputObj.masks || outputObj.output || outputObj.image) as string;
+            }
+        } else if (Array.isArray(output) && output.length > 0) {
+            maskUrl = output[0];
         } else if (typeof output === 'string') {
             maskUrl = output;
         }
 
-        // Prefer combined/cutout if available, otherwise we need to apply mask ourselves
-        const outputUrl = combinedUrl || maskUrl;
-
-        if (!outputUrl) {
+        if (!maskUrl) {
             logger.error(
                 { ...logContext, stage: "parse-error" },
                 `Unexpected output format from SAM`,
-                { output }
+                { output: JSON.stringify(output) }
             );
             throw new Error("No output returned from SAM point segmentation");
         }
 
         logger.info(
             { ...logContext, stage: "download" },
-            `Downloading segmented image from: ${outputUrl.substring(0, 80)}...`
+            `Downloading mask from: ${maskUrl.substring(0, 80)}...`
         );
 
-        // If we only got a mask, we need to apply it to the original image
-        if (!combinedUrl && maskUrl) {
-            // Download both mask and original, then composite
-            const [maskResponse, originalResponse] = await Promise.all([
-                fetch(maskUrl),
-                fetch(imageUrl)
-            ]);
+        // SAM 2 returns masks (white = object, black = background)
+        // We need to apply the mask to the original image to get transparent background
+        const [maskResponse] = await Promise.all([
+            fetch(maskUrl),
+        ]);
 
-            if (!maskResponse.ok || !originalResponse.ok) {
-                throw new Error(`Failed to download images for compositing`);
-            }
-
-            const maskBuffer = Buffer.from(await maskResponse.arrayBuffer());
-            const originalBuffer = Buffer.from(await originalResponse.arrayBuffer());
-
-            // Apply mask to original image
-            const result = await sharp(originalBuffer)
-                .ensureAlpha()
-                .composite([{
-                    input: await sharp(maskBuffer)
-                        .resize({ width: (await sharp(originalBuffer).metadata()).width })
-                        .toBuffer(),
-                    blend: 'dest-in'
-                }])
-                .png()
-                .toBuffer();
-
-            const isValid = await validateImageHasContent(result, logContext);
-            if (!isValid) {
-                throw new Error("SAM returned an empty mask - object not detected at click point");
-            }
-
-            logger.info(
-                { ...logContext, stage: "complete" },
-                `SAM point segmentation completed (with mask compositing), output size: ${result.length} bytes`
-            );
-
-            return {
-                imageBase64: result.toString('base64'),
-            };
+        if (!maskResponse.ok) {
+            throw new Error(`Failed to download mask: ${maskResponse.status}`);
         }
 
-        // Direct download of combined/cutout image
-        const response = await fetch(outputUrl);
-        if (!response.ok) {
-            throw new Error(`Failed to download segmented image: ${response.status}`);
-        }
+        const maskBuffer = Buffer.from(await maskResponse.arrayBuffer());
 
-        const arrayBuffer = await response.arrayBuffer();
-        const imageBuffer = Buffer.from(arrayBuffer);
+        // Apply mask to original image (imgBuffer was downloaded earlier for dimensions)
+        const result = await sharp(imgBuffer)
+            .ensureAlpha()
+            .composite([{
+                input: await sharp(maskBuffer)
+                    .resize({
+                        width: metadata.width,
+                        height: metadata.height,
+                        fit: 'fill'
+                    })
+                    .toBuffer(),
+                blend: 'dest-in'
+            }])
+            .png()
+            .toBuffer();
 
-        const isValid = await validateImageHasContent(imageBuffer, logContext);
+        const isValid = await validateImageHasContent(result, logContext);
         if (!isValid) {
-            throw new Error("SAM returned an empty image - object not detected at click point");
+            throw new Error("SAM returned an empty mask - object not detected at click point");
         }
-
-        const imageBase64 = imageBuffer.toString('base64');
 
         logger.info(
             { ...logContext, stage: "complete" },
-            `SAM point segmentation completed, output size: ${arrayBuffer.byteLength} bytes`
+            `SAM point segmentation completed, output size: ${result.length} bytes`
         );
 
         return {
-            imageBase64,
+            imageBase64: result.toString('base64'),
         };
 
     } catch (error: unknown) {
