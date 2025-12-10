@@ -22,9 +22,9 @@ export function getStatusInfo(status: AssetStatus | string | null | undefined): 
     if (!status || status === "unprepared") {
         return {
             tone: "new",
-            label: "Unprepared",
-            explanation: "Product has not been prepared yet",
-            buttonLabel: "Prepare",
+            label: "Not Processed",
+            explanation: "Background has not been removed yet",
+            buttonLabel: "Remove BG",
             buttonDisabled: false,
             showSpinner: false,
         };
@@ -34,9 +34,9 @@ export function getStatusInfo(status: AssetStatus | string | null | undefined): 
         case "pending":
             return {
                 tone: "attention",
-                label: "Pending",
-                explanation: "Queued for preparation...",
-                buttonLabel: "Preparing...",
+                label: "Queued",
+                explanation: "Waiting in processing queue...",
+                buttonLabel: "Queued...",
                 buttonDisabled: true,
                 showSpinner: true,
             };
@@ -44,8 +44,8 @@ export function getStatusInfo(status: AssetStatus | string | null | undefined): 
         case "processing":
             return {
                 tone: "attention",
-                label: "Processing",
-                explanation: "Currently being processed...",
+                label: "Removing BG...",
+                explanation: "Background removal in progress...",
                 buttonLabel: "Processing...",
                 buttonDisabled: true,
                 showSpinner: true,
@@ -54,9 +54,9 @@ export function getStatusInfo(status: AssetStatus | string | null | undefined): 
         case "ready":
             return {
                 tone: "success",
-                label: "Ready",
-                explanation: null,
-                buttonLabel: "Reprepare",
+                label: "BG Removed",
+                explanation: "Background successfully removed",
+                buttonLabel: "Re-process",
                 buttonDisabled: false,
                 showSpinner: false,
             };
@@ -64,8 +64,8 @@ export function getStatusInfo(status: AssetStatus | string | null | undefined): 
         case "failed":
             return {
                 tone: "critical",
-                label: "Failed",
-                explanation: "Preparation failed. Click Retry to try again.",
+                label: "Error",
+                explanation: "Background removal failed. Click Retry to try again.",
                 buttonLabel: "Retry",
                 buttonDisabled: false,
                 showSpinner: false,
@@ -74,9 +74,9 @@ export function getStatusInfo(status: AssetStatus | string | null | undefined): 
         case "stale":
             return {
                 tone: "warning",
-                label: "Stale",
-                explanation: "Product image has changed. Regenerate to update.",
-                buttonLabel: "Regenerate",
+                label: "Outdated",
+                explanation: "Product image has changed. Re-process to update.",
+                buttonLabel: "Re-process",
                 buttonDisabled: false,
                 showSpinner: false,
             };
@@ -84,9 +84,9 @@ export function getStatusInfo(status: AssetStatus | string | null | undefined): 
         case "orphaned":
             return {
                 tone: "info",
-                label: "Orphaned",
-                explanation: "Source image no longer exists",
-                buttonLabel: "Reprepare",
+                label: "Missing Source",
+                explanation: "Original image no longer exists",
+                buttonLabel: "Re-process",
                 buttonDisabled: false,
                 showSpinner: false,
             };
@@ -96,7 +96,7 @@ export function getStatusInfo(status: AssetStatus | string | null | undefined): 
                 tone: "new",
                 label: String(status),
                 explanation: null,
-                buttonLabel: "Prepare",
+                buttonLabel: "Remove BG",
                 buttonDisabled: false,
                 showSpinner: false,
             };
