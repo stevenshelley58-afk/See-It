@@ -273,15 +273,15 @@ export async function segmentWithPointPrompt(
             `Converted normalized (${clickX}, ${clickY}) to pixels (${pixelX}, ${pixelY}) for image ${metadata.width}x${metadata.height}`
         );
 
-        // Use SAM 2 model with point prompt
-        // Model: lucataco/segment-anything-2 on Replicate
+        // Use official Meta SAM 2 model with point prompt
+        // Model: meta/sam-2 on Replicate
         const output = await client.run(
-            "lucataco/segment-anything-2",
+            "meta/sam-2",
             {
                 input: {
                     image: imageUrl,
-                    input_points: [[pixelX, pixelY]], // Array of [x, y] points
-                    input_labels: [1], // 1 = foreground point
+                    point_coords: [[pixelX, pixelY]], // Array of [x, y] points
+                    point_labels: [1], // 1 = foreground point
                 }
             }
         );
