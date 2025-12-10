@@ -2,7 +2,89 @@
 // This replaces @imgly/background-removal-node for more accurate product isolation
 
 import Replicate from "replicate";
+import sharp from "sharp";
 import { logger, createLogContext } from "../utils/logger.server";
+
+/**
+ * Validate that an image has actual content (not just transparent pixels).
+ * Returns false if the image is mostly/entirely transparent.
+ */
+async function validateImageHasContent(
+    imageBuffer: Buffer,
+    logContext: ReturnType<typeof createLogContext>
+): Promise<boolean> {
+    try {
+        const { data, info } = await sharp(imageBuffer)
+            .ensureAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+
+        const pixelCount = info.width * info.height;
+        let opaquePixels = 0;
+
+        // Count pixels that have some opacity (alpha > 10)
+        // Data is in RGBA format, so every 4th byte is alpha
+        for (let i = 3; i < data.length; i += 4) {
+            if (data[i] > 10) {
+                opaquePixels++;
+            }
+        }
+
+        const opaquePercentage = (opaquePixels / pixelCount) * 100;
+
+        logger.info(
+            { ...logContext, stage: "validate" },
+            `Image validation: ${opaquePixels}/${pixelCount} opaque pixels (${opaquePercentage.toFixed(1)}%)`
+        );
+
+        // If less than 1% of pixels are opaque, consider it empty/failed
+        if (opaquePercentage < 1) {
+            logger.warn(
+                { ...logContext, stage: "validate" },
+                `Image appears empty/transparent (${opaquePercentage.toFixed(1)}% opaque)`
+            );
+            return false;
+        }
+
+        return true;
+    } catch (error) {
+        logger.warn(
+            { ...logContext, stage: "validate" },
+            "Failed to validate image content, assuming valid",
+            error
+        );
+        return true; // Assume valid if we can't check
+    }
+}
+
+export function extractObjectType(productTitle: string): string {
+    // Common object types we want to detect
+    const knownObjects = [
+        'mirror', 'snowboard', 'skateboard', 'surfboard', 'table', 'chair',
+        'lamp', 'clock', 'vase', 'plant', 'shelf', 'cabinet', 'desk', 'sofa',
+        'couch', 'bed', 'frame', 'art', 'painting', 'sculpture', 'rug', 'carpet',
+        'bench', 'stool', 'ottoman', 'bookshelf', 'dresser', 'nightstand',
+        'archway', 'door', 'window', 'curtain', 'pillow', 'blanket', 'basket'
+    ];
+
+    const lowerTitle = productTitle.toLowerCase();
+
+    // Check if any known object type is in the title
+    for (const obj of knownObjects) {
+        if (lowerTitle.includes(obj)) {
+            return obj;
+        }
+    }
+
+    // Fallback: use first word (stripped of numbers and special chars)
+    const firstWord = productTitle.split(/[\s\d-_]+/)[0];
+    if (firstWord && firstWord.length > 2) {
+        return firstWord.toLowerCase();
+    }
+
+    // Last resort: use full title
+    return productTitle.toLowerCase();
+}
 
 // Lazy initialize Replicate client
 let replicate: Replicate | null = null;
@@ -110,7 +192,15 @@ export async function segmentWithGroundedSam(
         }
 
         const arrayBuffer = await response.arrayBuffer();
-        const imageBase64 = Buffer.from(arrayBuffer).toString('base64');
+        const imageBuffer = Buffer.from(arrayBuffer);
+
+        // Validate the image has actual content (not just transparent)
+        const isValid = await validateImageHasContent(imageBuffer, logContext);
+        if (!isValid) {
+            throw new Error("Grounded SAM returned an empty/transparent image - object not detected");
+        }
+
+        const imageBase64 = imageBuffer.toString('base64');
 
         logger.info(
             { ...logContext, stage: "complete" },
