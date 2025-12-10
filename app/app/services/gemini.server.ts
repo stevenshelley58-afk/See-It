@@ -5,6 +5,7 @@ import sharp from "sharp";
 import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
+import { segmentWithGroundedSam, isGroundedSamAvailable } from "./grounded-sam.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -284,15 +285,17 @@ export async function prepareProduct(
     shopId: string,
     productId: string,
     assetId: string,
-    requestId: string = "background-processor"
+    requestId: string = "background-processor",
+    productTitle?: string // Optional product title for Grounded SAM text-prompted segmentation
 ): Promise<string> {
     const logContext = createLogContext("prepare", requestId, "start", {
         shopId,
         productId,
         assetId,
+        productTitle: productTitle || "(not provided)",
     });
 
-    logger.info(logContext, `Starting product preparation: productId=${productId}, sourceImageUrl=${sourceImageUrl.substring(0, 80)}...`);
+    logger.info(logContext, `Starting product preparation: productId=${productId}, title="${productTitle || 'N/A'}", sourceImageUrl=${sourceImageUrl.substring(0, 80)}...`);
 
     // Track buffers for explicit cleanup to prevent memory leaks
     let imageBuffer: Buffer | null = null;
@@ -343,102 +346,156 @@ export async function prepareProduct(
             );
         }
 
-        // Use @imgly/background-removal-node for TRUE transparent background
-        // Pass explicit mimeType so decoder knows it's PNG
-        logger.info(
-            { ...logContext, stage: "bg-remove" },
-            "Removing background with ML model (@imgly)"
-        );
+        // ============================================================================
+        // BACKGROUND REMOVAL STRATEGY:
+        // 1. If productTitle is provided AND Grounded SAM is available -> Use Grounded SAM
+        //    (Text-prompted segmentation: "segment the Mirror" -> only the mirror is kept)
+        // 2. Fallback to @imgly/background-removal-node (generic ML-based removal)
+        // ============================================================================
 
         let lastError: unknown = null;
+        let usedMethod: string = "none";
 
-        // Hard limit: MAX 2 attempts (PNG, then JPEG fallback)
-        // Do not extend this array without careful consideration of cost/performance
-        const MAX_BG_REMOVAL_ATTEMPTS = 2;
-
-        // Store reference to imageBuffer for JPEG fallback (captured before potential null)
-        const originalImageBuffer = imageBuffer;
-
-        const attempts: Array<{
-            label: string;
-            mimeType: 'image/png' | 'image/jpeg';
-            getBuffer: () => Promise<Buffer>;
-        }> = [
-            {
-                label: 'png',
-                mimeType: 'image/png',
-                getBuffer: async () => pngBuffer!
-            },
-            {
-                label: 'jpeg-fallback',
-                mimeType: 'image/jpeg',
-                getBuffer: async () => {
-                    logger.info(
-                        { ...logContext, stage: "bg-remove" },
-                        "Fallback: converting to JPEG before background removal"
-                    );
-                    const jpegBuffer = await sharp(originalImageBuffer).jpeg({ quality: 95 }).toBuffer();
-                    const meta = await sharp(jpegBuffer).metadata();
-                    logger.debug(
-                        { ...logContext, stage: "bg-remove" },
-                        `JPEG fallback metadata: format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
-                    );
-                    return jpegBuffer;
-                }
-            }
-        ];
-
-        // Enforce max attempts guard
-        if (attempts.length > MAX_BG_REMOVAL_ATTEMPTS) {
-            logger.error(
-                { ...logContext, stage: "bg-remove" },
-                `CONFIGURATION ERROR: Background removal attempts (${attempts.length}) exceeds maximum allowed (${MAX_BG_REMOVAL_ATTEMPTS})`
+        // Strategy 1: Grounded SAM (text-prompted segmentation)
+        if (productTitle && isGroundedSamAvailable()) {
+            logger.info(
+                { ...logContext, stage: "bg-remove-grounded-sam" },
+                `Attempting Grounded SAM with prompt: "${productTitle}"`
             );
-            throw new Error(`Too many background removal attempts configured: ${attempts.length} > ${MAX_BG_REMOVAL_ATTEMPTS}`);
-        }
 
-        for (const attempt of attempts) {
-            let attemptBuffer: Buffer | null = null;
             try {
-                attemptBuffer = await attempt.getBuffer();
-
-                logger.debug(
-                    { ...logContext, stage: "bg-remove" },
-                    `Attempting background removal with ${attempt.label}, mimeType: ${attempt.mimeType}`
+                const result = await segmentWithGroundedSam(
+                    sourceImageUrl, // Pass original URL - Replicate can fetch it directly
+                    productTitle,
+                    requestId
                 );
 
-                // Convert Buffer to Blob - @imgly/background-removal-node expects web-standard Blob, not Node Buffer
-                const inputBlob = new Blob([attemptBuffer], { type: attempt.mimeType });
-
-                const resultBlob = await removeBackground(inputBlob, {
-                    output: {
-                        format: 'image/png',
-                        quality: 1.0
-                    }
-                });
-
-                // Clean up attempt buffer immediately after background removal
-                attemptBuffer = null;
-
-                const arrayBuffer = await resultBlob.arrayBuffer();
-                outputBuffer = Buffer.from(arrayBuffer);
+                // Convert base64 to buffer
+                outputBuffer = Buffer.from(result.imageBase64, 'base64');
+                usedMethod = "grounded-sam";
 
                 logger.info(
-                    { ...logContext, stage: "bg-remove" },
-                    `Background removed successfully (${attempt.label}), output size: ${outputBuffer.length} bytes`
+                    { ...logContext, stage: "bg-remove-grounded-sam" },
+                    `Grounded SAM succeeded, output size: ${outputBuffer.length} bytes`
                 );
-                break;
-            } catch (err) {
-                lastError = err;
-                // Clean up attempt buffer on error
-                attemptBuffer = null;
+            } catch (groundedSamError) {
+                lastError = groundedSamError;
+                const errorMsg = groundedSamError instanceof Error ? groundedSamError.message : "Unknown error";
                 logger.warn(
-                    { ...logContext, stage: "bg-remove" },
-                    `Background removal failed on ${attempt.label}`,
-                    err
+                    { ...logContext, stage: "bg-remove-grounded-sam-failed" },
+                    `Grounded SAM failed, falling back to @imgly: ${errorMsg}`,
+                    groundedSamError
                 );
+                // Continue to fallback
             }
+        } else if (!productTitle) {
+            logger.info(
+                { ...logContext, stage: "bg-remove" },
+                "No product title provided, using @imgly directly"
+            );
+        } else {
+            logger.info(
+                { ...logContext, stage: "bg-remove" },
+                "Grounded SAM not available (REPLICATE_API_TOKEN not set), using @imgly"
+            );
         }
+
+        // Strategy 2: Fallback to @imgly/background-removal-node
+        if (!outputBuffer) {
+            logger.info(
+                { ...logContext, stage: "bg-remove" },
+                "Removing background with ML model (@imgly)"
+            );
+
+            // Hard limit: MAX 2 attempts (PNG, then JPEG fallback)
+            // Do not extend this array without careful consideration of cost/performance
+            const MAX_BG_REMOVAL_ATTEMPTS = 2;
+
+            // Store reference to imageBuffer for JPEG fallback (captured before potential null)
+            const originalImageBuffer = imageBuffer;
+
+            const attempts: Array<{
+                label: string;
+                mimeType: 'image/png' | 'image/jpeg';
+                getBuffer: () => Promise<Buffer>;
+            }> = [
+                {
+                    label: 'png',
+                    mimeType: 'image/png',
+                    getBuffer: async () => pngBuffer!
+                },
+                {
+                    label: 'jpeg-fallback',
+                    mimeType: 'image/jpeg',
+                    getBuffer: async () => {
+                        logger.info(
+                            { ...logContext, stage: "bg-remove" },
+                            "Fallback: converting to JPEG before background removal"
+                        );
+                        const jpegBuffer = await sharp(originalImageBuffer).jpeg({ quality: 95 }).toBuffer();
+                        const meta = await sharp(jpegBuffer).metadata();
+                        logger.debug(
+                            { ...logContext, stage: "bg-remove" },
+                            `JPEG fallback metadata: format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
+                        );
+                        return jpegBuffer;
+                    }
+                }
+            ];
+
+            // Enforce max attempts guard
+            if (attempts.length > MAX_BG_REMOVAL_ATTEMPTS) {
+                logger.error(
+                    { ...logContext, stage: "bg-remove" },
+                    `CONFIGURATION ERROR: Background removal attempts (${attempts.length}) exceeds maximum allowed (${MAX_BG_REMOVAL_ATTEMPTS})`
+                );
+                throw new Error(`Too many background removal attempts configured: ${attempts.length} > ${MAX_BG_REMOVAL_ATTEMPTS}`);
+            }
+
+            for (const attempt of attempts) {
+                let attemptBuffer: Buffer | null = null;
+                try {
+                    attemptBuffer = await attempt.getBuffer();
+
+                    logger.debug(
+                        { ...logContext, stage: "bg-remove" },
+                        `Attempting background removal with ${attempt.label}, mimeType: ${attempt.mimeType}`
+                    );
+
+                    // Convert Buffer to Blob - @imgly/background-removal-node expects web-standard Blob, not Node Buffer
+                    const inputBlob = new Blob([attemptBuffer], { type: attempt.mimeType });
+
+                    const resultBlob = await removeBackground(inputBlob, {
+                        output: {
+                            format: 'image/png',
+                            quality: 1.0
+                        }
+                    });
+
+                    // Clean up attempt buffer immediately after background removal
+                    attemptBuffer = null;
+
+                    const arrayBuffer = await resultBlob.arrayBuffer();
+                    outputBuffer = Buffer.from(arrayBuffer);
+                    usedMethod = "imgly";
+
+                    logger.info(
+                        { ...logContext, stage: "bg-remove" },
+                        `Background removed successfully (${attempt.label}), output size: ${outputBuffer.length} bytes`
+                    );
+                    break;
+                } catch (err) {
+                    lastError = err;
+                    // Clean up attempt buffer on error
+                    attemptBuffer = null;
+                    logger.warn(
+                        { ...logContext, stage: "bg-remove" },
+                        `Background removal failed on ${attempt.label}`,
+                        err
+                    );
+                }
+            }
+        } // End of @imgly fallback block
 
         // Clean up input buffers after background removal - no longer needed
         imageBuffer = null;
@@ -455,6 +512,11 @@ export async function prepareProduct(
             );
             throw error;
         }
+
+        logger.info(
+            { ...logContext, stage: "bg-remove-complete" },
+            `Background removal completed using method: ${usedMethod}`
+        );
 
         // Guard: ensure output buffer is valid
         if (outputBuffer.length === 0) {

@@ -60,6 +60,39 @@ export const action = async ({ request }) => {
             throw error;
         }
 
+        // Fetch product title from Shopify for Grounded SAM
+        let productTitle = null;
+        try {
+            const productGid = String(productId).startsWith('gid://')
+                ? productId
+                : `gid://shopify/Product/${productId}`;
+
+            const productResponse = await admin.graphql(
+                `#graphql
+                query getProductTitle($id: ID!) {
+                  product(id: $id) {
+                    title
+                  }
+                }`,
+                { variables: { id: productGid } }
+            );
+
+            const productJson = await productResponse.json();
+            productTitle = productJson.data?.product?.title || null;
+
+            logger.info(
+                createLogContext("prepare", requestId, "fetch-title", { shopId, productId }),
+                `Fetched product title: "${productTitle}"`
+            );
+        } catch (titleError) {
+            // Non-fatal - we can still process without title (falls back to @imgly)
+            logger.warn(
+                createLogContext("prepare", requestId, "fetch-title-failed", { shopId, productId }),
+                "Failed to fetch product title, will use fallback background removal",
+                titleError
+            );
+        }
+
         // Check if asset already exists
         let assetId;
         const existing = await prisma.productAsset.findFirst({
@@ -79,6 +112,7 @@ export const action = async ({ request }) => {
                     prepStrategy: "manual",
                     sourceImageUrl: String(imageUrl),
                     sourceImageId: String(imageId),
+                    productTitle: productTitle, // Store for Grounded SAM
                     updatedAt: new Date()
                 }
             });
@@ -88,6 +122,7 @@ export const action = async ({ request }) => {
                 data: {
                     shopId,
                     productId: String(productId),
+                    productTitle: productTitle, // Store for Grounded SAM
                     sourceImageId: String(imageId),
                     sourceImageUrl: String(imageUrl),
                     status: "pending",
@@ -105,7 +140,8 @@ export const action = async ({ request }) => {
             shopId,
             String(productId),
             assetId,
-            requestId
+            requestId,
+            productTitle // Pass product title for Grounded SAM
         );
 
         // Update as ready
