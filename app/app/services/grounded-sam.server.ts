@@ -237,3 +237,162 @@ export async function segmentWithGroundedSam(
 export function isGroundedSamAvailable(): boolean {
     return !!process.env.REPLICATE_API_TOKEN;
 }
+
+/**
+ * Use SAM to segment an object at a specific point (click coordinates)
+ *
+ * @param imageUrl - URL of the source image (must be publicly accessible)
+ * @param clickX - X coordinate of the click (0-1 normalized)
+ * @param clickY - Y coordinate of the click (0-1 normalized)
+ * @param requestId - Request ID for logging
+ * @returns Base64 encoded PNG with the segmented object on transparent background
+ */
+export async function segmentWithPointPrompt(
+    imageUrl: string,
+    clickX: number,
+    clickY: number,
+    requestId: string = "point-segment"
+): Promise<GroundedSamResult> {
+    const logContext = createLogContext("segment", requestId, "start", { clickX, clickY });
+
+    logger.info(logContext, `Starting SAM point segmentation at (${clickX.toFixed(3)}, ${clickY.toFixed(3)})`);
+
+    const client = getReplicateClient();
+
+    try {
+        // Use Meta's SAM model with point prompt
+        // Format: "x,y" where x,y are normalized coordinates (0-1)
+        const pointStr = `${clickX.toFixed(4)},${clickY.toFixed(4)}`;
+
+        const output = await client.run(
+            "meta/sam-2-base:4c262c1ab752fe3a5fd0c559905b6c3db9341ce872a4027e3f2eb53f5d5b5b60",
+            {
+                input: {
+                    image: imageUrl,
+                    point_coords: pointStr,
+                    point_labels: "1", // 1 = foreground point
+                    multimask_output: false, // Single best mask
+                    return_postprocessed: true, // Get cleaned mask
+                }
+            }
+        );
+
+        logger.info(
+            { ...logContext, stage: "api-complete" },
+            `SAM point API call completed`
+        );
+
+        // SAM returns different output formats
+        let maskUrl: string | null = null;
+        let combinedUrl: string | null = null;
+
+        if (Array.isArray(output)) {
+            // Array format: [mask_url, combined_url] or just [url]
+            if (output.length >= 2) {
+                combinedUrl = output[1]; // Second is usually combined/cutout
+            }
+            maskUrl = output[0];
+        } else if (output && typeof output === 'object') {
+            const outputObj = output as Record<string, unknown>;
+            maskUrl = (outputObj.mask || outputObj.masks) as string;
+            combinedUrl = (outputObj.combined || outputObj.cutout || outputObj.output) as string;
+        } else if (typeof output === 'string') {
+            maskUrl = output;
+        }
+
+        // Prefer combined/cutout if available, otherwise we need to apply mask ourselves
+        const outputUrl = combinedUrl || maskUrl;
+
+        if (!outputUrl) {
+            logger.error(
+                { ...logContext, stage: "parse-error" },
+                `Unexpected output format from SAM`,
+                { output }
+            );
+            throw new Error("No output returned from SAM point segmentation");
+        }
+
+        logger.info(
+            { ...logContext, stage: "download" },
+            `Downloading segmented image from: ${outputUrl.substring(0, 80)}...`
+        );
+
+        // If we only got a mask, we need to apply it to the original image
+        if (!combinedUrl && maskUrl) {
+            // Download both mask and original, then composite
+            const [maskResponse, originalResponse] = await Promise.all([
+                fetch(maskUrl),
+                fetch(imageUrl)
+            ]);
+
+            if (!maskResponse.ok || !originalResponse.ok) {
+                throw new Error(`Failed to download images for compositing`);
+            }
+
+            const maskBuffer = Buffer.from(await maskResponse.arrayBuffer());
+            const originalBuffer = Buffer.from(await originalResponse.arrayBuffer());
+
+            // Apply mask to original image
+            const result = await sharp(originalBuffer)
+                .ensureAlpha()
+                .composite([{
+                    input: await sharp(maskBuffer)
+                        .resize({ width: (await sharp(originalBuffer).metadata()).width })
+                        .toBuffer(),
+                    blend: 'dest-in'
+                }])
+                .png()
+                .toBuffer();
+
+            const isValid = await validateImageHasContent(result, logContext);
+            if (!isValid) {
+                throw new Error("SAM returned an empty mask - object not detected at click point");
+            }
+
+            logger.info(
+                { ...logContext, stage: "complete" },
+                `SAM point segmentation completed (with mask compositing), output size: ${result.length} bytes`
+            );
+
+            return {
+                imageBase64: result.toString('base64'),
+            };
+        }
+
+        // Direct download of combined/cutout image
+        const response = await fetch(outputUrl);
+        if (!response.ok) {
+            throw new Error(`Failed to download segmented image: ${response.status}`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const imageBuffer = Buffer.from(arrayBuffer);
+
+        const isValid = await validateImageHasContent(imageBuffer, logContext);
+        if (!isValid) {
+            throw new Error("SAM returned an empty image - object not detected at click point");
+        }
+
+        const imageBase64 = imageBuffer.toString('base64');
+
+        logger.info(
+            { ...logContext, stage: "complete" },
+            `SAM point segmentation completed, output size: ${arrayBuffer.byteLength} bytes`
+        );
+
+        return {
+            imageBase64,
+        };
+
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+        logger.error(
+            { ...logContext, stage: "error" },
+            `SAM point segmentation failed: ${errorMessage}`,
+            error
+        );
+
+        throw error;
+    }
+}

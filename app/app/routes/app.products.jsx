@@ -22,6 +22,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getStatusInfo, formatErrorMessage } from "../utils/status-mapping";
 import { StorageService } from "../services/storage.server";
+import { ManualSegmentModal } from "../components/ManualSegmentModal";
 
 import { PLANS } from "../billing";
 
@@ -226,6 +227,9 @@ export default function Products() {
     const [modalImage, setModalImage] = useState(null);
     const [modalTitle, setModalTitle] = useState("");
     const [modalPreparedImage, setModalPreparedImage] = useState(null);
+
+    // Manual segmentation modal state
+    const [manualFixProduct, setManualFixProduct] = useState(null);
 
     // Track which single item is being processed
     const [processingItemId, setProcessingItemId] = useState(null);
@@ -554,8 +558,9 @@ export default function Products() {
                                                     </BlockStack>
                                                 </InlineStack>
 
-                                                {/* Single item action button */}
-                                                <div style={{ flexShrink: 0 }}>
+                                                {/* Action buttons */}
+                                                <InlineStack gap="200" blockAlign="center">
+                                                    {/* Single item action button */}
                                                     {featuredImage && (
                                                         <Button
                                                             size="slim"
@@ -575,7 +580,24 @@ export default function Products() {
                                                             )}
                                                         </Button>
                                                     )}
-                                                </div>
+                                                    {/* Fix/Adjust button for failed or ready products that need manual adjustment */}
+                                                    {(asset?.status === 'failed' || asset?.status === 'ready') && featuredImage && (
+                                                        <Button
+                                                            size="slim"
+                                                            variant="secondary"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setManualFixProduct({
+                                                                    id: id.split('/').pop(),
+                                                                    title,
+                                                                    sourceImageUrl: featuredImage.url,
+                                                                });
+                                                            }}
+                                                        >
+                                                            {asset?.status === 'failed' ? 'Fix' : 'Adjust'}
+                                                        </Button>
+                                                    )}
+                                                </InlineStack>
                                             </InlineStack>
                                         </ResourceList.Item>
                                     );
@@ -671,6 +693,19 @@ export default function Products() {
                     </BlockStack>
                 </Modal.Section>
             </Modal>
+
+            {/* Manual Segmentation Modal */}
+            <ManualSegmentModal
+                open={!!manualFixProduct}
+                onClose={() => setManualFixProduct(null)}
+                productId={manualFixProduct?.id}
+                productTitle={manualFixProduct?.title}
+                sourceImageUrl={manualFixProduct?.sourceImageUrl}
+                onSuccess={() => {
+                    setManualFixProduct(null);
+                    revalidator.revalidate();
+                }}
+            />
         </Page>
     );
 }
