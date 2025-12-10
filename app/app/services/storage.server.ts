@@ -61,4 +61,31 @@ export class StorageService {
         const [exists] = await file.exists();
         return exists;
     }
+
+    /**
+     * Upload a buffer directly to GCS
+     * Returns a signed read URL for the uploaded file
+     */
+    static async uploadBuffer(
+        buffer: Buffer,
+        key: string,
+        contentType: string = 'image/png'
+    ): Promise<string> {
+        const bucket = storage.bucket(GCS_BUCKET);
+        const file = bucket.file(key);
+
+        await file.save(buffer, {
+            contentType,
+            resumable: false,
+        });
+
+        // Return a signed read URL (1 hour expiry)
+        const [url] = await file.getSignedUrl({
+            version: 'v4',
+            action: 'read',
+            expires: Date.now() + 60 * 60 * 1000,
+        });
+
+        return url;
+    }
 }
