@@ -97,6 +97,12 @@ export const action = async ({ request }) => {
 
         const imageId = product.featuredImage.id;
         const imageUrl = product.featuredImage.url;
+        const productTitle = product.title || null;
+
+        logger.info(
+            createLogContext("prepare", requestId, "fetch-title", { shopId, productId }),
+            `Fetched product title: "${productTitle}"`
+        );
 
         // Validate image URL to prevent SSRF attacks
         try {
@@ -145,6 +151,7 @@ export const action = async ({ request }) => {
                         prepStrategy: "manual",
                         sourceImageUrl: String(imageUrl),
                         sourceImageId: String(imageId),
+                        productTitle: productTitle, // Store for Grounded SAM
                         retryCount: 0, // Reset retry count so processor picks it up
                         errorMessage: null, // Clear previous error
                         updatedAt: new Date()
@@ -155,6 +162,7 @@ export const action = async ({ request }) => {
                     data: {
                         shopId,
                         productId: String(productId),
+                        productTitle: productTitle, // Store for Grounded SAM
                         sourceImageId: String(imageId),
                         sourceImageUrl: String(imageUrl),
                         status: "pending",
