@@ -19,6 +19,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getStatusInfo, formatErrorMessage } from "../utils/status-mapping";
 import { StorageService } from "../services/storage.server";
+import { ManualSegmentModal } from "../components/ManualSegmentModal";
 
 import { PLANS } from "../billing";
 
@@ -210,6 +211,9 @@ export default function Products() {
     const navigation = useNavigation();
     const prevFetcherState = useRef(fetcher.state);
 
+    // Manual segmentation modal state
+    const [manualFixProduct, setManualFixProduct] = useState(null);
+
     const isLoading = navigation.state === "loading" || revalidator.state === "loading";
 
     // Revalidate page data after batch-prepare completes to show updated statuses
@@ -383,6 +387,22 @@ export default function Products() {
                                                             Processing in background...
                                                         </Text>
                                                     )}
+                                                    {/* Fix button for failed or ready products that need adjustment */}
+                                                    {(asset?.status === 'failed' || asset?.status === 'ready') && featuredImage && (
+                                                        <Button
+                                                            size="slim"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setManualFixProduct({
+                                                                    id: id.split('/').pop(),
+                                                                    title,
+                                                                    sourceImageUrl: featuredImage.url,
+                                                                });
+                                                            }}
+                                                        >
+                                                            {asset?.status === 'failed' ? 'Fix' : 'Adjust'}
+                                                        </Button>
+                                                    )}
                                                 </BlockStack>
                                             </InlineStack>
                                         </ResourceList.Item>
@@ -402,6 +422,19 @@ export default function Products() {
                     </Card>
                 </Layout.Section>
             </Layout>
+
+            {/* Manual Segmentation Modal */}
+            <ManualSegmentModal
+                open={!!manualFixProduct}
+                onClose={() => setManualFixProduct(null)}
+                productId={manualFixProduct?.id}
+                productTitle={manualFixProduct?.title}
+                sourceImageUrl={manualFixProduct?.sourceImageUrl}
+                onSuccess={() => {
+                    setManualFixProduct(null);
+                    revalidator.revalidate();
+                }}
+            />
         </Page>
     );
 }
