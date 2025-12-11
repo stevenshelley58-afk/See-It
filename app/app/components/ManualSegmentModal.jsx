@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useFetcher } from "@remix-run/react";
 import {
     Modal,
@@ -11,16 +11,17 @@ import {
     Thumbnail,
     Spinner,
     Box,
+    ButtonGroup,
 } from "@shopify/polaris";
 
 /**
- * ManualSegmentModal - Allows users to manually segment a product when auto-detection fails
+ * ManualSegmentModal - Advanced segmentation with mask preview
  *
  * Flow:
- * 1. User clicks on the product in the image
- * 2. SAM segments based on that point
- * 3. User previews and confirms, or tries again
- * 4. Fallback options: upload custom image or use original
+ * 1. User adds click points (green = include, red = exclude)
+ * 2. Click "Preview Mask" to see what will be selected
+ * 3. Adjust points if needed
+ * 4. Click "Apply & Save" to create final transparent PNG
  */
 export function ManualSegmentModal({
     open,
@@ -30,79 +31,137 @@ export function ManualSegmentModal({
     sourceImageUrl,
     onSuccess,
 }) {
-    const [clickPoint, setClickPoint] = useState(null);
-    const [previewUrl, setPreviewUrl] = useState(null);
+    // Click points: { x, y, label: 1 (include) | 0 (exclude) }
+    const [clickPoints, setClickPoints] = useState([]);
+    const [clickMode, setClickMode] = useState(1); // 1 = include (green), 0 = exclude (red)
+    const [maskPreviewUrl, setMaskPreviewUrl] = useState(null);
+    const [finalPreviewUrl, setFinalPreviewUrl] = useState(null);
     const [error, setError] = useState(null);
     const [mode, setMode] = useState("click"); // "click" | "upload" | "original"
     const [uploadedFile, setUploadedFile] = useState(null);
+    const [step, setStep] = useState("select"); // "select" | "preview" | "done"
     const imageRef = useRef(null);
 
-    const segmentFetcher = useFetcher();
+    const previewFetcher = useFetcher();
+    const applyFetcher = useFetcher();
     const uploadFetcher = useFetcher();
     const originalFetcher = useFetcher();
 
     const isLoading =
-        segmentFetcher.state !== "idle" ||
+        previewFetcher.state !== "idle" ||
+        applyFetcher.state !== "idle" ||
         uploadFetcher.state !== "idle" ||
         originalFetcher.state !== "idle";
 
-    // Handle click on image
+    // Handle click on image - add point
     const handleImageClick = useCallback((e) => {
-        if (isLoading) return;
+        if (isLoading || step === "done") return;
 
         const rect = imageRef.current.getBoundingClientRect();
         const x = (e.clientX - rect.left) / rect.width;
         const y = (e.clientY - rect.top) / rect.height;
 
-        // Clamp to 0-1 range
         const clickX = Math.max(0, Math.min(1, x));
         const clickY = Math.max(0, Math.min(1, y));
 
-        setClickPoint({ x: clickX, y: clickY });
+        setClickPoints(prev => [...prev, { x: clickX, y: clickY, label: clickMode }]);
+        setMaskPreviewUrl(null); // Clear preview when points change
         setError(null);
-        setPreviewUrl(null);
+    }, [clickMode, isLoading, step]);
 
-        // Submit to segment endpoint
+    // Remove last point
+    const handleUndo = useCallback(() => {
+        setClickPoints(prev => prev.slice(0, -1));
+        setMaskPreviewUrl(null);
+    }, []);
+
+    // Clear all points
+    const handleClear = useCallback(() => {
+        setClickPoints([]);
+        setMaskPreviewUrl(null);
+        setFinalPreviewUrl(null);
+        setStep("select");
+    }, []);
+
+    // Generate mask preview
+    const handlePreviewMask = useCallback(() => {
+        if (clickPoints.length === 0) {
+            setError("Click on the product first to add selection points");
+            return;
+        }
+
         const formData = new FormData();
         formData.append("productId", productId);
-        formData.append("clickX", clickX.toString());
-        formData.append("clickY", clickY.toString());
+        formData.append("points", JSON.stringify(clickPoints));
+        formData.append("previewOnly", "true");
 
-        segmentFetcher.submit(formData, {
+        previewFetcher.submit(formData, {
             method: "post",
-            action: "/api/products/segment-point",
+            action: "/api/products/segment-preview",
         });
-    }, [productId, isLoading, segmentFetcher]);
+    }, [clickPoints, productId, previewFetcher]);
 
-    // Handle segment result
-    if (segmentFetcher.data && segmentFetcher.state === "idle") {
-        if (segmentFetcher.data.success && !previewUrl) {
-            setPreviewUrl(segmentFetcher.data.preparedImageUrl);
-        } else if (segmentFetcher.data.error && !error) {
-            setError(segmentFetcher.data.error);
+    // Apply mask and create final image
+    const handleApplyMask = useCallback(() => {
+        if (clickPoints.length === 0) return;
+
+        const formData = new FormData();
+        formData.append("productId", productId);
+        formData.append("points", JSON.stringify(clickPoints));
+
+        applyFetcher.submit(formData, {
+            method: "post",
+            action: "/api/products/segment-apply",
+        });
+    }, [clickPoints, productId, applyFetcher]);
+
+    // Handle preview result
+    useEffect(() => {
+        if (previewFetcher.data && previewFetcher.state === "idle") {
+            if (previewFetcher.data.success) {
+                setMaskPreviewUrl(previewFetcher.data.maskOverlayUrl);
+                setStep("preview");
+            } else if (previewFetcher.data.error) {
+                setError(previewFetcher.data.error);
+            }
         }
-    }
+    }, [previewFetcher.data, previewFetcher.state]);
+
+    // Handle apply result
+    useEffect(() => {
+        if (applyFetcher.data && applyFetcher.state === "idle") {
+            if (applyFetcher.data.success) {
+                setFinalPreviewUrl(applyFetcher.data.preparedImageUrl);
+                setStep("done");
+            } else if (applyFetcher.data.error) {
+                setError(applyFetcher.data.error);
+            }
+        }
+    }, [applyFetcher.data, applyFetcher.state]);
 
     // Handle upload result
-    if (uploadFetcher.data && uploadFetcher.state === "idle") {
-        if (uploadFetcher.data.success && !previewUrl) {
-            setPreviewUrl(uploadFetcher.data.preparedImageUrl);
-            onSuccess?.();
-            onClose();
-        } else if (uploadFetcher.data.error && !error) {
-            setError(uploadFetcher.data.error);
+    useEffect(() => {
+        if (uploadFetcher.data && uploadFetcher.state === "idle") {
+            if (uploadFetcher.data.success) {
+                onSuccess?.();
+                onClose();
+            } else if (uploadFetcher.data.error) {
+                setError(uploadFetcher.data.error);
+            }
         }
-    }
+    }, [uploadFetcher.data, uploadFetcher.state, onSuccess, onClose]);
 
     // Handle use original result
-    if (originalFetcher.data && originalFetcher.state === "idle") {
-        if (originalFetcher.data.success) {
-            onSuccess?.();
-            onClose();
-        } else if (originalFetcher.data.error && !error) {
-            setError(originalFetcher.data.error);
+    useEffect(() => {
+        if (originalFetcher.data && originalFetcher.state === "idle") {
+            if (originalFetcher.data.success) {
+                onSuccess?.();
+                onClose();
+            } else if (originalFetcher.data.error) {
+                setError(originalFetcher.data.error);
+            }
         }
-    }
+    }, [originalFetcher.data, originalFetcher.state, onSuccess, onClose]);
 
     // Handle file drop
     const handleDrop = useCallback((_dropFiles, acceptedFiles) => {
@@ -138,7 +197,7 @@ export function ManualSegmentModal({
         });
     }, [productId, originalFetcher]);
 
-    // Confirm segmented result
+    // Confirm and close
     const handleConfirm = useCallback(() => {
         onSuccess?.();
         onClose();
@@ -146,11 +205,14 @@ export function ManualSegmentModal({
 
     // Reset state on close
     const handleClose = useCallback(() => {
-        setClickPoint(null);
-        setPreviewUrl(null);
+        setClickPoints([]);
+        setMaskPreviewUrl(null);
+        setFinalPreviewUrl(null);
         setError(null);
         setMode("click");
         setUploadedFile(null);
+        setStep("select");
+        setClickMode(1);
         onClose();
     }, [onClose]);
 
@@ -173,10 +235,10 @@ export function ManualSegmentModal({
                     <InlineStack gap="200">
                         <Button
                             variant={mode === "click" ? "primary" : "secondary"}
-                            onClick={() => setMode("click")}
+                            onClick={() => { setMode("click"); handleClear(); }}
                             disabled={isLoading}
                         >
-                            Click to Select
+                            Select Product
                         </Button>
                         <Button
                             variant={mode === "upload" ? "primary" : "secondary"}
@@ -197,28 +259,75 @@ export function ManualSegmentModal({
                     {/* Click to select mode */}
                     {mode === "click" && (
                         <BlockStack gap="300">
-                            <Text variant="bodyMd">
-                                Click on the product in the image to select it. The AI will segment only the object you click on.
-                            </Text>
+                            {step === "select" && (
+                                <>
+                                    <Text variant="bodyMd">
+                                        Click to add points. <strong>Green = include</strong>, <strong>Red = exclude</strong>.
+                                        Then preview the selection before applying.
+                                    </Text>
 
-                            <InlineStack gap="400" align="start">
-                                {/* Source image (clickable) */}
+                                    {/* Point mode selector */}
+                                    <InlineStack gap="200" align="center">
+                                        <Text variant="bodySm">Click mode:</Text>
+                                        <ButtonGroup segmented>
+                                            <Button
+                                                pressed={clickMode === 1}
+                                                onClick={() => setClickMode(1)}
+                                            >
+                                                <span style={{ color: "#22c55e" }}>● Include</span>
+                                            </Button>
+                                            <Button
+                                                pressed={clickMode === 0}
+                                                onClick={() => setClickMode(0)}
+                                            >
+                                                <span style={{ color: "#ef4444" }}>● Exclude</span>
+                                            </Button>
+                                        </ButtonGroup>
+                                        <Button onClick={handleUndo} disabled={clickPoints.length === 0}>
+                                            Undo
+                                        </Button>
+                                        <Button onClick={handleClear} disabled={clickPoints.length === 0}>
+                                            Clear All
+                                        </Button>
+                                    </InlineStack>
+                                </>
+                            )}
+
+                            {step === "preview" && (
+                                <Banner tone="info">
+                                    <p>Review the highlighted area. Green = will be kept. If it looks wrong, go back and adjust your points.</p>
+                                </Banner>
+                            )}
+
+                            {step === "done" && (
+                                <Banner tone="success">
+                                    <p>Background removed! Review the result below.</p>
+                                </Banner>
+                            )}
+
+                            {/* Image display */}
+                            <InlineStack gap="400" align="start" wrap={false}>
+                                {/* Source image with points / mask overlay */}
                                 <Box>
-                                    <Text variant="bodySm" tone="subdued">Click on your product:</Text>
+                                    <Text variant="bodySm" tone="subdued">
+                                        {step === "select" ? "Click to add points:" :
+                                         step === "preview" ? "Mask preview (green = keep):" : "Original:"}
+                                    </Text>
                                     <div
                                         ref={imageRef}
-                                        onClick={handleImageClick}
+                                        onClick={step === "select" ? handleImageClick : undefined}
                                         style={{
                                             position: "relative",
-                                            cursor: isLoading ? "wait" : "crosshair",
-                                            border: "2px solid #ccc",
+                                            cursor: step === "select" ? (isLoading ? "wait" : "crosshair") : "default",
+                                            border: `2px solid ${step === "preview" ? "#22c55e" : "#ccc"}`,
                                             borderRadius: "8px",
                                             overflow: "hidden",
-                                            maxWidth: "300px",
+                                            maxWidth: "350px",
                                         }}
                                     >
+                                        {/* Show mask overlay in preview mode, otherwise original */}
                                         <img
-                                            src={sourceImageUrl}
+                                            src={step === "preview" && maskPreviewUrl ? maskPreviewUrl : sourceImageUrl}
                                             alt={productTitle}
                                             style={{
                                                 display: "block",
@@ -226,25 +335,39 @@ export function ManualSegmentModal({
                                                 height: "auto",
                                             }}
                                         />
-                                        {/* Click point indicator */}
-                                        {clickPoint && (
+
+                                        {/* Click point indicators (only in select mode) */}
+                                        {step === "select" && clickPoints.map((point, idx) => (
                                             <div
+                                                key={idx}
                                                 style={{
                                                     position: "absolute",
-                                                    left: `${clickPoint.x * 100}%`,
-                                                    top: `${clickPoint.y * 100}%`,
+                                                    left: `${point.x * 100}%`,
+                                                    top: `${point.y * 100}%`,
                                                     transform: "translate(-50%, -50%)",
-                                                    width: "20px",
-                                                    height: "20px",
+                                                    width: "24px",
+                                                    height: "24px",
                                                     borderRadius: "50%",
-                                                    border: "3px solid #ff4444",
-                                                    background: "rgba(255, 68, 68, 0.3)",
+                                                    border: `3px solid ${point.label === 1 ? "#22c55e" : "#ef4444"}`,
+                                                    background: point.label === 1
+                                                        ? "rgba(34, 197, 94, 0.4)"
+                                                        : "rgba(239, 68, 68, 0.4)",
                                                     pointerEvents: "none",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                    color: "white",
+                                                    fontSize: "14px",
+                                                    fontWeight: "bold",
+                                                    textShadow: "0 1px 2px rgba(0,0,0,0.5)",
                                                 }}
-                                            />
-                                        )}
+                                            >
+                                                {point.label === 1 ? "+" : "−"}
+                                            </div>
+                                        ))}
+
                                         {/* Loading overlay */}
-                                        {segmentFetcher.state !== "idle" && (
+                                        {isLoading && (
                                             <div
                                                 style={{
                                                     position: "absolute",
@@ -253,30 +376,33 @@ export function ManualSegmentModal({
                                                     display: "flex",
                                                     alignItems: "center",
                                                     justifyContent: "center",
+                                                    flexDirection: "column",
+                                                    gap: "8px",
                                                 }}
                                             >
                                                 <Spinner size="large" />
+                                                <Text variant="bodySm">Processing...</Text>
                                             </div>
                                         )}
                                     </div>
                                 </Box>
 
-                                {/* Preview result */}
-                                {previewUrl && (
+                                {/* Final result preview (only in done step) */}
+                                {step === "done" && finalPreviewUrl && (
                                     <Box>
-                                        <Text variant="bodySm" tone="subdued">Result preview:</Text>
+                                        <Text variant="bodySm" tone="subdued">Final result:</Text>
                                         <div
                                             style={{
                                                 border: "2px solid #22c55e",
                                                 borderRadius: "8px",
                                                 overflow: "hidden",
-                                                maxWidth: "300px",
+                                                maxWidth: "350px",
                                                 background: "repeating-conic-gradient(#ddd 0% 25%, transparent 0% 50%) 50% / 16px 16px",
                                             }}
                                         >
                                             <img
-                                                src={previewUrl}
-                                                alt={`${productTitle} - segmented`}
+                                                src={finalPreviewUrl}
+                                                alt={`${productTitle} - transparent`}
                                                 style={{
                                                     display: "block",
                                                     width: "100%",
@@ -288,15 +414,52 @@ export function ManualSegmentModal({
                                 )}
                             </InlineStack>
 
-                            {previewUrl && (
-                                <InlineStack gap="200">
-                                    <Button variant="primary" onClick={handleConfirm}>
-                                        Looks Good - Save
+                            {/* Action buttons based on step */}
+                            <InlineStack gap="200">
+                                {step === "select" && (
+                                    <Button
+                                        variant="primary"
+                                        onClick={handlePreviewMask}
+                                        loading={previewFetcher.state !== "idle"}
+                                        disabled={clickPoints.length === 0}
+                                    >
+                                        Preview Selection
                                     </Button>
-                                    <Button onClick={() => { setPreviewUrl(null); setClickPoint(null); }}>
-                                        Try Again
-                                    </Button>
-                                </InlineStack>
+                                )}
+
+                                {step === "preview" && (
+                                    <>
+                                        <Button
+                                            variant="primary"
+                                            onClick={handleApplyMask}
+                                            loading={applyFetcher.state !== "idle"}
+                                        >
+                                            Apply & Remove Background
+                                        </Button>
+                                        <Button onClick={() => { setStep("select"); setMaskPreviewUrl(null); }}>
+                                            Adjust Points
+                                        </Button>
+                                    </>
+                                )}
+
+                                {step === "done" && (
+                                    <>
+                                        <Button variant="primary" onClick={handleConfirm}>
+                                            Looks Good - Save
+                                        </Button>
+                                        <Button onClick={handleClear}>
+                                            Start Over
+                                        </Button>
+                                    </>
+                                )}
+                            </InlineStack>
+
+                            {/* Point count indicator */}
+                            {clickPoints.length > 0 && step === "select" && (
+                                <Text variant="bodySm" tone="subdued">
+                                    {clickPoints.filter(p => p.label === 1).length} include point(s), {" "}
+                                    {clickPoints.filter(p => p.label === 0).length} exclude point(s)
+                                </Text>
                             )}
                         </BlockStack>
                     )}
@@ -352,7 +515,6 @@ export function ManualSegmentModal({
                         <BlockStack gap="300">
                             <Text variant="bodyMd">
                                 Skip background removal and use the original product image as-is.
-                                Use this if your product image already has a suitable background.
                             </Text>
 
                             <div
