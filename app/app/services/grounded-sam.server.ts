@@ -415,21 +415,52 @@ export async function segmentWithPointPrompt(
 
         const maskBuffer = Buffer.from(await maskResponse.arrayBuffer());
 
-        // Apply mask to original image (imgBuffer was downloaded earlier for dimensions)
-        const result = await sharp(imgBuffer)
+        // Convert SAM grayscale mask to alpha channel
+        // SAM mask: white (255) = object to keep, black (0) = background to remove
+        const maskImage = sharp(maskBuffer).resize({
+            width: metadata.width,
+            height: metadata.height,
+            fit: 'fill'
+        });
+
+        // Extract grayscale values to use as alpha
+        const grayscaleMask = await maskImage
+            .grayscale()
+            .raw()
+            .toBuffer();
+
+        // Get original image as raw RGBA
+        const originalRgba = await sharp(imgBuffer)
             .ensureAlpha()
-            .composite([{
-                input: await sharp(maskBuffer)
-                    .resize({
-                        width: metadata.width,
-                        height: metadata.height,
-                        fit: 'fill'
-                    })
-                    .toBuffer(),
-                blend: 'dest-in'
-            }])
+            .raw()
+            .toBuffer();
+
+        const width = metadata.width!;
+        const height = metadata.height!;
+
+        // Apply mask as alpha channel
+        const resultBuffer = Buffer.alloc(width * height * 4);
+        for (let i = 0; i < width * height; i++) {
+            resultBuffer[i * 4] = originalRgba[i * 4];         // R
+            resultBuffer[i * 4 + 1] = originalRgba[i * 4 + 1]; // G
+            resultBuffer[i * 4 + 2] = originalRgba[i * 4 + 2]; // B
+            resultBuffer[i * 4 + 3] = grayscaleMask[i];        // A from mask
+        }
+
+        const result = await sharp(resultBuffer, {
+            raw: {
+                width,
+                height,
+                channels: 4
+            }
+        })
             .png()
             .toBuffer();
+
+        logger.info(
+            { ...logContext, stage: "mask-applied" },
+            `Applied mask to image: ${width}x${height}, result size: ${result.length} bytes`
+        );
 
         const isValid = await validateImageHasContent(result, logContext);
         if (!isValid) {
