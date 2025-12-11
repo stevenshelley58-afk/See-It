@@ -291,8 +291,36 @@ export async function segmentWithPointPrompt(
             `SAM point API call completed`
         );
 
-        // SAM 2 returns: { combined_mask: string, individual_masks: string[] }
+        // SAM 2 returns: { combined_mask: FileOutput, individual_masks: FileOutput[] }
+        // FileOutput objects from Replicate SDK need to be converted to URL strings
         let maskUrl: string | null = null;
+
+        // Helper to extract URL from FileOutput objects or strings
+        const extractUrl = (value: unknown): string | null => {
+            if (typeof value === 'string') {
+                return value;
+            }
+            if (value && typeof value === 'object') {
+                const obj = value as Record<string, unknown>;
+                // FileOutput has .url() method or .href property
+                if (typeof obj.url === 'function') {
+                    const url = (obj.url as () => string)();
+                    if (typeof url === 'string') return url;
+                }
+                if (typeof obj.href === 'string') {
+                    return obj.href;
+                }
+                if (typeof obj.url === 'string') {
+                    return obj.url;
+                }
+                // Try toString() which FileOutput implements
+                const str = String(value);
+                if (str && str.startsWith('http')) {
+                    return str;
+                }
+            }
+            return null;
+        };
 
         // Log raw output for debugging
         logger.info(
@@ -307,37 +335,58 @@ export async function segmentWithPointPrompt(
                 `SAM output keys: ${JSON.stringify(Object.keys(outputObj))}`
             );
 
-            // SAM 2 specific output format - validate types before assignment
-            if (outputObj.combined_mask && typeof outputObj.combined_mask === 'string') {
-                maskUrl = outputObj.combined_mask;
-            } else if (outputObj.individual_masks && Array.isArray(outputObj.individual_masks) && outputObj.individual_masks.length > 0) {
-                const firstMask = outputObj.individual_masks[0];
-                if (typeof firstMask === 'string') {
-                    maskUrl = firstMask;
-                }
+            // Log the actual types of the mask fields
+            logger.info(
+                { ...logContext, stage: "parse-output" },
+                `combined_mask type: ${typeof outputObj.combined_mask}, constructor: ${outputObj.combined_mask?.constructor?.name}`
+            );
+
+            // SAM 2 specific output format - handle FileOutput objects
+            if (outputObj.combined_mask) {
+                maskUrl = extractUrl(outputObj.combined_mask);
+                logger.info(
+                    { ...logContext, stage: "parse-output" },
+                    `Extracted from combined_mask: ${maskUrl?.substring(0, 100) || 'null'}`
+                );
             }
 
-            // Fallback for other possible field names - validate each is a string
+            if (!maskUrl && outputObj.individual_masks && Array.isArray(outputObj.individual_masks) && outputObj.individual_masks.length > 0) {
+                maskUrl = extractUrl(outputObj.individual_masks[0]);
+                logger.info(
+                    { ...logContext, stage: "parse-output" },
+                    `Extracted from individual_masks[0]: ${maskUrl?.substring(0, 100) || 'null'}`
+                );
+            }
+
+            // Fallback for other possible field names
             if (!maskUrl) {
                 const possibleFields = ['mask', 'masks', 'output', 'image', 'segmentation'];
                 for (const field of possibleFields) {
                     const value = outputObj[field];
-                    if (typeof value === 'string') {
-                        maskUrl = value;
+                    maskUrl = extractUrl(value);
+                    if (maskUrl) {
+                        logger.info(
+                            { ...logContext, stage: "parse-output" },
+                            `Extracted from ${field}: ${maskUrl.substring(0, 100)}`
+                        );
                         break;
-                    } else if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'string') {
-                        maskUrl = value[0];
-                        break;
+                    }
+                    if (Array.isArray(value) && value.length > 0) {
+                        maskUrl = extractUrl(value[0]);
+                        if (maskUrl) {
+                            logger.info(
+                                { ...logContext, stage: "parse-output" },
+                                `Extracted from ${field}[0]: ${maskUrl.substring(0, 100)}`
+                            );
+                            break;
+                        }
                     }
                 }
             }
         } else if (Array.isArray(output) && output.length > 0) {
-            const firstItem = output[0];
-            if (typeof firstItem === 'string') {
-                maskUrl = firstItem;
-            }
-        } else if (typeof output === 'string') {
-            maskUrl = output;
+            maskUrl = extractUrl(output[0]);
+        } else {
+            maskUrl = extractUrl(output);
         }
 
         if (!maskUrl || typeof maskUrl !== 'string') {
