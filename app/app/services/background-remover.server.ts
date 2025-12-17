@@ -1,42 +1,29 @@
 /**
- * Fast Background Removal Service
+ * Fast Background Removal Service using Prodia API
  *
- * Uses 851-labs/background-remover on Replicate
- * - ~3 seconds per image
- * - ~$0.0005 per image
- * - High accuracy with BiRefNet architecture
+ * - 190ms latency (fastest available)
+ * - $0.0025 per image
+ * - Uses BiRefNet 2 model
+ * - Returns transparent PNG
+ *
+ * Docs: https://docs.prodia.com/job-types/inference-remove-background-v1/
  */
 
-import Replicate from "replicate";
 import { logger, createLogContext } from "../utils/logger.server";
 
-// Model configuration
-const MODEL_ID = "851-labs/background-remover:a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc";
-
-let replicateClient: Replicate | null = null;
-
-function getReplicateClient(): Replicate {
-    if (!replicateClient) {
-        const token = process.env.REPLICATE_API_TOKEN;
-        if (!token) {
-            throw new Error("REPLICATE_API_TOKEN environment variable is not set");
-        }
-        replicateClient = new Replicate({ auth: token });
-    }
-    return replicateClient;
-}
+const PRODIA_API_URL = "https://inference.prodia.com/v2/job";
 
 export interface BackgroundRemovalResult {
-    imageUrl: string;  // URL to the processed image with transparent background
+    imageBuffer: Buffer;  // PNG with transparent background
     processingTimeMs: number;
 }
 
 /**
- * Remove background from an image - fast and accurate
+ * Remove background from an image using Prodia API
  *
  * @param imageUrl - URL of the source image
  * @param requestId - For logging/tracking
- * @returns URL to the processed image with transparent background
+ * @returns Buffer containing PNG with transparent background
  */
 export async function removeBackgroundFast(
     imageUrl: string,
@@ -45,57 +32,100 @@ export async function removeBackgroundFast(
     const logContext = createLogContext("bg-remove", requestId, "start", {});
     const startTime = Date.now();
 
+    const apiToken = process.env.PRODIA_API_TOKEN;
+    if (!apiToken) {
+        throw new Error("PRODIA_API_TOKEN environment variable is not set");
+    }
+
     logger.info(
         { ...logContext, stage: "start" },
-        `Starting fast background removal`
+        `Starting Prodia background removal`
     );
 
     try {
-        const client = getReplicateClient();
+        // Download the source image first
+        const imageResponse = await fetch(imageUrl);
+        if (!imageResponse.ok) {
+            throw new Error(`Failed to download source image: ${imageResponse.status}`);
+        }
+        const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+        const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
 
-        const output = await client.run(MODEL_ID, {
-            input: {
-                image: imageUrl,
-                format: "png",
-                background_type: "rgba",  // Transparent background
-            }
+        logger.info(
+            { ...logContext, stage: "downloaded" },
+            `Downloaded source image: ${imageBuffer.length} bytes`
+        );
+
+        // Build multipart form data
+        const boundary = `----ProdiaBoundary${Date.now()}`;
+        const jobConfig = JSON.stringify({
+            type: "inference.remove-background.v1",
+            config: {}
         });
 
-        const processingTimeMs = Date.now() - startTime;
+        // Construct multipart body manually for Node.js
+        const parts: Buffer[] = [];
 
-        // Extract URL from output
-        let resultUrl: string;
+        // Job config part
+        parts.push(Buffer.from(
+            `--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="job"; filename="job.json"\r\n` +
+            `Content-Type: application/json\r\n\r\n`
+        ));
+        parts.push(Buffer.from(jobConfig));
+        parts.push(Buffer.from('\r\n'));
 
-        if (typeof output === 'string') {
-            resultUrl = output;
-        } else if (output && typeof output === 'object') {
-            // Handle FileOutput object
-            const obj = output as Record<string, unknown>;
-            if (typeof obj.url === 'function') {
-                resultUrl = (obj.url as () => string)();
-            } else if (typeof obj.href === 'string') {
-                resultUrl = obj.href;
-            } else if (typeof obj.url === 'string') {
-                resultUrl = obj.url;
-            } else {
-                const str = String(output);
-                if (str.startsWith('http')) {
-                    resultUrl = str;
-                } else {
-                    throw new Error("Could not extract URL from output");
-                }
-            }
-        } else {
-            throw new Error("Unexpected output format from background remover");
+        // Image input part
+        const extension = contentType.includes('png') ? 'png' :
+                         contentType.includes('webp') ? 'webp' : 'jpg';
+        parts.push(Buffer.from(
+            `--${boundary}\r\n` +
+            `Content-Disposition: form-data; name="input"; filename="input.${extension}"\r\n` +
+            `Content-Type: ${contentType}\r\n\r\n`
+        ));
+        parts.push(imageBuffer);
+        parts.push(Buffer.from('\r\n'));
+
+        // End boundary
+        parts.push(Buffer.from(`--${boundary}--\r\n`));
+
+        const body = Buffer.concat(parts);
+
+        // Make API request
+        logger.info(
+            { ...logContext, stage: "calling-api" },
+            `Calling Prodia API...`
+        );
+
+        const response = await fetch(PRODIA_API_URL, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${apiToken}`,
+                "Content-Type": `multipart/form-data; boundary=${boundary}`,
+                "Accept": "image/png",  // Get PNG directly without multipart wrapper
+            },
+            body,
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            logger.error(
+                { ...logContext, stage: "api-error" },
+                `Prodia API error: ${response.status} - ${errorText}`
+            );
+            throw new Error(`Prodia API error: ${response.status} - ${errorText}`);
         }
+
+        const resultBuffer = Buffer.from(await response.arrayBuffer());
+        const processingTimeMs = Date.now() - startTime;
 
         logger.info(
             { ...logContext, stage: "complete" },
-            `Background removed in ${processingTimeMs}ms`
+            `Background removed in ${processingTimeMs}ms, output: ${resultBuffer.length} bytes`
         );
 
         return {
-            imageUrl: resultUrl,
+            imageBuffer: resultBuffer,
             processingTimeMs,
         };
 
@@ -114,5 +144,5 @@ export async function removeBackgroundFast(
  * Check if the background removal service is available
  */
 export function isBackgroundRemoverAvailable(): boolean {
-    return !!process.env.REPLICATE_API_TOKEN;
+    return !!process.env.PRODIA_API_TOKEN;
 }

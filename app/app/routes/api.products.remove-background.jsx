@@ -8,8 +8,10 @@ import { logger, createLogContext } from "../utils/logger.server";
 /**
  * POST /api/products/remove-background
  *
- * One-click background removal - fast and simple
- * Uses 851-labs/background-remover (~3 seconds, ~$0.0005/image)
+ * One-click background removal using Prodia API
+ * - 190ms latency
+ * - $0.0025/image
+ * - BiRefNet 2 model
  *
  * Body:
  * - productId: Shopify product ID
@@ -52,22 +54,16 @@ export const action = async ({ request }) => {
             return json({ success: false, error: "Product asset not found" }, { status: 404 });
         }
 
-        // Remove background - fast!
-        logger.info({ ...logContext, stage: "processing" }, `Removing background...`);
+        // Remove background with Prodia - fast!
+        logger.info({ ...logContext, stage: "processing" }, `Removing background with Prodia...`);
 
         const result = await removeBackgroundFast(asset.sourceImageUrl, requestId);
 
-        // Download the result and upload to our GCS
-        const response = await fetch(result.imageUrl);
-        if (!response.ok) {
-            throw new Error(`Failed to download processed image: ${response.status}`);
-        }
-
-        const imageBuffer = Buffer.from(await response.arrayBuffer());
+        // Upload to GCS
         const preparedImageKey = `shops/${shop.id}/products/${productId}/prepared-${Date.now()}.png`;
 
         const preparedImageUrl = await StorageService.uploadBuffer(
-            imageBuffer,
+            result.imageBuffer,
             preparedImageKey,
             'image/png'
         );
