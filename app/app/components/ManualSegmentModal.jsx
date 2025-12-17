@@ -11,17 +11,15 @@ import {
     Thumbnail,
     Spinner,
     Box,
-    ButtonGroup,
 } from "@shopify/polaris";
 
 /**
- * ManualSegmentModal - Advanced segmentation with mask preview
+ * ManualSegmentModal - Simple Canva-style background remover
  *
  * Flow:
- * 1. User adds click points (green = include, red = exclude)
- * 2. Click "Preview Mask" to see what will be selected
- * 3. Adjust points if needed
- * 4. Click "Apply & Save" to create final transparent PNG
+ * 1. Click "Remove Background" → auto removes in ~3 seconds
+ * 2. Preview result
+ * 3. Happy? Save. Not happy? Try manual selection or upload your own.
  */
 export function ManualSegmentModal({
     open,
@@ -31,31 +29,57 @@ export function ManualSegmentModal({
     sourceImageUrl,
     onSuccess,
 }) {
-    // Click points: { x, y, label: 1 (include) | 0 (exclude) }
-    const [clickPoints, setClickPoints] = useState([]);
-    const [clickMode, setClickMode] = useState(1); // 1 = include (green), 0 = exclude (red)
-    const [maskPreviewUrl, setMaskPreviewUrl] = useState(null);
-    const [finalPreviewUrl, setFinalPreviewUrl] = useState(null);
+    const [previewUrl, setPreviewUrl] = useState(null);
+    const [processingTime, setProcessingTime] = useState(null);
     const [error, setError] = useState(null);
-    const [mode, setMode] = useState("click"); // "click" | "upload" | "original"
+    const [mode, setMode] = useState("auto"); // "auto" | "manual" | "upload" | "original"
     const [uploadedFile, setUploadedFile] = useState(null);
-    const [step, setStep] = useState("select"); // "select" | "preview" | "done"
+
+    // Manual selection state
+    const [clickPoints, setClickPoints] = useState([]);
+    const [clickMode, setClickMode] = useState(1); // 1 = include, 0 = exclude
     const imageRef = useRef(null);
 
-    const previewFetcher = useFetcher();
-    const applyFetcher = useFetcher();
+    const autoFetcher = useFetcher();
+    const manualFetcher = useFetcher();
     const uploadFetcher = useFetcher();
     const originalFetcher = useFetcher();
 
     const isLoading =
-        previewFetcher.state !== "idle" ||
-        applyFetcher.state !== "idle" ||
+        autoFetcher.state !== "idle" ||
+        manualFetcher.state !== "idle" ||
         uploadFetcher.state !== "idle" ||
         originalFetcher.state !== "idle";
 
-    // Handle click on image - add point
+    // Auto remove background - one click!
+    const handleAutoRemove = useCallback(() => {
+        setError(null);
+        setPreviewUrl(null);
+
+        const formData = new FormData();
+        formData.append("productId", productId);
+
+        autoFetcher.submit(formData, {
+            method: "post",
+            action: "/api/products/remove-background",
+        });
+    }, [productId, autoFetcher]);
+
+    // Handle auto result
+    useEffect(() => {
+        if (autoFetcher.data && autoFetcher.state === "idle") {
+            if (autoFetcher.data.success) {
+                setPreviewUrl(autoFetcher.data.preparedImageUrl);
+                setProcessingTime(autoFetcher.data.processingTimeMs);
+            } else if (autoFetcher.data.error) {
+                setError(autoFetcher.data.error);
+            }
+        }
+    }, [autoFetcher.data, autoFetcher.state]);
+
+    // Manual selection click
     const handleImageClick = useCallback((e) => {
-        if (isLoading || step === "done") return;
+        if (isLoading || mode !== "manual") return;
 
         const rect = imageRef.current.getBoundingClientRect();
         const x = (e.clientX - rect.left) / rect.width;
@@ -65,103 +89,35 @@ export function ManualSegmentModal({
         const clickY = Math.max(0, Math.min(1, y));
 
         setClickPoints(prev => [...prev, { x: clickX, y: clickY, label: clickMode }]);
-        setMaskPreviewUrl(null); // Clear preview when points change
-        setError(null);
-    }, [clickMode, isLoading, step]);
+    }, [clickMode, isLoading, mode]);
 
-    // Remove last point
-    const handleUndo = useCallback(() => {
-        setClickPoints(prev => prev.slice(0, -1));
-        setMaskPreviewUrl(null);
-    }, []);
-
-    // Clear all points
-    const handleClear = useCallback(() => {
-        setClickPoints([]);
-        setMaskPreviewUrl(null);
-        setFinalPreviewUrl(null);
-        setStep("select");
-    }, []);
-
-    // Generate mask preview
-    const handlePreviewMask = useCallback(() => {
+    // Apply manual selection
+    const handleManualApply = useCallback(() => {
         if (clickPoints.length === 0) {
-            setError("Click on the product first to add selection points");
+            setError("Click on the product first");
             return;
         }
 
         const formData = new FormData();
         formData.append("productId", productId);
         formData.append("points", JSON.stringify(clickPoints));
-        formData.append("previewOnly", "true");
 
-        previewFetcher.submit(formData, {
-            method: "post",
-            action: "/api/products/segment-preview",
-        });
-    }, [clickPoints, productId, previewFetcher]);
-
-    // Apply mask and create final image
-    const handleApplyMask = useCallback(() => {
-        if (clickPoints.length === 0) return;
-
-        const formData = new FormData();
-        formData.append("productId", productId);
-        formData.append("points", JSON.stringify(clickPoints));
-
-        applyFetcher.submit(formData, {
+        manualFetcher.submit(formData, {
             method: "post",
             action: "/api/products/segment-apply",
         });
-    }, [clickPoints, productId, applyFetcher]);
+    }, [clickPoints, productId, manualFetcher]);
 
-    // Handle preview result
+    // Handle manual result
     useEffect(() => {
-        if (previewFetcher.data && previewFetcher.state === "idle") {
-            if (previewFetcher.data.success) {
-                setMaskPreviewUrl(previewFetcher.data.maskOverlayUrl);
-                setStep("preview");
-            } else if (previewFetcher.data.error) {
-                setError(previewFetcher.data.error);
+        if (manualFetcher.data && manualFetcher.state === "idle") {
+            if (manualFetcher.data.success) {
+                setPreviewUrl(manualFetcher.data.preparedImageUrl);
+            } else if (manualFetcher.data.error) {
+                setError(manualFetcher.data.error);
             }
         }
-    }, [previewFetcher.data, previewFetcher.state]);
-
-    // Handle apply result
-    useEffect(() => {
-        if (applyFetcher.data && applyFetcher.state === "idle") {
-            if (applyFetcher.data.success) {
-                setFinalPreviewUrl(applyFetcher.data.preparedImageUrl);
-                setStep("done");
-            } else if (applyFetcher.data.error) {
-                setError(applyFetcher.data.error);
-            }
-        }
-    }, [applyFetcher.data, applyFetcher.state]);
-
-    // Handle upload result
-    useEffect(() => {
-        if (uploadFetcher.data && uploadFetcher.state === "idle") {
-            if (uploadFetcher.data.success) {
-                onSuccess?.();
-                onClose();
-            } else if (uploadFetcher.data.error) {
-                setError(uploadFetcher.data.error);
-            }
-        }
-    }, [uploadFetcher.data, uploadFetcher.state, onSuccess, onClose]);
-
-    // Handle use original result
-    useEffect(() => {
-        if (originalFetcher.data && originalFetcher.state === "idle") {
-            if (originalFetcher.data.success) {
-                onSuccess?.();
-                onClose();
-            } else if (originalFetcher.data.error) {
-                setError(originalFetcher.data.error);
-            }
-        }
-    }, [originalFetcher.data, originalFetcher.state, onSuccess, onClose]);
+    }, [manualFetcher.data, manualFetcher.state]);
 
     // Handle file drop
     const handleDrop = useCallback((_dropFiles, acceptedFiles) => {
@@ -186,7 +142,19 @@ export function ManualSegmentModal({
         });
     }, [productId, uploadedFile, uploadFetcher]);
 
-    // Use original image
+    // Handle upload result
+    useEffect(() => {
+        if (uploadFetcher.data && uploadFetcher.state === "idle") {
+            if (uploadFetcher.data.success) {
+                onSuccess?.();
+                onClose();
+            } else if (uploadFetcher.data.error) {
+                setError(uploadFetcher.data.error);
+            }
+        }
+    }, [uploadFetcher.data, uploadFetcher.state, onSuccess, onClose]);
+
+    // Use original
     const handleUseOriginal = useCallback(() => {
         const formData = new FormData();
         formData.append("productId", productId);
@@ -197,6 +165,18 @@ export function ManualSegmentModal({
         });
     }, [productId, originalFetcher]);
 
+    // Handle original result
+    useEffect(() => {
+        if (originalFetcher.data && originalFetcher.state === "idle") {
+            if (originalFetcher.data.success) {
+                onSuccess?.();
+                onClose();
+            } else if (originalFetcher.data.error) {
+                setError(originalFetcher.data.error);
+            }
+        }
+    }, [originalFetcher.data, originalFetcher.state, onSuccess, onClose]);
+
     // Confirm and close
     const handleConfirm = useCallback(() => {
         onSuccess?.();
@@ -205,22 +185,29 @@ export function ManualSegmentModal({
 
     // Reset state on close
     const handleClose = useCallback(() => {
-        setClickPoints([]);
-        setMaskPreviewUrl(null);
-        setFinalPreviewUrl(null);
+        setPreviewUrl(null);
+        setProcessingTime(null);
         setError(null);
-        setMode("click");
+        setMode("auto");
         setUploadedFile(null);
-        setStep("select");
+        setClickPoints([]);
         setClickMode(1);
         onClose();
     }, [onClose]);
+
+    // Switch mode and reset
+    const switchMode = useCallback((newMode) => {
+        setMode(newMode);
+        setPreviewUrl(null);
+        setError(null);
+        setClickPoints([]);
+    }, []);
 
     return (
         <Modal
             open={open}
             onClose={handleClose}
-            title={`Fix Background Removal: ${productTitle}`}
+            title={`Fix Background: ${productTitle}`}
             large
         >
             <Modal.Section>
@@ -231,113 +218,193 @@ export function ManualSegmentModal({
                         </Banner>
                     )}
 
-                    {/* Mode selector */}
+                    {/* Mode tabs - subtle, not prominent */}
                     <InlineStack gap="200">
                         <Button
-                            variant={mode === "click" ? "primary" : "secondary"}
-                            onClick={() => { setMode("click"); handleClear(); }}
+                            variant={mode === "auto" ? "primary" : "tertiary"}
+                            onClick={() => switchMode("auto")}
                             disabled={isLoading}
+                            size="slim"
                         >
-                            Select Product
+                            Auto Remove
                         </Button>
                         <Button
-                            variant={mode === "upload" ? "primary" : "secondary"}
-                            onClick={() => setMode("upload")}
+                            variant={mode === "manual" ? "primary" : "tertiary"}
+                            onClick={() => switchMode("manual")}
                             disabled={isLoading}
+                            size="slim"
                         >
-                            Upload Image
+                            Manual Select
                         </Button>
                         <Button
-                            variant={mode === "original" ? "primary" : "secondary"}
-                            onClick={() => setMode("original")}
+                            variant={mode === "upload" ? "primary" : "tertiary"}
+                            onClick={() => switchMode("upload")}
                             disabled={isLoading}
+                            size="slim"
+                        >
+                            Upload
+                        </Button>
+                        <Button
+                            variant={mode === "original" ? "primary" : "tertiary"}
+                            onClick={() => switchMode("original")}
+                            disabled={isLoading}
+                            size="slim"
                         >
                             Use Original
                         </Button>
                     </InlineStack>
 
-                    {/* Click to select mode */}
-                    {mode === "click" && (
+                    {/* AUTO MODE - Simple one-click */}
+                    {mode === "auto" && (
                         <BlockStack gap="300">
-                            {step === "select" && (
-                                <>
-                                    <Text variant="bodyMd">
-                                        Click to add points. <strong>Green = include</strong>, <strong>Red = exclude</strong>.
-                                        Then preview the selection before applying.
-                                    </Text>
-
-                                    {/* Point mode selector */}
-                                    <InlineStack gap="200" align="center">
-                                        <Text variant="bodySm">Click mode:</Text>
-                                        <ButtonGroup segmented>
-                                            <Button
-                                                pressed={clickMode === 1}
-                                                onClick={() => setClickMode(1)}
-                                            >
-                                                <span style={{ color: "#22c55e" }}>● Include</span>
-                                            </Button>
-                                            <Button
-                                                pressed={clickMode === 0}
-                                                onClick={() => setClickMode(0)}
-                                            >
-                                                <span style={{ color: "#ef4444" }}>● Exclude</span>
-                                            </Button>
-                                        </ButtonGroup>
-                                        <Button onClick={handleUndo} disabled={clickPoints.length === 0}>
-                                            Undo
-                                        </Button>
-                                        <Button onClick={handleClear} disabled={clickPoints.length === 0}>
-                                            Clear All
-                                        </Button>
-                                    </InlineStack>
-                                </>
-                            )}
-
-                            {step === "preview" && (
-                                <Banner tone="info">
-                                    <p>Review the highlighted area. Green = will be kept. If it looks wrong, go back and adjust your points.</p>
-                                </Banner>
-                            )}
-
-                            {step === "done" && (
-                                <Banner tone="success">
-                                    <p>Background removed! Review the result below.</p>
-                                </Banner>
-                            )}
-
-                            {/* Image display */}
                             <InlineStack gap="400" align="start" wrap={false}>
-                                {/* Source image with points / mask overlay */}
+                                {/* Original image */}
                                 <Box>
-                                    <Text variant="bodySm" tone="subdued">
-                                        {step === "select" ? "Click to add points:" :
-                                         step === "preview" ? "Mask preview (green = keep):" : "Original:"}
-                                    </Text>
+                                    <Text variant="bodySm" tone="subdued">Original:</Text>
                                     <div
-                                        ref={imageRef}
-                                        onClick={step === "select" ? handleImageClick : undefined}
                                         style={{
-                                            position: "relative",
-                                            cursor: step === "select" ? (isLoading ? "wait" : "crosshair") : "default",
-                                            border: `2px solid ${step === "preview" ? "#22c55e" : "#ccc"}`,
+                                            border: "1px solid #ddd",
                                             borderRadius: "8px",
                                             overflow: "hidden",
-                                            maxWidth: "350px",
+                                            maxWidth: "300px",
                                         }}
                                     >
-                                        {/* Show mask overlay in preview mode, otherwise original */}
                                         <img
-                                            src={step === "preview" && maskPreviewUrl ? maskPreviewUrl : sourceImageUrl}
+                                            src={sourceImageUrl}
                                             alt={productTitle}
-                                            style={{
-                                                display: "block",
-                                                width: "100%",
-                                                height: "auto",
-                                            }}
+                                            style={{ display: "block", width: "100%", height: "auto" }}
                                         />
+                                    </div>
+                                </Box>
 
-                                        {/* Click point indicators (only in select mode) */}
-                                        {step === "select" && clickPoints.map((point, idx) => (
+                                {/* Arrow or processing indicator */}
+                                <Box paddingBlockStart="800">
+                                    {isLoading ? (
+                                        <Spinner size="small" />
+                                    ) : (
+                                        <Text variant="headingLg">→</Text>
+                                    )}
+                                </Box>
+
+                                {/* Result preview */}
+                                <Box>
+                                    <Text variant="bodySm" tone="subdued">
+                                        {previewUrl ? "Result:" : "Preview:"}
+                                    </Text>
+                                    <div
+                                        style={{
+                                            border: previewUrl ? "2px solid #22c55e" : "1px dashed #ccc",
+                                            borderRadius: "8px",
+                                            overflow: "hidden",
+                                            maxWidth: "300px",
+                                            minHeight: "200px",
+                                            background: previewUrl
+                                                ? "repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px"
+                                                : "#f5f5f5",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                        }}
+                                    >
+                                        {previewUrl ? (
+                                            <img
+                                                src={previewUrl}
+                                                alt={`${productTitle} - processed`}
+                                                style={{ display: "block", width: "100%", height: "auto" }}
+                                            />
+                                        ) : (
+                                            <Text variant="bodySm" tone="subdued">
+                                                Click "Remove Background"
+                                            </Text>
+                                        )}
+                                    </div>
+                                </Box>
+                            </InlineStack>
+
+                            {/* Action buttons */}
+                            <InlineStack gap="200">
+                                {!previewUrl ? (
+                                    <Button
+                                        variant="primary"
+                                        onClick={handleAutoRemove}
+                                        loading={autoFetcher.state !== "idle"}
+                                    >
+                                        Remove Background
+                                    </Button>
+                                ) : (
+                                    <>
+                                        <Button variant="primary" onClick={handleConfirm}>
+                                            Save
+                                        </Button>
+                                        <Button onClick={handleAutoRemove} loading={autoFetcher.state !== "idle"}>
+                                            Try Again
+                                        </Button>
+                                    </>
+                                )}
+                            </InlineStack>
+
+                            {processingTime && (
+                                <Text variant="bodySm" tone="subdued">
+                                    Processed in {(processingTime / 1000).toFixed(1)}s
+                                </Text>
+                            )}
+                        </BlockStack>
+                    )}
+
+                    {/* MANUAL MODE - Click to select */}
+                    {mode === "manual" && (
+                        <BlockStack gap="300">
+                            <Text variant="bodyMd">
+                                Click on the product to include it. Use exclude mode to remove unwanted areas.
+                            </Text>
+
+                            <InlineStack gap="200" align="center">
+                                <Button
+                                    pressed={clickMode === 1}
+                                    onClick={() => setClickMode(1)}
+                                    size="slim"
+                                >
+                                    + Include
+                                </Button>
+                                <Button
+                                    pressed={clickMode === 0}
+                                    onClick={() => setClickMode(0)}
+                                    size="slim"
+                                >
+                                    − Exclude
+                                </Button>
+                                <Button
+                                    onClick={() => setClickPoints([])}
+                                    disabled={clickPoints.length === 0}
+                                    size="slim"
+                                >
+                                    Clear
+                                </Button>
+                            </InlineStack>
+
+                            <InlineStack gap="400" align="start" wrap={false}>
+                                {/* Clickable image */}
+                                <Box>
+                                    <Text variant="bodySm" tone="subdued">Click to select:</Text>
+                                    <div
+                                        ref={imageRef}
+                                        onClick={handleImageClick}
+                                        style={{
+                                            position: "relative",
+                                            cursor: "crosshair",
+                                            border: "1px solid #ddd",
+                                            borderRadius: "8px",
+                                            overflow: "hidden",
+                                            maxWidth: "300px",
+                                        }}
+                                    >
+                                        <img
+                                            src={sourceImageUrl}
+                                            alt={productTitle}
+                                            style={{ display: "block", width: "100%", height: "auto" }}
+                                        />
+                                        {/* Click points */}
+                                        {clickPoints.map((point, idx) => (
                                             <div
                                                 key={idx}
                                                 style={{
@@ -345,138 +412,93 @@ export function ManualSegmentModal({
                                                     left: `${point.x * 100}%`,
                                                     top: `${point.y * 100}%`,
                                                     transform: "translate(-50%, -50%)",
-                                                    width: "24px",
-                                                    height: "24px",
+                                                    width: "20px",
+                                                    height: "20px",
                                                     borderRadius: "50%",
-                                                    border: `3px solid ${point.label === 1 ? "#22c55e" : "#ef4444"}`,
-                                                    background: point.label === 1
-                                                        ? "rgba(34, 197, 94, 0.4)"
-                                                        : "rgba(239, 68, 68, 0.4)",
+                                                    border: `2px solid ${point.label === 1 ? "#22c55e" : "#ef4444"}`,
+                                                    background: point.label === 1 ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)",
                                                     pointerEvents: "none",
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    justifyContent: "center",
-                                                    color: "white",
-                                                    fontSize: "14px",
-                                                    fontWeight: "bold",
-                                                    textShadow: "0 1px 2px rgba(0,0,0,0.5)",
                                                 }}
-                                            >
-                                                {point.label === 1 ? "+" : "−"}
-                                            </div>
+                                            />
                                         ))}
-
-                                        {/* Loading overlay */}
-                                        {isLoading && (
+                                        {manualFetcher.state !== "idle" && (
                                             <div
                                                 style={{
                                                     position: "absolute",
                                                     inset: 0,
-                                                    background: "rgba(255, 255, 255, 0.8)",
+                                                    background: "rgba(255,255,255,0.8)",
                                                     display: "flex",
                                                     alignItems: "center",
                                                     justifyContent: "center",
-                                                    flexDirection: "column",
-                                                    gap: "8px",
                                                 }}
                                             >
-                                                <Spinner size="large" />
-                                                <Text variant="bodySm">Processing...</Text>
+                                                <Spinner />
                                             </div>
                                         )}
                                     </div>
                                 </Box>
 
-                                {/* Final result preview (only in done step) */}
-                                {step === "done" && finalPreviewUrl && (
+                                {/* Result */}
+                                {previewUrl && (
                                     <Box>
-                                        <Text variant="bodySm" tone="subdued">Final result:</Text>
+                                        <Text variant="bodySm" tone="subdued">Result:</Text>
                                         <div
                                             style={{
                                                 border: "2px solid #22c55e",
                                                 borderRadius: "8px",
                                                 overflow: "hidden",
-                                                maxWidth: "350px",
-                                                background: "repeating-conic-gradient(#ddd 0% 25%, transparent 0% 50%) 50% / 16px 16px",
+                                                maxWidth: "300px",
+                                                background: "repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px",
                                             }}
                                         >
                                             <img
-                                                src={finalPreviewUrl}
-                                                alt={`${productTitle} - transparent`}
-                                                style={{
-                                                    display: "block",
-                                                    width: "100%",
-                                                    height: "auto",
-                                                }}
+                                                src={previewUrl}
+                                                alt={`${productTitle} - processed`}
+                                                style={{ display: "block", width: "100%", height: "auto" }}
                                             />
                                         </div>
                                     </Box>
                                 )}
                             </InlineStack>
 
-                            {/* Action buttons based on step */}
                             <InlineStack gap="200">
-                                {step === "select" && (
+                                {!previewUrl ? (
                                     <Button
                                         variant="primary"
-                                        onClick={handlePreviewMask}
-                                        loading={previewFetcher.state !== "idle"}
+                                        onClick={handleManualApply}
+                                        loading={manualFetcher.state !== "idle"}
                                         disabled={clickPoints.length === 0}
                                     >
-                                        Preview Selection
+                                        Apply Selection
                                     </Button>
-                                )}
-
-                                {step === "preview" && (
-                                    <>
-                                        <Button
-                                            variant="primary"
-                                            onClick={handleApplyMask}
-                                            loading={applyFetcher.state !== "idle"}
-                                        >
-                                            Apply & Remove Background
-                                        </Button>
-                                        <Button onClick={() => { setStep("select"); setMaskPreviewUrl(null); }}>
-                                            Adjust Points
-                                        </Button>
-                                    </>
-                                )}
-
-                                {step === "done" && (
+                                ) : (
                                     <>
                                         <Button variant="primary" onClick={handleConfirm}>
-                                            Looks Good - Save
+                                            Save
                                         </Button>
-                                        <Button onClick={handleClear}>
-                                            Start Over
+                                        <Button onClick={() => { setPreviewUrl(null); setClickPoints([]); }}>
+                                            Try Again
                                         </Button>
                                     </>
                                 )}
                             </InlineStack>
 
-                            {/* Point count indicator */}
-                            {clickPoints.length > 0 && step === "select" && (
+                            {clickPoints.length > 0 && !previewUrl && (
                                 <Text variant="bodySm" tone="subdued">
-                                    {clickPoints.filter(p => p.label === 1).length} include point(s), {" "}
-                                    {clickPoints.filter(p => p.label === 0).length} exclude point(s)
+                                    {clickPoints.filter(p => p.label === 1).length} include, {clickPoints.filter(p => p.label === 0).length} exclude
                                 </Text>
                             )}
                         </BlockStack>
                     )}
 
-                    {/* Upload mode */}
+                    {/* UPLOAD MODE */}
                     {mode === "upload" && (
                         <BlockStack gap="300">
                             <Text variant="bodyMd">
-                                Upload your own image with transparent background (PNG recommended).
+                                Upload your own image with transparent background.
                             </Text>
 
-                            <DropZone
-                                accept="image/*"
-                                type="image"
-                                onDrop={handleDrop}
-                                disabled={isLoading}
-                            >
+                            <DropZone accept="image/*" type="image" onDrop={handleDrop} disabled={isLoading}>
                                 {uploadedFile ? (
                                     <InlineStack gap="400" align="center" blockAlign="center">
                                         <Thumbnail
@@ -485,16 +507,14 @@ export function ManualSegmentModal({
                                             size="large"
                                         />
                                         <BlockStack>
-                                            <Text variant="bodyMd" fontWeight="bold">
-                                                {uploadedFile.name}
-                                            </Text>
+                                            <Text variant="bodyMd" fontWeight="bold">{uploadedFile.name}</Text>
                                             <Text variant="bodySm" tone="subdued">
                                                 {(uploadedFile.size / 1024).toFixed(1)} KB
                                             </Text>
                                         </BlockStack>
                                     </InlineStack>
                                 ) : (
-                                    <DropZone.FileUpload actionHint="or drop file to upload" />
+                                    <DropZone.FileUpload actionHint="Drop image or click to upload" />
                                 )}
                             </DropZone>
 
@@ -504,22 +524,22 @@ export function ManualSegmentModal({
                                     onClick={handleUploadSubmit}
                                     loading={uploadFetcher.state !== "idle"}
                                 >
-                                    Upload Image
+                                    Upload & Save
                                 </Button>
                             )}
                         </BlockStack>
                     )}
 
-                    {/* Use original mode */}
+                    {/* ORIGINAL MODE */}
                     {mode === "original" && (
                         <BlockStack gap="300">
                             <Text variant="bodyMd">
-                                Skip background removal and use the original product image as-is.
+                                Use the original image without removing the background.
                             </Text>
 
                             <div
                                 style={{
-                                    border: "2px solid #ccc",
+                                    border: "1px solid #ddd",
                                     borderRadius: "8px",
                                     overflow: "hidden",
                                     maxWidth: "300px",
@@ -528,11 +548,7 @@ export function ManualSegmentModal({
                                 <img
                                     src={sourceImageUrl}
                                     alt={productTitle}
-                                    style={{
-                                        display: "block",
-                                        width: "100%",
-                                        height: "auto",
-                                    }}
+                                    style={{ display: "block", width: "100%", height: "auto" }}
                                 />
                             </div>
 
@@ -541,7 +557,7 @@ export function ManualSegmentModal({
                                 onClick={handleUseOriginal}
                                 loading={originalFetcher.state !== "idle"}
                             >
-                                Use Original Image
+                                Use Original
                             </Button>
                         </BlockStack>
                     )}
