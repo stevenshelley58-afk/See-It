@@ -12,7 +12,7 @@ import {
     Box,
     ProgressBar,
 } from "@shopify/polaris";
-import { SmartBrushCanvas } from "./SmartBrushCanvas";
+import { AssistedBrushCanvas } from "./AssistedBrushCanvas";
 
 /**
  * ManualSegmentModal - Background removal with smart refinement
@@ -468,16 +468,17 @@ export function ManualSegmentModal({
                         <BlockStack gap="300">
                             <Banner tone="info">
                                 <p>
-                                    <strong>Restore:</strong> Paint to bring back areas that were incorrectly removed.{" "}
-                                    <strong>Erase:</strong> Paint to remove areas that should be transparent.
+                                    <strong>Assisted:</strong> Click on any area to select similar colors.{" "}
+                                    <strong>Manual:</strong> Paint directly with brush.{" "}
+                                    Use <strong>Restore</strong> to bring back removed areas or <strong>Erase</strong> to remove more.
                                 </p>
                             </Banner>
 
-                            <SmartBrushCanvas
+                            <AssistedBrushCanvas
                                 originalImageUrl={selectedImageUrl}
                                 processedImageUrl={previewUrl}
-                                width={500}
-                                height={450}
+                                width={550}
+                                height={480}
                                 onRefinedImage={handleRefinedImage}
                                 disabled={isLoading}
                             />
