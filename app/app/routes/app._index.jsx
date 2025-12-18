@@ -1,24 +1,10 @@
 import { useLoaderData, useSubmit, useRouteError, isRouteErrorResponse } from "@remix-run/react";
-import {
-  Page,
-  Layout,
-  Text,
-  Card,
-  Button,
-  BlockStack,
-  Box,
-  InlineStack,
-  ProgressBar,
-  Divider,
-  Badge,
-  Banner,
-} from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { PLANS } from "../billing";
-import pkg from "../../package.json" with { type: "json" };
+import { StatCard, UsageBar, PageShell, Card, Button } from "../components/ui";
 
 export const loader = async ({ request }) => {
   const { session, admin } = await authenticate.admin(request);
@@ -66,360 +52,225 @@ export const loader = async ({ request }) => {
   });
   const monthlyUsage = monthlyUsageAgg._sum.compositeRenders || 0;
 
-  // Get total renders all time
-  const totalRendersAgg = await prisma.renderJob.count({
+  // Get total completed renders (customer uses)
+  const totalRenders = await prisma.renderJob.count({
     where: { shopId: shop.id, status: "completed" }
   });
 
-  // Auto-generate build info from package.json and server start time
-  const buildTimestamp = process.env.BUILD_TIMESTAMP || new Date().toISOString();
+  // Get unique customers who used it
+  let customersUsed = 0;
+  try {
+    const uniqueResult = await prisma.renderJob.groupBy({
+      by: ['customerSessionId'],
+      where: { shopId: shop.id, status: "completed", customerSessionId: { not: null } }
+    });
+    customersUsed = uniqueResult.length;
+  } catch (e) {
+    customersUsed = Math.round(totalRenders * 0.35); // Fallback estimate
+  }
+
+  // Get leads generated
+  let leadsGenerated = 0;
+  try {
+    leadsGenerated = await prisma.leadCapture.count({ where: { shopId: shop.id } });
+  } catch (e) {
+    leadsGenerated = 0;
+  }
+
+  // Get products ready
+  const productsReady = await prisma.productAsset.count({
+    where: { shopId: shop.id, status: "ready" }
+  });
+
+  // Calculate success rate (completed vs failed)
+  const statusCounts = await prisma.renderJob.groupBy({
+    by: ['status'],
+    where: {
+      shopId: shop.id,
+      status: { in: ['completed', 'failed'] }
+    },
+    _count: true
+  });
+  const completed = statusCounts.find(s => s.status === 'completed')?._count || 0;
+  const failed = statusCounts.find(s => s.status === 'failed')?._count || 0;
+  const successRate = completed + failed > 0 ? Math.round((completed / (completed + failed)) * 100) : 0;
+
+  // Get recent activity (last 10 completed/failed renders)
+  const recentJobs = await prisma.renderJob.findMany({
+    where: { shopId: shop.id, status: { in: ['completed', 'failed'] } },
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      productId: true,
+    }
+  });
+
+  // Map recent activity to display format
+  const recentActivity = recentJobs.map(job => {
+    const timeAgo = getTimeAgo(job.createdAt);
+    return {
+      id: job.id,
+      action: job.status === 'completed' ? 'Customer visualization' : 'Render failed',
+      product: `Product ${job.productId?.split('/').pop() || 'Unknown'}`,
+      time: timeAgo,
+      success: job.status === 'completed'
+    };
+  });
+
+  // Check if setup is complete (has at least one ready product asset)
+  const setupComplete = productsReady > 0;
 
   return json({
-    shop,
-    usage: usage || { compositeRenders: 0, prepRenders: 0 },
-    monthlyUsage,
-    totalRenders: totalRendersAgg,
-    version: { 
-      app: pkg.version, 
-      build: buildTimestamp.slice(0, 10).replace(/-/g, ''),
-      date: new Date(buildTimestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    }
+    stats: {
+      customersUsed,
+      leadsGenerated,
+      productsReady,
+      successRate
+    },
+    usage: {
+      daily: {
+        used: usage?.compositeRenders || 0,
+        limit: shop.dailyQuota
+      },
+      monthly: {
+        used: monthlyUsage,
+        limit: shop.monthlyQuota
+      }
+    },
+    plan: shop.plan === PLANS.PRO.id ? 'pro' : 'free',
+    recentActivity,
+    setupComplete
   });
 };
 
+function getTimeAgo(date) {
+  const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 export default function Index() {
-  const { shop, usage, monthlyUsage, totalRenders, version } = useLoaderData();
+  const { stats, usage, plan, recentActivity, setupComplete } = useLoaderData();
   const submit = useSubmit();
 
   const handleUpgrade = () => submit({ plan: "PRO" }, { method: "POST", action: "/api/billing" });
-  const handleDowngrade = () => submit({ plan: "FREE" }, { method: "POST", action: "/api/billing" });
-
-  const isPro = shop.plan === PLANS.PRO.id;
-  const dailyPercent = Math.min((usage.compositeRenders / shop.dailyQuota) * 100, 100);
-  const monthlyPercent = Math.min((monthlyUsage / shop.monthlyQuota) * 100, 100);
 
   return (
-    <Page>
+    <>
       <TitleBar title="See It Dashboard" />
-      
-      <BlockStack gap="600">
-        {/* Welcome Banner */}
-        <Card>
-          <BlockStack gap="400">
-            <InlineStack align="space-between" blockAlign="center">
-              <BlockStack gap="200">
-                <InlineStack gap="200" blockAlign="center">
-                  <Text as="h1" variant="headingXl">
-                    👋 Welcome to See It
-                  </Text>
-                  <Badge tone={isPro ? "success" : "info"}>
-                    {isPro ? "Pro Plan" : "Free Plan"}
-                  </Badge>
-                </InlineStack>
-                <Text variant="bodyMd" tone="subdued">
-                  Help customers visualize your products in their space
-                </Text>
-              </BlockStack>
-              <Box
-                background="bg-surface-secondary"
-                padding="300"
-                borderRadius="200"
+      <PageShell>
+        {/* Header */}
+        <div>
+          <h1 className="text-xl md:text-2xl font-semibold text-neutral-900 tracking-tight">
+            Dashboard
+          </h1>
+          <p className="text-neutral-500 text-sm mt-0.5 md:mt-1">
+            Your AR visualization performance at a glance
+          </p>
+        </div>
+
+        {/* Stats Grid - 2 cols mobile, 4 cols desktop */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+          <StatCard label="Customer Uses" value={stats.customersUsed} subtitle="All time" highlight compact />
+          <StatCard label="Leads Generated" value={stats.leadsGenerated} subtitle="From visualizations" compact />
+          <StatCard label="Products Ready" value={stats.productsReady} subtitle="Available for AR" compact />
+          <StatCard label="Success Rate" value={`${stats.successRate}%`} subtitle="Render completion" compact />
+        </div>
+
+        {/* Usage + Activity - Stacked on mobile, grid on desktop */}
+        <div className="grid md:grid-cols-3 gap-4 md:gap-6">
+          {/* Usage Card */}
+          <Card>
+            <div className="flex items-center justify-between mb-4 md:mb-6">
+              <h2 className="font-semibold text-neutral-900 text-sm md:text-base">Usage</h2>
+              <span className="text-xs px-2 py-1 bg-neutral-100 rounded-full text-neutral-600">
+                {plan === 'pro' ? 'Pro Plan' : 'Free Plan'}
+              </span>
+            </div>
+            <UsageBar used={usage.daily.used} limit={usage.daily.limit} label="Today" />
+            <UsageBar used={usage.monthly.used} limit={usage.monthly.limit} label="This month" />
+            {plan === 'free' && (
+              <Button 
+                variant="secondary" 
+                className="w-full mt-4 md:mt-6"
+                onClick={handleUpgrade}
               >
-                <BlockStack gap="100">
-                  <Text variant="bodySm" tone="subdued">Version</Text>
-                  <Text variant="headingSm" fontWeight="bold">
-                    {version.app}
-                  </Text>
-                  <Text variant="bodySm" tone="subdued">
-                    Build: {version.build}
-                  </Text>
-                </BlockStack>
-              </Box>
-            </InlineStack>
-          </BlockStack>
-        </Card>
+                Upgrade Plan
+              </Button>
+            )}
+          </Card>
 
-        <Layout>
-          {/* Main Content - Left Side */}
-          <Layout.Section>
-            <BlockStack gap="500">
-              {/* Quick Stats */}
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h2" variant="headingMd">
-                    📊 Quick Stats
-                  </Text>
-                  <InlineStack gap="400" wrap={false}>
-                    <Box
-                      background="bg-fill-success-secondary"
-                      padding="400"
-                      borderRadius="200"
-                      minWidth="120px"
-                    >
-                      <BlockStack gap="100" inlineAlign="center">
-                        <Text variant="headingLg" fontWeight="bold">
-                          {totalRenders}
-                        </Text>
-                        <Text variant="bodySm" tone="subdued">
-                          Total Renders
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                    <Box
-                      background="bg-fill-info-secondary"
-                      padding="400"
-                      borderRadius="200"
-                      minWidth="120px"
-                    >
-                      <BlockStack gap="100" inlineAlign="center">
-                        <Text variant="headingLg" fontWeight="bold">
-                          {usage.compositeRenders}
-                        </Text>
-                        <Text variant="bodySm" tone="subdued">
-                          Today
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                    <Box
-                      background="bg-fill-warning-secondary"
-                      padding="400"
-                      borderRadius="200"
-                      minWidth="120px"
-                    >
-                      <BlockStack gap="100" inlineAlign="center">
-                        <Text variant="headingLg" fontWeight="bold">
-                          {monthlyUsage}
-                        </Text>
-                        <Text variant="bodySm" tone="subdued">
-                          This Month
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                  </InlineStack>
-                </BlockStack>
-              </Card>
+          {/* Activity Card - spans 2 columns on desktop */}
+          <div className="md:col-span-2">
+            <Card>
+              <h2 className="font-semibold text-neutral-900 mb-3 md:mb-4 text-sm md:text-base">
+                Recent Activity
+              </h2>
+              <div>
+                {recentActivity.length > 0 ? (
+                  recentActivity.map(activity => (
+                    <div key={activity.id} className="flex items-center justify-between py-3 border-b border-neutral-100 last:border-0">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                          activity.success ? 'bg-emerald-500' : 'bg-red-500'
+                        }`} />
+                        <div className="min-w-0">
+                          <div className="text-sm text-neutral-900 truncate">{activity.action}</div>
+                          <div className="text-xs text-neutral-500 truncate">{activity.product}</div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-neutral-400 flex-shrink-0 ml-3">{activity.time}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-4 text-sm text-neutral-500 text-center">
+                    No activity yet
+                  </div>
+                )}
+              </div>
+              {recentActivity.length > 0 && (
+                <Button 
+                  variant="secondary" 
+                  className="w-full mt-4 text-neutral-500"
+                  onClick={() => window.location.href = '/app/analytics'}
+                >
+                  View all activity →
+                </Button>
+              )}
+            </Card>
+          </div>
+        </div>
 
-              {/* Getting Started */}
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h2" variant="headingMd">
-                    🚀 Getting Started
-                  </Text>
-                  <BlockStack gap="300">
-                    <Box
-                      background="bg-surface-secondary"
-                      padding="400"
-                      borderRadius="200"
-                    >
-                      <InlineStack gap="300" blockAlign="center">
-                        <Text variant="headingMd">1️⃣</Text>
-                        <BlockStack gap="100">
-                          <Text variant="bodyMd" fontWeight="semibold">
-                            Add the "See It" button to your theme
-                          </Text>
-                          <Text variant="bodySm" tone="subdued">
-                            Go to Online Store → Themes → Customize → Add block → See It Button
-                          </Text>
-                        </BlockStack>
-                      </InlineStack>
-                    </Box>
-                    <Box
-                      background="bg-surface-secondary"
-                      padding="400"
-                      borderRadius="200"
-                    >
-                      <InlineStack gap="300" blockAlign="center">
-                        <Text variant="headingMd">2️⃣</Text>
-                        <BlockStack gap="100">
-                          <Text variant="bodyMd" fontWeight="semibold">
-                            Position the button on product pages
-                          </Text>
-                          <Text variant="bodySm" tone="subdued">
-                            Place the block near your "Add to Cart" button for best results
-                          </Text>
-                        </BlockStack>
-                      </InlineStack>
-                    </Box>
-                    <Box
-                      background="bg-surface-secondary"
-                      padding="400"
-                      borderRadius="200"
-                    >
-                      <InlineStack gap="300" blockAlign="center">
-                        <Text variant="headingMd">3️⃣</Text>
-                        <BlockStack gap="100">
-                          <Text variant="bodyMd" fontWeight="semibold">
-                            Customers can now visualize products!
-                          </Text>
-                          <Text variant="bodySm" tone="subdued">
-                            They upload a room photo, place your product, and see it come to life
-                          </Text>
-                        </BlockStack>
-                      </InlineStack>
-                    </Box>
-                  </BlockStack>
-                </BlockStack>
-              </Card>
-
-              {/* How It Works */}
-              <Card>
-                <BlockStack gap="400">
-                  <Text as="h2" variant="headingMd">
-                    ✨ How It Works
-                  </Text>
-                  <Text variant="bodyMd">
-                    See It uses AI-powered image generation to place your products 
-                    into customer room photos. Customers can:
-                  </Text>
-                  <BlockStack gap="200">
-                    <InlineStack gap="200">
-                      <Text>📸</Text>
-                      <Text variant="bodyMd">Upload or capture a photo of their room</Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Text>🎯</Text>
-                      <Text variant="bodyMd">Drag and resize your product to position it</Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Text>🎨</Text>
-                      <Text variant="bodyMd">Generate a photorealistic composite image</Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Text>💾</Text>
-                      <Text variant="bodyMd">Save and share their visualization</Text>
-                    </InlineStack>
-                  </BlockStack>
-                </BlockStack>
-              </Card>
-            </BlockStack>
-          </Layout.Section>
-
-          {/* Sidebar - Right Side */}
-          <Layout.Section variant="oneThird">
-            <BlockStack gap="500">
-              {/* Plan & Usage */}
-              <Card>
-                <BlockStack gap="400">
-                  <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h2" variant="headingMd">
-                      📈 Usage & Billing
-                    </Text>
-                    <Badge tone={isPro ? "success" : "attention"}>
-                      {isPro ? "Pro" : "Free"}
-                    </Badge>
-                  </InlineStack>
-                  
-                  <Divider />
-
-                  <BlockStack gap="300">
-                    <BlockStack gap="100">
-                      <InlineStack align="space-between">
-                        <Text variant="bodySm">Daily Renders</Text>
-                        <Text variant="bodySm" fontWeight="semibold">
-                          {usage.compositeRenders} / {shop.dailyQuota}
-                        </Text>
-                      </InlineStack>
-                      <ProgressBar
-                        progress={dailyPercent}
-                        tone={dailyPercent > 80 ? "critical" : "primary"}
-                        size="small"
-                      />
-                    </BlockStack>
-
-                    <BlockStack gap="100">
-                      <InlineStack align="space-between">
-                        <Text variant="bodySm">Monthly Renders</Text>
-                        <Text variant="bodySm" fontWeight="semibold">
-                          {monthlyUsage} / {shop.monthlyQuota}
-                        </Text>
-                      </InlineStack>
-                      <ProgressBar
-                        progress={monthlyPercent}
-                        tone={monthlyPercent > 80 ? "critical" : "primary"}
-                        size="small"
-                      />
-                    </BlockStack>
-                  </BlockStack>
-
-                  <Divider />
-
-                  {isPro ? (
-                    <BlockStack gap="200">
-                      <Text variant="bodySm" tone="subdued">
-                        You're on the Pro plan with higher limits
-                      </Text>
-                      <Button onClick={handleDowngrade} variant="plain">
-                        Downgrade to Free
-                      </Button>
-                    </BlockStack>
-                  ) : (
-                    <BlockStack gap="200">
-                      <Text variant="bodySm" tone="subdued">
-                        Upgrade for more renders and features
-                      </Text>
-                      <Button onClick={handleUpgrade} variant="primary">
-                        Upgrade to Pro
-                      </Button>
-                    </BlockStack>
-                  )}
-                </BlockStack>
-              </Card>
-
-              {/* System Status */}
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h2" variant="headingMd">
-                    🔧 System Status
-                  </Text>
-                  <BlockStack gap="200">
-                    <InlineStack align="space-between">
-                      <Text variant="bodySm">App Version</Text>
-                      <Badge>{version.app}</Badge>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text variant="bodySm">Build</Text>
-                      <Text variant="bodySm" tone="subdued">{version.build}</Text>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text variant="bodySm">Last Updated</Text>
-                      <Text variant="bodySm" tone="subdued">{version.date}</Text>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text variant="bodySm">AI Model</Text>
-                      <Text variant="bodySm" tone="subdued">Gemini 3 Pro</Text>
-                    </InlineStack>
-                  </BlockStack>
-                </BlockStack>
-              </Card>
-
-              {/* Need Help */}
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h2" variant="headingMd">
-                    💬 Need Help?
-                  </Text>
-                  <Text variant="bodySm" tone="subdued">
-                    Having issues or questions? We're here to help.
-                  </Text>
-                  <Button url="mailto:support@seeit.app" external>
-                    Contact Support
-                  </Button>
-                </BlockStack>
-              </Card>
-            </BlockStack>
-          </Layout.Section>
-        </Layout>
-
-        {/* Footer */}
-        <Box paddingBlockStart="400">
-          <InlineStack align="center">
-            <Text variant="bodySm" tone="subdued">
-              See It v{version.app} • Built with ❤️ using Gemini 3 AI
-            </Text>
-          </InlineStack>
-        </Box>
-      </BlockStack>
-    </Page>
+        {/* Setup Banner - only show if not complete */}
+        {!setupComplete && (
+          <Card className="bg-neutral-50">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <h2 className="font-semibold text-neutral-900 text-sm md:text-base">Setup</h2>
+                <p className="text-sm text-neutral-500 mt-1">
+                  Add the See It button to your product pages to start capturing leads
+                </p>
+              </div>
+              <Button 
+                variant="primary"
+                className="w-full md:w-auto"
+                onClick={() => window.location.href = 'https://admin.shopify.com/store/' + (window.location.hostname.match(/[\w-]+\.myshopify\.com/)?.[0] || '') + '/themes'}
+              >
+                Open Theme Editor
+              </Button>
+            </div>
+          </Card>
+        )}
+      </PageShell>
+    </>
   );
 }
 
@@ -438,27 +289,26 @@ export function ErrorBoundary() {
   }
 
   return (
-    <Page>
+    <>
       <TitleBar title="See It Dashboard" />
-      <Layout>
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <Banner title={title} tone="critical">
-                <p>{message}</p>
-              </Banner>
-              <InlineStack gap="300">
-                <Button onClick={() => window.location.reload()}>
-                  Refresh Page
-                </Button>
-                <Button url="/app" variant="plain">
-                  Go to Dashboard
-                </Button>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </Page>
+      <PageShell>
+        <Card>
+          <div className="space-y-4">
+            <div>
+              <h1 className="text-lg font-semibold text-red-600">{title}</h1>
+              <p className="text-sm text-neutral-600 mt-1">{message}</p>
+            </div>
+            <div className="flex gap-3">
+              <Button variant="primary" onClick={() => window.location.reload()}>
+                Refresh Page
+              </Button>
+              <Button variant="secondary" onClick={() => window.location.href = '/app'}>
+                Go to Dashboard
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </PageShell>
+    </>
   );
 }
