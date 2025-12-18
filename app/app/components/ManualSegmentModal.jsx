@@ -276,7 +276,7 @@ export function ManualSegmentModal({
     const handleApplyDrawn = useCallback(() => {
         if (!maskCanvasRef.current) return;
 
-        startProgress(["Applying your selection...", "Creating transparent image..."]);
+        startProgress(["Sending to AI...", "Refining edges...", "Creating transparent image..."]);
 
         const maskDataUrl = maskCanvasRef.current.toDataURL("image/png");
 
@@ -522,13 +522,13 @@ export function ManualSegmentModal({
                         </BlockStack>
                     )}
 
-                    {/* === DRAW MODE === */}
+                    {/* === DRAW MODE (Smart selection) === */}
                     {step === "draw" && (
                         <BlockStack gap="300">
                             <Banner tone="info">
                                 <p>
-                                    <strong>Paint over the product</strong> you want to keep.
-                                    Green = kept, everything else removed.
+                                    <strong>Paint roughly over the product</strong> you want to keep.
+                                    AI will refine the edges for you - no need to be precise!
                                 </p>
                             </Banner>
 
@@ -600,7 +600,7 @@ export function ManualSegmentModal({
                             </div>
 
                             <Text variant="bodySm" tone="subdued">
-                                Paint over the product you want to keep
+                                Just paint roughly - AI detects precise edges automatically
                             </Text>
 
                             {/* Buttons */}
