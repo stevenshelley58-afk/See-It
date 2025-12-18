@@ -27,18 +27,35 @@ function extractGcsKeyFromUrl(signedUrl: string): string | null {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+    const requestId = `cleanup-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    console.log(`[Cleanup] Request started`, { requestId });
+    
     const { session } = await authenticate.public.appProxy(request);
 
     if (!session) {
-        return json({ status: "forbidden" }, { status: 403 });
+        console.warn(`[Cleanup] Authentication failed`, { requestId });
+        return json({ status: "error", message: "Authentication required" }, { status: 403 });
     }
 
-    const body = await request.json();
+    let body;
+    try {
+        body = await request.json();
+    } catch (parseError) {
+        console.error(`[Cleanup] JSON parse failed`, { requestId, error: parseError });
+        return json({ status: "error", message: "Invalid request body" }, { status: 400 });
+    }
+    
     const { room_session_id, mask_data_url } = body;
 
     // Validate session ID
+    if (!room_session_id) {
+        console.error(`[Cleanup] Missing room_session_id`, { requestId });
+        return json({ status: "error", message: "room_session_id is required" }, { status: 400 });
+    }
+    
     const sessionResult = validateSessionId(room_session_id);
     if (!sessionResult.valid) {
+        console.error(`[Cleanup] Invalid session ID`, { requestId, error: sessionResult.error });
         return json({ status: "error", message: sessionResult.error }, { status: 400 });
     }
     const sanitizedSessionId = sessionResult.sanitized!;
@@ -48,9 +65,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (mask_data_url) {
         const maskResult = validateMaskDataUrl(mask_data_url, 10 * 1024 * 1024);
         if (!maskResult.valid) {
+            console.error(`[Cleanup] Invalid mask data URL`, { requestId, error: maskResult.error });
             return json({ status: "error", message: maskResult.error }, { status: 400 });
         }
         sanitizedMaskUrl = maskResult.sanitized;
+        console.log(`[Cleanup] Mask validated`, { requestId, maskLength: sanitizedMaskUrl.length });
+    } else {
+        console.warn(`[Cleanup] No mask provided`, { requestId });
     }
 
     const roomSession = await prisma.roomSession.findFirst({
@@ -61,8 +82,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (!roomSession) {
-        return json({ status: "error", message: "Invalid session" }, { status: 404 });
+        console.error(`[Cleanup] Session not found`, { requestId, sessionId: sanitizedSessionId, shop: session.shop });
+        return json({ status: "error", message: "Session not found or expired. Please re-upload your room image." }, { status: 404 });
     }
+    
+    console.log(`[Cleanup] Session found`, { requestId, sessionId: sanitizedSessionId });
 
     // Use the most recent room image key (cleaned if available, otherwise original)
     // For legacy sessions without keys, fall back to stored URLs
@@ -78,22 +102,67 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Legacy: use stored URL if no keys available
         currentRoomUrl = roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl;
     } else {
-        return json({ status: "error", message: "No room image found" }, { status: 400 });
+        console.error(`[Cleanup] No room image found in session`, { requestId, sessionId: sanitizedSessionId });
+        return json({ status: "error", message: "No room image found. Please re-upload your room image." }, { status: 400 });
     }
 
     try {
-        console.log(`[Cleanup] Processing cleanup for session ${sanitizedSessionId}`);
-        console.log(`[Cleanup] Room URL: ${currentRoomUrl.substring(0, 80)}...`);
-        console.log(`[Cleanup] Mask provided: ${!!sanitizedMaskUrl}, length: ${sanitizedMaskUrl?.length || 0}`);
+        console.log(`[Cleanup] Processing cleanup`, { 
+            requestId, 
+            sessionId: sanitizedSessionId,
+            roomUrlPreview: currentRoomUrl.substring(0, 80) + '...',
+            hasMask: !!sanitizedMaskUrl,
+            maskLength: sanitizedMaskUrl?.length || 0
+        });
 
         // If mask data is provided, attempt cleanup; otherwise echo the current image per spec stub allowance.
         if (!sanitizedMaskUrl) {
-            console.log(`[Cleanup] No mask provided, returning current image`);
+            console.log(`[Cleanup] No mask provided, returning current image`, { requestId });
         }
 
-        const cleanedRoomImageUrl = sanitizedMaskUrl
-            ? await cleanupRoom(currentRoomUrl, sanitizedMaskUrl, sanitizedSessionId)
-            : currentRoomUrl;
+        let cleanedRoomImageUrl: string;
+        if (sanitizedMaskUrl) {
+            // Retry logic for transient failures (network, GCS, etc.)
+            const MAX_RETRIES = 2;
+            let lastError: Error | null = null;
+            let success = false;
+            
+            for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                    if (attempt > 0) {
+                        console.log(`[Cleanup] Retry attempt ${attempt}`, { requestId });
+                        // Exponential backoff: 500ms, 1000ms
+                        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+                    }
+                    
+                    cleanedRoomImageUrl = await cleanupRoom(currentRoomUrl, sanitizedMaskUrl, requestId);
+                    console.log(`[Cleanup] Cleanup successful`, { requestId, attempt, urlPreview: cleanedRoomImageUrl.substring(0, 80) + '...' });
+                    success = true;
+                    break; // Success, exit retry loop
+                } catch (error) {
+                    lastError = error instanceof Error ? error : new Error(String(error));
+                    console.error(`[Cleanup] Cleanup attempt ${attempt} failed`, { requestId, attempt, error: lastError.message });
+                    
+                    // Don't retry on validation errors or permanent failures
+                    if (lastError.message.includes('validation') || 
+                        lastError.message.includes('Invalid') ||
+                        lastError.message.includes('not found')) {
+                        throw lastError;
+                    }
+                    
+                    // If this was the last attempt, throw
+                    if (attempt === MAX_RETRIES) {
+                        throw lastError;
+                    }
+                }
+            }
+            
+            if (!success) {
+                throw lastError || new Error('Cleanup failed after retries');
+            }
+        } else {
+            cleanedRoomImageUrl = currentRoomUrl;
+        }
 
         // Extract GCS key from the returned URL for future URL regeneration
         const cleanedRoomImageKey = extractGcsKeyFromUrl(cleanedRoomImageUrl);
@@ -116,7 +185,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
 
     } catch (error) {
-        console.error("[Cleanup] Gemini error:", error);
-        return json({ status: "error", message: "Cleanup failed" }, { status: 500 });
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        console.error(`[Cleanup] Error processing cleanup`, { 
+            requestId, 
+            error: errorMessage,
+            stack: errorStack,
+            sessionId: sanitizedSessionId
+        });
+        
+        // Return user-friendly error message
+        let userMessage = "Cleanup failed";
+        if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+            userMessage = "Cleanup timed out. Please try again.";
+        } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+            userMessage = "Network error. Please check your connection and try again.";
+        } else if (errorMessage.includes('session') || errorMessage.includes('not found')) {
+            userMessage = "Session expired. Please re-upload your room image.";
+        } else if (errorMessage.includes('mask') || errorMessage.includes('Mask')) {
+            userMessage = "Invalid mask. Please draw over the area to remove and try again.";
+        }
+        
+        return json({ 
+            status: "error", 
+            message: userMessage 
+        }, { status: 500 });
     }
 };
