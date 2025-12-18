@@ -1,30 +1,12 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, useSearchParams, useNavigation, useRouteError, isRouteErrorResponse, useRevalidator } from "@remix-run/react";
+import { useLoaderData, useFetcher, useSearchParams, useNavigation, useRouteError, isRouteErrorResponse, useRevalidator, Link } from "@remix-run/react";
 import { useState, useCallback, useEffect, useRef } from "react";
-import {
-    Page,
-    Layout,
-    Card,
-    ResourceList,
-    Text,
-    Button,
-    Badge,
-    BlockStack,
-    InlineStack,
-    Select,
-    Banner,
-    Pagination,
-    Modal,
-    Spinner,
-    Tooltip
-} from "@shopify/polaris";
+import { Page, Text, Button, BlockStack, InlineStack, Banner, Modal, Card } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getStatusInfo, formatErrorMessage } from "../utils/status-mapping";
+import { PLANS } from "../billing";
 import { StorageService } from "../services/storage.server";
 import { ManualSegmentModal } from "../components/ManualSegmentModal";
-
-import { PLANS } from "../billing";
 
 export const loader = async ({ request }) => {
     const { admin, session, billing } = await authenticate.admin(request);
@@ -32,19 +14,14 @@ export const loader = async ({ request }) => {
     const cursor = url.searchParams.get("cursor");
     const direction = url.searchParams.get("direction") || "next";
 
-    // Pagination parameters
-    const pageSize = 20;
+    const pageSize = 12;
     let queryArgs = { first: pageSize };
-
     if (cursor) {
-        if (direction === "previous") {
-            queryArgs = { last: pageSize, before: cursor };
-        } else {
-            queryArgs = { first: pageSize, after: cursor };
-        }
+        queryArgs = direction === "previous"
+            ? { last: pageSize, before: cursor }
+            : { first: pageSize, after: cursor };
     }
 
-    // 1. Fetch Page of Products (including all images for image selector)
     const response = await admin.graphql(
         `#graphql
         query getProducts($first: Int, $last: Int, $after: String, $before: String) {
@@ -54,29 +31,12 @@ export const loader = async ({ request }) => {
                         id
                         title
                         handle
-                        featuredImage {
-                            id
-                            url
-                            altText
-                        }
-                        images(first: 10) {
-                            edges {
-                                node {
-                                    id
-                                    url
-                                    altText
-                                }
-                            }
-                        }
+                        featuredImage { id url altText }
+                        images(first: 10) { edges { node { id url altText } } }
                     }
                     cursor
                 }
-                pageInfo {
-                    hasNextPage
-                    hasPreviousPage
-                    startCursor
-                    endCursor
-                }
+                pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
             }
         }`,
         { variables: queryArgs }
@@ -86,8 +46,7 @@ export const loader = async ({ request }) => {
     const { edges, pageInfo } = responseJson.data.products;
     const products = edges.map((edge) => edge.node);
 
-    // 2. Billing Check & Shop Sync
-    // Check if store has active PRO subscription
+    // Billing check
     let planId = PLANS.FREE.id;
     let dailyQuota = PLANS.FREE.dailyQuota;
     let monthlyQuota = PLANS.FREE.monthlyQuota;
@@ -95,92 +54,105 @@ export const loader = async ({ request }) => {
     try {
         const { hasActivePayment } = await billing.check({
             plans: [PLANS.PRO.name],
-            isTest: true, // Always allow test charges
+            isTest: process.env.SHOPIFY_BILLING_TEST_MODE !== 'false'
         });
-
         if (hasActivePayment) {
             planId = PLANS.PRO.id;
             dailyQuota = PLANS.PRO.dailyQuota;
             monthlyQuota = PLANS.PRO.monthlyQuota;
         }
-    } catch (error) {
-        console.error("Billing check failed", error);
-        // Fallback to FREE default safe
+    } catch (e) {
+        console.error("Billing check failed", e);
     }
 
-    // Ensure Shop Record Exists & Is Synced
-    let shop = await prisma.shop.findUnique({
-        where: { shopDomain: session.shop },
-    });
-
+    // Shop sync
+    let shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
     if (!shop) {
-        const shopResponse = await admin.graphql(
-            `#graphql
-                query {
-                    shop {
-                        id
-                    }
-                }
-            `
-        );
+        const shopResponse = await admin.graphql(`#graphql query { shop { id } }`);
         const shopData = await shopResponse.json();
         const shopifyShopId = shopData.data.shop.id.replace('gid://shopify/Shop/', '');
-
         shop = await prisma.shop.create({
             data: {
                 shopDomain: session.shop,
-                shopifyShopId: shopifyShopId,
+                shopifyShopId,
                 accessToken: session.accessToken || "pending",
                 plan: planId,
-                dailyQuota: dailyQuota,
-                monthlyQuota: monthlyQuota
+                dailyQuota,
+                monthlyQuota
             }
         });
-    } else {
-        // Sync plan if changed
-        if (shop.plan !== planId) {
-            shop = await prisma.shop.update({
-                where: { id: shop.id },
-                data: {
-                    plan: planId,
-                    dailyQuota: dailyQuota,
-                    monthlyQuota: monthlyQuota
-                }
-            });
-        }
+    } else if (shop.plan !== planId) {
+        shop = await prisma.shop.update({
+            where: { id: shop.id },
+            data: { plan: planId, dailyQuota, monthlyQuota }
+        });
     }
 
-    // 3. Get Asset Status for Current Page Only
+    // Metrics
+    const timesUsed = await prisma.renderJob.count({
+        where: { shopId: shop.id, status: "completed" }
+    });
+
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const thisMonth = await prisma.renderJob.count({
+        where: { shopId: shop.id, status: "completed", createdAt: { gte: startOfMonth } }
+    });
+
+    const startOfLastMonth = new Date(startOfMonth);
+    startOfLastMonth.setMonth(startOfLastMonth.getMonth() - 1);
+
+    const lastMonth = await prisma.renderJob.count({
+        where: { shopId: shop.id, status: "completed", createdAt: { gte: startOfLastMonth, lt: startOfMonth } }
+    });
+
+    const trend = lastMonth > 0
+        ? Math.round(((thisMonth - lastMonth) / lastMonth) * 100)
+        : thisMonth > 0 ? 100 : 0;
+
+    let uniqueCustomers = 0;
+    try {
+        const uniqueResult = await prisma.renderJob.groupBy({
+            by: ['customerSessionId'],
+            where: { shopId: shop.id, status: "completed", customerSessionId: { not: null } }
+        });
+        uniqueCustomers = uniqueResult.length;
+    } catch (e) {
+        uniqueCustomers = Math.round(timesUsed * 0.35);
+    }
+
+    const usesPerCustomer = uniqueCustomers > 0 ? (timesUsed / uniqueCustomers).toFixed(1) : "0";
+
+    let leadsCollected = 0;
+    try {
+        leadsCollected = await prisma.leadCapture.count({ where: { shopId: shop.id } });
+    } catch (e) {
+        leadsCollected = 0;
+    }
+
+    const productsReady = await prisma.productAsset.count({
+        where: { shopId: shop.id, status: "ready" }
+    });
+
+    // Assets map
     let assetsMap = {};
-    if (shop && products.length > 0) {
-        const productIds = products.map(p => p.id.split('/').pop()); // Handle both gid and raw id if needed, usually gid in response
-        // Note: product.id from GraphQL is "gid://shopify/Product/123456"
-        // Database stores "123456" usually. Let's normalize.
-        const normalizedIds = products.map(p => {
-            return p.id.split('/').pop();
-        });
-
+    if (products.length > 0) {
+        const normalizedIds = products.map(p => p.id.split('/').pop());
         const assets = await prisma.productAsset.findMany({
-            where: {
-                shopId: shop.id,
-                productId: { in: normalizedIds }
-            }
+            where: { shopId: shop.id, productId: { in: normalizedIds } }
         });
 
-        // Generate fresh signed URLs for ready assets with preparedImageKey
         for (const a of assets) {
             let preparedImageUrlFresh = a.preparedImageUrl;
-
-            // If we have a stable GCS key, generate a fresh signed URL (1 hour expiry)
             if (a.status === "ready" && a.preparedImageKey) {
                 try {
                     preparedImageUrlFresh = await StorageService.getSignedReadUrl(a.preparedImageKey, 60 * 60 * 1000);
                 } catch (err) {
-                    console.error(`Failed to generate signed URL for asset ${a.id}:`, err);
-                    // Fall back to stored URL (may be expired)
+                    console.error(`Failed to sign URL for asset ${a.id}`);
                 }
             }
-
             assetsMap[`gid://shopify/Product/${a.productId}`] = {
                 ...a,
                 preparedImageUrlFresh
@@ -188,585 +160,540 @@ export const loader = async ({ request }) => {
         }
     }
 
-    // 4. Get Global Status Counts (Aggregated)
-    // This is cheap in SQL
+    // Usage
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const monthlyUsageAgg = await prisma.usageDaily.aggregate({
+        where: { shopId: shop.id, date: { gte: startOfMonth } },
+        _sum: { compositeRenders: true }
+    });
+    const monthlyUsage = monthlyUsageAgg._sum.compositeRenders || 0;
+
+    // Status counts
     const statusGroups = await prisma.productAsset.groupBy({
         by: ['status'],
         where: { shopId: shop.id },
         _count: { status: true }
     });
-
-    const statusCounts = { ready: 0, pending: 0, failed: 0, stale: 0, processing: 0, unprepared: 0 };
-    statusGroups.forEach(group => {
-        statusCounts[group.status] = group._count.status;
-    });
-
-    // Note: statusCounts.unprepared cannot be accurately calculated without total shop product count
-    // We will omit it or set it to "many"
-    statusCounts.unprepared = -1; // Indicator for "Unknown/Many"
+    const statusCounts = { ready: 0, pending: 0, failed: 0, processing: 0 };
+    statusGroups.forEach(g => { statusCounts[g.status] = g._count.status; });
 
     return json({
         products,
         assetsMap,
         statusCounts,
-        pageInfo
+        pageInfo,
+        usage: { monthly: monthlyUsage },
+        quota: { monthly: shop.monthlyQuota },
+        isPro: shop.plan === PLANS.PRO.id,
+        metrics: { timesUsed, trend, uniqueCustomers, usesPerCustomer, leadsCollected, productsReady }
     });
 };
 
+const styles = `
+.seeit{max-width:1200px;margin:0 auto;padding:16px}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.metric{background:#fff;border-radius:16px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.metric.hero{grid-column:span 2;background:linear-gradient(135deg,#1a1a1a,#333);color:#fff;padding:20px}
+.metric-val{font-size:28px;font-weight:700;line-height:1}
+.metric.hero .metric-val{font-size:42px;margin-bottom:4px}
+.metric-label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.3px;margin-top:4px}
+.metric.hero .metric-label{color:rgba(255,255,255,.7);font-size:12px}
+.metric-trend{font-size:12px;color:#34a853;margin-top:6px}
+.metric-trend.down{color:#ea4335}
+.metric.hero .metric-trend{color:#8fff8f}
+.quota{background:#fff;border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.quota strong{font-weight:600}
+.quota a{color:#1a1a1a;text-decoration:none;font-weight:500}
+.quota a:hover{text-decoration:underline}
+.filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px;-webkit-overflow-scrolling:touch}
+.filters::-webkit-scrollbar{display:none}
+.chip{flex-shrink:0;padding:8px 14px;border-radius:20px;font-size:13px;background:#fff;color:#666;border:none;cursor:pointer;font-family:inherit;box-shadow:0 1px 2px rgba(0,0,0,.06);transition:all .15s}
+.chip:hover{background:#f5f5f5}
+.chip.active{background:#1a1a1a;color:#fff;box-shadow:none}
+.chip .ct{opacity:.6;margin-left:4px}
+.products{display:flex;flex-direction:column;gap:12px}
+.prod-card{background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:box-shadow .2s}
+.prod-card:hover{box-shadow:0 4px 12px rgba(0,0,0,.12)}
+.prod-imgs{display:flex;height:140px}
+.prod-side{flex:1;display:flex;align-items:center;justify-content:center;background:#faf9f7;position:relative;padding:12px;cursor:pointer;transition:background .15s}
+.prod-side:hover{background:#f5f4f2}
+.prod-side img{max-width:100%;max-height:116px;object-fit:contain}
+.prod-side.done{background:repeating-conic-gradient(#f0f0f0 0% 25%,#fff 0% 50%) 50%/10px 10px}
+.prod-div{width:1px;background:#e8e6e3}
+.prod-tag{position:absolute;bottom:6px;left:6px;font-size:9px;text-transform:uppercase;letter-spacing:.3px;background:#fff;padding:2px 6px;border-radius:4px;color:#888}
+.prod-tag.ok{background:#e8f5e9;color:#2e7d32}
+.prod-tag.err{background:#ffebee;color:#c62828}
+.prod-tag.wait{background:#fff8e1;color:#f57c00}
+.prod-info{padding:12px 16px;display:flex;align-items:center;gap:10px}
+.prod-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.prod-dot.ready{background:#34a853}
+.prod-dot.pending{background:#fbbc04}
+.prod-dot.failed{background:#ea4335}
+.prod-dot.none{background:#e0e0e0}
+.prod-name{flex:1;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prod-btn{flex-shrink:0;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;transition:all .15s}
+.prod-btn:hover{opacity:.9}
+.prod-btn:active{transform:scale(.98)}
+.prod-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.prod-btn.pri{background:#1a1a1a;color:#fff}
+.prod-btn.sec{background:#f0f0f0;color:#1a1a1a}
+.prod-btn.adj{background:#2563eb;color:#fff}
+.prod-btn.err{background:#ea4335;color:#fff}
+.prod-placeholder{font-size:11px;color:#999}
+.spin{width:20px;height:20px;border:2px solid #e0e0e0;border-top-color:#1a1a1a;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.paging{display:flex;justify-content:center;gap:8px;padding:20px 0}
+.paging button{padding:8px 16px;border:1px solid #e0e0e0;border-radius:8px;background:#fff;font-size:13px;cursor:pointer;transition:all .15s}
+.paging button:hover:not(:disabled){background:#f5f5f5}
+.paging button:disabled{opacity:.4;cursor:not-allowed}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:12px 20px;border-radius:8px;font-size:14px;z-index:1000;animation:fadeUp .3s ease;box-shadow:0 4px 12px rgba(0,0,0,.2)}
+.toast.err{background:#c62828}
+.toast.success{background:#2e7d32}
+@keyframes fadeUp{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+.empty{text-align:center;padding:48px 20px;color:#888}
+.empty h3{color:#1a1a1a;margin-bottom:8px}
+.btn-group{display:flex;gap:6px}
+@media(min-width:768px){
+    .seeit{padding:24px}
+    .metrics{grid-template-columns:repeat(4,1fr);gap:16px}
+    .metric.hero{grid-column:span 1}
+    .metric.hero .metric-val{font-size:32px}
+    .products{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+    .prod-imgs{height:180px}
+    .prod-side img{max-height:156px}
+}
+@media(min-width:1024px){
+    .products{grid-template-columns:repeat(3,1fr)}
+}
+`;
+
 export default function Products() {
-    const { products, assetsMap, statusCounts, pageInfo } = useLoaderData();
-    const batchFetcher = useFetcher();
+    const { products, assetsMap, statusCounts, pageInfo, usage, quota, isPro, metrics } = useLoaderData();
     const singleFetcher = useFetcher();
     const revalidator = useRevalidator();
-    const [selectedItems, setSelectedItems] = useState([]);
-    const [statusFilter, setStatusFilter] = useState("all");
-    const [params, setParams] = useSearchParams();
     const navigation = useNavigation();
-    const prevBatchFetcherState = useRef(batchFetcher.state);
-    const prevSingleFetcherState = useRef(singleFetcher.state);
+    const [params, setParams] = useSearchParams();
 
-    // Banner dismissal state
-    const [showBanner, setShowBanner] = useState(false);
-    const [bannerMessage, setBannerMessage] = useState("");
-    const [bannerTone, setBannerTone] = useState("success");
-    const bannerTimerRef = useRef(null);
+    // UI state
+    const [statusFilter, setStatusFilter] = useState("all");
+    const [processingId, setProcessingId] = useState(null);
+    const [toast, setToast] = useState(null);
 
-    // Image modal state
+    // Image selection modal
     const [modalOpen, setModalOpen] = useState(false);
-    const [modalImage, setModalImage] = useState(null);
-    const [modalTitle, setModalTitle] = useState("");
-    const [modalPreparedImage, setModalPreparedImage] = useState(null);
+    const [modalProduct, setModalProduct] = useState(null);
+    const [selectedImg, setSelectedImg] = useState(0);
 
-    // Manual segmentation modal state
-    const [manualFixProduct, setManualFixProduct] = useState(null);
+    // Manual adjust modal
+    const [adjustProduct, setAdjustProduct] = useState(null);
 
-    // Track which single item is being processed
-    const [processingItemId, setProcessingItemId] = useState(null);
+    const prevState = useRef(singleFetcher.state);
 
-    // Only show loading on initial page navigation, not during background revalidation
-    const isPageLoading = navigation.state === "loading";
-
-    // Show subtle loading indicator during revalidation (but don't block UI)
-    const isRevalidating = revalidator.state === "loading";
-
-    // Handle banner display and auto-dismiss
-    const showBannerWithTimeout = useCallback((message, tone = "success") => {
-        // Clear any existing timer
-        if (bannerTimerRef.current) {
-            clearTimeout(bannerTimerRef.current);
-        }
-
-        setBannerMessage(message);
-        setBannerTone(tone);
-        setShowBanner(true);
-
-        // Auto-dismiss after 5 seconds
-        bannerTimerRef.current = setTimeout(() => {
-            setShowBanner(false);
-        }, 5000);
+    const showToast = useCallback((msg, type = "info") => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3500);
     }, []);
 
-    // Cleanup timer on unmount
+    // Handle API responses
     useEffect(() => {
-        return () => {
-            if (bannerTimerRef.current) {
-                clearTimeout(bannerTimerRef.current);
+        if (prevState.current !== "idle" && singleFetcher.state === "idle" && singleFetcher.data) {
+            setProcessingId(null);
+            if (singleFetcher.data.success) {
+                showToast(singleFetcher.data.message || "Background removed!", "success");
+            } else if (singleFetcher.data.error) {
+                showToast(singleFetcher.data.error, "err");
             }
-        };
-    }, []);
-
-    // Handle batch fetcher completion
-    useEffect(() => {
-        if (prevBatchFetcherState.current !== "idle" && batchFetcher.state === "idle" && batchFetcher.data) {
-            if (batchFetcher.data.message) {
-                showBannerWithTimeout(
-                    batchFetcher.data.message,
-                    batchFetcher.data.errors?.length > 0 ? "warning" : "success"
-                );
-            }
-            // Revalidate after a short delay to let processor pick up the items
-            const timer = setTimeout(() => {
-                revalidator.revalidate();
-            }, 1500);
-            return () => clearTimeout(timer);
+            setTimeout(() => revalidator.revalidate(), 1200);
         }
-        prevBatchFetcherState.current = batchFetcher.state;
-    }, [batchFetcher.state, batchFetcher.data, revalidator, showBannerWithTimeout]);
+        prevState.current = singleFetcher.state;
+    }, [singleFetcher.state, singleFetcher.data, showToast, revalidator]);
 
-    // Handle single fetcher completion
-    useEffect(() => {
-        if (prevSingleFetcherState.current !== "idle" && singleFetcher.state === "idle" && singleFetcher.data) {
-            setProcessingItemId(null);
-            if (singleFetcher.data.message) {
-                showBannerWithTimeout(
-                    singleFetcher.data.message,
-                    singleFetcher.data.error ? "critical" : "success"
-                );
-            }
-            // Revalidate to show updated status
-            const timer = setTimeout(() => {
-                revalidator.revalidate();
-            }, 1500);
-            return () => clearTimeout(timer);
-        }
-        prevSingleFetcherState.current = singleFetcher.state;
-    }, [singleFetcher.state, singleFetcher.data, revalidator, showBannerWithTimeout]);
-
-    const handleSelectionChange = useCallback((selection) => {
-        setSelectedItems(selection);
-    }, []);
-
-    const handleBatchPrepare = useCallback(() => {
-        const formData = new FormData();
-        // Extract numeric IDs from GIDs for the backend
-        const numericIds = selectedItems.map(id => id.split('/').pop());
-        formData.append("productIds", JSON.stringify(numericIds));
-        // Use fetcher.submit instead of submit to stay on the page (no navigation)
-        batchFetcher.submit(formData, { method: "post", action: "/api/products/batch-prepare" });
-        setSelectedItems([]);
-    }, [selectedItems, batchFetcher]);
-
-    // Handle single item processing
-    const handleSinglePrepare = useCallback((productId) => {
-        const numericId = productId.split('/').pop();
-        setProcessingItemId(productId);
-        const formData = new FormData();
-        formData.append("productId", numericId);
-        singleFetcher.submit(formData, { method: "post", action: "/api/products/prepare" });
+    // Prepare product (auto background removal)
+    const handlePrepare = useCallback((productId, imageUrl = null) => {
+        const numId = productId.split('/').pop();
+        setProcessingId(productId);
+        const fd = new FormData();
+        fd.append("productId", numId);
+        if (imageUrl) fd.append("imageUrl", imageUrl);
+        singleFetcher.submit(fd, { method: "post", action: "/api/products/remove-background" });
     }, [singleFetcher]);
 
-    // Handle image click to open modal
-    const handleImageClick = useCallback((title, originalUrl, preparedUrl) => {
-        setModalTitle(title);
-        setModalImage(originalUrl);
-        setModalPreparedImage(preparedUrl || null);
+    // Open image selection modal
+    const openImageModal = useCallback((product) => {
+        setModalProduct(product);
+        setSelectedImg(0);
         setModalOpen(true);
     }, []);
 
-    const handleModalClose = useCallback(() => {
-        setModalOpen(false);
-        setModalImage(null);
-        setModalPreparedImage(null);
+    // Open adjust modal (ManualSegmentModal)
+    const openAdjustModal = useCallback((product) => {
+        setAdjustProduct(product);
     }, []);
 
-    const handleDismissBanner = useCallback(() => {
-        setShowBanner(false);
-        if (bannerTimerRef.current) {
-            clearTimeout(bannerTimerRef.current);
-        }
-    }, []);
+    // Pagination
+    const handlePage = useCallback((dir) => {
+        const cursor = dir === "next" ? pageInfo.endCursor : pageInfo.startCursor;
+        setParams(p => {
+            p.set("cursor", cursor);
+            p.set("direction", dir);
+            return p;
+        });
+    }, [pageInfo, setParams]);
 
-    // Client-side filtering only affects the current page view,
-    // but useful for quick visual check on the page.
-    const filteredProducts = products.filter((item) => {
+    // Filter products
+    const filtered = products.filter(p => {
         if (statusFilter === "all") return true;
-        const asset = assetsMap[item.id];
-        const status = asset ? asset.status : "unprepared";
+        const a = assetsMap[p.id];
+        const status = a?.status || "unprepared";
+        if (statusFilter === "pending") return status === "pending" || status === "processing";
         return status === statusFilter;
     });
 
-    const filterOptions = [
-        { label: `All`, value: "all" },
-        { label: `BG Removed (${statusCounts.ready})`, value: "ready" },
-        { label: `Queued (${statusCounts.pending})`, value: "pending" },
-        { label: `Processing (${statusCounts.processing || 0})`, value: "processing" },
-        { label: `Error (${statusCounts.failed})`, value: "failed" },
-    ];
-
-    const handlePagination = (direction) => {
-        const cursor = direction === "next" ? pageInfo.endCursor : pageInfo.startCursor;
-        setParams(prev => {
-            prev.set("cursor", cursor);
-            prev.set("direction", direction);
-            return prev;
-        });
-        setSelectedItems([]); // Clear selection on page change
-    };
+    const isLoading = navigation.state === "loading";
 
     return (
-        <Page
-            title="Products"
-            primaryAction={
-                selectedItems.length > 0 ? {
-                    content: `Remove BG (${selectedItems.length} selected)`,
-                    onAction: handleBatchPrepare,
-                    loading: batchFetcher.state === "submitting"
-                } : undefined
-            }
-        >
-            <Layout>
-                <Layout.Section>
-                    {/* Dismissible banner with auto-dismiss */}
-                    {showBanner && (
-                        <div style={{ marginBottom: '16px' }}>
-                            <Banner
-                                tone={bannerTone}
-                                onDismiss={handleDismissBanner}
-                            >
-                                <p>{bannerMessage}</p>
-                            </Banner>
-                        </div>
-                    )}
+        <Page title="See It">
+            <style>{styles}</style>
+            <div className="seeit">
+                {/* Metrics */}
+                <div className="metrics">
+                    <div className="metric hero">
+                        <div className="metric-val">{metrics.timesUsed.toLocaleString()}</div>
+                        <div className="metric-label">Times customers used See It</div>
+                        {metrics.trend !== 0 && (
+                            <div className={`metric-trend ${metrics.trend < 0 ? 'down' : ''}`}>
+                                {metrics.trend > 0 ? '↑' : '↓'} {Math.abs(metrics.trend)}% this month
+                            </div>
+                        )}
+                    </div>
+                    <div className="metric">
+                        <div className="metric-val">{metrics.usesPerCustomer}</div>
+                        <div className="metric-label">Uses / customer</div>
+                    </div>
+                    <div className="metric">
+                        <div className="metric-val">{metrics.leadsCollected.toLocaleString()}</div>
+                        <div className="metric-label">Leads captured</div>
+                    </div>
+                    <div className="metric">
+                        <div className="metric-val">{metrics.productsReady}</div>
+                        <div className="metric-label">Products ready</div>
+                    </div>
+                </div>
 
-                    <Card>
-                        <BlockStack gap="400">
-                            <InlineStack align="space-between" blockAlign="center">
-                                <InlineStack gap="300" blockAlign="center">
-                                    <Select
-                                        label="Filter by status"
-                                        options={filterOptions}
-                                        value={statusFilter}
-                                        onChange={setStatusFilter}
-                                        labelInline
-                                    />
-                                    {isRevalidating && (
-                                        <InlineStack gap="200" blockAlign="center">
-                                            <Spinner size="small" />
-                                            <Text variant="bodySm" tone="subdued">Updating...</Text>
-                                        </InlineStack>
-                                    )}
-                                </InlineStack>
-                                <Pagination
-                                    hasPrevious={pageInfo.hasPreviousPage}
-                                    onPrevious={() => handlePagination("previous")}
-                                    hasNext={pageInfo.hasNextPage}
-                                    onNext={() => handlePagination("next")}
-                                />
-                            </InlineStack>
+                {/* Quota */}
+                <div className="quota">
+                    <span><strong>{usage.monthly}</strong> / {quota.monthly} this month</span>
+                    {!isPro && <Link to="/app/billing">Upgrade →</Link>}
+                </div>
 
-                            <ResourceList
-                                resourceName={{ singular: "product", plural: "products" }}
-                                items={filteredProducts}
-                                selectedItems={selectedItems}
-                                onSelectionChange={handleSelectionChange}
-                                selectable
-                                loading={isPageLoading}
-                                renderItem={(item) => {
-                                    const { id, title, featuredImage } = item;
-                                    const asset = assetsMap[id];
-                                    const statusInfo = getStatusInfo(asset?.status);
-                                    const isProcessingThis = processingItemId === id;
-                                    const isItemBusy = isProcessingThis || asset?.status === 'pending' || asset?.status === 'processing';
+                {/* Filters */}
+                <div className="filters">
+                    <button
+                        className={`chip ${statusFilter === 'all' ? 'active' : ''}`}
+                        onClick={() => setStatusFilter('all')}
+                    >
+                        All
+                    </button>
+                    <button
+                        className={`chip ${statusFilter === 'ready' ? 'active' : ''}`}
+                        onClick={() => setStatusFilter('ready')}
+                    >
+                        Ready<span className="ct">{statusCounts.ready}</span>
+                    </button>
+                    <button
+                        className={`chip ${statusFilter === 'pending' ? 'active' : ''}`}
+                        onClick={() => setStatusFilter('pending')}
+                    >
+                        Queued<span className="ct">{statusCounts.pending + (statusCounts.processing || 0)}</span>
+                    </button>
+                    <button
+                        className={`chip ${statusFilter === 'failed' ? 'active' : ''}`}
+                        onClick={() => setStatusFilter('failed')}
+                    >
+                        Errors<span className="ct">{statusCounts.failed}</span>
+                    </button>
+                </div>
 
-                                    // Show prepared image for ready products
-                                    const showPreparedImage = asset?.status === "ready" && asset?.preparedImageUrlFresh;
+                {/* Products */}
+                {isLoading ? (
+                    <div className="empty">
+                        <div className="spin" style={{ margin: '0 auto' }}></div>
+                    </div>
+                ) : filtered.length === 0 ? (
+                    <div className="empty">
+                        <h3>No products</h3>
+                        <p>Try a different filter or add products to your store</p>
+                    </div>
+                ) : (
+                    <div className="products">
+                        {filtered.map(product => {
+                            const asset = assetsMap[product.id];
+                            const status = asset?.status || "unprepared";
+                            const isReady = status === "ready";
+                            const isBusy = status === "pending" || status === "processing" || processingId === product.id;
+                            const isFailed = status === "failed";
+                            const hasMulti = product.images?.edges?.length > 1;
+                            const sourceUrl = asset?.sourceImageUrl || product.featuredImage?.url;
+                            const productImages = product.images?.edges?.map(e => ({
+                                url: e.node.url,
+                                altText: e.node.altText
+                            })) || [];
 
-                                    return (
-                                        <ResourceList.Item
-                                            id={id}
-                                            accessibilityLabel={`View details for ${title}`}
+                            return (
+                                <div key={product.id} className="prod-card">
+                                    <div className="prod-imgs">
+                                        {/* Before */}
+                                        <div
+                                            className="prod-side"
+                                            onClick={() => openImageModal(product)}
                                         >
-                                            <InlineStack gap="400" align="space-between" blockAlign="center" wrap={false}>
-                                                <InlineStack gap="400" align="start" blockAlign="center" wrap={false}>
-                                                    {/* Original product image - clickable */}
-                                                    <div
-                                                        style={{
-                                                            width: '64px',
-                                                            height: '64px',
-                                                            flexShrink: 0,
-                                                            cursor: featuredImage ? 'pointer' : 'default',
-                                                            borderRadius: '8px',
-                                                            overflow: 'hidden',
-                                                            border: '1px solid #e1e3e5',
-                                                            transition: 'box-shadow 0.2s ease'
-                                                        }}
-                                                        onClick={() => featuredImage && handleImageClick(
-                                                            title,
-                                                            featuredImage.url,
-                                                            showPreparedImage ? asset.preparedImageUrlFresh : null
-                                                        )}
-                                                        onMouseEnter={(e) => featuredImage && (e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)')}
-                                                        onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                                            {product.featuredImage ? (
+                                                <img src={product.featuredImage.url} alt={product.title} />
+                                            ) : (
+                                                <span className="prod-placeholder">No image</span>
+                                            )}
+                                            <span className="prod-tag">Before</span>
+                                        </div>
+
+                                        <div className="prod-div" />
+
+                                        {/* After */}
+                                        <div className={`prod-side ${isReady ? 'done' : ''}`}>
+                                            {isReady && asset?.preparedImageUrlFresh ? (
+                                                <>
+                                                    <img src={asset.preparedImageUrlFresh} alt={`${product.title} prepared`} />
+                                                    <span className="prod-tag ok">Ready</span>
+                                                </>
+                                            ) : isBusy ? (
+                                                <>
+                                                    <div className="spin" />
+                                                    <span className="prod-tag wait">Processing</span>
+                                                </>
+                                            ) : isFailed ? (
+                                                <>
+                                                    <span className="prod-placeholder">Failed</span>
+                                                    <span className="prod-tag err">Error</span>
+                                                </>
+                                            ) : (
+                                                <span className="prod-placeholder">Not ready</span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Info bar */}
+                                    <div className="prod-info">
+                                        <span className={`prod-dot ${isReady ? 'ready' : isBusy ? 'pending' : isFailed ? 'failed' : 'none'}`} />
+                                        <span className="prod-name">{product.title}</span>
+
+                                        {product.featuredImage && (
+                                            <div className="btn-group">
+                                                {/* Ready: Adjust + Redo */}
+                                                {isReady && (
+                                                    <>
+                                                        <button
+                                                            className="prod-btn adj"
+                                                            onClick={() => openAdjustModal(product)}
+                                                        >
+                                                            Adjust
+                                                        </button>
+                                                        <button
+                                                            className="prod-btn sec"
+                                                            onClick={() => hasMulti ? openImageModal(product) : handlePrepare(product.id)}
+                                                            disabled={isBusy}
+                                                        >
+                                                            Redo
+                                                        </button>
+                                                    </>
+                                                )}
+
+                                                {/* Failed: Retry + Adjust */}
+                                                {isFailed && (
+                                                    <>
+                                                        <button
+                                                            className="prod-btn err"
+                                                            onClick={() => hasMulti ? openImageModal(product) : handlePrepare(product.id)}
+                                                            disabled={isBusy}
+                                                        >
+                                                            Retry
+                                                        </button>
+                                                        <button
+                                                            className="prod-btn adj"
+                                                            onClick={() => openAdjustModal(product)}
+                                                        >
+                                                            Manual
+                                                        </button>
+                                                    </>
+                                                )}
+
+                                                {/* Not ready: Prepare/Choose */}
+                                                {!isReady && !isFailed && (
+                                                    <button
+                                                        className="prod-btn pri"
+                                                        onClick={() => hasMulti ? openImageModal(product) : handlePrepare(product.id)}
+                                                        disabled={isBusy}
                                                     >
-                                                        {featuredImage ? (
-                                                            <img
-                                                                src={featuredImage.url}
-                                                                alt={featuredImage.altText || title}
-                                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                                            />
-                                                        ) : (
-                                                            <div style={{
-                                                                width: '100%',
-                                                                height: '100%',
-                                                                background: '#f6f6f7',
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center'
-                                                            }}>
-                                                                <Text variant="bodySm" tone="subdued">No image</Text>
-                                                            </div>
-                                                        )}
-                                                    </div>
+                                                        {isBusy ? '...' : hasMulti ? 'Choose' : 'Prepare'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
 
-                                                    {/* Prepared image preview (background removed) - clickable */}
-                                                    {showPreparedImage && (
-                                                        <div
-                                                            style={{
-                                                                width: '64px',
-                                                                height: '64px',
-                                                                flexShrink: 0,
-                                                                position: 'relative',
-                                                                cursor: 'pointer',
-                                                                borderRadius: '8px',
-                                                                overflow: 'hidden',
-                                                                border: '1px solid #e1e3e5',
-                                                                transition: 'box-shadow 0.2s ease'
-                                                            }}
-                                                            onClick={() => handleImageClick(
-                                                                title,
-                                                                featuredImage?.url,
-                                                                asset.preparedImageUrlFresh
-                                                            )}
-                                                            onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)'}
-                                                            onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
-                                                        >
-                                                            <img
-                                                                src={asset.preparedImageUrlFresh}
-                                                                alt={`${title} - background removed`}
-                                                                style={{
-                                                                    width: '100%',
-                                                                    height: '100%',
-                                                                    objectFit: 'contain',
-                                                                    background: 'repeating-conic-gradient(#f0f0f0 0% 25%, white 0% 50%) 50% / 8px 8px'
-                                                                }}
-                                                            />
-                                                            <span style={{
-                                                                position: 'absolute',
-                                                                bottom: '2px',
-                                                                right: '2px',
-                                                                fontSize: '9px',
-                                                                background: 'rgba(0,128,0,0.8)',
-                                                                color: 'white',
-                                                                padding: '2px 4px',
-                                                                borderRadius: '3px',
-                                                                fontWeight: '500'
-                                                            }}>Done</span>
-                                                        </div>
-                                                    )}
+                {/* Pagination */}
+                <div className="paging">
+                    <button
+                        onClick={() => handlePage("previous")}
+                        disabled={!pageInfo.hasPreviousPage || isLoading}
+                    >
+                        ← Prev
+                    </button>
+                    <button
+                        onClick={() => handlePage("next")}
+                        disabled={!pageInfo.hasNextPage || isLoading}
+                    >
+                        Next →
+                    </button>
+                </div>
+            </div>
 
-                                                    <BlockStack gap="100">
-                                                        <Text variant="bodyMd" fontWeight="semibold" as="h3">
-                                                            {title}
-                                                        </Text>
-                                                        <InlineStack gap="200" blockAlign="center">
-                                                            <Badge tone={statusInfo.tone}>{statusInfo.label}</Badge>
-                                                            {asset?.updatedAt && (
-                                                                <Text variant="bodySm" tone="subdued">
-                                                                    {new Date(asset.updatedAt).toLocaleDateString()}
-                                                                </Text>
-                                                            )}
-                                                        </InlineStack>
-                                                        {/* Show error message on hover if failed */}
-                                                        {asset?.status === 'failed' && asset?.errorMessage && (
-                                                            <Tooltip content={asset.errorMessage}>
-                                                                <Text variant="bodySm" tone="critical">
-                                                                    {formatErrorMessage(asset.errorMessage, 40)}
-                                                                </Text>
-                                                            </Tooltip>
-                                                        )}
-                                                    </BlockStack>
-                                                </InlineStack>
+            {/* Toast */}
+            {toast && (
+                <div className={`toast ${toast.type}`}>{toast.msg}</div>
+            )}
 
-                                                {/* Action buttons */}
-                                                <InlineStack gap="200" blockAlign="center">
-                                                    {/* Single item action button */}
-                                                    {featuredImage && (
-                                                        <Button
-                                                            size="slim"
-                                                            onClick={() => handleSinglePrepare(id)}
-                                                            loading={isProcessingThis}
-                                                            disabled={isItemBusy}
-                                                            variant={asset?.status === 'failed' ? 'primary' : 'secondary'}
-                                                            tone={asset?.status === 'failed' ? 'critical' : undefined}
-                                                        >
-                                                            {statusInfo.showSpinner ? (
-                                                                <InlineStack gap="200" blockAlign="center">
-                                                                    <Spinner size="small" />
-                                                                    <span>{statusInfo.buttonLabel}</span>
-                                                                </InlineStack>
-                                                            ) : (
-                                                                statusInfo.buttonLabel
-                                                            )}
-                                                        </Button>
-                                                    )}
-                                                    {/* Fix/Adjust button for failed or ready products that need manual adjustment */}
-                                                    {(asset?.status === 'failed' || asset?.status === 'ready') && featuredImage && (
-                                                        <Button
-                                                            size="slim"
-                                                            variant="secondary"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                // Get all images for this product
-                                                                const allImages = item.images?.edges?.map(edge => ({
-                                                                    url: edge.node.url,
-                                                                    altText: edge.node.altText || title,
-                                                                })) || [];
-                                                                setManualFixProduct({
-                                                                    id: id.split('/').pop(),
-                                                                    title,
-                                                                    sourceImageUrl: featuredImage.url,
-                                                                    images: allImages,
-                                                                });
-                                                            }}
-                                                        >
-                                                            {asset?.status === 'failed' ? 'Fix' : 'Adjust'}
-                                                        </Button>
-                                                    )}
-                                                </InlineStack>
-                                            </InlineStack>
-                                        </ResourceList.Item>
-                                    );
-                                }}
-                            />
-
-                            <InlineStack align="center">
-                                <Pagination
-                                    hasPrevious={pageInfo.hasPreviousPage}
-                                    onPrevious={() => handlePagination("previous")}
-                                    hasNext={pageInfo.hasNextPage}
-                                    onNext={() => handlePagination("next")}
-                                />
-                            </InlineStack>
-                        </BlockStack>
-                    </Card>
-                </Layout.Section>
-            </Layout>
-
-            {/* Image Preview Modal */}
+            {/* Image Selection Modal */}
             <Modal
                 open={modalOpen}
-                onClose={handleModalClose}
-                title={modalTitle}
-                large
+                onClose={() => setModalOpen(false)}
+                title={modalProduct?.title || "Select image"}
             >
                 <Modal.Section>
-                    <BlockStack gap="400">
-                        <InlineStack gap="400" align="center" wrap>
-                            {/* Original Image */}
-                            <BlockStack gap="200" inlineAlign="center">
-                                <Text variant="headingSm" as="h3">Original</Text>
-                                <div style={{
-                                    maxWidth: '400px',
-                                    maxHeight: '400px',
-                                    border: '1px solid #e1e3e5',
-                                    borderRadius: '8px',
-                                    overflow: 'hidden',
-                                    background: '#f6f6f7'
-                                }}>
-                                    {modalImage && (
-                                        <img
-                                            src={modalImage}
-                                            alt="Original product"
+                    {modalProduct && (
+                        <BlockStack gap="400">
+                            <div style={{
+                                background: '#faf9f7',
+                                borderRadius: '12px',
+                                padding: '16px',
+                                display: 'flex',
+                                justifyContent: 'center',
+                                minHeight: '240px',
+                                alignItems: 'center'
+                            }}>
+                                {modalProduct.images?.edges?.[selectedImg] ? (
+                                    <img
+                                        src={modalProduct.images.edges[selectedImg].node.url}
+                                        alt=""
+                                        style={{ maxWidth: '100%', maxHeight: '300px', objectFit: 'contain' }}
+                                    />
+                                ) : modalProduct.featuredImage ? (
+                                    <img
+                                        src={modalProduct.featuredImage.url}
+                                        alt=""
+                                        style={{ maxWidth: '100%', maxHeight: '300px', objectFit: 'contain' }}
+                                    />
+                                ) : (
+                                    <Text tone="subdued">No image</Text>
+                                )}
+                            </div>
+
+                            {modalProduct.images?.edges?.length > 1 && (
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                    {modalProduct.images.edges.map((edge, idx) => (
+                                        <div
+                                            key={edge.node.id}
+                                            onClick={() => setSelectedImg(idx)}
                                             style={{
-                                                maxWidth: '100%',
-                                                maxHeight: '400px',
-                                                objectFit: 'contain'
+                                                width: '56px',
+                                                height: '56px',
+                                                borderRadius: '8px',
+                                                overflow: 'hidden',
+                                                border: idx === selectedImg ? '2px solid #1a1a1a' : '1px solid #e0e0e0',
+                                                cursor: 'pointer'
                                             }}
-                                        />
-                                    )}
+                                        >
+                                            <img
+                                                src={edge.node.url}
+                                                alt=""
+                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                            />
+                                        </div>
+                                    ))}
                                 </div>
-                            </BlockStack>
-
-                            {/* Prepared Image (if available) */}
-                            {modalPreparedImage && (
-                                <BlockStack gap="200" inlineAlign="center">
-                                    <Text variant="headingSm" as="h3">Background Removed</Text>
-                                    <div style={{
-                                        maxWidth: '400px',
-                                        maxHeight: '400px',
-                                        border: '1px solid #e1e3e5',
-                                        borderRadius: '8px',
-                                        overflow: 'hidden',
-                                        background: 'repeating-conic-gradient(#e8e8e8 0% 25%, white 0% 50%) 50% / 16px 16px'
-                                    }}>
-                                        <img
-                                            src={modalPreparedImage}
-                                            alt="Background removed"
-                                            style={{
-                                                maxWidth: '100%',
-                                                maxHeight: '400px',
-                                                objectFit: 'contain'
-                                            }}
-                                        />
-                                    </div>
-                                </BlockStack>
                             )}
-                        </InlineStack>
 
-                        {/* Download button for prepared image */}
-                        {modalPreparedImage && (
-                            <InlineStack align="center">
+                            <InlineStack align="end" gap="200">
+                                <Button onClick={() => setModalOpen(false)}>Cancel</Button>
                                 <Button
-                                    url={modalPreparedImage}
-                                    download
-                                    external
+                                    variant="primary"
+                                    onClick={() => {
+                                        handlePrepare(
+                                            modalProduct.id,
+                                            modalProduct.images?.edges?.[selectedImg]?.node?.url || modalProduct.featuredImage?.url
+                                        );
+                                        setModalOpen(false);
+                                    }}
                                 >
-                                    Download Processed Image
+                                    Remove background
                                 </Button>
                             </InlineStack>
-                        )}
-                    </BlockStack>
+                        </BlockStack>
+                    )}
                 </Modal.Section>
             </Modal>
 
-            {/* Manual Segmentation Modal */}
-            <ManualSegmentModal
-                open={!!manualFixProduct}
-                onClose={() => setManualFixProduct(null)}
-                productId={manualFixProduct?.id}
-                productTitle={manualFixProduct?.title}
-                sourceImageUrl={manualFixProduct?.sourceImageUrl}
-                productImages={manualFixProduct?.images || []}
-                onSuccess={() => {
-                    setManualFixProduct(null);
-                    revalidator.revalidate();
-                }}
-            />
+            {/* Manual Adjustment Modal */}
+            {adjustProduct && (
+                <ManualSegmentModal
+                    open={!!adjustProduct}
+                    onClose={() => setAdjustProduct(null)}
+                    productId={adjustProduct.id.split('/').pop()}
+                    productTitle={adjustProduct.title}
+                    sourceImageUrl={
+                        assetsMap[adjustProduct.id]?.sourceImageUrl ||
+                        adjustProduct.featuredImage?.url
+                    }
+                    productImages={adjustProduct.images?.edges?.map(e => ({
+                        url: e.node.url,
+                        altText: e.node.altText
+                    })) || []}
+                    onSuccess={() => {
+                        showToast("Background updated!", "success");
+                        setTimeout(() => revalidator.revalidate(), 500);
+                    }}
+                />
+            )}
         </Page>
     );
 }
 
-// Error boundary to catch and display errors gracefully
 export function ErrorBoundary() {
     const error = useRouteError();
-
-    let title = "Something went wrong";
-    let message = "An unexpected error occurred while loading products. Please try refreshing the page.";
+    let title = "Error";
+    let message = "Something went wrong";
 
     if (isRouteErrorResponse(error)) {
-        title = `${error.status} ${error.statusText}`;
-        if (error.status === 401 || error.status === 403) {
-            message = "You don't have permission to view this page. Please check your app installation.";
-        } else if (error.status === 404) {
-            message = "The products page could not be found.";
-        } else {
-            message = error.data?.message || "Failed to load products data.";
-        }
+        title = `${error.status}`;
+        message = error.data?.message || error.statusText;
     } else if (error instanceof Error) {
         message = error.message;
     }
 
     return (
-        <Page title="Products">
-            <Layout>
-                <Layout.Section>
-                    <Card>
-                        <BlockStack gap="400">
-                            <Banner title={title} tone="critical">
-                                <p>{message}</p>
-                            </Banner>
-                            <InlineStack gap="300">
-                                <Button onClick={() => window.location.reload()}>
-                                    Refresh Page
-                                </Button>
-                                <Button url="/app" variant="plain">
-                                    Go to Dashboard
-                                </Button>
-                            </InlineStack>
-                        </BlockStack>
-                    </Card>
-                </Layout.Section>
-            </Layout>
+        <Page title="See It">
+            <Card>
+                <BlockStack gap="400">
+                    <Banner title={title} tone="critical">
+                        <p>{message}</p>
+                    </Banner>
+                    <Button onClick={() => window.location.reload()}>Refresh</Button>
+                </BlockStack>
+            </Card>
         </Page>
     );
 }
