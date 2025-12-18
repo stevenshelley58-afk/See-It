@@ -13,21 +13,19 @@ import {
     ProgressBar,
 } from "@shopify/polaris";
 import { AssistedBrushCanvas } from "./AssistedBrushCanvas";
+import { DirectSelectionCanvas } from "./DirectSelectionCanvas";
 
 /**
- * ManualSegmentModal - Background removal with smart refinement
+ * ManualSegmentModal - Background removal with multiple options
  *
- * Flow:
- * 1. Auto Remove - AI removes background (Prodia ~190ms)
- * 2. Preview result
- * 3. If not perfect → Refine with smart brush
- *    - "Restore" brush: Bring back areas AI incorrectly removed
- *    - "Erase" brush: Remove areas AI missed
- * 4. Save
+ * Modes:
+ * 1. AUTO: AI removes background automatically (Prodia ~190ms)
+ * 2. MANUAL SELECT: Click/paint directly on image to remove areas (like Adobe magic eraser)
+ * 3. UPLOAD: Upload pre-processed image
+ * 4. ORIGINAL: Use original without changes
  *
- * This matches how Canva/Adobe/Photoroom work:
- * - AI does the heavy lifting
- * - Smart brush is for REFINEMENT only
+ * The Manual Select mode lets users directly click on areas to remove
+ * without needing AI processing first - like the magic wand tool in Adobe/Canva.
  */
 export function ManualSegmentModal({
     open,
@@ -39,9 +37,10 @@ export function ManualSegmentModal({
     onSuccess,
 }) {
     // State
-    const [mode, setMode] = useState("auto"); // "auto" | "refine" | "upload" | "original"
+    const [mode, setMode] = useState("manual-select"); // "auto" | "refine" | "manual-select" | "upload" | "original"
     const [previewUrl, setPreviewUrl] = useState(null);
     const [refinedImageData, setRefinedImageData] = useState(null);
+    const [manualSelectionData, setManualSelectionData] = useState(null); // For manual select mode
     const [processingTime, setProcessingTime] = useState(null);
     const [error, setError] = useState(null);
     const [uploadedFile, setUploadedFile] = useState(null);
@@ -153,6 +152,30 @@ export function ManualSegmentModal({
         setRefinedImageData(dataUrl);
     }, []);
 
+    // === MANUAL SELECT MODE ===
+    const handleManualSelectionChange = useCallback((dataUrl) => {
+        setManualSelectionData(dataUrl);
+    }, []);
+
+    // Save manual selection
+    const handleSaveManualSelection = useCallback(() => {
+        if (!manualSelectionData) {
+            setError("Please click on areas to remove first");
+            return;
+        }
+
+        startProgress(["Saving your selection...", "Uploading..."]);
+
+        const formData = new FormData();
+        formData.append("productId", productId);
+        formData.append("imageDataUrl", manualSelectionData);
+
+        saveFetcher.submit(formData, {
+            method: "post",
+            action: "/api/products/save-refined",
+        });
+    }, [manualSelectionData, productId, saveFetcher, startProgress]);
+
     // Save refined image
     const handleSaveRefined = useCallback(() => {
         if (!refinedImageData) {
@@ -259,9 +282,10 @@ export function ManualSegmentModal({
         if (progressIntervalRef.current) {
             clearInterval(progressIntervalRef.current);
         }
-        setMode("auto");
+        setMode("manual-select");
         setPreviewUrl(null);
         setRefinedImageData(null);
+        setManualSelectionData(null);
         setProcessingTime(null);
         setError(null);
         setUploadedFile(null);
@@ -277,6 +301,9 @@ export function ManualSegmentModal({
         if (newMode === "auto") {
             setPreviewUrl(null);
             setRefinedImageData(null);
+        }
+        if (newMode === "manual-select") {
+            setManualSelectionData(null);
         }
     }, []);
 
@@ -317,12 +344,20 @@ export function ManualSegmentModal({
                     {/* Mode tabs */}
                     <InlineStack gap="200">
                         <Button
+                            variant={mode === "manual-select" ? "primary" : "tertiary"}
+                            onClick={() => switchMode("manual-select")}
+                            disabled={isLoading}
+                            size="slim"
+                        >
+                            ✨ Manual Select
+                        </Button>
+                        <Button
                             variant={mode === "auto" || mode === "refine" ? "primary" : "tertiary"}
                             onClick={() => switchMode("auto")}
                             disabled={isLoading}
                             size="slim"
                         >
-                            Remove Background
+                            🤖 AI Remove
                         </Button>
                         <Button
                             variant={mode === "upload" ? "primary" : "tertiary"}
@@ -330,7 +365,7 @@ export function ManualSegmentModal({
                             disabled={isLoading}
                             size="slim"
                         >
-                            Upload
+                            📤 Upload
                         </Button>
                         <Button
                             variant={mode === "original" ? "primary" : "tertiary"}
@@ -342,8 +377,8 @@ export function ManualSegmentModal({
                         </Button>
                     </InlineStack>
 
-                    {/* Image selector */}
-                    {allImages.length > 1 && mode === "auto" && !previewUrl && (
+                    {/* Image selector - show for both auto and manual-select modes */}
+                    {allImages.length > 1 && (mode === "auto" || mode === "manual-select") && !previewUrl && (
                         <BlockStack gap="200">
                             <Text variant="bodySm" fontWeight="medium">Select image:</Text>
                             <InlineStack gap="200" wrap>
@@ -366,6 +401,33 @@ export function ManualSegmentModal({
                                         />
                                     </div>
                                 ))}
+                            </InlineStack>
+                        </BlockStack>
+                    )}
+
+                    {/* === MANUAL SELECT MODE === */}
+                    {mode === "manual-select" && (
+                        <BlockStack gap="300">
+                            <DirectSelectionCanvas
+                                imageUrl={selectedImageUrl}
+                                width={580}
+                                height={450}
+                                onImageChange={handleManualSelectionChange}
+                                disabled={isLoading}
+                            />
+
+                            <InlineStack gap="200">
+                                <Button
+                                    variant="primary"
+                                    onClick={handleSaveManualSelection}
+                                    loading={saveFetcher.state !== "idle"}
+                                    disabled={!manualSelectionData}
+                                >
+                                    Save Selection
+                                </Button>
+                                <Button onClick={() => switchMode("auto")}>
+                                    Try AI Instead
+                                </Button>
                             </InlineStack>
                         </BlockStack>
                     )}
@@ -436,15 +498,15 @@ export function ManualSegmentModal({
                                         onClick={handleAutoRemove}
                                         loading={autoFetcher.state !== "idle"}
                                     >
-                                        Remove Background
+                                        🤖 Run AI Removal
                                     </Button>
                                 ) : (
                                     <>
                                         <Button variant="primary" onClick={handleConfirm}>
-                                            Looks Good - Save
+                                            ✓ Looks Good - Save
                                         </Button>
                                         <Button onClick={handleStartRefine}>
-                                            Refine with Brush
+                                            🖌️ Refine with Brush
                                         </Button>
                                         <Button
                                             onClick={handleAutoRemove}
