@@ -287,6 +287,7 @@ export default function Products() {
 
     // Manual adjust modal
     const [adjustProduct, setAdjustProduct] = useState(null);
+    const [adjustStartInDraw, setAdjustStartInDraw] = useState(false);
 
     const prevState = useRef(singleFetcher.state);
 
@@ -327,7 +328,9 @@ export default function Products() {
     }, []);
 
     // Open adjust modal (ManualSegmentModal)
-    const openAdjustModal = useCallback((product) => {
+    // startInDraw: true = skip auto, go straight to draw mode (for Adjust button)
+    const openAdjustModal = useCallback((product, startInDraw = true) => {
+        setAdjustStartInDraw(startInDraw);
         setAdjustProduct(product);
     }, []);
 
@@ -662,6 +665,7 @@ export default function Products() {
                         url: e.node.url,
                         altText: e.node.altText
                     })) || []}
+                    startInDrawMode={adjustStartInDraw}
                     onSuccess={() => {
                         showToast("Background updated!", "success");
                         setTimeout(() => revalidator.revalidate(), 500);
