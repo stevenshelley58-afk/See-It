@@ -141,8 +141,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const getCanvasPos = (e) => {
         const rect = maskCanvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const touch =
+            (e.touches && e.touches[0]) ||
+            (e.changedTouches && e.changedTouches[0]) ||
+            null;
+        const clientX = touch ? touch.clientX : e.clientX;
+        const clientY = touch ? touch.clientY : e.clientY;
         // Scale from CSS size to canvas size
         const scaleX = maskCanvas.width / rect.width;
         const scaleY = maskCanvas.height / rect.height;
@@ -203,14 +207,31 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     if (maskCanvas) {
-        maskCanvas.addEventListener('mousedown', startDraw);
-        maskCanvas.addEventListener('mousemove', draw);
-        maskCanvas.addEventListener('mouseup', stopDraw);
-        maskCanvas.addEventListener('mouseleave', stopDraw);
-        maskCanvas.addEventListener('touchstart', startDraw, { passive: false });
-        maskCanvas.addEventListener('touchmove', draw, { passive: false });
-        maskCanvas.addEventListener('touchend', stopDraw);
-        maskCanvas.addEventListener('touchcancel', stopDraw);
+        // Prefer Pointer Events when available (prevents "mouse up outside canvas" issues)
+        if (window.PointerEvent) {
+            maskCanvas.addEventListener('pointerdown', (e) => {
+                try { maskCanvas.setPointerCapture(e.pointerId); } catch {}
+                startDraw(e);
+            });
+            maskCanvas.addEventListener('pointermove', draw);
+            maskCanvas.addEventListener('pointerup', stopDraw);
+            maskCanvas.addEventListener('pointercancel', stopDraw);
+            // Fallback safety: if something goes wrong with capture, still stop drawing
+            window.addEventListener('pointerup', stopDraw);
+        } else {
+            maskCanvas.addEventListener('mousedown', startDraw);
+            maskCanvas.addEventListener('mousemove', draw);
+            maskCanvas.addEventListener('mouseup', stopDraw);
+            maskCanvas.addEventListener('mouseleave', stopDraw);
+            maskCanvas.addEventListener('touchstart', startDraw, { passive: false });
+            maskCanvas.addEventListener('touchmove', draw, { passive: false });
+            maskCanvas.addEventListener('touchend', stopDraw);
+            maskCanvas.addEventListener('touchcancel', stopDraw);
+            // Fallback: ensure strokes are committed even if finger/mouse ends outside canvas
+            window.addEventListener('mouseup', stopDraw);
+            window.addEventListener('touchend', stopDraw);
+            window.addEventListener('touchcancel', stopDraw);
+        }
     }
 
     btnUndo?.addEventListener('click', () => {
