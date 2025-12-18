@@ -83,10 +83,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     try {
         console.log(`[Cleanup] Processing cleanup for session ${sanitizedSessionId}`);
+        console.log(`[Cleanup] Room URL: ${currentRoomUrl.substring(0, 80)}...`);
+        console.log(`[Cleanup] Mask provided: ${!!sanitizedMaskUrl}, length: ${sanitizedMaskUrl?.length || 0}`);
 
         // If mask data is provided, attempt cleanup; otherwise echo the current image per spec stub allowance.
+        if (!sanitizedMaskUrl) {
+            console.log(`[Cleanup] No mask provided, returning current image`);
+        }
+
         const cleanedRoomImageUrl = sanitizedMaskUrl
-            ? await cleanupRoom(currentRoomUrl, sanitizedMaskUrl)
+            ? await cleanupRoom(currentRoomUrl, sanitizedMaskUrl, sanitizedSessionId)
             : currentRoomUrl;
 
         // Extract GCS key from the returned URL for future URL regeneration
