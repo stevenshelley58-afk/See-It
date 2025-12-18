@@ -30,7 +30,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const btnConfirmRoom = $('see-it-confirm-room');
     const btnBackToWelcome = $('see-it-back-to-welcome');
     const cleanupLoading = $('see-it-cleanup-loading');
-    
+    const uploadIndicator = $('see-it-upload-indicator');
+
     // Eraser Controls
     const btnUndo = $('see-it-undo-btn');
     const btnClear = $('see-it-clear-btn');
@@ -59,25 +60,27 @@ document.addEventListener('DOMContentLoaded', function () {
         originalRoomImageUrl: null,
         cleanedRoomImageUrl: null,
         currentRoomImageUrl: null,
-        productImageUrl: trigger ? trigger.dataset.productImage : '',  // Fallback to original
-        preparedProductImageUrl: null,  // Transparent background version
+        localImageDataUrl: null,  // Client-side preview (instant)
+        productImageUrl: trigger ? trigger.dataset.productImage : '',
+        preparedProductImageUrl: null,
         productId: trigger ? trigger.dataset.productId : '',
         scale: 1.0,
         x: 0,
         y: 0,
         isUploading: false,
         isCleaningUp: false,
-        isPrepared: false  // Track if product has background removed
+        isPrepared: false,
+        uploadComplete: false  // Track when cloud upload is done
     };
-    
+
     // Canvas drawing state
     let ctx = null;
     let isDrawing = false;
     let drawHistory = []; // For undo
-    const BRUSH_SIZE = 30;
-    const BRUSH_COLOR = 'rgba(138, 43, 226, 0.5)'; // Semi-transparent purple
-    
-    const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl;
+    const BRUSH_SIZE = 40; // Larger brush for easier selection
+    const BRUSH_COLOR = 'rgba(138, 43, 226, 0.6)'; // Semi-transparent purple
+
+    const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
 
     // --- Helpers ---
     const showStep = (step) => {
@@ -111,60 +114,97 @@ document.addEventListener('DOMContentLoaded', function () {
     
     const updateEraserButtons = () => {
         const hasDrawing = drawHistory.length > 0;
-        const uploadComplete = !state.isUploading && state.originalRoomImageUrl;
         if (btnUndo) btnUndo.disabled = !hasDrawing;
         if (btnClear) btnClear.disabled = !hasDrawing;
         // Remove button needs: drawing exists, not cleaning up, upload finished
-        if (btnRemove) btnRemove.disabled = !hasDrawing || state.isCleaningUp || !uploadComplete;
+        if (btnRemove) {
+            const canRemove = hasDrawing && !state.isCleaningUp && state.uploadComplete;
+            btnRemove.disabled = !canRemove;
+            // Show waiting state if drawing but upload not done
+            if (hasDrawing && !state.uploadComplete && !state.isCleaningUp) {
+                btnRemove.textContent = 'Uploading...';
+            } else {
+                btnRemove.textContent = 'Remove';
+            }
+        }
+    };
+
+    const updateUploadIndicator = () => {
+        if (uploadIndicator) {
+            if (state.isUploading) {
+                uploadIndicator.classList.remove('hidden');
+            } else {
+                uploadIndicator.classList.add('hidden');
+            }
+        }
     };
 
     // --- Canvas Drawing ---
     const initCanvas = () => {
         if (!maskCanvas || !roomPreview || !canvasWrapper) return;
-        
+
         // Wait for image to load
-        if (!roomPreview.complete) {
-            roomPreview.onload = initCanvas;
+        if (!roomPreview.complete || !roomPreview.naturalWidth) {
+            roomPreview.onload = () => requestAnimationFrame(initCanvas);
             return;
         }
-        
-        // Size canvas to match the rendered image and align it over the centered preview
-        const rect = roomPreview.getBoundingClientRect();
-        const wrapperRect = canvasWrapper.getBoundingClientRect();
-        const offsetLeft = rect.left - wrapperRect.left;
-        const offsetTop = rect.top - wrapperRect.top;
 
-        maskCanvas.width = rect.width;
-        maskCanvas.height = rect.height;
-        maskCanvas.style.width = rect.width + 'px';
-        maskCanvas.style.height = rect.height + 'px';
-        maskCanvas.style.left = offsetLeft + 'px';
-        maskCanvas.style.top = offsetTop + 'px';
-        
-        ctx = maskCanvas.getContext('2d');
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = BRUSH_SIZE;
-        ctx.strokeStyle = BRUSH_COLOR;
-        
-        // Clear and reset
-        ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        drawHistory = [];
-        updateEraserButtons();
+        // Use requestAnimationFrame to ensure layout is complete
+        requestAnimationFrame(() => {
+            // Get the actual rendered size and position of the image
+            const imgRect = roomPreview.getBoundingClientRect();
+            const wrapperRect = canvasWrapper.getBoundingClientRect();
+
+            // Calculate offset from wrapper to image (image is centered)
+            const offsetLeft = imgRect.left - wrapperRect.left;
+            const offsetTop = imgRect.top - wrapperRect.top;
+
+            // Set canvas to exactly match image dimensions (use device pixel ratio for sharpness)
+            const dpr = window.devicePixelRatio || 1;
+            const width = imgRect.width;
+            const height = imgRect.height;
+
+            // Canvas internal size (for drawing resolution)
+            maskCanvas.width = Math.round(width * dpr);
+            maskCanvas.height = Math.round(height * dpr);
+
+            // Canvas display size (CSS)
+            maskCanvas.style.width = width + 'px';
+            maskCanvas.style.height = height + 'px';
+            maskCanvas.style.left = offsetLeft + 'px';
+            maskCanvas.style.top = offsetTop + 'px';
+            maskCanvas.style.position = 'absolute';
+
+            ctx = maskCanvas.getContext('2d');
+            ctx.scale(dpr, dpr); // Scale context for high-DPI displays
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = BRUSH_SIZE;
+            ctx.strokeStyle = BRUSH_COLOR;
+
+            // Clear and reset
+            ctx.clearRect(0, 0, width, height);
+            drawHistory = [];
+            updateEraserButtons();
+
+            console.log('[See It] Canvas initialized:', { width, height, offsetLeft, offsetTop, dpr });
+        });
     };
     
     const getEventPos = (e) => {
         const rect = maskCanvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        // Return position in CSS pixels (context is scaled for DPR)
         return {
             x: clientX - rect.left,
             y: clientY - rect.top
         };
     };
-    
+
     const saveState = () => {
         if (!ctx) return;
+        // Save the full canvas buffer (at device pixel ratio resolution)
         drawHistory.push(ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height));
         // Limit history size
         if (drawHistory.length > 20) drawHistory.shift();
@@ -220,56 +260,78 @@ document.addEventListener('DOMContentLoaded', function () {
     if (btnUndo) {
         btnUndo.addEventListener('click', () => {
             if (drawHistory.length > 0 && ctx) {
+                const dpr = window.devicePixelRatio || 1;
                 drawHistory.pop(); // Remove current state
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform for putImageData
                 if (drawHistory.length > 0) {
                     ctx.putImageData(drawHistory[drawHistory.length - 1], 0, 0);
                 } else {
                     ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
                 }
+                ctx.restore();
+                ctx.scale(dpr, dpr); // Reapply scale
                 updateEraserButtons();
             }
         });
     }
-    
+
     // Clear button
     if (btnClear) {
         btnClear.addEventListener('click', () => {
             if (ctx) {
+                const dpr = window.devicePixelRatio || 1;
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
                 ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                ctx.restore();
+                ctx.scale(dpr, dpr);
                 drawHistory = [];
                 updateEraserButtons();
             }
         });
     }
-    
-    // Generate mask image from canvas
+
+    // Generate mask image from canvas (outputs at display resolution, not DPR-scaled)
     const generateMaskImage = () => {
         if (!ctx || !maskCanvas) return null;
-        
-        // Create a new canvas for the mask (white on black)
+
+        const dpr = window.devicePixelRatio || 1;
+        const displayWidth = Math.round(maskCanvas.width / dpr);
+        const displayHeight = Math.round(maskCanvas.height / dpr);
+
+        // Create a new canvas for the mask (white on black) at display resolution
         const maskCtx = document.createElement('canvas').getContext('2d');
-        maskCtx.canvas.width = maskCanvas.width;
-        maskCtx.canvas.height = maskCanvas.height;
-        
+        maskCtx.canvas.width = displayWidth;
+        maskCtx.canvas.height = displayHeight;
+
         // Fill with black
         maskCtx.fillStyle = 'black';
-        maskCtx.fillRect(0, 0, maskCtx.canvas.width, maskCtx.canvas.height);
-        
-        // Get the drawing data
-        const imageData = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
-        const maskData = maskCtx.getImageData(0, 0, maskCtx.canvas.width, maskCtx.canvas.height);
-        
-        // Convert: any pixel with alpha > 0 becomes white
-        for (let i = 0; i < imageData.data.length; i += 4) {
-            if (imageData.data[i + 3] > 0) { // If alpha > 0
-                maskData.data[i] = 255;     // R
-                maskData.data[i + 1] = 255; // G
-                maskData.data[i + 2] = 255; // B
-                maskData.data[i + 3] = 255; // A
+        maskCtx.fillRect(0, 0, displayWidth, displayHeight);
+
+        // Draw the scaled-down version of the drawing canvas
+        maskCtx.drawImage(maskCanvas, 0, 0, displayWidth, displayHeight);
+
+        // Get the pixel data and convert to binary mask
+        const imageData = maskCtx.getImageData(0, 0, displayWidth, displayHeight);
+        const pixels = imageData.data;
+
+        // Convert: any pixel with alpha > 0 becomes white, else black
+        for (let i = 0; i < pixels.length; i += 4) {
+            if (pixels[i + 3] > 10) { // If alpha > threshold (some anti-aliasing)
+                pixels[i] = 255;     // R
+                pixels[i + 1] = 255; // G
+                pixels[i + 2] = 255; // B
+                pixels[i + 3] = 255; // A
+            } else {
+                pixels[i] = 0;
+                pixels[i + 1] = 0;
+                pixels[i + 2] = 0;
+                pixels[i + 3] = 255;
             }
         }
-        
-        maskCtx.putImageData(maskData, 0, 0);
+
+        maskCtx.putImageData(imageData, 0, 0);
         return maskCtx.canvas.toDataURL('image/png');
     };
 
@@ -403,27 +465,34 @@ document.addEventListener('DOMContentLoaded', function () {
         const file = e.target.files[0];
         if (!file) return;
 
+        // Reset state for new image
         state.cleanedRoomImageUrl = null;
         state.originalRoomImageUrl = null;
         state.sessionId = null;
+        state.uploadComplete = false;
+        state.localImageDataUrl = null;
 
+        // INSTANT: Show preview immediately using FileReader
         const reader = new FileReader();
-        reader.onload = (e) => {
-            state.currentRoomImageUrl = e.target.result;
-            if (roomPreview) roomPreview.src = state.currentRoomImageUrl;
-            if (roomImage) roomImage.src = state.currentRoomImageUrl;
+        reader.onload = (loadEvent) => {
+            state.localImageDataUrl = loadEvent.target.result;
+            state.currentRoomImageUrl = loadEvent.target.result;
+            if (roomPreview) {
+                roomPreview.src = state.localImageDataUrl;
+                // Trigger canvas init once image loads
+                roomPreview.onload = () => requestAnimationFrame(initCanvas);
+            }
+            if (roomImage) roomImage.src = state.localImageDataUrl;
             showStep(stepEdit);
         };
         reader.readAsDataURL(file);
 
-        try {
-            state.isUploading = true;
-            if (btnConfirmRoom) {
-                btnConfirmRoom.textContent = 'Uploading...';
-                btnConfirmRoom.disabled = true;
-            }
-            if (btnRemove) btnRemove.disabled = true;
+        // BACKGROUND: Upload to cloud while user can start drawing
+        state.isUploading = true;
+        updateUploadIndicator();
+        updateEraserButtons();
 
+        try {
             const sessionData = await startSession();
             state.sessionId = sessionData.sessionId;
             const uploadUrl = sessionData.uploadUrl;
@@ -432,17 +501,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const confirmData = await confirmRoom(state.sessionId);
             state.originalRoomImageUrl = confirmData.roomImageUrl;
+            state.uploadComplete = true;
 
-            console.log('Upload complete:', state.originalRoomImageUrl);
+            console.log('[See It] Upload complete:', state.originalRoomImageUrl);
 
         } catch (err) {
+            console.error('[See It] Upload error:', err);
             showError('Upload failed: ' + err.message);
+            // Reset state on error
+            state.sessionId = null;
+            state.uploadComplete = false;
         } finally {
             state.isUploading = false;
-            if (btnConfirmRoom) {
-                btnConfirmRoom.textContent = 'Continue →';
-                btnConfirmRoom.disabled = false;
-            }
+            updateUploadIndicator();
             updateEraserButtons();
         }
     };
@@ -457,16 +528,39 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (btnConfirmRoom) {
         btnConfirmRoom.addEventListener('click', () => {
-            if (state.isUploading || state.isCleaningUp) return;
-            
+            if (state.isCleaningUp) return;
+
             // Need at least a local image to continue
-            const roomUrl = getActiveRoomUrl() || state.currentRoomImageUrl;
+            const roomUrl = getActiveRoomUrl();
             if (!roomUrl) {
                 showError('Please upload an image first');
                 return;
             }
+
+            // If still uploading, wait for it (but this should be rare - upload is fast)
+            if (state.isUploading) {
+                btnConfirmRoom.textContent = 'Finishing upload...';
+                btnConfirmRoom.disabled = true;
+                const checkUpload = setInterval(() => {
+                    if (!state.isUploading) {
+                        clearInterval(checkUpload);
+                        btnConfirmRoom.textContent = 'Continue →';
+                        btnConfirmRoom.disabled = false;
+                        if (state.uploadComplete) {
+                            // Now continue
+                            if (roomImage) roomImage.src = getActiveRoomUrl();
+                            showStep(stepPlace);
+                            state.x = 0;
+                            state.y = 0;
+                            state.scale = 1.0;
+                            updateTransform();
+                        }
+                    }
+                }, 100);
+                return;
+            }
+
             if (roomImage) roomImage.src = roomUrl;
-            
             showStep(stepPlace);
             state.x = 0;
             state.y = 0;
@@ -475,49 +569,69 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
     
-    // Remove button - process the mask
+    // Remove button - process the mask (Magic Eraser)
     if (btnRemove) {
         btnRemove.addEventListener('click', async () => {
             // Must have session, drawing, not cleaning up, and upload must be complete
-            if (state.isCleaningUp || !state.sessionId || drawHistory.length === 0 || state.isUploading || !state.originalRoomImageUrl) {
-                console.log('Remove blocked:', { isCleaningUp: state.isCleaningUp, sessionId: state.sessionId, hasDrawing: drawHistory.length > 0, isUploading: state.isUploading, hasOriginalUrl: !!state.originalRoomImageUrl });
+            if (state.isCleaningUp || !state.sessionId || drawHistory.length === 0 || !state.uploadComplete) {
+                console.log('[See It] Remove blocked:', {
+                    isCleaningUp: state.isCleaningUp,
+                    sessionId: state.sessionId,
+                    hasDrawing: drawHistory.length > 0,
+                    uploadComplete: state.uploadComplete
+                });
                 return;
             }
-            
+
             state.isCleaningUp = true;
             if (cleanupLoading) cleanupLoading.classList.remove('hidden');
-            if (btnRemove) btnRemove.disabled = true;
+            if (btnRemove) {
+                btnRemove.disabled = true;
+                btnRemove.textContent = 'Removing...';
+            }
             if (btnUndo) btnUndo.disabled = true;
             if (btnClear) btnClear.disabled = true;
-            
+            if (btnConfirmRoom) btnConfirmRoom.disabled = true;
+
             try {
                 const maskDataUrl = generateMaskImage();
-                console.log('Sending mask for cleanup...');
-                
+                console.log('[See It] Sending mask for cleanup...');
+
                 const result = await cleanupWithMask(maskDataUrl);
-                
+
                 state.cleanedRoomImageUrl = result.cleaned_room_image_url;
-                
-                if (roomPreview) roomPreview.src = result.cleaned_room_image_url;
+
+                // Show the cleaned image
+                if (roomPreview) {
+                    roomPreview.src = result.cleaned_room_image_url;
+                    roomPreview.onload = () => {
+                        // Re-init canvas for the new image after it loads
+                        requestAnimationFrame(initCanvas);
+                    };
+                }
                 if (roomImage) roomImage.src = result.cleaned_room_image_url;
-                
+
                 // Clear canvas for next edit
                 if (ctx) {
+                    const dpr = window.devicePixelRatio || 1;
+                    ctx.save();
+                    ctx.setTransform(1, 0, 0, 1, 0, 0);
                     ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+                    ctx.restore();
+                    ctx.scale(dpr, dpr);
                     drawHistory = [];
                 }
-                
-                // Re-init canvas for the new image
-                setTimeout(initCanvas, 100);
-                
-                console.log('Cleanup complete:', result.cleaned_room_image_url);
-                
+
+                console.log('[See It] Cleanup complete:', result.cleaned_room_image_url);
+
             } catch (err) {
-                console.error('Cleanup error:', err);
+                console.error('[See It] Cleanup error:', err);
                 showError('Failed to remove: ' + err.message);
             } finally {
                 state.isCleaningUp = false;
                 if (cleanupLoading) cleanupLoading.classList.add('hidden');
+                if (btnRemove) btnRemove.textContent = 'Remove';
+                if (btnConfirmRoom) btnConfirmRoom.disabled = false;
                 updateEraserButtons();
             }
         });
