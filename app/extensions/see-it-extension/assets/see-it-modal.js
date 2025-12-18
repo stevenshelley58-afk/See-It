@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.25';
+    const VERSION = '1.0.26';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // --- DOM Elements ---
@@ -199,16 +199,45 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
-    // Canvas event listeners - simple mouse/touch handling
+    // Canvas drawing - pointer events with complete isolation
+    let justFinishedDrawing = false;
+
     if (maskCanvas) {
-        maskCanvas.addEventListener('mousedown', startDraw);
-        maskCanvas.addEventListener('mousemove', draw);
-        maskCanvas.addEventListener('mouseup', stopDraw);
-        maskCanvas.addEventListener('mouseleave', stopDraw);
-        maskCanvas.addEventListener('touchstart', startDraw, { passive: false });
-        maskCanvas.addEventListener('touchmove', draw, { passive: false });
-        maskCanvas.addEventListener('touchend', stopDraw);
-        maskCanvas.addEventListener('touchcancel', stopDraw);
+        maskCanvas.style.touchAction = 'none'; // Prevent browser gestures
+
+        maskCanvas.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+            startDraw(e);
+        });
+
+        maskCanvas.addEventListener('pointermove', (e) => {
+            e.stopPropagation();
+            draw(e);
+        });
+
+        maskCanvas.addEventListener('pointerup', (e) => {
+            e.stopPropagation();
+            if (isDrawing) {
+                justFinishedDrawing = true;
+                // Clear after microtask (not a timer - just next event loop)
+                Promise.resolve().then(() => { justFinishedDrawing = false; });
+            }
+            stopDraw(e);
+        });
+
+        maskCanvas.addEventListener('pointerleave', (e) => {
+            e.stopPropagation();
+            if (isDrawing) {
+                justFinishedDrawing = true;
+                Promise.resolve().then(() => { justFinishedDrawing = false; });
+            }
+            stopDraw(e);
+        });
+
+        maskCanvas.addEventListener('pointercancel', (e) => {
+            e.stopPropagation();
+            stopDraw(e);
+        });
     }
 
     btnUndo?.addEventListener('click', () => {
@@ -418,47 +447,16 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // ============================================================
-    // REMOVE BUTTON - Simple: mousedown/mouseup, NOT click
-    // This avoids synthetic click events from touch/trackpad
+    // REMOVE BUTTON - Simple click. justFinishedDrawing guards
+    // against synthetic clicks from lifting finger after drawing.
     // ============================================================
-    let removeButtonDown = false;
-
-    if (btnRemove) {
-        // Only trigger on deliberate press+release ON the button
-        btnRemove.addEventListener('mousedown', (e) => {
-            if (btnRemove.disabled) return;
-            removeButtonDown = true;
-        });
-
-        btnRemove.addEventListener('mouseup', async (e) => {
-            if (!removeButtonDown || btnRemove.disabled) return;
-            removeButtonDown = false;
-            await doRemove();
-        });
-
-        // Cancel if mouse leaves button while pressed
-        btnRemove.addEventListener('mouseleave', () => {
-            removeButtonDown = false;
-        });
-
-        // Touch support
-        btnRemove.addEventListener('touchstart', (e) => {
-            if (btnRemove.disabled) return;
-            e.preventDefault(); // Prevent synthetic click
-            removeButtonDown = true;
-        }, { passive: false });
-
-        btnRemove.addEventListener('touchend', async (e) => {
-            if (!removeButtonDown || btnRemove.disabled) return;
-            e.preventDefault();
-            removeButtonDown = false;
-            await doRemove();
-        }, { passive: false });
-
-        btnRemove.addEventListener('touchcancel', () => {
-            removeButtonDown = false;
-        });
-    }
+    btnRemove?.addEventListener('click', async () => {
+        if (btnRemove.disabled || justFinishedDrawing) {
+            console.log('[See It] Remove blocked:', { disabled: btnRemove.disabled, justFinishedDrawing });
+            return;
+        }
+        await doRemove();
+    });
 
     async function doRemove() {
         if (state.isCleaningUp || !state.sessionId || strokes.length === 0 || !state.uploadComplete) {
