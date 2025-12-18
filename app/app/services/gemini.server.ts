@@ -656,14 +656,39 @@ export async function compositeScene(
 
         // Step 1: Mechanical placement with Sharp
         const roomMetadata = await sharp(roomBuffer).metadata();
-        const roomWidth = roomMetadata.width || 1920;
-        const roomHeight = roomMetadata.height || 1080;
+        const roomWidth = roomMetadata.width;
+        const roomHeight = roomMetadata.height;
+
+        // Validate room image dimensions - don't use defaults if image failed to load
+        if (!roomWidth || !roomHeight || roomWidth < 100 || roomHeight < 100) {
+            const error = new Error(`Room image dimensions invalid: ${roomWidth}x${roomHeight}. The image may have failed to load or is too small.`);
+            logger.error(
+                { ...logContext, stage: "validation" },
+                `Room image validation failed: width=${roomWidth}, height=${roomHeight}`,
+                error
+            );
+            throw error;
+        }
 
         const pixelX = Math.round(roomWidth * placement.x);
         const pixelY = Math.round(roomHeight * placement.y);
 
         const productMetadata = await sharp(productBuffer).metadata();
-        const newWidth = Math.round((productMetadata.width || 500) * placement.scale);
+        const productWidth = productMetadata.width;
+        const productHeight = productMetadata.height;
+
+        // Validate product image dimensions
+        if (!productWidth || !productHeight || productWidth < 10 || productHeight < 10) {
+            const error = new Error(`Product image dimensions invalid: ${productWidth}x${productHeight}. The product image may have failed to load.`);
+            logger.error(
+                { ...logContext, stage: "validation" },
+                `Product image validation failed: width=${productWidth}, height=${productHeight}`,
+                error
+            );
+            throw error;
+        }
+
+        const newWidth = Math.round(productWidth * placement.scale);
 
         resizedProduct = await sharp(productBuffer)
             .resize({ width: newWidth })

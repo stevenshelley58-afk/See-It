@@ -507,21 +507,19 @@ document.addEventListener('DOMContentLoaded', function () {
         productContainer?.classList.remove('is-dragging');
     });
 
-    // Resize handles
+    // Resize handles - intuitive corner drag (outward = larger, inward = smaller)
     document.querySelectorAll('.resize-handle').forEach(handle => {
-        let resizing = false, startDist = 0, startScale = 1;
-
-        const getDist = (x, y) => {
-            const rect = productContainer.getBoundingClientRect();
-            return Math.hypot(x - (rect.left + rect.width/2), y - (rect.top + rect.height/2));
-        };
+        let resizing = false, startX = 0, startY = 0, startScale = 1;
+        const isTopHandle = handle.classList.contains('handle-tl') || handle.classList.contains('handle-tr');
+        const isLeftHandle = handle.classList.contains('handle-tl') || handle.classList.contains('handle-bl');
 
         const onDown = (e) => {
-            e.stopPropagation(); e.preventDefault();
+            e.stopPropagation();
+            e.preventDefault();
             resizing = true;
-            const cx = e.clientX || e.touches[0].clientX;
-            const cy = e.clientY || e.touches[0].clientY;
-            startDist = getDist(cx, cy);
+            handle.classList.add('is-resizing');
+            startX = e.clientX || e.touches[0].clientX;
+            startY = e.clientY || e.touches[0].clientY;
             startScale = state.scale;
         };
 
@@ -529,12 +527,39 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!resizing) return;
             const cx = e.clientX || e.touches?.[0]?.clientX;
             const cy = e.clientY || e.touches?.[0]?.clientY;
-            if (cx == null) return;
-            state.scale = Math.max(0.2, Math.min(5, startScale * (getDist(cx, cy) / startDist)));
+            if (cx == null || cy == null) return;
+
+            const dx = cx - startX;
+            const dy = cy - startY;
+
+            // Calculate direction multiplier based on which corner
+            // Dragging bottom-right outward (positive dx, positive dy) = larger
+            // Dragging top-left outward (negative dx, negative dy) = larger
+            let delta = 0;
+            if (isTopHandle && isLeftHandle) {
+                // Top-left: dragging up-left (negative) = larger
+                delta = (-dx - dy) / 2;
+            } else if (isTopHandle && !isLeftHandle) {
+                // Top-right: dragging up-right = larger
+                delta = (dx - dy) / 2;
+            } else if (!isTopHandle && isLeftHandle) {
+                // Bottom-left: dragging down-left = larger
+                delta = (-dx + dy) / 2;
+            } else {
+                // Bottom-right: dragging down-right (positive) = larger
+                delta = (dx + dy) / 2;
+            }
+
+            // Scale factor: ~200px drag = double size
+            const scaleFactor = delta / 200;
+            state.scale = Math.max(0.2, Math.min(5, startScale * (1 + scaleFactor)));
             updateTransform();
         };
 
-        const onUp = () => { resizing = false; };
+        const onUp = () => {
+            resizing = false;
+            handle.classList.remove('is-resizing');
+        };
 
         handle.addEventListener('mousedown', onDown);
         handle.addEventListener('touchstart', onDown, { passive: false });
@@ -542,6 +567,38 @@ document.addEventListener('DOMContentLoaded', function () {
         window.addEventListener('touchmove', onMove, { passive: true });
         window.addEventListener('mouseup', onUp);
         window.addEventListener('touchend', onUp);
+    });
+
+    // Pinch-to-zoom on mobile (on the product container itself)
+    let initialPinchDistance = 0;
+    let initialPinchScale = 1;
+
+    productContainer?.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const dx = e.touches[1].clientX - e.touches[0].clientX;
+            const dy = e.touches[1].clientY - e.touches[0].clientY;
+            initialPinchDistance = Math.hypot(dx, dy);
+            initialPinchScale = state.scale;
+        }
+    }, { passive: false });
+
+    productContainer?.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2 && initialPinchDistance > 0) {
+            e.preventDefault();
+            const dx = e.touches[1].clientX - e.touches[0].clientX;
+            const dy = e.touches[1].clientY - e.touches[0].clientY;
+            const currentDistance = Math.hypot(dx, dy);
+            const pinchRatio = currentDistance / initialPinchDistance;
+            state.scale = Math.max(0.2, Math.min(5, initialPinchScale * pinchRatio));
+            updateTransform();
+        }
+    }, { passive: false });
+
+    productContainer?.addEventListener('touchend', (e) => {
+        if (e.touches.length < 2) {
+            initialPinchDistance = 0;
+        }
     });
 
     scaleSlider?.addEventListener('input', (e) => {
@@ -589,7 +646,16 @@ document.addEventListener('DOMContentLoaded', function () {
         .then(r => r.json())
         .then(data => {
             if (data.status === 'failed') {
-                showError(data.error === 'room_not_found' ? 'Session expired, please re-upload' : 'Render failed');
+                // Map error codes to user-friendly messages
+                let errorMsg = 'Render failed - please try again';
+                if (data.error === 'room_not_found') {
+                    errorMsg = 'Session expired - please re-upload your room image';
+                } else if (data.error === 'no_product_image') {
+                    errorMsg = 'Product image not available - please refresh the page';
+                } else if (data.errorMessage?.includes('dimensions invalid')) {
+                    errorMsg = 'Image processing error - please try uploading a different room photo';
+                }
+                showError(errorMsg);
                 actionsDiv.classList.remove('hidden');
                 btnRetry?.classList.remove('hidden');
                 return;
@@ -628,7 +694,16 @@ document.addEventListener('DOMContentLoaded', function () {
                     btnRetry?.classList.add('hidden');
                 } else if (data.status === 'failed') {
                     clearInterval(interval);
-                    showError(data.errorMessage || 'Failed');
+                    // Map error messages to user-friendly text
+                    let errorMsg = data.errorMessage || 'Generation failed';
+                    if (errorMsg.includes('dimensions invalid')) {
+                        errorMsg = 'Image processing error - please try a different room photo';
+                    } else if (errorMsg.includes('timeout') || errorMsg.includes('Timeout')) {
+                        errorMsg = 'Generation took too long - please try again';
+                    } else if (errorMsg.includes('No room image')) {
+                        errorMsg = 'Room image expired - please re-upload';
+                    }
+                    showError(errorMsg);
                     actionsDiv.classList.remove('hidden');
                     btnRetry?.classList.remove('hidden');
                 }

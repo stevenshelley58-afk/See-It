@@ -393,16 +393,24 @@
   position: relative;
   width: 100%;
   max-width: 100%;
+  max-height: 60vh;
   margin: 0 auto;
-  overflow: hidden;
+  overflow: visible; /* Allow resize handles to show outside */
   border-radius: 8px;
   background: #f4f4f4;
   touch-action: none; /* Critical for touch drag */
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #see-it-room-image {
-  width: 100%;
+  max-width: 100%;
+  max-height: 60vh;
+  width: auto;
+  height: auto;
   display: block;
+  object-fit: contain; /* Preserve aspect ratio, no cropping */
   pointer-events: none; /* Let clicks pass through to container if needed */
 }
 
@@ -415,24 +423,23 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
-  /* Subtle border so user can see product bounds */
-  border: 1px dashed rgba(0, 128, 96, 0.5);
-  border-radius: 4px;
-  padding: 4px;
-  /* Subtle shadow to lift product off the room */
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  /* NO visible border - let product blend naturally */
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  /* Subtle shadow only when interacting */
+  box-shadow: none;
+  transition: box-shadow 0.2s;
 }
 
 .draggable-container:hover {
-  border-color: rgba(0, 128, 96, 0.8);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  /* Subtle highlight on hover to show it's interactive */
+  box-shadow: 0 0 0 2px rgba(0, 128, 96, 0.3);
 }
 
 .draggable-container.is-dragging {
   cursor: grabbing;
-  border: 2px dashed #008060;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .draggable-item {
@@ -444,57 +451,61 @@
   background: transparent;
 }
 
-/* Resize Handles - Always visible for discoverability */
+/* Resize Handles - Prominent corner handles for drag-to-resize */
 .resize-handle {
   position: absolute;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   background-color: white;
-  border: 2px solid #008060;
+  border: 3px solid #008060;
   border-radius: 50%;
   z-index: 10;
   display: block; /* Always visible */
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  transition: transform 0.15s, background-color 0.15s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s, background-color 0.15s, box-shadow 0.15s;
 }
 
 .resize-handle:hover {
-  transform: scale(1.2);
-  background-color: #008060;
+  transform: scale(1.15);
+  background-color: #e8f5f1;
+  box-shadow: 0 3px 10px rgba(0, 128, 96, 0.4);
 }
 
-.resize-handle:active {
+.resize-handle:active,
+.resize-handle.is-resizing {
   transform: scale(1.1);
-  background-color: #006e52;
+  background-color: #008060;
+  box-shadow: 0 4px 12px rgba(0, 128, 96, 0.5);
 }
 
-/* Corner resize icon indicators */
+/* Diagonal arrow icon in corners */
 .resize-handle::after {
   content: '';
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid #008060;
-  border-bottom: 2px solid #008060;
+  width: 10px;
+  height: 10px;
+  border-right: 3px solid #008060;
+  border-bottom: 3px solid #008060;
 }
 
-.resize-handle:hover::after {
+.resize-handle:active::after,
+.resize-handle.is-resizing::after {
   border-color: white;
 }
 
-.handle-tl { top: -10px; left: -10px; cursor: nwse-resize; }
+.handle-tl { top: -14px; left: -14px; cursor: nwse-resize; }
 .handle-tl::after { transform: translate(-50%, -50%) rotate(-135deg); }
 
-.handle-tr { top: -10px; right: -10px; cursor: nesw-resize; }
+.handle-tr { top: -14px; right: -14px; cursor: nesw-resize; }
 .handle-tr::after { transform: translate(-50%, -50%) rotate(-45deg); }
 
-.handle-bl { bottom: -10px; left: -10px; cursor: nesw-resize; }
+.handle-bl { bottom: -14px; left: -14px; cursor: nesw-resize; }
 .handle-bl::after { transform: translate(-50%, -50%) rotate(135deg); }
 
-.handle-br { bottom: -10px; right: -10px; cursor: nwse-resize; }
+.handle-br { bottom: -14px; right: -14px; cursor: nwse-resize; }
 .handle-br::after { transform: translate(-50%, -50%) rotate(45deg); }
 
 /* Controls Panel */
@@ -504,9 +515,9 @@
   border-top: 1px solid #eee;
 }
 
+/* Hide slider - use corner handles for resizing instead */
 .see-it-slider-control {
-  margin-bottom: 15px;
-  text-align: center;
+  display: none;
 }
 
 .see-it-actions-row {
@@ -561,40 +572,58 @@
     max-height: 100%;
     border-radius: 0;
   }
-  
+
+  /* Larger touch targets on mobile */
   .resize-handle {
-    width: 30px;
-    height: 30px;
+    width: 40px;
+    height: 40px;
+    border-width: 3px;
   }
-  
-  .see-it-slider-control {
-    display: none;
+
+  .handle-tl { top: -20px; left: -20px; }
+  .handle-tr { top: -20px; right: -20px; }
+  .handle-bl { bottom: -20px; left: -20px; }
+  .handle-br { bottom: -20px; right: -20px; }
+
+  .resize-handle::after {
+    width: 14px;
+    height: 14px;
+    border-width: 3px;
   }
-  
+
   .see-it-actions-row {
     flex-direction: column-reverse;
   }
-  
+
   .see-it-actions-row .button {
     width: 100%;
   }
-  
+
   /* Mobile eraser controls */
   .see-it-eraser-controls {
     flex-direction: column;
     gap: 10px;
   }
-  
+
   .see-it-eraser-hint {
     font-size: 13px;
   }
-  
+
   .see-it-eraser-actions {
     width: 100%;
     justify-content: space-between;
   }
-  
+
   .see-it-remove-btn {
     flex: 1;
+  }
+
+  /* Interactive canvas full screen on mobile */
+  .see-it-interactive-canvas {
+    max-height: 50vh;
+  }
+
+  #see-it-room-image {
+    max-height: 50vh;
   }
 }
