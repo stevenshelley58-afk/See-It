@@ -12,6 +12,7 @@ import {
     Box,
     ProgressBar,
     Spinner,
+    RangeSlider,
 } from "@shopify/polaris";
 
 /**
@@ -19,8 +20,10 @@ import {
  *
  * Flow:
  * 1. Prodia auto-removes background (fast, one-click)
- * 2. If not perfect → "Adjust" → User clicks on product to KEEP
- * 3. SAM uses that selection to segment properly
+ * 2. If not perfect → "Adjust" → Two options:
+ *    a) Click mode: Click on product → SAM segments it
+ *    b) Draw mode: Paint over product to keep (if SAM fails)
+ * 3. Apply selection
  */
 export function ManualSegmentModal({
     open,
@@ -38,11 +41,17 @@ export function ManualSegmentModal({
     const [uploadedFile, setUploadedFile] = useState(null);
     const [selectedImageUrl, setSelectedImageUrl] = useState(sourceImageUrl);
 
-    // SAM adjustment state
+    // Adjust mode state
+    const [adjustMode, setAdjustMode] = useState("click"); // "click" | "draw"
     const [points, setPoints] = useState([]);
     const [maskOverlayUrl, setMaskOverlayUrl] = useState(null);
     const [imageDimensions, setImageDimensions] = useState(null);
+    const [brushSize, setBrushSize] = useState(30);
+    const [isDrawing, setIsDrawing] = useState(false);
+
+    // Canvas refs
     const canvasRef = useRef(null);
+    const maskCanvasRef = useRef(null); // Hidden canvas for drawing mask
     const imageRef = useRef(null);
 
     // Progress
@@ -54,12 +63,14 @@ export function ManualSegmentModal({
     const autoFetcher = useFetcher();
     const previewFetcher = useFetcher();
     const applyFetcher = useFetcher();
+    const maskFetcher = useFetcher();
     const uploadFetcher = useFetcher();
 
     const isLoading =
         autoFetcher.state !== "idle" ||
         previewFetcher.state !== "idle" ||
         applyFetcher.state !== "idle" ||
+        maskFetcher.state !== "idle" ||
         uploadFetcher.state !== "idle";
 
     // Progress helpers
@@ -131,9 +142,10 @@ export function ManualSegmentModal({
         }
     }, [autoFetcher.data, autoFetcher.state, stopProgress]);
 
-    // === ADJUST MODE (SAM) ===
+    // === ADJUST MODE ===
     const handleStartAdjust = useCallback(() => {
         setStep("adjust");
+        setAdjustMode("click");
         setPoints([]);
         setMaskOverlayUrl(null);
     }, []);
@@ -158,12 +170,26 @@ export function ManualSegmentModal({
             setImageDimensions({
                 displayWidth: Math.round(displayWidth),
                 displayHeight: Math.round(displayHeight),
+                naturalWidth: img.width,
+                naturalHeight: img.height,
             });
         };
         img.src = selectedImageUrl;
     }, [step, selectedImageUrl]);
 
-    // Draw canvas
+    // Initialize mask canvas when switching to draw mode
+    useEffect(() => {
+        if (adjustMode !== "draw" || !maskCanvasRef.current || !imageDimensions) return;
+
+        const maskCanvas = maskCanvasRef.current;
+        maskCanvas.width = imageDimensions.naturalWidth;
+        maskCanvas.height = imageDimensions.naturalHeight;
+        const ctx = maskCanvas.getContext("2d");
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+    }, [adjustMode, imageDimensions]);
+
+    // Draw main canvas
     useEffect(() => {
         if (!canvasRef.current || !imageRef.current || !imageDimensions) return;
 
@@ -172,41 +198,77 @@ export function ManualSegmentModal({
         canvas.width = imageDimensions.displayWidth;
         canvas.height = imageDimensions.displayHeight;
 
+        // Draw image
         ctx.drawImage(imageRef.current, 0, 0, imageDimensions.displayWidth, imageDimensions.displayHeight);
 
-        // Draw points
-        points.forEach((pt) => {
-            const x = pt.x * imageDimensions.displayWidth;
-            const y = pt.y * imageDimensions.displayHeight;
-            ctx.beginPath();
-            ctx.arc(x, y, 14, 0, Math.PI * 2);
-            ctx.fillStyle = pt.label === 1 ? "rgba(34, 197, 94, 0.9)" : "rgba(239, 68, 68, 0.9)";
-            ctx.fill();
-            ctx.strokeStyle = "white";
-            ctx.lineWidth = 3;
-            ctx.stroke();
-            ctx.fillStyle = "white";
-            ctx.font = "bold 18px Arial";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(pt.label === 1 ? "+" : "−", x, y);
-        });
-    }, [imageDimensions, points]);
+        if (adjustMode === "click") {
+            // Draw SAM points
+            points.forEach((pt) => {
+                const x = pt.x * imageDimensions.displayWidth;
+                const y = pt.y * imageDimensions.displayHeight;
+                ctx.beginPath();
+                ctx.arc(x, y, 14, 0, Math.PI * 2);
+                ctx.fillStyle = pt.label === 1 ? "rgba(34, 197, 94, 0.9)" : "rgba(239, 68, 68, 0.9)";
+                ctx.fill();
+                ctx.strokeStyle = "white";
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.fillStyle = "white";
+                ctx.font = "bold 18px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(pt.label === 1 ? "+" : "−", x, y);
+            });
+        } else if (adjustMode === "draw" && maskCanvasRef.current) {
+            // Draw mask overlay (green tint on painted areas)
+            const maskCanvas = maskCanvasRef.current;
+            ctx.save();
+            ctx.globalAlpha = 0.4;
+            ctx.globalCompositeOperation = "source-atop";
 
-    // Handle canvas click
+            // Scale mask to display size
+            const tempCanvas = document.createElement("canvas");
+            tempCanvas.width = imageDimensions.displayWidth;
+            tempCanvas.height = imageDimensions.displayHeight;
+            const tempCtx = tempCanvas.getContext("2d");
+            tempCtx.drawImage(maskCanvas, 0, 0, imageDimensions.displayWidth, imageDimensions.displayHeight);
+
+            // Get mask data and draw green overlay where white
+            const maskData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            for (let i = 0; i < maskData.data.length; i += 4) {
+                if (maskData.data[i] > 128) {
+                    // White area - make green
+                    maskData.data[i] = 34;
+                    maskData.data[i + 1] = 197;
+                    maskData.data[i + 2] = 94;
+                    maskData.data[i + 3] = 180;
+                } else {
+                    // Black area - transparent
+                    maskData.data[i + 3] = 0;
+                }
+            }
+            tempCtx.putImageData(maskData, 0, 0);
+
+            ctx.restore();
+            ctx.globalAlpha = 0.5;
+            ctx.drawImage(tempCanvas, 0, 0);
+            ctx.globalAlpha = 1;
+        }
+    }, [imageDimensions, points, adjustMode]);
+
+    // === CLICK MODE (SAM) ===
     const handleCanvasClick = useCallback((e) => {
-        if (isLoading || !imageDimensions) return;
+        if (isLoading || !imageDimensions || adjustMode !== "click") return;
 
         const canvas = canvasRef.current;
         const rect = canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left) / rect.width;
         const y = (e.clientY - rect.top) / rect.height;
-        const label = e.shiftKey ? 0 : 1; // Shift = exclude
+        const label = e.shiftKey ? 0 : 1;
 
         const newPoints = [...points, { x, y, label }];
         setPoints(newPoints);
 
-        // Get SAM preview
         const formData = new FormData();
         formData.append("productId", productId);
         formData.append("points", JSON.stringify(newPoints));
@@ -215,7 +277,7 @@ export function ManualSegmentModal({
             method: "post",
             action: "/api/products/segment-preview",
         });
-    }, [isLoading, imageDimensions, points, productId, previewFetcher]);
+    }, [isLoading, imageDimensions, adjustMode, points, productId, previewFetcher]);
 
     // Handle preview result
     useEffect(() => {
@@ -223,13 +285,13 @@ export function ManualSegmentModal({
             if (previewFetcher.data.success) {
                 setMaskOverlayUrl(previewFetcher.data.maskOverlayUrl);
             } else {
-                setError(previewFetcher.data.error || "Failed to generate preview");
+                setError(previewFetcher.data.error || "SAM failed - try drawing instead");
             }
         }
     }, [previewFetcher.data, previewFetcher.state]);
 
     // Apply SAM selection
-    const handleApplySelection = useCallback(() => {
+    const handleApplySAM = useCallback(() => {
         if (points.length === 0) return;
 
         startProgress(["Applying selection...", "Creating transparent image..."]);
@@ -244,7 +306,7 @@ export function ManualSegmentModal({
         });
     }, [points, productId, applyFetcher, startProgress]);
 
-    // Handle apply result
+    // Handle SAM apply result
     useEffect(() => {
         if (applyFetcher.data && applyFetcher.state === "idle") {
             stopProgress(applyFetcher.data.success);
@@ -252,12 +314,109 @@ export function ManualSegmentModal({
                 onSuccess?.();
                 onClose();
             } else {
-                setError(applyFetcher.data.error || "Failed to apply selection");
+                setError(applyFetcher.data.error || "Failed - try drawing instead");
             }
         }
     }, [applyFetcher.data, applyFetcher.state, stopProgress, onSuccess, onClose]);
 
-    // Undo last point
+    // === DRAW MODE ===
+    const getDrawCoords = useCallback((e) => {
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = imageDimensions.naturalWidth / rect.width;
+        const scaleY = imageDimensions.naturalHeight / rect.height;
+
+        let clientX, clientY;
+        if (e.touches) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY,
+        };
+    }, [imageDimensions]);
+
+    const drawOnMask = useCallback((x, y) => {
+        if (!maskCanvasRef.current) return;
+
+        const ctx = maskCanvasRef.current.getContext("2d");
+        const scaledBrush = brushSize * (imageDimensions.naturalWidth / imageDimensions.displayWidth);
+
+        ctx.beginPath();
+        ctx.arc(x, y, scaledBrush / 2, 0, Math.PI * 2);
+        ctx.fillStyle = "white";
+        ctx.fill();
+    }, [brushSize, imageDimensions]);
+
+    const handleDrawStart = useCallback((e) => {
+        if (adjustMode !== "draw" || isLoading) return;
+        e.preventDefault();
+        setIsDrawing(true);
+        const coords = getDrawCoords(e);
+        drawOnMask(coords.x, coords.y);
+    }, [adjustMode, isLoading, getDrawCoords, drawOnMask]);
+
+    const handleDrawMove = useCallback((e) => {
+        if (!isDrawing || adjustMode !== "draw") return;
+        e.preventDefault();
+        const coords = getDrawCoords(e);
+        drawOnMask(coords.x, coords.y);
+
+        // Trigger re-render to show overlay
+        setPoints([...points]);
+    }, [isDrawing, adjustMode, getDrawCoords, drawOnMask, points]);
+
+    const handleDrawEnd = useCallback(() => {
+        setIsDrawing(false);
+    }, []);
+
+    // Apply drawn mask
+    const handleApplyDrawn = useCallback(() => {
+        if (!maskCanvasRef.current) return;
+
+        startProgress(["Applying your selection...", "Creating transparent image..."]);
+
+        const maskDataUrl = maskCanvasRef.current.toDataURL("image/png");
+
+        const formData = new FormData();
+        formData.append("productId", productId);
+        formData.append("maskDataUrl", maskDataUrl);
+        formData.append("imageUrl", selectedImageUrl);
+
+        maskFetcher.submit(formData, {
+            method: "post",
+            action: "/api/products/apply-mask",
+        });
+    }, [productId, selectedImageUrl, maskFetcher, startProgress]);
+
+    // Handle mask apply result
+    useEffect(() => {
+        if (maskFetcher.data && maskFetcher.state === "idle") {
+            stopProgress(maskFetcher.data.success);
+            if (maskFetcher.data.success) {
+                onSuccess?.();
+                onClose();
+            } else {
+                setError(maskFetcher.data.error || "Failed to apply mask");
+            }
+        }
+    }, [maskFetcher.data, maskFetcher.state, stopProgress, onSuccess, onClose]);
+
+    // Clear drawing
+    const handleClearDrawing = useCallback(() => {
+        if (!maskCanvasRef.current || !imageDimensions) return;
+        const ctx = maskCanvasRef.current.getContext("2d");
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, imageDimensions.naturalWidth, imageDimensions.naturalHeight);
+        setPoints([...points]); // Trigger re-render
+    }, [imageDimensions, points]);
+
+    // Undo last SAM point
     const handleUndo = useCallback(() => {
         if (points.length === 0) return;
         const newPoints = points.slice(0, -1);
@@ -327,6 +486,7 @@ export function ManualSegmentModal({
         setUploadedFile(null);
         setPoints([]);
         setMaskOverlayUrl(null);
+        setAdjustMode("click");
         setProgressStage("");
         setProgressPercent(0);
         setSelectedImageUrl(sourceImageUrl);
@@ -485,32 +645,83 @@ export function ManualSegmentModal({
                         </BlockStack>
                     )}
 
-                    {/* === ADJUST MODE (SAM) === */}
+                    {/* === ADJUST MODE === */}
                     {step === "adjust" && (
                         <BlockStack gap="300">
+                            {/* Mode toggle */}
+                            <InlineStack gap="200">
+                                <Button
+                                    pressed={adjustMode === "click"}
+                                    onClick={() => setAdjustMode("click")}
+                                    size="slim"
+                                >
+                                    Click to Select
+                                </Button>
+                                <Button
+                                    pressed={adjustMode === "draw"}
+                                    onClick={() => setAdjustMode("draw")}
+                                    size="slim"
+                                >
+                                    Draw to Keep
+                                </Button>
+                            </InlineStack>
+
+                            {/* Instructions */}
                             <Banner tone="info">
-                                <p>
-                                    <strong>Click on the product</strong> you want to keep.
-                                    Green = keep, Red = remove.
-                                    <strong>Shift+click</strong> to mark areas to remove.
-                                </p>
+                                {adjustMode === "click" ? (
+                                    <p>
+                                        <strong>Click on the product</strong> you want to keep.
+                                        Shift+click to mark areas to remove.
+                                    </p>
+                                ) : (
+                                    <p>
+                                        <strong>Paint over the product</strong> you want to keep.
+                                        Green areas will be kept, everything else removed.
+                                    </p>
+                                )}
                             </Banner>
 
-                            {/* Canvas with overlay */}
+                            {/* Brush size slider for draw mode */}
+                            {adjustMode === "draw" && (
+                                <div style={{ width: "200px" }}>
+                                    <RangeSlider
+                                        label={`Brush size: ${brushSize}px`}
+                                        value={brushSize}
+                                        onChange={setBrushSize}
+                                        min={10}
+                                        max={100}
+                                        step={5}
+                                    />
+                                </div>
+                            )}
+
+                            {/* Canvas */}
                             <div style={{ position: "relative", display: "inline-block" }}>
                                 {imageDimensions ? (
                                     <>
                                         <canvas
                                             ref={canvasRef}
-                                            onClick={handleCanvasClick}
+                                            onClick={adjustMode === "click" ? handleCanvasClick : undefined}
+                                            onMouseDown={adjustMode === "draw" ? handleDrawStart : undefined}
+                                            onMouseMove={adjustMode === "draw" ? handleDrawMove : undefined}
+                                            onMouseUp={adjustMode === "draw" ? handleDrawEnd : undefined}
+                                            onMouseLeave={adjustMode === "draw" ? handleDrawEnd : undefined}
+                                            onTouchStart={adjustMode === "draw" ? handleDrawStart : undefined}
+                                            onTouchMove={adjustMode === "draw" ? handleDrawMove : undefined}
+                                            onTouchEnd={adjustMode === "draw" ? handleDrawEnd : undefined}
                                             style={{
                                                 display: "block",
                                                 border: "2px solid #2563eb",
                                                 borderRadius: "8px",
-                                                cursor: isLoading ? "wait" : "crosshair",
+                                                cursor: isLoading ? "wait" : (adjustMode === "click" ? "crosshair" : "cell"),
+                                                touchAction: "none",
                                             }}
                                         />
-                                        {maskOverlayUrl && (
+                                        {/* Hidden mask canvas for drawing */}
+                                        <canvas ref={maskCanvasRef} style={{ display: "none" }} />
+
+                                        {/* SAM overlay */}
+                                        {adjustMode === "click" && maskOverlayUrl && (
                                             <img
                                                 src={maskOverlayUrl}
                                                 alt="Preview"
@@ -526,6 +737,8 @@ export function ManualSegmentModal({
                                                 }}
                                             />
                                         )}
+
+                                        {/* Loading overlay */}
                                         {isLoading && (
                                             <div style={{
                                                 position: "absolute",
@@ -558,25 +771,45 @@ export function ManualSegmentModal({
                                 )}
                             </div>
 
+                            {/* Status */}
                             <Text variant="bodySm" tone="subdued">
-                                {points.length === 0
-                                    ? "Click on the product to start"
-                                    : `${points.length} point${points.length > 1 ? "s" : ""} • Green = keep, Red = remove`}
+                                {adjustMode === "click"
+                                    ? (points.length === 0
+                                        ? "Click on the product to start"
+                                        : `${points.length} point${points.length > 1 ? "s" : ""} • Green = keep, Red = remove`)
+                                    : "Paint over the product you want to keep"}
                             </Text>
 
                             {/* Action buttons */}
                             <InlineStack gap="200">
-                                <Button
-                                    variant="primary"
-                                    onClick={handleApplySelection}
-                                    loading={applyFetcher.state !== "idle"}
-                                    disabled={points.length === 0}
-                                >
-                                    Apply Selection
-                                </Button>
-                                <Button onClick={handleUndo} disabled={points.length === 0 || isLoading}>
-                                    Undo
-                                </Button>
+                                {adjustMode === "click" ? (
+                                    <>
+                                        <Button
+                                            variant="primary"
+                                            onClick={handleApplySAM}
+                                            loading={applyFetcher.state !== "idle"}
+                                            disabled={points.length === 0}
+                                        >
+                                            Apply Selection
+                                        </Button>
+                                        <Button onClick={handleUndo} disabled={points.length === 0 || isLoading}>
+                                            Undo
+                                        </Button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Button
+                                            variant="primary"
+                                            onClick={handleApplyDrawn}
+                                            loading={maskFetcher.state !== "idle"}
+                                        >
+                                            Apply Drawing
+                                        </Button>
+                                        <Button onClick={handleClearDrawing} disabled={isLoading}>
+                                            Clear
+                                        </Button>
+                                    </>
+                                )}
                                 <Button onClick={() => setStep("auto")}>
                                     Back
                                 </Button>
