@@ -26,6 +26,7 @@ export const action = async ({ request }) => {
 
         const formData = await request.formData();
         const productId = formData.get("productId")?.toString();
+        const imageUrl = formData.get("imageUrl")?.toString(); // Optional: direct URL from modal
 
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
@@ -42,22 +43,44 @@ export const action = async ({ request }) => {
             return json({ success: false, error: "Shop not found" }, { status: 404 });
         }
 
-        // Get existing asset for this product
-        const asset = await prisma.productAsset.findFirst({
+        // Get existing asset or create one
+        let asset = await prisma.productAsset.findFirst({
             where: {
                 shopId: shop.id,
                 productId: productId,
             },
         });
 
-        if (!asset?.sourceImageUrl) {
-            return json({ success: false, error: "Product asset not found" }, { status: 404 });
+        // Determine source image URL - prefer passed URL, fallback to asset
+        const sourceImageUrl = imageUrl || asset?.sourceImageUrl;
+
+        if (!sourceImageUrl) {
+            return json({ success: false, error: "No image URL provided" }, { status: 400 });
+        }
+
+        // Create asset if it doesn't exist
+        if (!asset) {
+            asset = await prisma.productAsset.create({
+                data: {
+                    shopId: shop.id,
+                    productId: productId,
+                    sourceImageUrl: sourceImageUrl,
+                    status: "processing",
+                },
+            });
+            logger.info(logContext, `Created new ProductAsset for product ${productId}`);
+        } else if (imageUrl && imageUrl !== asset.sourceImageUrl) {
+            // Update source if a different image was selected
+            await prisma.productAsset.update({
+                where: { id: asset.id },
+                data: { sourceImageUrl: imageUrl },
+            });
         }
 
         // Remove background with Prodia - fast!
         logger.info({ ...logContext, stage: "processing" }, `Removing background with Prodia...`);
 
-        const result = await removeBackgroundFast(asset.sourceImageUrl, requestId);
+        const result = await removeBackgroundFast(sourceImageUrl, requestId);
 
         // Upload to GCS
         const preparedImageKey = `shops/${shop.id}/products/${productId}/prepared-${Date.now()}.png`;

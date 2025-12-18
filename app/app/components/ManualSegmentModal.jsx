@@ -122,12 +122,13 @@ export function ManualSegmentModal({
 
         const formData = new FormData();
         formData.append("productId", productId);
+        formData.append("imageUrl", selectedImageUrl); // Send the selected image URL
 
         autoFetcher.submit(formData, {
             method: "post",
             action: "/api/products/remove-background",
         });
-    }, [productId, autoFetcher, startProgress]);
+    }, [productId, selectedImageUrl, autoFetcher, startProgress]);
 
     // Handle auto result
     useEffect(() => {
