@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.26';
+    const VERSION = '1.0.27';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // --- DOM Elements ---
@@ -199,14 +199,17 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
-    // Canvas drawing - pointer events with complete isolation
+    // Canvas drawing - pointer events with CAPTURE to prevent button clicks
     let justFinishedDrawing = false;
 
     if (maskCanvas) {
-        maskCanvas.style.touchAction = 'none'; // Prevent browser gestures
+        maskCanvas.style.touchAction = 'none';
 
         maskCanvas.addEventListener('pointerdown', (e) => {
             e.stopPropagation();
+            e.preventDefault();
+            // CAPTURE all pointer events to this canvas while drawing
+            maskCanvas.setPointerCapture(e.pointerId);
             startDraw(e);
         });
 
@@ -217,25 +220,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
         maskCanvas.addEventListener('pointerup', (e) => {
             e.stopPropagation();
+            e.preventDefault();
+            maskCanvas.releasePointerCapture(e.pointerId);
             if (isDrawing) {
                 justFinishedDrawing = true;
-                // Clear after microtask (not a timer - just next event loop)
-                Promise.resolve().then(() => { justFinishedDrawing = false; });
-            }
-            stopDraw(e);
-        });
-
-        maskCanvas.addEventListener('pointerleave', (e) => {
-            e.stopPropagation();
-            if (isDrawing) {
-                justFinishedDrawing = true;
-                Promise.resolve().then(() => { justFinishedDrawing = false; });
+                // Clear after 2 frames (catches any synthetic click)
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        justFinishedDrawing = false;
+                    });
+                });
             }
             stopDraw(e);
         });
 
         maskCanvas.addEventListener('pointercancel', (e) => {
             e.stopPropagation();
+            maskCanvas.releasePointerCapture(e.pointerId);
             stopDraw(e);
         });
     }
