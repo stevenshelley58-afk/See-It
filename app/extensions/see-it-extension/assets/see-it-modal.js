@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.28';
+    const VERSION = '1.0.29';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // --- DOM Elements ---
@@ -199,13 +199,12 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
-    // Canvas drawing - disable Remove button via CSS during drawing
+    // Canvas drawing with pointer events
     if (maskCanvas) {
         maskCanvas.style.touchAction = 'none';
 
         maskCanvas.addEventListener('pointerdown', (e) => {
-            // Disable Remove button entirely while drawing
-            if (btnRemove) btnRemove.style.pointerEvents = 'none';
+            console.log('[See It] Canvas pointerdown', { pointerId: e.pointerId, pointerType: e.pointerType });
             startDraw(e);
         });
 
@@ -214,16 +213,13 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         maskCanvas.addEventListener('pointerup', (e) => {
+            console.log('[See It] Canvas pointerup', { pointerId: e.pointerId });
             stopDraw(e);
-            // Re-enable button after 100ms
-            setTimeout(() => {
-                if (btnRemove) btnRemove.style.pointerEvents = '';
-            }, 100);
         });
 
         maskCanvas.addEventListener('pointercancel', (e) => {
+            console.log('[See It] Canvas pointercancel');
             stopDraw(e);
-            if (btnRemove) btnRemove.style.pointerEvents = '';
         });
     }
 
@@ -433,8 +429,16 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // REMOVE BUTTON - simple click handler
-    btnRemove?.addEventListener('click', async () => {
+    // REMOVE BUTTON - with debugging
+    btnRemove?.addEventListener('click', async (e) => {
+        console.log('[See It] REMOVE BUTTON CLICKED', {
+            disabled: btnRemove.disabled,
+            isTrusted: e.isTrusted,
+            pointerType: e.pointerType,
+            isDrawing: isDrawing,
+            strokes: strokes.length,
+            uploadComplete: state.uploadComplete
+        });
         if (btnRemove.disabled) return;
         await doRemove();
     });
