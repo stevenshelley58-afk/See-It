@@ -347,6 +347,11 @@
   width: auto;
 }
 
+/* Prevent Remove button from receiving clicks during/after drawing */
+.see-it-remove-btn:disabled {
+  pointer-events: none;
+}
+
 .see-it-loading-overlay {
   position: absolute;
   top: 0;

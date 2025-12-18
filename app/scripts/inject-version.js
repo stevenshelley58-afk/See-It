@@ -31,19 +31,16 @@ liquidContent = liquidContent.replace(
 writeFileSync(liquidPath, liquidContent, 'utf-8');
 console.log(`[Version Inject] Updated ${liquidPath}`);
 
-// Also update JS if it has version
+// Also update JS VERSION constant (if present)
 const jsPath = join(__dirname, '..', 'extensions', 'see-it-extension', 'assets', 'see-it-modal.js');
 let jsContent = readFileSync(jsPath, 'utf-8');
 
-// Check if there's a version constant to update
-if (jsContent.includes('VERSION') || jsContent.includes('version')) {
-    // Only update if there's a clear version pattern
-    const versionPattern = /(const|let|var)\s+VERSION\s*=\s*['"][\d.]+['"]/;
-    if (versionPattern.test(jsContent)) {
-        jsContent = jsContent.replace(versionPattern, `const VERSION = '${version}'`);
-        writeFileSync(jsPath, jsContent, 'utf-8');
-        console.log(`[Version Inject] Updated ${jsPath}`);
-    }
+// Only update if there's a clear VERSION pattern (avoid accidental replacements)
+const versionPattern = /(const|let|var)\s+VERSION\s*=\s*['"][\d.]+['"]/;
+if (versionPattern.test(jsContent)) {
+    jsContent = jsContent.replace(versionPattern, `const VERSION = '${version}'`);
+    writeFileSync(jsPath, jsContent, 'utf-8');
+    console.log(`[Version Inject] Updated ${jsPath}`);
 }
 
 console.log(`[Version Inject] Complete! Version ${version} injected.`);

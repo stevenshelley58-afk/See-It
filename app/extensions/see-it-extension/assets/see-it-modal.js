@@ -1,4 +1,7 @@
 document.addEventListener('DOMContentLoaded', function () {
+    const VERSION = '1.0.24';
+    console.log('[See It] see-it-modal.js loaded', { VERSION });
+
     // --- DOM Elements ---
     const $ = id => document.getElementById(id);
     const trigger = $('see-it-trigger');
@@ -23,7 +26,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const cameraInput = $('see-it-camera-input');
 
     // Edit
-    const canvasWrapper = $('see-it-canvas-wrapper');
     const roomPreview = $('see-it-room-preview');
     const maskCanvas = $('see-it-mask-canvas');
     const btnConfirmRoom = $('see-it-confirm-room');
@@ -67,17 +69,11 @@ document.addEventListener('DOMContentLoaded', function () {
         uploadComplete: false
     };
 
-    // Canvas state - SIMPLIFIED
+    // Canvas state
     let ctx = null;
     let isDrawing = false;
-    let strokes = []; // Store strokes for undo, not full canvas state
-    const BRUSH_SIZE = 35;
+    let strokes = [];
     const BRUSH_COLOR = 'rgba(138, 43, 226, 0.7)';
-    
-    // Click suppression: prevent accidental clicks after drawing
-    let lastDrawEndTime = 0;
-    const CLICK_COOLDOWN_MS = 250; // Ignore clicks for 250ms after drawing ends
-    let activePointerId = null; // Track active pointer for capture
 
     const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
 
@@ -113,17 +109,15 @@ document.addEventListener('DOMContentLoaded', function () {
         uploadIndicator?.classList.toggle('hidden', !state.isUploading);
     };
 
-    // --- Canvas Drawing (SIMPLIFIED) ---
+    // --- Canvas Drawing ---
     const initCanvas = () => {
         if (!maskCanvas || !roomPreview) return;
 
-        // Wait for image
         if (!roomPreview.complete || !roomPreview.naturalWidth) {
             roomPreview.onload = initCanvas;
             return;
         }
 
-        // SIMPLE: Canvas matches natural image size, CSS scales it
         const natW = roomPreview.naturalWidth;
         const natH = roomPreview.naturalHeight;
 
@@ -134,7 +128,6 @@ document.addEventListener('DOMContentLoaded', function () {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.strokeStyle = BRUSH_COLOR;
-        // Scale brush relative to image size (bigger images need bigger brush)
         ctx.lineWidth = Math.max(20, Math.min(60, natW / 15));
 
         ctx.clearRect(0, 0, natW, natH);
@@ -146,13 +139,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const getCanvasPos = (e) => {
         const rect = maskCanvas.getBoundingClientRect();
-        const touch =
-            (e.touches && e.touches[0]) ||
-            (e.changedTouches && e.changedTouches[0]) ||
-            null;
+        const touch = e.touches?.[0] || e.changedTouches?.[0] || null;
         const clientX = touch ? touch.clientX : e.clientX;
         const clientY = touch ? touch.clientY : e.clientY;
-        // Scale from CSS size to canvas size
         const scaleX = maskCanvas.width / rect.width;
         const scaleY = maskCanvas.height / rect.height;
         return {
@@ -166,7 +155,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const startDraw = (e) => {
         if (!ctx) return;
         e.preventDefault();
-        e.stopPropagation(); // Prevent event bubbling to buttons
         isDrawing = true;
         currentStroke = [];
         const pos = getCanvasPos(e);
@@ -175,15 +163,11 @@ document.addEventListener('DOMContentLoaded', function () {
         ctx.moveTo(pos.x, pos.y);
         ctx.lineTo(pos.x + 0.1, pos.y + 0.1);
         ctx.stroke();
-        
-        // Log for debugging
-        console.log('[See It] Drawing started', { pointerId: e.pointerId, type: e.type });
     };
 
     const draw = (e) => {
         if (!isDrawing || !ctx) return;
         e.preventDefault();
-        e.stopPropagation(); // Prevent event bubbling
         const pos = getCanvasPos(e);
         currentStroke.push(pos);
         ctx.lineTo(pos.x, pos.y);
@@ -195,22 +179,14 @@ document.addEventListener('DOMContentLoaded', function () {
     const stopDraw = (e) => {
         if (!isDrawing) return;
         isDrawing = false;
-        if (e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
         if (currentStroke.length > 0) {
             strokes.push([...currentStroke]);
             currentStroke = [];
         }
         ctx?.beginPath();
-        lastDrawEndTime = Date.now(); // Record when drawing ended for cooldown
-        activePointerId = null;
         updateButtons();
-        console.log('[See It] Drawing stopped', { strokes: strokes.length, time: lastDrawEndTime });
     };
 
-    // Redraw all strokes
     const redrawStrokes = () => {
         if (!ctx) return;
         ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
@@ -223,42 +199,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
+    // Canvas event listeners - simple mouse/touch handling
     if (maskCanvas) {
-        // Prefer Pointer Events when available (prevents "mouse up outside canvas" issues)
-        if (window.PointerEvent) {
-            maskCanvas.addEventListener('pointerdown', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                activePointerId = e.pointerId;
-                try { 
-                    maskCanvas.setPointerCapture(e.pointerId);
-                    console.log('[See It] Pointer captured', e.pointerId);
-                } catch (err) {
-                    console.warn('[See It] Pointer capture failed', err);
-                }
-                startDraw(e);
-            });
-            maskCanvas.addEventListener('pointermove', draw);
-            maskCanvas.addEventListener('pointerup', (e) => {
-                if (e.pointerId === activePointerId) {
-                    try { maskCanvas.releasePointerCapture(e.pointerId); } catch {}
-                    stopDraw(e);
-                }
-            });
-            maskCanvas.addEventListener('pointercancel', (e) => {
-                if (e.pointerId === activePointerId) {
-                    try { maskCanvas.releasePointerCapture(e.pointerId); } catch {}
-                    stopDraw(e);
-                }
-            });
-            // Fallback safety: if something goes wrong with capture, still stop drawing
-            const globalPointerUp = (e) => {
-                if (e.pointerId === activePointerId) {
-                    stopDraw(e);
-                }
-            };
-            window.addEventListener('pointerup', globalPointerUp);
-        } else {
         maskCanvas.addEventListener('mousedown', startDraw);
         maskCanvas.addEventListener('mousemove', draw);
         maskCanvas.addEventListener('mouseup', stopDraw);
@@ -267,21 +209,6 @@ document.addEventListener('DOMContentLoaded', function () {
         maskCanvas.addEventListener('touchmove', draw, { passive: false });
         maskCanvas.addEventListener('touchend', stopDraw);
         maskCanvas.addEventListener('touchcancel', stopDraw);
-            // Fallback: ensure strokes are committed even if finger/mouse ends outside canvas
-            window.addEventListener('mouseup', stopDraw);
-            window.addEventListener('touchend', stopDraw);
-            window.addEventListener('touchcancel', stopDraw);
-        }
-        
-        // Suppress clicks on canvas during/after drawing
-        maskCanvas.addEventListener('click', (e) => {
-            const timeSinceDrawEnd = Date.now() - lastDrawEndTime;
-            if (isDrawing || timeSinceDrawEnd < CLICK_COOLDOWN_MS) {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('[See It] Click suppressed', { isDrawing, timeSinceDrawEnd });
-            }
-        }, true); // Use capture phase to catch early
     }
 
     btnUndo?.addEventListener('click', () => {
@@ -298,39 +225,26 @@ document.addEventListener('DOMContentLoaded', function () {
         updateButtons();
     });
 
-    // Generate mask: white on black, at natural image resolution
-    // White = areas to REMOVE (inpaint), Black = areas to KEEP
+    // Generate mask
     const generateMask = () => {
-        if (!maskCanvas || !ctx) {
-            console.error('[See It] generateMask: canvas or context not ready');
-            return null;
-        }
+        if (!maskCanvas || !ctx) return null;
 
         const w = maskCanvas.width;
         const h = maskCanvas.height;
-
-        if (w === 0 || h === 0) {
-            console.error('[See It] generateMask: canvas has zero dimensions');
-            return null;
-        }
-
-        console.log(`[See It] Generating mask: ${w}x${h}, strokes: ${strokes.length}`);
+        if (w === 0 || h === 0) return null;
 
         const out = document.createElement('canvas');
         out.width = w;
         out.height = h;
         const outCtx = out.getContext('2d');
 
-        // Start with black background (areas to KEEP)
         outCtx.fillStyle = '#000000';
         outCtx.fillRect(0, 0, w, h);
 
-        // Redraw strokes in solid white on the output canvas
-        // This ensures clean, solid mask regions
         outCtx.strokeStyle = '#FFFFFF';
         outCtx.lineCap = 'round';
         outCtx.lineJoin = 'round';
-        outCtx.lineWidth = ctx.lineWidth; // Use same brush size
+        outCtx.lineWidth = ctx.lineWidth;
 
         strokes.forEach(stroke => {
             if (stroke.length === 0) return;
@@ -340,25 +254,7 @@ document.addEventListener('DOMContentLoaded', function () {
             outCtx.stroke();
         });
 
-        // Count white pixels for debugging and validation
-        const imgData = outCtx.getImageData(0, 0, w, h);
-        let whitePixels = 0;
-        for (let i = 0; i < imgData.data.length; i += 4) {
-            if (imgData.data[i] > 128) whitePixels++;
-        }
-        const coverage = ((whitePixels / (w * h)) * 100).toFixed(2);
-        console.log(`[See It] Mask generated: ${whitePixels} white pixels, ${coverage}% coverage`);
-
-        // Validate mask has content
-        if (whitePixels === 0) {
-            console.error('[See It] generateMask: mask is empty (no white pixels)');
-            return null;
-        }
-
-        const dataUrl = out.toDataURL('image/png');
-        console.log(`[See It] Mask data URL length: ${dataUrl.length}`);
-
-        return dataUrl;
+        return out.toDataURL('image/png');
     };
 
     // --- API ---
@@ -389,9 +285,6 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const cleanupWithMask = async (maskDataUrl) => {
-        const requestId = `cleanup-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-        console.log('[See It] cleanupWithMask called', { requestId, sessionId: state.sessionId, maskLength: maskDataUrl?.length });
-        
         const res = await fetch('/apps/see-it/room/cleanup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -401,24 +294,16 @@ document.addEventListener('DOMContentLoaded', function () {
             })
         });
         
-        console.log('[See It] cleanupWithMask response', { requestId, status: res.status, ok: res.ok });
-        
         if (!res.ok) {
             let errorMessage = 'Cleanup failed';
             try {
                 const err = await res.json();
-                errorMessage = err.message || err.status || errorMessage;
-                console.error('[See It] cleanupWithMask error response', { requestId, error: err });
-            } catch (parseErr) {
-                console.error('[See It] cleanupWithMask error parse failed', { requestId, status: res.status, parseErr });
-                errorMessage = `Server error (${res.status})`;
-            }
+                errorMessage = err.message || errorMessage;
+            } catch {}
             throw new Error(errorMessage);
         }
         
-        const result = await res.json();
-        console.log('[See It] cleanupWithMask success', { requestId, hasResult: !!result });
-        return result;
+        return res.json();
     };
 
     const fetchPreparedProduct = async (productId) => {
@@ -433,7 +318,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- Flow ---
     trigger?.addEventListener('click', async () => {
         modal.classList.remove('hidden');
-        resetError(); // Clear any previous errors
+        resetError();
         state.productId = trigger.dataset.productId || state.productId;
 
         const preparedUrl = await fetchPreparedProduct(state.productId);
@@ -460,13 +345,11 @@ document.addEventListener('DOMContentLoaded', function () {
         const file = e.target.files[0];
         if (!file) return;
 
-        // Reset
         state.cleanedRoomImageUrl = null;
         state.originalRoomImageUrl = null;
         state.sessionId = null;
         state.uploadComplete = false;
 
-        // Instant preview
         const reader = new FileReader();
         reader.onload = (ev) => {
             state.localImageDataUrl = ev.target.result;
@@ -476,7 +359,6 @@ document.addEventListener('DOMContentLoaded', function () {
         };
         reader.readAsDataURL(file);
 
-        // Background upload
         state.isUploading = true;
         updateUploadIndicator();
         updateButtons();
@@ -505,7 +387,6 @@ document.addEventListener('DOMContentLoaded', function () {
     uploadInput?.addEventListener('change', handleFile);
     cameraInput?.addEventListener('change', handleFile);
 
-    // Edit step
     btnBackToWelcome?.addEventListener('click', () => showStep(stepWelcome));
 
     btnConfirmRoom?.addEventListener('click', () => {
@@ -519,7 +400,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const check = setInterval(() => {
                 if (!state.isUploading) {
                     clearInterval(check);
-                    btnConfirmRoom.textContent = 'Continue →';
+                    btnConfirmRoom.textContent = 'Continue';
                     btnConfirmRoom.disabled = false;
                     if (state.uploadComplete) proceed();
                 }
@@ -536,70 +417,72 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // Remove (magic eraser) - with click suppression
-    btnRemove?.addEventListener('click', async (e) => {
-        // Suppress clicks that happen too soon after drawing ends
-        const timeSinceDrawEnd = Date.now() - lastDrawEndTime;
-        if (timeSinceDrawEnd < CLICK_COOLDOWN_MS) {
-            console.log('[See It] Remove click suppressed (cooldown)', { timeSinceDrawEnd, cooldown: CLICK_COOLDOWN_MS });
+    // ============================================================
+    // REMOVE BUTTON - Simple: mousedown/mouseup, NOT click
+    // This avoids synthetic click events from touch/trackpad
+    // ============================================================
+    let removeButtonDown = false;
+
+    if (btnRemove) {
+        // Only trigger on deliberate press+release ON the button
+        btnRemove.addEventListener('mousedown', (e) => {
+            if (btnRemove.disabled) return;
+            removeButtonDown = true;
+        });
+
+        btnRemove.addEventListener('mouseup', async (e) => {
+            if (!removeButtonDown || btnRemove.disabled) return;
+            removeButtonDown = false;
+            await doRemove();
+        });
+
+        // Cancel if mouse leaves button while pressed
+        btnRemove.addEventListener('mouseleave', () => {
+            removeButtonDown = false;
+        });
+
+        // Touch support
+        btnRemove.addEventListener('touchstart', (e) => {
+            if (btnRemove.disabled) return;
+            e.preventDefault(); // Prevent synthetic click
+            removeButtonDown = true;
+        }, { passive: false });
+
+        btnRemove.addEventListener('touchend', async (e) => {
+            if (!removeButtonDown || btnRemove.disabled) return;
             e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            return;
-        }
-        
-        // Suppress if currently drawing
-        if (isDrawing) {
-            console.log('[See It] Remove click suppressed (drawing active)');
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            return;
-        }
-        
+            removeButtonDown = false;
+            await doRemove();
+        }, { passive: false });
+
+        btnRemove.addEventListener('touchcancel', () => {
+            removeButtonDown = false;
+        });
+    }
+
+    async function doRemove() {
         if (state.isCleaningUp || !state.sessionId || strokes.length === 0 || !state.uploadComplete) {
-            console.log('[See It] Remove blocked', { isCleaningUp: state.isCleaningUp, hasSession: !!state.sessionId, hasStrokes: strokes.length > 0, uploadComplete: state.uploadComplete });
             return;
         }
 
-        const requestId = `cleanup-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-        console.log('[See It] Remove clicked', { requestId, strokes: strokes.length });
+        console.log('[See It] Remove triggered', { strokes: strokes.length });
 
         state.isCleaningUp = true;
         cleanupLoading?.classList.remove('hidden');
         btnRemove.disabled = true;
         btnRemove.textContent = 'Removing...';
-        btnUndo && (btnUndo.disabled = true);
-        btnClear && (btnClear.disabled = true);
-        btnConfirmRoom && (btnConfirmRoom.disabled = false); // Keep Continue enabled so user can skip if cleanup fails
-        
-        // Store strokes backup in case cleanup fails (so user can retry)
+        if (btnUndo) btnUndo.disabled = true;
+        if (btnClear) btnClear.disabled = true;
+
         const strokesBackup = JSON.parse(JSON.stringify(strokes));
-        
-        // Add timeout for cleanup request
-        const CLEANUP_TIMEOUT_MS = 60000; // 60 seconds
-        let timeoutId = null;
-        const timeoutPromise = new Promise((_, reject) => {
-            timeoutId = setTimeout(() => {
-                reject(new Error('Cleanup timed out after 60 seconds. Please try again.'));
-            }, CLEANUP_TIMEOUT_MS);
-        });
 
         try {
             const mask = generateMask();
             if (!mask) {
-                throw new Error('Failed to generate mask. Please draw over the area to remove.');
+                throw new Error('Failed to generate mask');
             }
-            
-            console.log('[See It] Calling cleanup API', { requestId, maskLength: mask.length });
-            const result = await Promise.race([
-                cleanupWithMask(mask),
-                timeoutPromise
-            ]);
-            
-            if (timeoutId) clearTimeout(timeoutId);
-            
-            console.log('[See It] Cleanup API success', { requestId, hasResult: !!result });
+
+            const result = await cleanupWithMask(mask);
             state.cleanedRoomImageUrl = result.cleaned_room_image_url;
 
             if (roomPreview) {
@@ -608,28 +491,21 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             if (roomImage) roomImage.src = state.cleanedRoomImageUrl;
 
-            // Only clear strokes on success
             strokes = [];
             ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-            console.log('[See It] Cleanup done', { requestId });
+            console.log('[See It] Cleanup done');
         } catch (err) {
-            if (timeoutId) clearTimeout(timeoutId);
-            console.error('[See It] Cleanup error', { requestId, error: err.message, stack: err.stack });
-            
-            // Restore strokes on failure so user can retry
+            console.error('[See It] Cleanup error:', err);
             strokes = strokesBackup;
             redrawStrokes();
-            
-            showError('Remove failed: ' + (err.message || 'Unknown error. Please try again.'));
+            showError('Remove failed: ' + err.message);
         } finally {
             state.isCleaningUp = false;
             cleanupLoading?.classList.add('hidden');
             btnRemove.textContent = 'Remove';
-            btnConfirmRoom && (btnConfirmRoom.disabled = false);
             updateButtons();
-            console.log('[See It] Cleanup UI reset', { requestId });
         }
-    });
+    }
 
     // Place product
     const updateTransform = () => {
