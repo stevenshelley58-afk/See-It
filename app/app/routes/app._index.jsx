@@ -57,25 +57,11 @@ export const loader = async ({ request }) => {
     where: { shopId: shop.id, status: "completed" }
   });
 
-  // Get unique customers who used it
-  let customersUsed = 0;
-  try {
-    const uniqueResult = await prisma.renderJob.groupBy({
-      by: ['customerSessionId'],
-      where: { shopId: shop.id, status: "completed", customerSessionId: { not: null } }
-    });
-    customersUsed = uniqueResult.length;
-  } catch (e) {
-    customersUsed = Math.round(totalRenders * 0.35); // Fallback estimate
-  }
+  // Customer uses = total completed renders (each render is a customer use)
+  const customersUsed = totalRenders;
 
-  // Get leads generated
-  let leadsGenerated = 0;
-  try {
-    leadsGenerated = await prisma.leadCapture.count({ where: { shopId: shop.id } });
-  } catch (e) {
-    leadsGenerated = 0;
-  }
+  // Get leads generated (feature not yet implemented)
+  const leadsGenerated = 0;
 
   // Get products ready
   const productsReady = await prisma.productAsset.count({
@@ -173,7 +159,7 @@ export default function Index() {
             Dashboard
           </h1>
           <p className="text-neutral-500 text-sm mt-0.5 md:mt-1">
-            Your AR visualization performance at a glance
+            Your product visualization performance at a glance
           </p>
         </div>
 
@@ -181,7 +167,7 @@ export default function Index() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
           <StatCard label="Customer Uses" value={stats.customersUsed} subtitle="All time" highlight compact />
           <StatCard label="Leads Generated" value={stats.leadsGenerated} subtitle="From visualizations" compact />
-          <StatCard label="Products Ready" value={stats.productsReady} subtitle="Available for AR" compact />
+          <StatCard label="Products Ready" value={stats.productsReady} subtitle="Available to visualize" compact />
           <StatCard label="Success Rate" value={`${stats.successRate}%`} subtitle="Render completion" compact />
         </div>
 

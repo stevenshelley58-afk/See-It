@@ -48,13 +48,8 @@ export const loader = async ({ request }) => {
     // Calculate average per product
     const avgPerProduct = totalProducts > 0 ? (totalVisualizations / totalProducts).toFixed(1) : "0";
 
-    // Get leads collected
-    let leadsCount = 0;
-    try {
-        leadsCount = await prisma.leadCapture.count({ where: { shopId: shop.id } });
-    } catch (e) {
-        leadsCount = 0;
-    }
+    // Get leads collected (feature not yet implemented)
+    const leadsCount = 0;
 
     // Calculate lead conversion rate (simplified: leads / total visualizations * 100)
     const leadConversion = totalVisualizations > 0 ? ((leadsCount / totalVisualizations) * 100).toFixed(1) : "0";
