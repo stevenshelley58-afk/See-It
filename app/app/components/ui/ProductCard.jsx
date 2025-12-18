@@ -22,7 +22,7 @@ export function ProductCard({
   const isFailed = status === "failed";
   
   return (
-    <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
       <div className="aspect-square bg-neutral-50 relative overflow-hidden">
         {product.featuredImage ? (
           <img 

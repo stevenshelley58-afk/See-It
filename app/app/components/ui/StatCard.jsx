@@ -5,10 +5,10 @@
  */
 export function StatCard({ label, value, subtitle, highlight = false, compact = false }) {
   return (
-    <div className={`p-4 md:p-6 rounded-xl border ${
+    <div className={`p-4 md:p-6 rounded-xl ${
       highlight 
-        ? 'bg-neutral-900 text-white border-neutral-900' 
-        : 'bg-white border-neutral-200'
+        ? 'bg-neutral-900 text-white' 
+        : 'bg-white shadow-sm'
     }`}>
       <div className={`text-xs md:text-sm mb-0.5 md:mb-1 ${
         highlight ? 'text-neutral-400' : 'text-neutral-500'

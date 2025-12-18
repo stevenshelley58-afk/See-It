@@ -14,7 +14,7 @@ export function Button({
   
   const variantClasses = {
     primary: "bg-neutral-900 text-white active:bg-neutral-800 md:hover:bg-neutral-800",
-    secondary: "border border-neutral-200 text-neutral-700 active:bg-neutral-50 md:hover:bg-neutral-50",
+    secondary: "bg-neutral-100 text-neutral-700 active:bg-neutral-200 md:hover:bg-neutral-200",
   };
   
   const sizeClasses = {
