@@ -3,13 +3,21 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
+import { removeBackgroundFast, isBackgroundRemoverAvailable } from "../services/background-remover.server";
 import sharp from "sharp";
 
 /**
  * POST /api/products/apply-mask
  *
- * Apply a user-painted mask to remove background.
- * Much simpler and faster than SAM - user IS the segmentation model!
+ * SMART mask application - combines user's rough selection with AI edge detection.
+ *
+ * How it works:
+ * 1. User paints roughly over the product they want to keep
+ * 2. We run Prodia AI to get clean, precise edges
+ * 3. We intersect: Prodia's clean edges + user's expanded rough region
+ *
+ * Result: Clean AI edges, constrained to user's selected area.
+ * This handles cases where Prodia keeps multiple objects but user only wants one.
  *
  * Body:
  * - productId: Shopify product ID
@@ -78,38 +86,110 @@ export const action = async ({ request }) => {
         }
         const maskBuffer = Buffer.from(maskBase64, 'base64');
 
-        logger.info({ ...logContext, stage: "processing" }, "Processing image with mask...");
-
         // Get image dimensions
         const imageMetadata = await sharp(imageBuffer).metadata();
         const { width, height } = imageMetadata;
 
-        // Process mask - resize to match image and extract as grayscale
-        const processedMask = await sharp(maskBuffer)
+        // Process user's rough mask - resize to match image
+        logger.info({ ...logContext, stage: "processing-mask" }, "Processing user mask...");
+        const userMaskGray = await sharp(maskBuffer)
             .resize({ width, height, fit: 'fill' })
             .grayscale()
             .raw()
             .toBuffer();
 
-        // Get image as RGBA
+        // Dilate/expand user's mask by ~30px to be generous with selection
+        // This ensures we capture the full object even with rough painting
+        logger.info({ ...logContext, stage: "dilating" }, "Expanding user selection...");
+        const dilatedMask = await sharp(userMaskGray, { raw: { width, height, channels: 1 } })
+            .blur(15)  // Blur expands the mask edges
+            .normalize()  // Re-normalize to 0-255
+            .raw()
+            .toBuffer();
+
+        // Threshold the dilated mask - anything > 10 becomes 255 (generous expansion)
+        const expandedMask = Buffer.alloc(width * height);
+        for (let i = 0; i < width * height; i++) {
+            expandedMask[i] = dilatedMask[i] > 10 ? 255 : 0;
+        }
+
+        let finalAlpha;
+        let resultBuffer;
+
+        // Try to use Prodia for clean edges
+        if (isBackgroundRemoverAvailable()) {
+            logger.info({ ...logContext, stage: "prodia" }, "Running Prodia AI for clean edges...");
+
+            try {
+                // Run Prodia to get clean AI-detected edges
+                const prodiaResult = await removeBackgroundFast(sourceImageUrl, requestId);
+
+                // Extract alpha channel from Prodia result
+                const prodiaRgba = await sharp(prodiaResult.imageBuffer)
+                    .ensureAlpha()
+                    .resize({ width, height, fit: 'fill' })
+                    .raw()
+                    .toBuffer();
+
+                // Extract Prodia's alpha channel
+                const prodiaAlpha = Buffer.alloc(width * height);
+                for (let i = 0; i < width * height; i++) {
+                    prodiaAlpha[i] = prodiaRgba[i * 4 + 3];  // Alpha is 4th channel
+                }
+
+                // INTERSECT: final = Prodia's clean edges AND user's expanded region
+                // This keeps Prodia's precise edges but only in the area user highlighted
+                logger.info({ ...logContext, stage: "intersecting" }, "Combining AI edges with user selection...");
+                finalAlpha = Buffer.alloc(width * height);
+                for (let i = 0; i < width * height; i++) {
+                    // Keep pixel only if BOTH Prodia thinks it's foreground AND user selected this region
+                    finalAlpha[i] = Math.min(prodiaAlpha[i], expandedMask[i]);
+                }
+
+                logger.info({ ...logContext, stage: "prodia-success" }, "Smart edge detection complete");
+
+            } catch (prodiaError) {
+                // Prodia failed - fall back to user's mask directly with some smoothing
+                logger.warn(
+                    { ...logContext, stage: "prodia-fallback" },
+                    `Prodia failed, using direct mask: ${prodiaError.message}`
+                );
+
+                // Apply slight blur to user's mask for softer edges
+                const smoothedMask = await sharp(userMaskGray, { raw: { width, height, channels: 1 } })
+                    .blur(2)
+                    .raw()
+                    .toBuffer();
+                finalAlpha = smoothedMask;
+            }
+        } else {
+            // No Prodia available - use user's mask directly with smoothing
+            logger.info({ ...logContext, stage: "no-prodia" }, "Prodia not available, using direct mask");
+            const smoothedMask = await sharp(userMaskGray, { raw: { width, height, channels: 1 } })
+                .blur(2)
+                .raw()
+                .toBuffer();
+            finalAlpha = smoothedMask;
+        }
+
+        // Get original image as RGBA
         const imageRgba = await sharp(imageBuffer)
             .ensureAlpha()
             .raw()
             .toBuffer();
 
-        // Apply mask as alpha channel (white = opaque, black = transparent)
+        // Apply final alpha channel
         const outputBuffer = Buffer.alloc(width * height * 4);
-
         for (let i = 0; i < width * height; i++) {
             const rgbaIdx = i * 4;
             outputBuffer[rgbaIdx] = imageRgba[rgbaIdx];         // R
             outputBuffer[rgbaIdx + 1] = imageRgba[rgbaIdx + 1]; // G
             outputBuffer[rgbaIdx + 2] = imageRgba[rgbaIdx + 2]; // B
-            outputBuffer[rgbaIdx + 3] = processedMask[i];       // A from mask
+            outputBuffer[rgbaIdx + 3] = finalAlpha[i];          // A from smart mask
         }
 
         // Create final PNG
-        const resultBuffer = await sharp(outputBuffer, {
+        resultBuffer = await sharp(outputBuffer, {
             raw: { width, height, channels: 4 }
         })
             .png()
