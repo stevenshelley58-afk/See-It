@@ -73,7 +73,7 @@
              <input type="file" id="see-it-upload" accept="image/*" style="display: none;" />
              <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
           </div>
-          <div class="see-it-version-badge">See It v1.0.21</div>
+          <div class="see-it-version-badge">See It v1.0.22</div>
         </div>
       </div>
 
@@ -83,25 +83,30 @@
         <p class="see-it-step-description">Paint over anything you want to remove, or skip to place the product.</p>
 
         <div class="see-it-canvas-wrapper" id="see-it-canvas-wrapper">
-          <img id="see-it-room-preview" src="" alt="Room Preview" width="400" height="300" />
+          <img id="see-it-room-preview" src="" alt="Room Preview" />
           <canvas id="see-it-mask-canvas"></canvas>
           <div id="see-it-cleanup-loading" class="see-it-loading-overlay hidden">
             <div class="see-it-spinner"></div>
             <p>Removing...</p>
           </div>
+          <div id="see-it-upload-indicator" class="see-it-upload-badge hidden">
+            <span class="see-it-upload-dot"></span>
+            Uploading...
+          </div>
         </div>
 
-        <!-- Simple Eraser Controls -->
+        <!-- Magic Eraser Controls -->
         <div class="see-it-eraser-controls">
           <div class="see-it-eraser-hint">
-            <span class="see-it-eraser-icon">Draw over what to remove</span>
+            <span class="see-it-brush-icon"></span>
+            <span>Paint over what to remove</span>
           </div>
           <div class="see-it-eraser-actions">
-            <button id="see-it-undo-btn" class="see-it-tool-btn" disabled>
-              Undo
+            <button id="see-it-undo-btn" class="see-it-tool-btn" disabled title="Undo">
+              <span class="see-it-icon-undo"></span> Undo
             </button>
-            <button id="see-it-clear-btn" class="see-it-tool-btn" disabled>
-              Clear
+            <button id="see-it-clear-btn" class="see-it-tool-btn" disabled title="Clear all">
+              <span class="see-it-icon-clear"></span> Clear
             </button>
             <button id="see-it-remove-btn" class="button see-it-primary-btn see-it-remove-btn" disabled>
               Remove
