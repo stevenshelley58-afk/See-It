@@ -44,7 +44,7 @@ export const loader = async ({ request }) => {
         }
     }
 
-    // 1. Fetch Page of Products
+    // 1. Fetch Page of Products (including all images for image selector)
     const response = await admin.graphql(
         `#graphql
         query getProducts($first: Int, $last: Int, $after: String, $before: String) {
@@ -58,6 +58,15 @@ export const loader = async ({ request }) => {
                             id
                             url
                             altText
+                        }
+                        images(first: 10) {
+                            edges {
+                                node {
+                                    id
+                                    url
+                                    altText
+                                }
+                            }
                         }
                     }
                     cursor
@@ -587,10 +596,16 @@ export default function Products() {
                                                             variant="secondary"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
+                                                                // Get all images for this product
+                                                                const allImages = item.images?.edges?.map(edge => ({
+                                                                    url: edge.node.url,
+                                                                    altText: edge.node.altText || title,
+                                                                })) || [];
                                                                 setManualFixProduct({
                                                                     id: id.split('/').pop(),
                                                                     title,
                                                                     sourceImageUrl: featuredImage.url,
+                                                                    images: allImages,
                                                                 });
                                                             }}
                                                         >
@@ -701,6 +716,7 @@ export default function Products() {
                 productId={manualFixProduct?.id}
                 productTitle={manualFixProduct?.title}
                 sourceImageUrl={manualFixProduct?.sourceImageUrl}
+                productImages={manualFixProduct?.images || []}
                 onSuccess={() => {
                     setManualFixProduct(null);
                     revalidator.revalidate();

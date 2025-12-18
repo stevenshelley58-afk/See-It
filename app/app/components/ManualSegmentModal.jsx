@@ -9,17 +9,24 @@ import {
     Banner,
     DropZone,
     Thumbnail,
-    Spinner,
     Box,
+    ProgressBar,
 } from "@shopify/polaris";
+import { PaintBrushCanvas } from "./PaintBrushCanvas";
 
 /**
- * ManualSegmentModal - Simple Canva-style background remover
+ * ManualSegmentModal - Background removal with paint tool
  *
  * Flow:
- * 1. Click "Remove Background" → auto removes in ~3 seconds
- * 2. Preview result
- * 3. Happy? Save. Not happy? Try manual selection or upload your own.
+ * 1. Auto Remove - One click, uses AI (Prodia)
+ * 2. Paint & Remove - User paints what to keep/remove, instant local processing
+ * 3. Upload - User uploads their own transparent PNG
+ * 4. Use Original - Keep the original image
+ *
+ * New features:
+ * - Paint brush tool (replaces click points)
+ * - Image selector (pick from product images)
+ * - Streaming progress indicators
  */
 export function ManualSegmentModal({
     open,
@@ -27,34 +34,96 @@ export function ManualSegmentModal({
     productId,
     productTitle,
     sourceImageUrl,
+    productImages = [], // Array of {url, altText} for image selection
     onSuccess,
 }) {
     const [previewUrl, setPreviewUrl] = useState(null);
     const [processingTime, setProcessingTime] = useState(null);
     const [error, setError] = useState(null);
-    const [mode, setMode] = useState("auto"); // "auto" | "manual" | "upload" | "original"
+    const [mode, setMode] = useState("auto"); // "auto" | "paint" | "upload" | "original"
     const [uploadedFile, setUploadedFile] = useState(null);
 
-    // Manual selection state
-    const [clickPoints, setClickPoints] = useState([]);
-    const [clickMode, setClickMode] = useState(1); // 1 = include, 0 = exclude
-    const imageRef = useRef(null);
+    // Image selection
+    const [selectedImageUrl, setSelectedImageUrl] = useState(sourceImageUrl);
+
+    // Paint mode state
+    const [maskDataUrl, setMaskDataUrl] = useState(null);
+
+    // Progress state for streaming-style updates
+    const [progressStage, setProgressStage] = useState("");
+    const [progressPercent, setProgressPercent] = useState(0);
 
     const autoFetcher = useFetcher();
-    const manualFetcher = useFetcher();
+    const paintFetcher = useFetcher();
     const uploadFetcher = useFetcher();
     const originalFetcher = useFetcher();
 
     const isLoading =
         autoFetcher.state !== "idle" ||
-        manualFetcher.state !== "idle" ||
+        paintFetcher.state !== "idle" ||
         uploadFetcher.state !== "idle" ||
         originalFetcher.state !== "idle";
+
+    // Progress simulation for better UX
+    const progressIntervalRef = useRef(null);
+
+    const startProgress = useCallback((stages) => {
+        let currentStage = 0;
+        let currentPercent = 0;
+
+        const advance = () => {
+            if (currentStage < stages.length) {
+                setProgressStage(stages[currentStage]);
+                currentPercent = Math.min(95, currentPercent + Math.random() * 15 + 5);
+                setProgressPercent(currentPercent);
+
+                if (currentPercent >= (currentStage + 1) * (90 / stages.length)) {
+                    currentStage++;
+                }
+            }
+        };
+
+        // Start immediately
+        advance();
+
+        // Continue advancing
+        progressIntervalRef.current = setInterval(advance, 800);
+    }, []);
+
+    const stopProgress = useCallback((success = true) => {
+        if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
+            progressIntervalRef.current = null;
+        }
+        if (success) {
+            setProgressStage("Complete!");
+            setProgressPercent(100);
+            setTimeout(() => {
+                setProgressStage("");
+                setProgressPercent(0);
+            }, 1000);
+        } else {
+            setProgressStage("");
+            setProgressPercent(0);
+        }
+    }, []);
+
+    // Update selected image when sourceImageUrl changes
+    useEffect(() => {
+        setSelectedImageUrl(sourceImageUrl);
+    }, [sourceImageUrl]);
 
     // Auto remove background - one click!
     const handleAutoRemove = useCallback(() => {
         setError(null);
         setPreviewUrl(null);
+
+        startProgress([
+            "Sending to AI...",
+            "Detecting product...",
+            "Removing background...",
+            "Finalizing...",
+        ]);
 
         const formData = new FormData();
         formData.append("productId", productId);
@@ -63,61 +132,64 @@ export function ManualSegmentModal({
             method: "post",
             action: "/api/products/remove-background",
         });
-    }, [productId, autoFetcher]);
+    }, [productId, autoFetcher, startProgress]);
 
     // Handle auto result
     useEffect(() => {
         if (autoFetcher.data && autoFetcher.state === "idle") {
             if (autoFetcher.data.success) {
+                stopProgress(true);
                 setPreviewUrl(autoFetcher.data.preparedImageUrl);
                 setProcessingTime(autoFetcher.data.processingTimeMs);
             } else if (autoFetcher.data.error) {
+                stopProgress(false);
                 setError(autoFetcher.data.error);
             }
         }
-    }, [autoFetcher.data, autoFetcher.state]);
+    }, [autoFetcher.data, autoFetcher.state, stopProgress]);
 
-    // Manual selection click
-    const handleImageClick = useCallback((e) => {
-        if (isLoading || mode !== "manual") return;
-
-        const rect = imageRef.current.getBoundingClientRect();
-        const x = (e.clientX - rect.left) / rect.width;
-        const y = (e.clientY - rect.top) / rect.height;
-
-        const clickX = Math.max(0, Math.min(1, x));
-        const clickY = Math.max(0, Math.min(1, y));
-
-        setClickPoints(prev => [...prev, { x: clickX, y: clickY, label: clickMode }]);
-    }, [clickMode, isLoading, mode]);
-
-    // Apply manual selection
-    const handleManualApply = useCallback(() => {
-        if (clickPoints.length === 0) {
-            setError("Click on the product first");
+    // Apply painted mask
+    const handlePaintApply = useCallback(() => {
+        if (!maskDataUrl) {
+            setError("Paint on the image first to select what to keep/remove");
             return;
         }
 
+        setError(null);
+        setPreviewUrl(null);
+
+        startProgress([
+            "Processing mask...",
+            "Applying transparency...",
+            "Saving...",
+        ]);
+
         const formData = new FormData();
         formData.append("productId", productId);
-        formData.append("points", JSON.stringify(clickPoints));
+        formData.append("maskDataUrl", maskDataUrl);
+        if (selectedImageUrl !== sourceImageUrl) {
+            formData.append("imageUrl", selectedImageUrl);
+        }
 
-        manualFetcher.submit(formData, {
+        paintFetcher.submit(formData, {
             method: "post",
-            action: "/api/products/segment-apply",
+            action: "/api/products/apply-mask",
         });
-    }, [clickPoints, productId, manualFetcher]);
+    }, [maskDataUrl, productId, selectedImageUrl, sourceImageUrl, paintFetcher, startProgress]);
 
-    // Handle manual result
+    // Handle paint result
     useEffect(() => {
-        if (manualFetcher.data && manualFetcher.state === "idle") {
-            if (manualFetcher.data.success) {
-                setPreviewUrl(manualFetcher.data.preparedImageUrl);
-            } else if (manualFetcher.data.error) {
-                setError(manualFetcher.data.error);
+        if (paintFetcher.data && paintFetcher.state === "idle") {
+            if (paintFetcher.data.success) {
+                stopProgress(true);
+                setPreviewUrl(paintFetcher.data.preparedImageUrl);
+                setProcessingTime(paintFetcher.data.processingTimeMs);
+            } else if (paintFetcher.data.error) {
+                stopProgress(false);
+                setError(paintFetcher.data.error);
             }
         }
-    }, [manualFetcher.data, manualFetcher.state]);
+    }, [paintFetcher.data, paintFetcher.state, stopProgress]);
 
     // Handle file drop
     const handleDrop = useCallback((_dropFiles, acceptedFiles) => {
@@ -131,6 +203,8 @@ export function ManualSegmentModal({
     const handleUploadSubmit = useCallback(() => {
         if (!uploadedFile) return;
 
+        startProgress(["Uploading...", "Processing...", "Saving..."]);
+
         const formData = new FormData();
         formData.append("productId", productId);
         formData.append("image", uploadedFile);
@@ -140,11 +214,12 @@ export function ManualSegmentModal({
             action: "/api/products/upload-prepared",
             encType: "multipart/form-data",
         });
-    }, [productId, uploadedFile, uploadFetcher]);
+    }, [productId, uploadedFile, uploadFetcher, startProgress]);
 
     // Handle upload result
     useEffect(() => {
         if (uploadFetcher.data && uploadFetcher.state === "idle") {
+            stopProgress(uploadFetcher.data.success);
             if (uploadFetcher.data.success) {
                 onSuccess?.();
                 onClose();
@@ -152,10 +227,12 @@ export function ManualSegmentModal({
                 setError(uploadFetcher.data.error);
             }
         }
-    }, [uploadFetcher.data, uploadFetcher.state, onSuccess, onClose]);
+    }, [uploadFetcher.data, uploadFetcher.state, onSuccess, onClose, stopProgress]);
 
     // Use original
     const handleUseOriginal = useCallback(() => {
+        startProgress(["Saving..."]);
+
         const formData = new FormData();
         formData.append("productId", productId);
 
@@ -163,11 +240,12 @@ export function ManualSegmentModal({
             method: "post",
             action: "/api/products/use-original",
         });
-    }, [productId, originalFetcher]);
+    }, [productId, originalFetcher, startProgress]);
 
     // Handle original result
     useEffect(() => {
         if (originalFetcher.data && originalFetcher.state === "idle") {
+            stopProgress(originalFetcher.data.success);
             if (originalFetcher.data.success) {
                 onSuccess?.();
                 onClose();
@@ -175,7 +253,7 @@ export function ManualSegmentModal({
                 setError(originalFetcher.data.error);
             }
         }
-    }, [originalFetcher.data, originalFetcher.state, onSuccess, onClose]);
+    }, [originalFetcher.data, originalFetcher.state, onSuccess, onClose, stopProgress]);
 
     // Confirm and close
     const handleConfirm = useCallback(() => {
@@ -185,23 +263,35 @@ export function ManualSegmentModal({
 
     // Reset state on close
     const handleClose = useCallback(() => {
+        if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
+        }
         setPreviewUrl(null);
         setProcessingTime(null);
         setError(null);
         setMode("auto");
         setUploadedFile(null);
-        setClickPoints([]);
-        setClickMode(1);
+        setMaskDataUrl(null);
+        setProgressStage("");
+        setProgressPercent(0);
+        setSelectedImageUrl(sourceImageUrl);
         onClose();
-    }, [onClose]);
+    }, [onClose, sourceImageUrl]);
 
     // Switch mode and reset
     const switchMode = useCallback((newMode) => {
         setMode(newMode);
         setPreviewUrl(null);
         setError(null);
-        setClickPoints([]);
+        setMaskDataUrl(null);
     }, []);
+
+    // All product images including featured
+    const allImages = productImages.length > 0
+        ? productImages
+        : sourceImageUrl
+            ? [{ url: sourceImageUrl, altText: productTitle }]
+            : [];
 
     return (
         <Modal
@@ -218,7 +308,24 @@ export function ManualSegmentModal({
                         </Banner>
                     )}
 
-                    {/* Mode tabs - subtle, not prominent */}
+                    {/* Progress indicator */}
+                    {progressStage && (
+                        <div style={{ marginBottom: "8px" }}>
+                            <BlockStack gap="200">
+                                <InlineStack align="space-between">
+                                    <Text variant="bodySm" fontWeight="medium">
+                                        {progressStage}
+                                    </Text>
+                                    <Text variant="bodySm" tone="subdued">
+                                        {Math.round(progressPercent)}%
+                                    </Text>
+                                </InlineStack>
+                                <ProgressBar progress={progressPercent} size="small" />
+                            </BlockStack>
+                        </div>
+                    )}
+
+                    {/* Mode tabs */}
                     <InlineStack gap="200">
                         <Button
                             variant={mode === "auto" ? "primary" : "tertiary"}
@@ -229,12 +336,12 @@ export function ManualSegmentModal({
                             Auto Remove
                         </Button>
                         <Button
-                            variant={mode === "manual" ? "primary" : "tertiary"}
-                            onClick={() => switchMode("manual")}
+                            variant={mode === "paint" ? "primary" : "tertiary"}
+                            onClick={() => switchMode("paint")}
                             disabled={isLoading}
                             size="slim"
                         >
-                            Manual Select
+                            Paint & Remove
                         </Button>
                         <Button
                             variant={mode === "upload" ? "primary" : "tertiary"}
@@ -254,6 +361,41 @@ export function ManualSegmentModal({
                         </Button>
                     </InlineStack>
 
+                    {/* Image selector (when multiple images available) */}
+                    {allImages.length > 1 && (mode === "auto" || mode === "paint") && (
+                        <BlockStack gap="200">
+                            <Text variant="bodySm" fontWeight="medium">Select image:</Text>
+                            <InlineStack gap="200" wrap>
+                                {allImages.map((img, idx) => (
+                                    <div
+                                        key={idx}
+                                        onClick={() => !isLoading && setSelectedImageUrl(img.url)}
+                                        style={{
+                                            cursor: isLoading ? "not-allowed" : "pointer",
+                                            border: selectedImageUrl === img.url
+                                                ? "2px solid #2563eb"
+                                                : "1px solid #ddd",
+                                            borderRadius: "6px",
+                                            overflow: "hidden",
+                                            opacity: isLoading ? 0.5 : 1,
+                                        }}
+                                    >
+                                        <img
+                                            src={img.url}
+                                            alt={img.altText || `Image ${idx + 1}`}
+                                            style={{
+                                                width: "60px",
+                                                height: "60px",
+                                                objectFit: "cover",
+                                                display: "block",
+                                            }}
+                                        />
+                                    </div>
+                                ))}
+                            </InlineStack>
+                        </BlockStack>
+                    )}
+
                     {/* AUTO MODE - Simple one-click */}
                     {mode === "auto" && (
                         <BlockStack gap="300">
@@ -270,20 +412,16 @@ export function ManualSegmentModal({
                                         }}
                                     >
                                         <img
-                                            src={sourceImageUrl}
+                                            src={selectedImageUrl}
                                             alt={productTitle}
                                             style={{ display: "block", width: "100%", height: "auto" }}
                                         />
                                     </div>
                                 </Box>
 
-                                {/* Arrow or processing indicator */}
+                                {/* Arrow */}
                                 <Box paddingBlockStart="800">
-                                    {isLoading ? (
-                                        <Spinner size="small" />
-                                    ) : (
-                                        <Text variant="headingLg">→</Text>
-                                    )}
+                                    <Text variant="headingLg">→</Text>
                                 </Box>
 
                                 {/* Result preview */}
@@ -339,6 +477,9 @@ export function ManualSegmentModal({
                                         <Button onClick={handleAutoRemove} loading={autoFetcher.state !== "idle"}>
                                             Try Again
                                         </Button>
+                                        <Button onClick={() => switchMode("paint")}>
+                                            Fix Manually
+                                        </Button>
                                     </>
                                 )}
                             </InlineStack>
@@ -351,94 +492,26 @@ export function ManualSegmentModal({
                         </BlockStack>
                     )}
 
-                    {/* MANUAL MODE - Click to select */}
-                    {mode === "manual" && (
+                    {/* PAINT MODE - Brush tool */}
+                    {mode === "paint" && (
                         <BlockStack gap="300">
-                            <Text variant="bodyMd">
-                                Click on the product to include it. Use exclude mode to remove unwanted areas.
-                            </Text>
+                            <Banner tone="info">
+                                <p>Paint green over what you want to <strong>KEEP</strong>. Paint red over what you want to <strong>REMOVE</strong>. Then click "Apply".</p>
+                            </Banner>
 
-                            <InlineStack gap="200" align="center">
-                                <Button
-                                    pressed={clickMode === 1}
-                                    onClick={() => setClickMode(1)}
-                                    size="slim"
-                                >
-                                    + Include
-                                </Button>
-                                <Button
-                                    pressed={clickMode === 0}
-                                    onClick={() => setClickMode(0)}
-                                    size="slim"
-                                >
-                                    − Exclude
-                                </Button>
-                                <Button
-                                    onClick={() => setClickPoints([])}
-                                    disabled={clickPoints.length === 0}
-                                    size="slim"
-                                >
-                                    Clear
-                                </Button>
-                            </InlineStack>
-
-                            <InlineStack gap="400" align="start" wrap={false}>
-                                {/* Clickable image */}
+                            <InlineStack gap="400" align="start" wrap>
+                                {/* Paint canvas */}
                                 <Box>
-                                    <Text variant="bodySm" tone="subdued">Click to select:</Text>
-                                    <div
-                                        ref={imageRef}
-                                        onClick={handleImageClick}
-                                        style={{
-                                            position: "relative",
-                                            cursor: "crosshair",
-                                            border: "1px solid #ddd",
-                                            borderRadius: "8px",
-                                            overflow: "hidden",
-                                            maxWidth: "300px",
-                                        }}
-                                    >
-                                        <img
-                                            src={sourceImageUrl}
-                                            alt={productTitle}
-                                            style={{ display: "block", width: "100%", height: "auto" }}
-                                        />
-                                        {/* Click points */}
-                                        {clickPoints.map((point, idx) => (
-                                            <div
-                                                key={idx}
-                                                style={{
-                                                    position: "absolute",
-                                                    left: `${point.x * 100}%`,
-                                                    top: `${point.y * 100}%`,
-                                                    transform: "translate(-50%, -50%)",
-                                                    width: "20px",
-                                                    height: "20px",
-                                                    borderRadius: "50%",
-                                                    border: `2px solid ${point.label === 1 ? "#22c55e" : "#ef4444"}`,
-                                                    background: point.label === 1 ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)",
-                                                    pointerEvents: "none",
-                                                }}
-                                            />
-                                        ))}
-                                        {manualFetcher.state !== "idle" && (
-                                            <div
-                                                style={{
-                                                    position: "absolute",
-                                                    inset: 0,
-                                                    background: "rgba(255,255,255,0.8)",
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    justifyContent: "center",
-                                                }}
-                                            >
-                                                <Spinner />
-                                            </div>
-                                        )}
-                                    </div>
+                                    <PaintBrushCanvas
+                                        imageUrl={selectedImageUrl}
+                                        width={350}
+                                        height={350}
+                                        onMaskChange={setMaskDataUrl}
+                                        disabled={isLoading}
+                                    />
                                 </Box>
 
-                                {/* Result */}
+                                {/* Result preview */}
                                 {previewUrl && (
                                     <Box>
                                         <Text variant="bodySm" tone="subdued">Result:</Text>
@@ -465,29 +538,23 @@ export function ManualSegmentModal({
                                 {!previewUrl ? (
                                     <Button
                                         variant="primary"
-                                        onClick={handleManualApply}
-                                        loading={manualFetcher.state !== "idle"}
-                                        disabled={clickPoints.length === 0}
+                                        onClick={handlePaintApply}
+                                        loading={paintFetcher.state !== "idle"}
+                                        disabled={!maskDataUrl}
                                     >
-                                        Apply Selection
+                                        Apply Mask
                                     </Button>
                                 ) : (
                                     <>
                                         <Button variant="primary" onClick={handleConfirm}>
                                             Save
                                         </Button>
-                                        <Button onClick={() => { setPreviewUrl(null); setClickPoints([]); }}>
+                                        <Button onClick={() => { setPreviewUrl(null); setMaskDataUrl(null); }}>
                                             Try Again
                                         </Button>
                                     </>
                                 )}
                             </InlineStack>
-
-                            {clickPoints.length > 0 && !previewUrl && (
-                                <Text variant="bodySm" tone="subdued">
-                                    {clickPoints.filter(p => p.label === 1).length} include, {clickPoints.filter(p => p.label === 0).length} exclude
-                                </Text>
-                            )}
                         </BlockStack>
                     )}
 
