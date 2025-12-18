@@ -566,17 +566,21 @@ export async function cleanupRoom(
     requestId: string = "cleanup"
 ): Promise<string> {
     const logContext = createLogContext("cleanup", requestId, "start", {});
-    logger.info(logContext, "Processing room cleanup with Prodia (fast)");
+    logger.info(logContext, "Processing room cleanup with mask-driven inpainting");
 
     try {
-        // Use Prodia for fast object removal (~190ms vs seconds with Gemini)
-        const { removeObjectsFromUrl } = await import("./object-remover.server");
+        // Use new object removal service with proper mask handling
+        const { removeObjectsFromUrl, isObjectRemovalAvailable } = await import("./object-removal.server");
+
+        if (!isObjectRemovalAvailable()) {
+            throw new Error("Object removal service unavailable - PRODIA_API_TOKEN not set");
+        }
 
         const result = await removeObjectsFromUrl(roomImageUrl, maskDataUrl, requestId);
 
         logger.info(
-            { ...logContext, stage: "prodia-complete" },
-            `Prodia cleanup done in ${result.processingTimeMs}ms`
+            { ...logContext, stage: "inpaint-complete" },
+            `Object removal done: time=${result.processingTimeMs}ms, coverage=${result.maskCoveragePercent.toFixed(2)}%, dimensions=${result.imageDimensions.width}x${result.imageDimensions.height}`
         );
 
         // Upload result to GCS
@@ -585,15 +589,15 @@ export async function cleanupRoom(
 
         return url;
 
-    } catch (prodiaError) {
-        // Fallback to Gemini if Prodia fails (e.g., missing API key)
-        const errorMsg = prodiaError instanceof Error ? prodiaError.message : "Unknown error";
+    } catch (inpaintError) {
+        // Fallback to Gemini if inpainting fails
+        const errorMsg = inpaintError instanceof Error ? inpaintError.message : "Unknown error";
         logger.warn(
-            { ...logContext, stage: "prodia-fallback" },
-            `Prodia failed (${errorMsg}), falling back to Gemini`
+            { ...logContext, stage: "inpaint-fallback" },
+            `Inpainting failed (${errorMsg}), falling back to Gemini`
         );
 
-        // Original Gemini implementation as fallback
+        // Gemini fallback implementation
         let maskBuffer: Buffer | null = null;
         let roomBuffer: Buffer | null = null;
         let outputBuffer: Buffer | null = null;

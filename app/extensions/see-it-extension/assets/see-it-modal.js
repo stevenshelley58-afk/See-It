@@ -228,36 +228,60 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // Generate mask: white on black, at natural image resolution
+    // White = areas to REMOVE (inpaint), Black = areas to KEEP
     const generateMask = () => {
-        if (!maskCanvas) return null;
+        if (!maskCanvas || !ctx) {
+            console.error('[See It] generateMask: canvas or context not ready');
+            return null;
+        }
 
         const w = maskCanvas.width;
         const h = maskCanvas.height;
+
+        if (w === 0 || h === 0) {
+            console.error('[See It] generateMask: canvas has zero dimensions');
+            return null;
+        }
+
+        console.log(`[See It] Generating mask: ${w}x${h}, strokes: ${strokes.length}`);
+
         const out = document.createElement('canvas');
         out.width = w;
         out.height = h;
         const outCtx = out.getContext('2d');
 
-        // Black background
-        outCtx.fillStyle = 'black';
+        // Start with black background (areas to KEEP)
+        outCtx.fillStyle = '#000000';
         outCtx.fillRect(0, 0, w, h);
 
-        // Get drawing pixels
-        const srcData = ctx.getImageData(0, 0, w, h);
-        const dstData = outCtx.getImageData(0, 0, w, h);
+        // Redraw strokes in solid white on the output canvas
+        // This ensures clean, solid mask regions
+        outCtx.strokeStyle = '#FFFFFF';
+        outCtx.lineCap = 'round';
+        outCtx.lineJoin = 'round';
+        outCtx.lineWidth = ctx.lineWidth; // Use same brush size
 
-        // Any alpha > 0 becomes white
-        for (let i = 0; i < srcData.data.length; i += 4) {
-            if (srcData.data[i + 3] > 10) {
-                dstData.data[i] = 255;
-                dstData.data[i + 1] = 255;
-                dstData.data[i + 2] = 255;
-            }
-            dstData.data[i + 3] = 255;
+        strokes.forEach(stroke => {
+            if (stroke.length === 0) return;
+            outCtx.beginPath();
+            outCtx.moveTo(stroke[0].x, stroke[0].y);
+            stroke.forEach(p => outCtx.lineTo(p.x, p.y));
+            outCtx.stroke();
+        });
+
+        // Count white pixels for debugging
+        const imgData = outCtx.getImageData(0, 0, w, h);
+        let whitePixels = 0;
+        for (let i = 0; i < imgData.data.length; i += 4) {
+            if (imgData.data[i] > 128) whitePixels++;
         }
+        const coverage = ((whitePixels / (w * h)) * 100).toFixed(2);
+        console.log(`[See It] Mask generated: ${whitePixels} white pixels, ${coverage}% coverage`);
 
-        outCtx.putImageData(dstData, 0, 0);
-        return out.toDataURL('image/png');
+        const dataUrl = out.toDataURL('image/png');
+        console.log(`[See It] Mask data URL length: ${dataUrl.length}`);
+
+        return dataUrl;
     };
 
     // --- API ---
