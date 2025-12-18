@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.32';
+    const VERSION = '1.0.33';
     console.log('[See It] Modal loaded', VERSION);
 
     // --- DOM ---
@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!trigger || !modal) return;
 
     const stepWelcome = $('see-it-step-welcome');
+    const stepEdit = $('see-it-step-edit-room');
     const stepPlace = $('see-it-step-place');
     const stepResult = $('see-it-step-result');
 
@@ -18,6 +19,16 @@ document.addEventListener('DOMContentLoaded', function () {
     const cameraBtn = $('see-it-btn-camera');
     const uploadInput = $('see-it-upload');
     const cameraInput = $('see-it-camera-input');
+
+    const roomPreview = $('see-it-room-preview');
+    const maskCanvas = $('see-it-mask-canvas');
+    const btnRemove = $('see-it-remove-btn');
+    const btnUndo = $('see-it-undo-btn');
+    const btnClear = $('see-it-clear-btn');
+    const btnBackToWelcome = $('see-it-back-to-welcome');
+    const btnConfirmRoom = $('see-it-confirm-room');
+    const cleanupLoading = $('see-it-cleanup-loading');
+    const uploadIndicator = $('see-it-upload-indicator');
 
     const roomImage = $('see-it-room-image');
     const productContainer = $('see-it-product-container');
@@ -48,11 +59,17 @@ document.addEventListener('DOMContentLoaded', function () {
         uploadComplete: false
     };
 
+    // Drawing state - completely separate
+    let ctx = null;
+    let strokes = [];
+    let currentStroke = [];
+    let isDrawing = false;
+
     const getActiveRoomUrl = () => state.roomImageUrl || state.localImageDataUrl;
 
     // --- Helpers ---
     const showStep = (step) => {
-        [stepWelcome, stepPlace, stepResult].forEach(s => s?.classList.add('hidden'));
+        [stepWelcome, stepEdit, stepPlace, stepResult].forEach(s => s?.classList.add('hidden'));
         step?.classList.remove('hidden');
     };
 
@@ -64,6 +81,13 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const resetError = () => errorDiv?.classList.add('hidden');
+
+    const updateButtons = () => {
+        const hasStrokes = strokes.length > 0;
+        if (btnUndo) btnUndo.disabled = !hasStrokes;
+        if (btnClear) btnClear.disabled = !hasStrokes;
+        if (btnRemove) btnRemove.disabled = !hasStrokes;
+    };
 
     // --- API ---
     const startSession = async () => {
@@ -100,6 +124,224 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch { return null; }
     };
 
+    // --- Canvas Setup ---
+    const initCanvas = () => {
+        if (!maskCanvas || !roomPreview) return;
+
+        const rect = roomPreview.getBoundingClientRect();
+        maskCanvas.width = rect.width;
+        maskCanvas.height = rect.height;
+
+        ctx = maskCanvas.getContext('2d');
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 30;
+        ctx.strokeStyle = 'rgba(139, 92, 246, 0.5)';
+
+        strokes = [];
+        currentStroke = [];
+        updateButtons();
+    };
+
+    const getPos = (e) => {
+        const rect = maskCanvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+            x: clientX - rect.left,
+            y: clientY - rect.top
+        };
+    };
+
+    const redrawStrokes = () => {
+        if (!ctx) return;
+        ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+        for (const stroke of strokes) {
+            if (stroke.length < 2) continue;
+            ctx.beginPath();
+            ctx.moveTo(stroke[0].x, stroke[0].y);
+            for (let i = 1; i < stroke.length; i++) {
+                ctx.lineTo(stroke[i].x, stroke[i].y);
+            }
+            ctx.stroke();
+        }
+    };
+
+    // --- Drawing Events (Mouse) ---
+    const onMouseDown = (e) => {
+        if (e.button !== 0) return; // Left click only
+        e.preventDefault();
+        isDrawing = true;
+        currentStroke = [getPos(e)];
+    };
+
+    const onMouseMove = (e) => {
+        if (!isDrawing || !ctx) return;
+        const pos = getPos(e);
+        currentStroke.push(pos);
+
+        // Draw current stroke
+        if (currentStroke.length >= 2) {
+            const prev = currentStroke[currentStroke.length - 2];
+            ctx.beginPath();
+            ctx.moveTo(prev.x, prev.y);
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+        }
+    };
+
+    const onMouseUp = () => {
+        if (!isDrawing) return;
+        isDrawing = false;
+
+        if (currentStroke.length > 1) {
+            strokes.push([...currentStroke]);
+            updateButtons();
+        }
+        currentStroke = [];
+    };
+
+    // --- Drawing Events (Touch) ---
+    const onTouchStart = (e) => {
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        isDrawing = true;
+        currentStroke = [getPos(e)];
+    };
+
+    const onTouchMove = (e) => {
+        if (!isDrawing || !ctx || e.touches.length !== 1) return;
+        e.preventDefault();
+        const pos = getPos(e);
+        currentStroke.push(pos);
+
+        if (currentStroke.length >= 2) {
+            const prev = currentStroke[currentStroke.length - 2];
+            ctx.beginPath();
+            ctx.moveTo(prev.x, prev.y);
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+        }
+    };
+
+    const onTouchEnd = () => {
+        if (!isDrawing) return;
+        isDrawing = false;
+
+        if (currentStroke.length > 1) {
+            strokes.push([...currentStroke]);
+            updateButtons();
+        }
+        currentStroke = [];
+    };
+
+    // Attach canvas events
+    if (maskCanvas) {
+        maskCanvas.addEventListener('mousedown', onMouseDown);
+        maskCanvas.addEventListener('mousemove', onMouseMove);
+        maskCanvas.addEventListener('mouseup', onMouseUp);
+        maskCanvas.addEventListener('mouseleave', onMouseUp);
+
+        maskCanvas.addEventListener('touchstart', onTouchStart, { passive: false });
+        maskCanvas.addEventListener('touchmove', onTouchMove, { passive: false });
+        maskCanvas.addEventListener('touchend', onTouchEnd);
+        maskCanvas.addEventListener('touchcancel', onTouchEnd);
+    }
+
+    // --- Remove Button ---
+    if (btnRemove) {
+        btnRemove.addEventListener('click', () => doRemove());
+    }
+
+    const doRemove = async () => {
+        if (strokes.length === 0) return;
+        if (!state.sessionId) {
+            showError('Please wait for upload to complete');
+            return;
+        }
+
+        if (cleanupLoading) cleanupLoading.classList.remove('hidden');
+        if (btnRemove) btnRemove.disabled = true;
+
+        try {
+            const maskDataUrl = generateMask();
+            const result = await cleanupWithMask(state.sessionId, maskDataUrl);
+
+            if (result.cleanedImageUrl) {
+                state.roomImageUrl = result.cleanedImageUrl;
+                if (roomPreview) roomPreview.src = result.cleanedImageUrl;
+                strokes = [];
+                redrawStrokes();
+                updateButtons();
+            }
+        } catch (err) {
+            showError('Removal failed: ' + err.message);
+        } finally {
+            if (cleanupLoading) cleanupLoading.classList.add('hidden');
+            updateButtons();
+        }
+    };
+
+    const generateMask = () => {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = maskCanvas.width;
+        tempCanvas.height = maskCanvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        tempCtx.fillStyle = 'black';
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+        tempCtx.strokeStyle = 'white';
+        tempCtx.lineCap = 'round';
+        tempCtx.lineJoin = 'round';
+        tempCtx.lineWidth = 30;
+
+        for (const stroke of strokes) {
+            if (stroke.length < 2) continue;
+            tempCtx.beginPath();
+            tempCtx.moveTo(stroke[0].x, stroke[0].y);
+            for (let i = 1; i < stroke.length; i++) {
+                tempCtx.lineTo(stroke[i].x, stroke[i].y);
+            }
+            tempCtx.stroke();
+        }
+
+        return tempCanvas.toDataURL('image/png');
+    };
+
+    const cleanupWithMask = async (sessionId, maskDataUrl) => {
+        const res = await fetch('/apps/see-it/room/cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                room_session_id: sessionId,
+                mask_data_url: maskDataUrl
+            })
+        });
+        if (!res.ok) throw new Error('Cleanup request failed');
+        return res.json();
+    };
+
+    // --- Undo/Clear ---
+    if (btnUndo) {
+        btnUndo.addEventListener('click', () => {
+            if (strokes.length > 0) {
+                strokes.pop();
+                redrawStrokes();
+                updateButtons();
+            }
+        });
+    }
+
+    if (btnClear) {
+        btnClear.addEventListener('click', () => {
+            strokes = [];
+            redrawStrokes();
+            updateButtons();
+        });
+    }
+
     // --- Flow ---
     trigger?.addEventListener('click', async () => {
         modal.classList.remove('hidden');
@@ -131,19 +373,23 @@ document.addEventListener('DOMContentLoaded', function () {
         state.sessionId = null;
         state.uploadComplete = false;
 
-        // Show image immediately
+        // Show image immediately in edit step
         const reader = new FileReader();
         reader.onload = (ev) => {
             state.localImageDataUrl = ev.target.result;
-            if (roomImage) roomImage.src = state.localImageDataUrl;
-            showStep(stepPlace);
-            state.x = 0; state.y = 0; state.scale = 1.0;
-            updateTransform();
+            if (roomPreview) roomPreview.src = state.localImageDataUrl;
+            showStep(stepEdit);
+
+            // Init canvas after image loads
+            if (roomPreview) {
+                roomPreview.onload = () => initCanvas();
+            }
         };
         reader.readAsDataURL(file);
 
         // Upload in background
         state.isUploading = true;
+        if (uploadIndicator) uploadIndicator.classList.remove('hidden');
 
         try {
             const session = await startSession();
@@ -157,6 +403,7 @@ document.addEventListener('DOMContentLoaded', function () {
             state.sessionId = null;
         } finally {
             state.isUploading = false;
+            if (uploadIndicator) uploadIndicator.classList.add('hidden');
         }
     };
 
@@ -164,6 +411,18 @@ document.addEventListener('DOMContentLoaded', function () {
     cameraBtn?.addEventListener('click', () => cameraInput?.click());
     uploadInput?.addEventListener('change', handleFile);
     cameraInput?.addEventListener('change', handleFile);
+
+    // Edit room navigation
+    btnBackToWelcome?.addEventListener('click', () => showStep(stepWelcome));
+
+    btnConfirmRoom?.addEventListener('click', () => {
+        if (roomImage) roomImage.src = getActiveRoomUrl();
+        showStep(stepPlace);
+        state.x = 0;
+        state.y = 0;
+        state.scale = 1.0;
+        updateTransform();
+    });
 
     // --- Place Product ---
     const updateTransform = () => {

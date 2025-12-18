@@ -74,11 +74,56 @@
              <input type="file" id="see-it-upload" accept="image/*" style="display: none;" />
              <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
           </div>
-          <div class="see-it-version-badge">See It v1.0.32</div>
+          <div class="see-it-version-badge">See It v1.0.33</div>
         </div>
       </div>
 
-      <!-- Step 1: Place Product -->
+      <!-- Step 1: Edit Room -->
+      <div id="see-it-step-edit-room" class="see-it-step hidden">
+        <h3>Prepare Your Room</h3>
+        <p class="see-it-step-description">Paint over anything you want to remove, or skip to place the product.</p>
+
+        <div class="see-it-canvas-wrapper" id="see-it-canvas-wrapper">
+          <div class="see-it-image-container">
+            <img id="see-it-room-preview" src="" alt="Room Preview" width="400" height="300" />
+            <canvas id="see-it-mask-canvas"></canvas>
+          </div>
+          <div id="see-it-cleanup-loading" class="see-it-loading-overlay hidden">
+            <div class="see-it-spinner"></div>
+            <p>Removing...</p>
+          </div>
+          <div id="see-it-upload-indicator" class="see-it-upload-badge hidden">
+            <span class="see-it-upload-dot"></span>
+            Uploading...
+          </div>
+        </div>
+
+        <!-- Magic Eraser Controls -->
+        <div class="see-it-eraser-controls">
+          <div class="see-it-eraser-hint">
+            <span class="see-it-brush-icon"></span>
+            <span>Paint over what to remove</span>
+          </div>
+          <div class="see-it-eraser-actions">
+            <button type="button" id="see-it-undo-btn" class="see-it-tool-btn" disabled title="Undo">
+              <span class="see-it-icon-undo"></span> Undo
+            </button>
+            <button type="button" id="see-it-clear-btn" class="see-it-tool-btn" disabled title="Clear all">
+              <span class="see-it-icon-clear"></span> Clear
+            </button>
+            <button type="button" id="see-it-remove-btn" class="button see-it-primary-btn see-it-remove-btn" disabled>
+              Remove
+            </button>
+          </div>
+        </div>
+
+        <div class="see-it-actions-row">
+          <button type="button" id="see-it-back-to-welcome" class="button see-it-text-btn">Back</button>
+          <button type="button" id="see-it-confirm-room" class="button see-it-primary-btn">Continue</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Place Product -->
       <div id="see-it-step-place" class="see-it-step hidden">
         <div id="see-it-canvas-container" class="see-it-interactive-canvas">
           <img id="see-it-room-image" src="" alt="Room" width="400" height="300" />
