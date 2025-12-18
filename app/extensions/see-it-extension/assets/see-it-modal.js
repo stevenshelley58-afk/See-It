@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.31';
+    const VERSION = '1.0.32';
     console.log('[See It] Modal loaded', VERSION);
 
     // --- DOM ---
@@ -11,7 +11,6 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!trigger || !modal) return;
 
     const stepWelcome = $('see-it-step-welcome');
-    const stepEdit = $('see-it-step-edit-room');
     const stepPlace = $('see-it-step-place');
     const stepResult = $('see-it-step-result');
 
@@ -19,16 +18,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const cameraBtn = $('see-it-btn-camera');
     const uploadInput = $('see-it-upload');
     const cameraInput = $('see-it-camera-input');
-
-    const roomPreview = $('see-it-room-preview');
-    const maskCanvas = $('see-it-mask-canvas');
-    const btnConfirmRoom = $('see-it-confirm-room');
-    const btnBackToWelcome = $('see-it-back-to-welcome');
-    const cleanupLoading = $('see-it-cleanup-loading');
-    const uploadIndicator = $('see-it-upload-indicator');
-    const btnUndo = $('see-it-undo-btn');
-    const btnClear = $('see-it-clear-btn');
-    const btnRemove = $('see-it-remove-btn');
 
     const roomImage = $('see-it-room-image');
     const productContainer = $('see-it-product-container');
@@ -48,8 +37,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- State ---
     const state = {
         sessionId: null,
-        originalRoomImageUrl: null,
-        cleanedRoomImageUrl: null,
+        roomImageUrl: null,
         localImageDataUrl: null,
         productImageUrl: trigger?.dataset.productImage || '',
         productId: trigger?.dataset.productId || '',
@@ -57,21 +45,15 @@ document.addEventListener('DOMContentLoaded', function () {
         x: 0,
         y: 0,
         isUploading: false,
-        isCleaningUp: false,
         uploadComplete: false
     };
 
-    let ctx = null;
-    let strokes = [];
-    const BRUSH_COLOR = 'rgba(138, 43, 226, 0.7)';
-
-    const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
+    const getActiveRoomUrl = () => state.roomImageUrl || state.localImageDataUrl;
 
     // --- Helpers ---
     const showStep = (step) => {
-        [stepWelcome, stepEdit, stepPlace, stepResult].forEach(s => s?.classList.add('hidden'));
+        [stepWelcome, stepPlace, stepResult].forEach(s => s?.classList.add('hidden'));
         step?.classList.remove('hidden');
-        if (step === stepEdit) initCanvas();
     };
 
     const showError = (msg) => {
@@ -82,214 +64,6 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const resetError = () => errorDiv?.classList.add('hidden');
-
-    const updateButtons = () => {
-        const hasStrokes = strokes.length > 0;
-        if (btnUndo) btnUndo.disabled = !hasStrokes;
-        if (btnClear) btnClear.disabled = !hasStrokes;
-        if (btnRemove) {
-            const canRemove = hasStrokes && !state.isCleaningUp && state.uploadComplete;
-            btnRemove.disabled = !canRemove;
-            btnRemove.textContent = hasStrokes && !state.uploadComplete ? 'Uploading...' : 'Remove';
-        }
-    };
-
-    // --- Canvas Drawing (rebuilt from scratch) ---
-    const initCanvas = () => {
-        if (!maskCanvas || !roomPreview) return;
-        if (!roomPreview.complete || !roomPreview.naturalWidth) {
-            roomPreview.onload = initCanvas;
-            return;
-        }
-
-        const w = roomPreview.naturalWidth;
-        const h = roomPreview.naturalHeight;
-        maskCanvas.width = w;
-        maskCanvas.height = h;
-
-        ctx = maskCanvas.getContext('2d');
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = BRUSH_COLOR;
-        ctx.lineWidth = Math.max(20, Math.min(60, w / 15));
-        ctx.clearRect(0, 0, w, h);
-        strokes = [];
-        updateButtons();
-    };
-
-    const getPos = (e) => {
-        const rect = maskCanvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        return {
-            x: (clientX - rect.left) * (maskCanvas.width / rect.width),
-            y: (clientY - rect.top) * (maskCanvas.height / rect.height)
-        };
-    };
-
-    // Drawing state
-    let drawing = false;
-    let currentStroke = [];
-    let lastDrawEndTime = 0;  // Track when drawing ended for cooldown
-
-    // Use pointer events with CAPTURE to keep events on canvas
-    if (maskCanvas) {
-        maskCanvas.style.touchAction = 'none';
-
-        maskCanvas.addEventListener('pointerdown', (e) => {
-            if (!ctx) return;
-            e.preventDefault();
-            maskCanvas.setPointerCapture(e.pointerId);  // CAPTURE all events
-            drawing = true;
-            currentStroke = [];
-            const pos = getPos(e);
-            currentStroke.push(pos);
-            ctx.beginPath();
-            ctx.moveTo(pos.x, pos.y);
-        });
-
-        maskCanvas.addEventListener('pointermove', (e) => {
-            if (!drawing || !ctx) return;
-            e.preventDefault();
-            const pos = getPos(e);
-            currentStroke.push(pos);
-            ctx.lineTo(pos.x, pos.y);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(pos.x, pos.y);
-        });
-
-        maskCanvas.addEventListener('pointerup', (e) => {
-            if (!drawing) return;
-            e.preventDefault();
-            maskCanvas.releasePointerCapture(e.pointerId);
-            drawing = false;
-            lastDrawEndTime = Date.now();  // Set cooldown timestamp
-            if (currentStroke.length > 0) {
-                strokes.push([...currentStroke]);
-            }
-            currentStroke = [];
-            ctx?.beginPath();
-            updateButtons();
-        });
-
-        maskCanvas.addEventListener('pointercancel', (e) => {
-            if (drawing) {
-                maskCanvas.releasePointerCapture(e.pointerId);
-                drawing = false;
-                currentStroke = [];
-                ctx?.beginPath();
-                updateButtons();
-            }
-        });
-    }
-
-    const redrawStrokes = () => {
-        if (!ctx) return;
-        ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        strokes.forEach(stroke => {
-            if (!stroke.length) return;
-            ctx.beginPath();
-            ctx.moveTo(stroke[0].x, stroke[0].y);
-            stroke.forEach(p => ctx.lineTo(p.x, p.y));
-            ctx.stroke();
-        });
-    };
-
-    // --- Undo/Clear ---
-    btnUndo?.addEventListener('click', () => {
-        strokes.pop();
-        redrawStrokes();
-        updateButtons();
-    });
-
-    btnClear?.addEventListener('click', () => {
-        strokes = [];
-        ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        updateButtons();
-    });
-
-    // --- Remove Button with cooldown guard ---
-    if (btnRemove) {
-        btnRemove.addEventListener('click', async function(e) {
-            // Ignore clicks within 300ms of drawing end (prevents trackpad auto-click)
-            if (Date.now() - lastDrawEndTime < 300) {
-                return;
-            }
-            // Only proceed if truly enabled
-            if (this.disabled || state.isCleaningUp || !state.uploadComplete || strokes.length === 0) {
-                return;
-            }
-            await doRemove();
-        });
-    }
-
-    async function doRemove() {
-        if (!state.sessionId) return;
-
-        state.isCleaningUp = true;
-        cleanupLoading?.classList.remove('hidden');
-        btnRemove.disabled = true;
-        btnRemove.textContent = 'Removing...';
-        if (btnUndo) btnUndo.disabled = true;
-        if (btnClear) btnClear.disabled = true;
-
-        const backup = JSON.parse(JSON.stringify(strokes));
-
-        try {
-            const mask = generateMask();
-            if (!mask) throw new Error('Failed to generate mask');
-
-            const result = await cleanupWithMask(mask);
-            state.cleanedRoomImageUrl = result.cleaned_room_image_url;
-
-            if (roomPreview) {
-                roomPreview.src = state.cleanedRoomImageUrl;
-                roomPreview.onload = initCanvas;
-            }
-            if (roomImage) roomImage.src = state.cleanedRoomImageUrl;
-
-            strokes = [];
-            ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        } catch (err) {
-            strokes = backup;
-            redrawStrokes();
-            showError('Remove failed: ' + err.message);
-        } finally {
-            state.isCleaningUp = false;
-            cleanupLoading?.classList.add('hidden');
-            btnRemove.textContent = 'Remove';
-            updateButtons();
-        }
-    }
-
-    const generateMask = () => {
-        if (!maskCanvas || !ctx) return null;
-        const w = maskCanvas.width, h = maskCanvas.height;
-        if (!w || !h) return null;
-
-        const out = document.createElement('canvas');
-        out.width = w;
-        out.height = h;
-        const outCtx = out.getContext('2d');
-
-        outCtx.fillStyle = '#000';
-        outCtx.fillRect(0, 0, w, h);
-        outCtx.strokeStyle = '#FFF';
-        outCtx.lineCap = 'round';
-        outCtx.lineJoin = 'round';
-        outCtx.lineWidth = ctx.lineWidth;
-
-        strokes.forEach(stroke => {
-            if (!stroke.length) return;
-            outCtx.beginPath();
-            outCtx.moveTo(stroke[0].x, stroke[0].y);
-            stroke.forEach(p => outCtx.lineTo(p.x, p.y));
-            outCtx.stroke();
-        });
-
-        return out.toDataURL('image/png');
-    };
 
     // --- API ---
     const startSession = async () => {
@@ -318,22 +92,6 @@ document.addEventListener('DOMContentLoaded', function () {
         return res.json();
     };
 
-    const cleanupWithMask = async (maskDataUrl) => {
-        const res = await fetch('/apps/see-it/room/cleanup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                room_session_id: state.sessionId,
-                mask_data_url: maskDataUrl
-            })
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.message || 'Cleanup failed');
-        }
-        return res.json();
-    };
-
     const fetchPreparedProduct = async (productId) => {
         try {
             const res = await fetch(`/apps/see-it/product/prepared?product_id=${encodeURIComponent(productId)}`);
@@ -353,12 +111,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (productImage) productImage.src = state.productImageUrl;
 
         if (state.sessionId && getActiveRoomUrl()) {
-            if (roomPreview) roomPreview.src = getActiveRoomUrl();
             if (roomImage) roomImage.src = getActiveRoomUrl();
-            showStep(stepEdit);
+            showStep(stepPlace);
         } else {
-            state.originalRoomImageUrl = null;
-            state.cleanedRoomImageUrl = null;
+            state.roomImageUrl = null;
             state.sessionId = null;
             state.uploadComplete = false;
             showStep(stepWelcome);
@@ -371,38 +127,36 @@ document.addEventListener('DOMContentLoaded', function () {
         const file = e.target.files[0];
         if (!file) return;
 
-        state.cleanedRoomImageUrl = null;
-        state.originalRoomImageUrl = null;
+        state.roomImageUrl = null;
         state.sessionId = null;
         state.uploadComplete = false;
 
+        // Show image immediately
         const reader = new FileReader();
         reader.onload = (ev) => {
             state.localImageDataUrl = ev.target.result;
-            if (roomPreview) roomPreview.src = state.localImageDataUrl;
             if (roomImage) roomImage.src = state.localImageDataUrl;
-            showStep(stepEdit);
+            showStep(stepPlace);
+            state.x = 0; state.y = 0; state.scale = 1.0;
+            updateTransform();
         };
         reader.readAsDataURL(file);
 
+        // Upload in background
         state.isUploading = true;
-        uploadIndicator?.classList.remove('hidden');
-        updateButtons();
 
         try {
             const session = await startSession();
             state.sessionId = session.sessionId;
             await uploadImage(file, session.uploadUrl);
             const confirm = await confirmRoom(state.sessionId);
-            state.originalRoomImageUrl = confirm.roomImageUrl;
+            state.roomImageUrl = confirm.roomImageUrl;
             state.uploadComplete = true;
         } catch (err) {
             showError('Upload failed: ' + err.message);
             state.sessionId = null;
         } finally {
             state.isUploading = false;
-            uploadIndicator?.classList.add('hidden');
-            updateButtons();
         }
     };
 
@@ -410,35 +164,6 @@ document.addEventListener('DOMContentLoaded', function () {
     cameraBtn?.addEventListener('click', () => cameraInput?.click());
     uploadInput?.addEventListener('change', handleFile);
     cameraInput?.addEventListener('change', handleFile);
-
-    btnBackToWelcome?.addEventListener('click', () => showStep(stepWelcome));
-
-    btnConfirmRoom?.addEventListener('click', () => {
-        if (state.isCleaningUp) return;
-        if (!getActiveRoomUrl()) return showError('Please upload an image first');
-
-        if (state.isUploading) {
-            btnConfirmRoom.textContent = 'Finishing...';
-            btnConfirmRoom.disabled = true;
-            const check = setInterval(() => {
-                if (!state.isUploading) {
-                    clearInterval(check);
-                    btnConfirmRoom.textContent = 'Continue';
-                    btnConfirmRoom.disabled = false;
-                    if (state.uploadComplete) proceed();
-                }
-            }, 100);
-            return;
-        }
-        proceed();
-
-        function proceed() {
-            if (roomImage) roomImage.src = getActiveRoomUrl();
-            showStep(stepPlace);
-            state.x = 0; state.y = 0; state.scale = 1.0;
-            updateTransform();
-        }
-    });
 
     // --- Place Product ---
     const updateTransform = () => {
@@ -537,7 +262,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Generate ---
     btnGenerate?.addEventListener('click', () => {
-        if (!state.sessionId || !state.productId) return showError('Missing session or product');
+        if (!state.sessionId || !state.productId) return showError('Please wait for upload to complete');
         if (!roomImage || !productImage) return showError('Images not loaded');
 
         showStep(stepResult);
