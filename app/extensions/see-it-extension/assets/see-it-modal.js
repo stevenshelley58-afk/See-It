@@ -5,7 +5,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const modal = $('see-it-modal');
     const closeBtn = document.querySelector('.see-it-close');
 
-    // Early exit if essential elements not found (e.g., product has no featured image)
     if (!trigger || !modal) {
         console.log('[See It] Button not rendered - product may not have a featured image');
         return;
@@ -17,13 +16,13 @@ document.addEventListener('DOMContentLoaded', function () {
     const stepPlace = $('see-it-step-place');
     const stepResult = $('see-it-step-result');
 
-    // Welcome Inputs
+    // Welcome
     const uploadBtn = $('see-it-btn-upload');
     const cameraBtn = $('see-it-btn-camera');
     const uploadInput = $('see-it-upload');
     const cameraInput = $('see-it-camera-input');
 
-    // Edit Inputs
+    // Edit
     const canvasWrapper = $('see-it-canvas-wrapper');
     const roomPreview = $('see-it-room-preview');
     const maskCanvas = $('see-it-mask-canvas');
@@ -31,13 +30,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const btnBackToWelcome = $('see-it-back-to-welcome');
     const cleanupLoading = $('see-it-cleanup-loading');
     const uploadIndicator = $('see-it-upload-indicator');
-
-    // Eraser Controls
     const btnUndo = $('see-it-undo-btn');
     const btnClear = $('see-it-clear-btn');
     const btnRemove = $('see-it-remove-btn');
 
-    // Place Inputs
+    // Place
     const roomImage = $('see-it-room-image');
     const productContainer = $('see-it-product-container');
     const productImage = $('see-it-product-image');
@@ -45,7 +42,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const scaleValue = $('see-it-scale-value');
     const btnGenerate = $('see-it-generate');
 
-    // Result Inputs
+    // Result
     const resultDiv = $('see-it-result');
     const statusText = $('see-it-status');
     const errorDiv = $('see-it-error');
@@ -59,333 +56,225 @@ document.addEventListener('DOMContentLoaded', function () {
         sessionId: null,
         originalRoomImageUrl: null,
         cleanedRoomImageUrl: null,
-        currentRoomImageUrl: null,
-        localImageDataUrl: null,  // Client-side preview (instant)
-        productImageUrl: trigger ? trigger.dataset.productImage : '',
-        preparedProductImageUrl: null,
-        productId: trigger ? trigger.dataset.productId : '',
+        localImageDataUrl: null,
+        productImageUrl: trigger?.dataset.productImage || '',
+        productId: trigger?.dataset.productId || '',
         scale: 1.0,
         x: 0,
         y: 0,
         isUploading: false,
         isCleaningUp: false,
-        isPrepared: false,
-        uploadComplete: false  // Track when cloud upload is done
+        uploadComplete: false
     };
 
-    // Canvas drawing state
+    // Canvas state - SIMPLIFIED
     let ctx = null;
     let isDrawing = false;
-    let drawHistory = []; // For undo
-    const BRUSH_SIZE = 40; // Larger brush for easier selection
-    const BRUSH_COLOR = 'rgba(138, 43, 226, 0.6)'; // Semi-transparent purple
+    let strokes = []; // Store strokes for undo, not full canvas state
+    const BRUSH_SIZE = 35;
+    const BRUSH_COLOR = 'rgba(138, 43, 226, 0.7)';
 
     const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
 
     // --- Helpers ---
     const showStep = (step) => {
-        [stepWelcome, stepEdit, stepPlace, stepResult].forEach(s => s && s.classList.add('hidden'));
-        if (step) step.classList.remove('hidden');
-        
-        // Initialize canvas when entering edit step
-        if (step === stepEdit) {
-            setTimeout(initCanvas, 100);
-        }
+        [stepWelcome, stepEdit, stepPlace, stepResult].forEach(s => s?.classList.add('hidden'));
+        step?.classList.remove('hidden');
+        if (step === stepEdit) initCanvas();
     };
-
-    // Keep canvas aligned if the modal resizes (e.g., viewport change)
-    window.addEventListener('resize', () => {
-        if (stepEdit && !stepEdit.classList.contains('hidden')) {
-            initCanvas();
-        }
-    });
 
     const showError = (msg) => {
         if (errorDiv) {
             errorDiv.textContent = msg;
             errorDiv.classList.remove('hidden');
         }
-        console.error(msg);
+        console.error('[See It]', msg);
     };
 
-    const resetError = () => {
-        if (errorDiv) errorDiv.classList.add('hidden');
-    };
-    
-    const updateEraserButtons = () => {
-        const hasDrawing = drawHistory.length > 0;
-        if (btnUndo) btnUndo.disabled = !hasDrawing;
-        if (btnClear) btnClear.disabled = !hasDrawing;
-        // Remove button needs: drawing exists, not cleaning up, upload finished
+    const resetError = () => errorDiv?.classList.add('hidden');
+
+    const updateButtons = () => {
+        const hasStrokes = strokes.length > 0;
+        if (btnUndo) btnUndo.disabled = !hasStrokes;
+        if (btnClear) btnClear.disabled = !hasStrokes;
         if (btnRemove) {
-            const canRemove = hasDrawing && !state.isCleaningUp && state.uploadComplete;
+            const canRemove = hasStrokes && !state.isCleaningUp && state.uploadComplete;
             btnRemove.disabled = !canRemove;
-            // Show waiting state if drawing but upload not done
-            if (hasDrawing && !state.uploadComplete && !state.isCleaningUp) {
-                btnRemove.textContent = 'Uploading...';
-            } else {
-                btnRemove.textContent = 'Remove';
-            }
+            btnRemove.textContent = hasStrokes && !state.uploadComplete ? 'Uploading...' : 'Remove';
         }
     };
 
     const updateUploadIndicator = () => {
-        if (uploadIndicator) {
-            if (state.isUploading) {
-                uploadIndicator.classList.remove('hidden');
-            } else {
-                uploadIndicator.classList.add('hidden');
-            }
-        }
+        uploadIndicator?.classList.toggle('hidden', !state.isUploading);
     };
 
-    // --- Canvas Drawing ---
+    // --- Canvas Drawing (SIMPLIFIED) ---
     const initCanvas = () => {
-        if (!maskCanvas || !roomPreview || !canvasWrapper) return;
+        if (!maskCanvas || !roomPreview) return;
 
-        // Wait for image to load
+        // Wait for image
         if (!roomPreview.complete || !roomPreview.naturalWidth) {
-            roomPreview.onload = () => requestAnimationFrame(initCanvas);
+            roomPreview.onload = initCanvas;
             return;
         }
 
-        // Use requestAnimationFrame to ensure layout is complete
-        requestAnimationFrame(() => {
-            // Get the actual rendered size and position of the image
-            const imgRect = roomPreview.getBoundingClientRect();
-            const wrapperRect = canvasWrapper.getBoundingClientRect();
+        // SIMPLE: Canvas matches natural image size, CSS scales it
+        const natW = roomPreview.naturalWidth;
+        const natH = roomPreview.naturalHeight;
 
-            // Calculate offset from wrapper to image (image is centered)
-            const offsetLeft = imgRect.left - wrapperRect.left;
-            const offsetTop = imgRect.top - wrapperRect.top;
+        maskCanvas.width = natW;
+        maskCanvas.height = natH;
 
-            // Set canvas to exactly match image dimensions (use device pixel ratio for sharpness)
-            const dpr = window.devicePixelRatio || 1;
-            const width = imgRect.width;
-            const height = imgRect.height;
+        ctx = maskCanvas.getContext('2d');
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = BRUSH_COLOR;
+        // Scale brush relative to image size (bigger images need bigger brush)
+        ctx.lineWidth = Math.max(20, Math.min(60, natW / 15));
 
-            // Canvas internal size (for drawing resolution)
-            maskCanvas.width = Math.round(width * dpr);
-            maskCanvas.height = Math.round(height * dpr);
+        ctx.clearRect(0, 0, natW, natH);
+        strokes = [];
+        updateButtons();
 
-            // Canvas display size (CSS)
-            maskCanvas.style.width = width + 'px';
-            maskCanvas.style.height = height + 'px';
-            maskCanvas.style.left = offsetLeft + 'px';
-            maskCanvas.style.top = offsetTop + 'px';
-            maskCanvas.style.position = 'absolute';
-
-            ctx = maskCanvas.getContext('2d');
-            ctx.scale(dpr, dpr); // Scale context for high-DPI displays
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.lineWidth = BRUSH_SIZE;
-            ctx.strokeStyle = BRUSH_COLOR;
-
-            // Clear and reset
-            ctx.clearRect(0, 0, width, height);
-            drawHistory = [];
-            updateEraserButtons();
-
-            console.log('[See It] Canvas initialized:', { width, height, offsetLeft, offsetTop, dpr });
-        });
+        console.log('[See It] Canvas init:', natW, 'x', natH);
     };
-    
-    const getEventPos = (e) => {
+
+    const getCanvasPos = (e) => {
         const rect = maskCanvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        // Return position in CSS pixels (context is scaled for DPR)
+        // Scale from CSS size to canvas size
+        const scaleX = maskCanvas.width / rect.width;
+        const scaleY = maskCanvas.height / rect.height;
         return {
-            x: clientX - rect.left,
-            y: clientY - rect.top
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
         };
     };
 
-    const saveState = () => {
-        if (!ctx) return;
-        // Save the full canvas buffer (at device pixel ratio resolution)
-        drawHistory.push(ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height));
-        // Limit history size
-        if (drawHistory.length > 20) drawHistory.shift();
-        updateEraserButtons();
-    };
-    
+    let currentStroke = [];
+
     const startDraw = (e) => {
         if (!ctx) return;
         e.preventDefault();
         isDrawing = true;
-        saveState();
-        const pos = getEventPos(e);
+        currentStroke = [];
+        const pos = getCanvasPos(e);
+        currentStroke.push(pos);
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
-        // Draw a dot for single taps
         ctx.lineTo(pos.x + 0.1, pos.y + 0.1);
         ctx.stroke();
     };
-    
+
     const draw = (e) => {
         if (!isDrawing || !ctx) return;
         e.preventDefault();
-        const pos = getEventPos(e);
+        const pos = getCanvasPos(e);
+        currentStroke.push(pos);
         ctx.lineTo(pos.x, pos.y);
         ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
     };
-    
+
     const stopDraw = () => {
-        if (!ctx) return;
+        if (!isDrawing) return;
         isDrawing = false;
-        ctx.beginPath();
-        updateEraserButtons();
+        if (currentStroke.length > 0) {
+            strokes.push([...currentStroke]);
+            currentStroke = [];
+        }
+        ctx?.beginPath();
+        updateButtons();
     };
-    
-    // Canvas event listeners
+
+    // Redraw all strokes
+    const redrawStrokes = () => {
+        if (!ctx) return;
+        ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        strokes.forEach(stroke => {
+            if (stroke.length === 0) return;
+            ctx.beginPath();
+            ctx.moveTo(stroke[0].x, stroke[0].y);
+            stroke.forEach(p => ctx.lineTo(p.x, p.y));
+            ctx.stroke();
+        });
+    };
+
     if (maskCanvas) {
-        // Mouse events
         maskCanvas.addEventListener('mousedown', startDraw);
         maskCanvas.addEventListener('mousemove', draw);
         maskCanvas.addEventListener('mouseup', stopDraw);
         maskCanvas.addEventListener('mouseleave', stopDraw);
-        
-        // Touch events
         maskCanvas.addEventListener('touchstart', startDraw, { passive: false });
         maskCanvas.addEventListener('touchmove', draw, { passive: false });
         maskCanvas.addEventListener('touchend', stopDraw);
         maskCanvas.addEventListener('touchcancel', stopDraw);
     }
-    
-    // Undo button
-    if (btnUndo) {
-        btnUndo.addEventListener('click', () => {
-            if (drawHistory.length > 0 && ctx) {
-                const dpr = window.devicePixelRatio || 1;
-                drawHistory.pop(); // Remove current state
-                ctx.save();
-                ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform for putImageData
-                if (drawHistory.length > 0) {
-                    ctx.putImageData(drawHistory[drawHistory.length - 1], 0, 0);
-                } else {
-                    ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-                }
-                ctx.restore();
-                ctx.scale(dpr, dpr); // Reapply scale
-                updateEraserButtons();
+
+    btnUndo?.addEventListener('click', () => {
+        if (strokes.length > 0) {
+            strokes.pop();
+            redrawStrokes();
+            updateButtons();
+        }
+    });
+
+    btnClear?.addEventListener('click', () => {
+        strokes = [];
+        ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        updateButtons();
+    });
+
+    // Generate mask: white on black, at natural image resolution
+    const generateMask = () => {
+        if (!maskCanvas) return null;
+
+        const w = maskCanvas.width;
+        const h = maskCanvas.height;
+        const out = document.createElement('canvas');
+        out.width = w;
+        out.height = h;
+        const outCtx = out.getContext('2d');
+
+        // Black background
+        outCtx.fillStyle = 'black';
+        outCtx.fillRect(0, 0, w, h);
+
+        // Get drawing pixels
+        const srcData = ctx.getImageData(0, 0, w, h);
+        const dstData = outCtx.getImageData(0, 0, w, h);
+
+        // Any alpha > 0 becomes white
+        for (let i = 0; i < srcData.data.length; i += 4) {
+            if (srcData.data[i + 3] > 10) {
+                dstData.data[i] = 255;
+                dstData.data[i + 1] = 255;
+                dstData.data[i + 2] = 255;
             }
-        });
-    }
-
-    // Clear button
-    if (btnClear) {
-        btnClear.addEventListener('click', () => {
-            if (ctx) {
-                const dpr = window.devicePixelRatio || 1;
-                ctx.save();
-                ctx.setTransform(1, 0, 0, 1, 0, 0);
-                ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-                ctx.restore();
-                ctx.scale(dpr, dpr);
-                drawHistory = [];
-                updateEraserButtons();
-            }
-        });
-    }
-
-    // Generate mask image from canvas (outputs at display resolution, not DPR-scaled)
-    const generateMaskImage = () => {
-        if (!ctx || !maskCanvas) return null;
-
-        const dpr = window.devicePixelRatio || 1;
-        const displayWidth = Math.round(maskCanvas.width / dpr);
-        const displayHeight = Math.round(maskCanvas.height / dpr);
-
-        // Create a new canvas for the mask (white on black) at display resolution
-        const maskCtx = document.createElement('canvas').getContext('2d');
-        maskCtx.canvas.width = displayWidth;
-        maskCtx.canvas.height = displayHeight;
-
-        // Fill with black
-        maskCtx.fillStyle = 'black';
-        maskCtx.fillRect(0, 0, displayWidth, displayHeight);
-
-        // Draw the scaled-down version of the drawing canvas
-        maskCtx.drawImage(maskCanvas, 0, 0, displayWidth, displayHeight);
-
-        // Get the pixel data and convert to binary mask
-        const imageData = maskCtx.getImageData(0, 0, displayWidth, displayHeight);
-        const pixels = imageData.data;
-
-        // Convert: any pixel with alpha > 0 becomes white, else black
-        for (let i = 0; i < pixels.length; i += 4) {
-            if (pixels[i + 3] > 10) { // If alpha > threshold (some anti-aliasing)
-                pixels[i] = 255;     // R
-                pixels[i + 1] = 255; // G
-                pixels[i + 2] = 255; // B
-                pixels[i + 3] = 255; // A
-            } else {
-                pixels[i] = 0;
-                pixels[i + 1] = 0;
-                pixels[i + 2] = 0;
-                pixels[i + 3] = 255;
-            }
+            dstData.data[i + 3] = 255;
         }
 
-        maskCtx.putImageData(imageData, 0, 0);
-        return maskCtx.canvas.toDataURL('image/png');
+        outCtx.putImageData(dstData, 0, 0);
+        return out.toDataURL('image/png');
     };
 
-    // --- API Calls ---
-    
-    // Fetch prepared product image (with transparent background) from our API
-    const fetchPreparedProductImage = async (productId) => {
-        try {
-            const res = await fetch(`/apps/see-it/product/prepared?product_id=${encodeURIComponent(productId)}`);
-            if (!res.ok) {
-                console.log('No prepared image found, using original');
-                return null;
-            }
-            const data = await res.json();
-            if (data.prepared_image_url) {
-                console.log('Found prepared image:', data.prepared_image_url);
-                return data.prepared_image_url;
-            }
-            return null;
-        } catch (err) {
-            console.warn('Failed to fetch prepared image:', err);
-            return null;
-        }
-    };
-    
+    // --- API ---
     const startSession = async () => {
         const res = await fetch('/apps/see-it/room/start', { method: 'POST' });
         if (!res.ok) throw new Error('Failed to start session');
-        return await res.json();
+        return res.json();
     };
 
-    const uploadImage = async (file, uploadUrl) => {
-        console.log('[See It] Uploading to GCS:', uploadUrl.substring(0, 100) + '...');
-        try {
-            const res = await fetch(uploadUrl, {
-                method: 'PUT',
-                body: file,
-                headers: { 'Content-Type': file.type },
-                mode: 'cors'
-            });
-            if (!res.ok) {
-                const errorText = await res.text().catch(() => res.statusText);
-                console.error('[See It] GCS upload failed:', res.status, errorText);
-                throw new Error(`Upload failed (${res.status}): ${errorText || 'CORS or network error'}`);
-            }
-            console.log('[See It] Upload successful');
-        } catch (err) {
-            console.error('[See It] Upload error:', err);
-            // Check if it's a CORS error
-            if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
-                throw new Error('Upload blocked - GCS CORS not configured. Contact support.');
-            }
-            throw err;
-        }
+    const uploadImage = async (file, url) => {
+        const res = await fetch(url, {
+            method: 'PUT',
+            body: file,
+            headers: { 'Content-Type': file.type },
+            mode: 'cors'
+        });
+        if (!res.ok) throw new Error('Upload failed');
     };
 
     const confirmRoom = async (sessionId) => {
@@ -394,10 +283,10 @@ document.addEventListener('DOMContentLoaded', function () {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ room_session_id: sessionId })
         });
-        if (!res.ok) throw new Error('Failed to confirm room');
-        return await res.json();
+        if (!res.ok) throw new Error('Failed to confirm');
+        return res.json();
     };
-    
+
     const cleanupWithMask = async (maskDataUrl) => {
         const res = await fetch('/apps/see-it/room/cleanup', {
             method: 'POST',
@@ -408,236 +297,165 @@ document.addEventListener('DOMContentLoaded', function () {
             })
         });
         if (!res.ok) {
-            const error = await res.json().catch(() => ({}));
-            throw new Error(error.message || 'Cleanup failed');
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message || 'Cleanup failed');
         }
-        return await res.json();
+        return res.json();
     };
 
-    // --- Flow Handlers ---
+    const fetchPreparedProduct = async (productId) => {
+        try {
+            const res = await fetch(`/apps/see-it/product/prepared?product_id=${encodeURIComponent(productId)}`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            return data.prepared_image_url || null;
+        } catch { return null; }
+    };
 
-    // 1. Initialize
-    if (trigger) {
-        trigger.addEventListener('click', async () => {
-            modal.classList.remove('hidden');
-            
-            state.productId = trigger.dataset.productId || state.productId;
-            const originalImageUrl = trigger.dataset.productImage || state.productImageUrl;
-            
-            // Fetch the prepared (background-removed) image if available
-            const preparedUrl = await fetchPreparedProductImage(state.productId);
-            
-            if (preparedUrl) {
-                // Use the prepared image (transparent background)
-                state.preparedProductImageUrl = preparedUrl;
-                state.productImageUrl = preparedUrl;
-                state.isPrepared = true;
-            } else {
-                // Fall back to original Shopify image
-                state.preparedProductImageUrl = null;
-                state.productImageUrl = originalImageUrl;
-                state.isPrepared = false;
-            }
-            
-            if (productImage) productImage.src = state.productImageUrl;
-            
-            if (state.sessionId && (state.originalRoomImageUrl || state.cleanedRoomImageUrl)) {
-                const roomUrl = getActiveRoomUrl();
-                if (roomPreview) roomPreview.src = roomUrl;
-                if (roomImage) roomImage.src = roomUrl;
-                showStep(stepEdit);
-            } else {
-                state.currentRoomImageUrl = null;
-                state.originalRoomImageUrl = null;
-                state.cleanedRoomImageUrl = null;
-                state.sessionId = null;
-                showStep(stepWelcome);
-            }
-        });
-    }
+    // --- Flow ---
+    trigger?.addEventListener('click', async () => {
+        modal.classList.remove('hidden');
+        state.productId = trigger.dataset.productId || state.productId;
 
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
-    }
+        const preparedUrl = await fetchPreparedProduct(state.productId);
+        state.productImageUrl = preparedUrl || trigger.dataset.productImage;
+        if (productImage) productImage.src = state.productImageUrl;
 
-    // 2. Upload / Capture
-    const handleFileSelect = async (e) => {
+        if (state.sessionId && getActiveRoomUrl()) {
+            roomPreview && (roomPreview.src = getActiveRoomUrl());
+            roomImage && (roomImage.src = getActiveRoomUrl());
+            showStep(stepEdit);
+        } else {
+            state.originalRoomImageUrl = null;
+            state.cleanedRoomImageUrl = null;
+            state.sessionId = null;
+            state.uploadComplete = false;
+            showStep(stepWelcome);
+        }
+    });
+
+    closeBtn?.addEventListener('click', () => modal.classList.add('hidden'));
+
+    // Upload handler
+    const handleFile = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
-        // Reset state for new image
+        // Reset
         state.cleanedRoomImageUrl = null;
         state.originalRoomImageUrl = null;
         state.sessionId = null;
         state.uploadComplete = false;
-        state.localImageDataUrl = null;
 
-        // INSTANT: Show preview immediately using FileReader
+        // Instant preview
         const reader = new FileReader();
-        reader.onload = (loadEvent) => {
-            state.localImageDataUrl = loadEvent.target.result;
-            state.currentRoomImageUrl = loadEvent.target.result;
-            if (roomPreview) {
-                roomPreview.src = state.localImageDataUrl;
-                // Trigger canvas init once image loads
-                roomPreview.onload = () => requestAnimationFrame(initCanvas);
-            }
+        reader.onload = (ev) => {
+            state.localImageDataUrl = ev.target.result;
+            if (roomPreview) roomPreview.src = state.localImageDataUrl;
             if (roomImage) roomImage.src = state.localImageDataUrl;
             showStep(stepEdit);
         };
         reader.readAsDataURL(file);
 
-        // BACKGROUND: Upload to cloud while user can start drawing
+        // Background upload
         state.isUploading = true;
         updateUploadIndicator();
-        updateEraserButtons();
+        updateButtons();
 
         try {
-            const sessionData = await startSession();
-            state.sessionId = sessionData.sessionId;
-            const uploadUrl = sessionData.uploadUrl;
-
-            await uploadImage(file, uploadUrl);
-
-            const confirmData = await confirmRoom(state.sessionId);
-            state.originalRoomImageUrl = confirmData.roomImageUrl;
+            const session = await startSession();
+            state.sessionId = session.sessionId;
+            await uploadImage(file, session.uploadUrl);
+            const confirm = await confirmRoom(state.sessionId);
+            state.originalRoomImageUrl = confirm.roomImageUrl;
             state.uploadComplete = true;
-
-            console.log('[See It] Upload complete:', state.originalRoomImageUrl);
-
+            console.log('[See It] Upload done');
         } catch (err) {
             console.error('[See It] Upload error:', err);
             showError('Upload failed: ' + err.message);
-            // Reset state on error
             state.sessionId = null;
-            state.uploadComplete = false;
         } finally {
             state.isUploading = false;
             updateUploadIndicator();
-            updateEraserButtons();
+            updateButtons();
         }
     };
 
-    if (uploadBtn) uploadBtn.addEventListener('click', () => uploadInput.click());
-    if (cameraBtn) cameraBtn.addEventListener('click', () => cameraInput.click());
-    if (uploadInput) uploadInput.addEventListener('change', handleFileSelect);
-    if (cameraInput) cameraInput.addEventListener('change', handleFileSelect);
+    uploadBtn?.addEventListener('click', () => uploadInput?.click());
+    cameraBtn?.addEventListener('click', () => cameraInput?.click());
+    uploadInput?.addEventListener('change', handleFile);
+    cameraInput?.addEventListener('change', handleFile);
 
-    // 3. Edit Room
-    if (btnBackToWelcome) btnBackToWelcome.addEventListener('click', () => showStep(stepWelcome));
+    // Edit step
+    btnBackToWelcome?.addEventListener('click', () => showStep(stepWelcome));
 
-    if (btnConfirmRoom) {
-        btnConfirmRoom.addEventListener('click', () => {
-            if (state.isCleaningUp) return;
+    btnConfirmRoom?.addEventListener('click', () => {
+        if (state.isCleaningUp) return;
+        const url = getActiveRoomUrl();
+        if (!url) return showError('Please upload an image first');
 
-            // Need at least a local image to continue
-            const roomUrl = getActiveRoomUrl();
-            if (!roomUrl) {
-                showError('Please upload an image first');
-                return;
-            }
+        if (state.isUploading) {
+            btnConfirmRoom.textContent = 'Finishing...';
+            btnConfirmRoom.disabled = true;
+            const check = setInterval(() => {
+                if (!state.isUploading) {
+                    clearInterval(check);
+                    btnConfirmRoom.textContent = 'Continue →';
+                    btnConfirmRoom.disabled = false;
+                    if (state.uploadComplete) proceed();
+                }
+            }, 100);
+            return;
+        }
+        proceed();
 
-            // If still uploading, wait for it (but this should be rare - upload is fast)
-            if (state.isUploading) {
-                btnConfirmRoom.textContent = 'Finishing upload...';
-                btnConfirmRoom.disabled = true;
-                const checkUpload = setInterval(() => {
-                    if (!state.isUploading) {
-                        clearInterval(checkUpload);
-                        btnConfirmRoom.textContent = 'Continue →';
-                        btnConfirmRoom.disabled = false;
-                        if (state.uploadComplete) {
-                            // Now continue
-                            if (roomImage) roomImage.src = getActiveRoomUrl();
-                            showStep(stepPlace);
-                            state.x = 0;
-                            state.y = 0;
-                            state.scale = 1.0;
-                            updateTransform();
-                        }
-                    }
-                }, 100);
-                return;
-            }
-
-            if (roomImage) roomImage.src = roomUrl;
+        function proceed() {
+            if (roomImage) roomImage.src = getActiveRoomUrl();
             showStep(stepPlace);
-            state.x = 0;
-            state.y = 0;
-            state.scale = 1.0;
+            state.x = 0; state.y = 0; state.scale = 1.0;
             updateTransform();
-        });
-    }
-    
-    // Remove button - process the mask (Magic Eraser)
-    if (btnRemove) {
-        btnRemove.addEventListener('click', async () => {
-            // Must have session, drawing, not cleaning up, and upload must be complete
-            if (state.isCleaningUp || !state.sessionId || drawHistory.length === 0 || !state.uploadComplete) {
-                console.log('[See It] Remove blocked:', {
-                    isCleaningUp: state.isCleaningUp,
-                    sessionId: state.sessionId,
-                    hasDrawing: drawHistory.length > 0,
-                    uploadComplete: state.uploadComplete
-                });
-                return;
+        }
+    });
+
+    // Remove (magic eraser)
+    btnRemove?.addEventListener('click', async () => {
+        if (state.isCleaningUp || !state.sessionId || strokes.length === 0 || !state.uploadComplete) return;
+
+        state.isCleaningUp = true;
+        cleanupLoading?.classList.remove('hidden');
+        btnRemove.disabled = true;
+        btnRemove.textContent = 'Removing...';
+        btnUndo && (btnUndo.disabled = true);
+        btnClear && (btnClear.disabled = true);
+        btnConfirmRoom && (btnConfirmRoom.disabled = true);
+
+        try {
+            const mask = generateMask();
+            const result = await cleanupWithMask(mask);
+            state.cleanedRoomImageUrl = result.cleaned_room_image_url;
+
+            if (roomPreview) {
+                roomPreview.src = state.cleanedRoomImageUrl;
+                roomPreview.onload = initCanvas;
             }
+            if (roomImage) roomImage.src = state.cleanedRoomImageUrl;
 
-            state.isCleaningUp = true;
-            if (cleanupLoading) cleanupLoading.classList.remove('hidden');
-            if (btnRemove) {
-                btnRemove.disabled = true;
-                btnRemove.textContent = 'Removing...';
-            }
-            if (btnUndo) btnUndo.disabled = true;
-            if (btnClear) btnClear.disabled = true;
-            if (btnConfirmRoom) btnConfirmRoom.disabled = true;
+            strokes = [];
+            ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+            console.log('[See It] Cleanup done');
+        } catch (err) {
+            console.error('[See It] Cleanup error:', err);
+            showError('Remove failed: ' + err.message);
+        } finally {
+            state.isCleaningUp = false;
+            cleanupLoading?.classList.add('hidden');
+            btnRemove.textContent = 'Remove';
+            btnConfirmRoom && (btnConfirmRoom.disabled = false);
+            updateButtons();
+        }
+    });
 
-            try {
-                const maskDataUrl = generateMaskImage();
-                console.log('[See It] Sending mask for cleanup...');
-
-                const result = await cleanupWithMask(maskDataUrl);
-
-                state.cleanedRoomImageUrl = result.cleaned_room_image_url;
-
-                // Show the cleaned image
-                if (roomPreview) {
-                    roomPreview.src = result.cleaned_room_image_url;
-                    roomPreview.onload = () => {
-                        // Re-init canvas for the new image after it loads
-                        requestAnimationFrame(initCanvas);
-                    };
-                }
-                if (roomImage) roomImage.src = result.cleaned_room_image_url;
-
-                // Clear canvas for next edit
-                if (ctx) {
-                    const dpr = window.devicePixelRatio || 1;
-                    ctx.save();
-                    ctx.setTransform(1, 0, 0, 1, 0, 0);
-                    ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-                    ctx.restore();
-                    ctx.scale(dpr, dpr);
-                    drawHistory = [];
-                }
-
-                console.log('[See It] Cleanup complete:', result.cleaned_room_image_url);
-
-            } catch (err) {
-                console.error('[See It] Cleanup error:', err);
-                showError('Failed to remove: ' + err.message);
-            } finally {
-                state.isCleaningUp = false;
-                if (cleanupLoading) cleanupLoading.classList.add('hidden');
-                if (btnRemove) btnRemove.textContent = 'Remove';
-                if (btnConfirmRoom) btnConfirmRoom.disabled = false;
-                updateEraserButtons();
-            }
-        });
-    }
-
-    // 4. Place Product (Interactions)
+    // Place product
     const updateTransform = () => {
         if (productContainer) {
             productContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
@@ -646,268 +464,184 @@ document.addEventListener('DOMContentLoaded', function () {
         if (scaleSlider) scaleSlider.value = state.scale;
     };
 
-    let isDragging = false;
-    let startX, startY, initialX, initialY;
+    let isDragging = false, startX, startY, initX, initY;
 
-    if (productContainer) {
-        productContainer.addEventListener('mousedown', (e) => {
-            if (e.target.classList.contains('resize-handle')) return;
-            e.preventDefault();
-            isDragging = true;
-            productContainer.classList.add('is-dragging');
-            startX = e.clientX;
-            startY = e.clientY;
-            initialX = state.x;
-            initialY = state.y;
-        });
+    productContainer?.addEventListener('mousedown', (e) => {
+        if (e.target.classList.contains('resize-handle')) return;
+        e.preventDefault();
+        isDragging = true;
+        productContainer.classList.add('is-dragging');
+        startX = e.clientX; startY = e.clientY;
+        initX = state.x; initY = state.y;
+    });
 
-        window.addEventListener('mousemove', (e) => {
-            if (!isDragging) return;
-            e.preventDefault();
-            state.x = initialX + (e.clientX - startX);
-            state.y = initialY + (e.clientY - startY);
-            updateTransform();
-        });
+    window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        state.x = initX + (e.clientX - startX);
+        state.y = initY + (e.clientY - startY);
+        updateTransform();
+    });
 
-        window.addEventListener('mouseup', () => {
-            isDragging = false;
-            if (productContainer) productContainer.classList.remove('is-dragging');
-        });
+    window.addEventListener('mouseup', () => {
+        isDragging = false;
+        productContainer?.classList.remove('is-dragging');
+    });
 
-        productContainer.addEventListener('touchstart', (e) => {
-            if (e.touches.length > 1) return;
-            if (e.target.classList.contains('resize-handle')) return;
-            isDragging = true;
-            productContainer.classList.add('is-dragging');
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-            initialX = state.x;
-            initialY = state.y;
-        });
+    productContainer?.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 1 || e.target.classList.contains('resize-handle')) return;
+        isDragging = true;
+        productContainer.classList.add('is-dragging');
+        startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+        initX = state.x; initY = state.y;
+    });
 
-        window.addEventListener('touchmove', (e) => {
-            if (!isDragging) return;
-            state.x = initialX + (e.touches[0].clientX - startX);
-            state.y = initialY + (e.touches[0].clientY - startY);
-            updateTransform();
-        }, { passive: false });
+    window.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        state.x = initX + (e.touches[0].clientX - startX);
+        state.y = initY + (e.touches[0].clientY - startY);
+        updateTransform();
+    }, { passive: true });
 
-        window.addEventListener('touchend', () => {
-            isDragging = false;
-            if (productContainer) productContainer.classList.remove('is-dragging');
-        });
-    }
+    window.addEventListener('touchend', () => {
+        isDragging = false;
+        productContainer?.classList.remove('is-dragging');
+    });
 
-    const handles = document.querySelectorAll('.resize-handle');
-    handles.forEach(handle => {
-        let isResizing = false;
-        let startDist = 0;
-        let startScale = 1;
+    // Resize handles
+    document.querySelectorAll('.resize-handle').forEach(handle => {
+        let resizing = false, startDist = 0, startScale = 1;
 
         const getDist = (x, y) => {
             const rect = productContainer.getBoundingClientRect();
-            const cx = rect.left + rect.width / 2;
-            const cy = rect.top + rect.height / 2;
-            return Math.hypot(x - cx, y - cy);
+            return Math.hypot(x - (rect.left + rect.width/2), y - (rect.top + rect.height/2));
         };
 
         const onDown = (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            isResizing = true;
-            const clientX = e.clientX || e.touches[0].clientX;
-            const clientY = e.clientY || e.touches[0].clientY;
-            startDist = getDist(clientX, clientY);
+            e.stopPropagation(); e.preventDefault();
+            resizing = true;
+            const cx = e.clientX || e.touches[0].clientX;
+            const cy = e.clientY || e.touches[0].clientY;
+            startDist = getDist(cx, cy);
             startScale = state.scale;
         };
 
         const onMove = (e) => {
-            if (!isResizing) return;
-            e.preventDefault();
-            const clientX = e.clientX || e.touches[0].clientX;
-            const clientY = e.clientY || e.touches[0].clientY;
-            const newScale = startScale * (getDist(clientX, clientY) / startDist);
-            state.scale = Math.max(0.2, Math.min(5.0, newScale));
+            if (!resizing) return;
+            const cx = e.clientX || e.touches?.[0]?.clientX;
+            const cy = e.clientY || e.touches?.[0]?.clientY;
+            if (cx == null) return;
+            state.scale = Math.max(0.2, Math.min(5, startScale * (getDist(cx, cy) / startDist)));
             updateTransform();
         };
 
-        const onUp = () => { isResizing = false; };
+        const onUp = () => { resizing = false; };
 
         handle.addEventListener('mousedown', onDown);
+        handle.addEventListener('touchstart', onDown, { passive: false });
         window.addEventListener('mousemove', onMove);
+        window.addEventListener('touchmove', onMove, { passive: true });
         window.addEventListener('mouseup', onUp);
-        handle.addEventListener('touchstart', onDown);
-        window.addEventListener('touchmove', onMove, { passive: false });
         window.addEventListener('touchend', onUp);
     });
 
-    if (scaleSlider) {
-        scaleSlider.addEventListener('input', (e) => {
-            state.scale = parseFloat(e.target.value);
-            updateTransform();
+    scaleSlider?.addEventListener('input', (e) => {
+        state.scale = parseFloat(e.target.value);
+        updateTransform();
+    });
+
+    // Generate
+    btnGenerate?.addEventListener('click', () => {
+        if (!state.sessionId || !state.productId) return showError('Missing session or product');
+        if (!roomImage || !productImage) return showError('Images not loaded');
+
+        showStep(stepResult);
+        resetError();
+        statusText.textContent = 'Generating...';
+        resultDiv.innerHTML = '';
+        actionsDiv.classList.add('hidden');
+
+        const roomRect = roomImage.getBoundingClientRect();
+        const prodRect = productImage.getBoundingClientRect();
+
+        const cx = prodRect.left + prodRect.width/2 - roomRect.left;
+        const cy = prodRect.top + prodRect.height/2 - roomRect.top;
+
+        const payload = {
+            room_session_id: state.sessionId,
+            product_id: state.productId,
+            placement: {
+                x: Math.max(0, Math.min(1, cx / roomRect.width)),
+                y: Math.max(0, Math.min(1, cy / roomRect.height)),
+                scale: state.scale || 1
+            },
+            config: {
+                style_preset: 'neutral',
+                quality: 'standard',
+                product_image_url: state.productImageUrl
+            }
+        };
+
+        fetch('/apps/see-it/render', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'failed') {
+                showError(data.error === 'room_not_found' ? 'Session expired, please re-upload' : 'Render failed');
+                actionsDiv.classList.remove('hidden');
+                btnRetry?.classList.remove('hidden');
+                return;
+            }
+            if (data.job_id) pollStatus(data.job_id);
+            else throw new Error('No job ID');
+        })
+        .catch(err => {
+            showError('Error: ' + err.message);
+            actionsDiv.classList.remove('hidden');
+            btnRetry?.classList.remove('hidden');
         });
-    }
-
-    // 5. Generate
-    if (btnGenerate) {
-        btnGenerate.addEventListener('click', () => {
-            // Validate required state
-            if (!state.sessionId || !state.productId) {
-                showError('Missing session or product ID');
-                return;
-            }
-
-            if (!roomImage || !productImage) {
-                showError('Room or product image not loaded');
-                return;
-            }
-
-            showStep(stepResult);
-            resetError();
-            statusText.textContent = 'Generating...';
-            resultDiv.innerHTML = '';
-            actionsDiv.classList.add('hidden');
-
-            const roomRect = roomImage.getBoundingClientRect();
-            const productRect = productImage.getBoundingClientRect();
-
-            if (!roomRect.width || !roomRect.height) {
-                showError('Room image dimensions invalid');
-                return;
-            }
-
-            const productCX = productRect.left + productRect.width / 2 - roomRect.left;
-            const productCY = productRect.top + productRect.height / 2 - roomRect.top;
-
-            // Calculate normalized coordinates (0-1 range)
-            // Use calculated position, or fallback to state.x/y if calculation fails
-            let normalizedX = Number.isFinite(productCX / roomRect.width) 
-                ? productCX / roomRect.width 
-                : (state.x / roomRect.width) || 0.5;
-            let normalizedY = Number.isFinite(productCY / roomRect.height)
-                ? productCY / roomRect.height
-                : (state.y / roomRect.height) || 0.5;
-
-            // Clamp to valid range (0-1)
-            normalizedX = Math.max(0, Math.min(1, normalizedX));
-            normalizedY = Math.max(0, Math.min(1, normalizedY));
-
-            console.log('[See It] Placement calculation:', {
-                productCX, productCY,
-                roomWidth: roomRect.width, roomHeight: roomRect.height,
-                normalizedX, normalizedY,
-                stateX: state.x, stateY: state.y
-            });
-
-            const payload = {
-                room_session_id: state.sessionId,
-                product_id: state.productId,
-                placement: {
-                    x: normalizedX,
-                    y: normalizedY,
-                    scale: state.scale || 1.0
-                },
-                config: {
-                    style_preset: 'neutral',
-                    quality: 'standard',
-                    product_image_url: state.productImageUrl  // Fallback image URL
-                }
-            };
-
-            console.log('[See It] Render payload:', payload);
-
-            fetch('/apps/see-it/render', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            })
-                .then(res => res.json())
-                .then(data => {
-                    // Handle immediate failure
-                    if (data.status === 'failed') {
-                        const errorMsg = data.error === 'room_not_found' 
-                            ? 'Room session expired. Please upload your room image again.'
-                            : data.error === 'no_product_image'
-                            ? 'Product image not available. Please try again.'
-                            : 'Render failed. Please try again.';
-                        showError(errorMsg);
-                        statusText.textContent = '';
-                        actionsDiv.classList.remove('hidden');
-                        btnRetry.classList.remove('hidden');
-                        return;
-                    }
-                    
-                    if (data.job_id) {
-                        pollStatus(data.job_id);
-                    } else {
-                        throw new Error('No job ID returned');
-                    }
-                })
-                .catch(err => {
-                    showError('Error starting render: ' + err.message);
-                    statusText.textContent = '';
-                    actionsDiv.classList.remove('hidden');
-                    btnRetry.classList.remove('hidden');
-                });
-        });
-    }
+    });
 
     const pollStatus = (jobId) => {
-        const POLL_INTERVAL_MS = 2000;
-        const MAX_POLL_DURATION_MS = 60000; // 60 seconds
-        const maxAttempts = Math.ceil(MAX_POLL_DURATION_MS / POLL_INTERVAL_MS);
-        let attemptCount = 0;
-
+        let attempts = 0;
         const interval = setInterval(() => {
-            attemptCount++;
-
-            // Check if we've exceeded the maximum number of attempts
-            if (attemptCount > maxAttempts) {
+            if (++attempts > 30) {
                 clearInterval(interval);
-                showError('Request timed out. The image is taking longer than expected to generate. Please try again.');
-                statusText.textContent = '';
+                showError('Timeout - please try again');
                 actionsDiv.classList.remove('hidden');
-                btnRetry.classList.remove('hidden');
+                btnRetry?.classList.remove('hidden');
                 return;
             }
 
             fetch(`/apps/see-it/render/${jobId}`)
-                .then(res => {
-                    if (!res.ok) {
-                        throw new Error(`Server error: ${res.status}`);
-                    }
-                    return res.json();
-                })
-                .then(data => {
-                    if (data.status === 'completed') {
-                        clearInterval(interval);
-                        statusText.textContent = 'Done!';
-                        const img = document.createElement('img');
-                        img.src = data.imageUrl;
-                        resultDiv.appendChild(img);
-                        actionsDiv.classList.remove('hidden');
-                        btnRetry.classList.add('hidden');
-                    } else if (data.status === 'failed') {
-                        clearInterval(interval);
-                        showError(data.errorMessage || 'Render failed');
-                        statusText.textContent = '';
-                        actionsDiv.classList.remove('hidden');
-                        btnRetry.classList.remove('hidden');
-                    }
-                    // If status is 'pending' or 'processing', continue polling (next interval tick)
-                })
-                .catch(err => {
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'completed') {
                     clearInterval(interval);
-                    console.error('Polling error:', err);
-                    showError('Network error while checking status. Please check your connection and try again.');
-                    statusText.textContent = '';
+                    statusText.textContent = 'Done!';
+                    const img = document.createElement('img');
+                    img.src = data.imageUrl;
+                    resultDiv.appendChild(img);
                     actionsDiv.classList.remove('hidden');
-                    btnRetry.classList.remove('hidden');
-                });
-        }, POLL_INTERVAL_MS);
+                    btnRetry?.classList.add('hidden');
+                } else if (data.status === 'failed') {
+                    clearInterval(interval);
+                    showError(data.errorMessage || 'Failed');
+                    actionsDiv.classList.remove('hidden');
+                    btnRetry?.classList.remove('hidden');
+                }
+            })
+            .catch(() => {
+                clearInterval(interval);
+                showError('Network error');
+                actionsDiv.classList.remove('hidden');
+                btnRetry?.classList.remove('hidden');
+            });
+        }, 2000);
     };
 
-    if (btnAdjust) btnAdjust.addEventListener('click', () => showStep(stepPlace));
-    if (btnStartOver) btnStartOver.addEventListener('click', () => showStep(stepWelcome));
-
+    btnAdjust?.addEventListener('click', () => showStep(stepPlace));
+    btnStartOver?.addEventListener('click', () => showStep(stepWelcome));
 });

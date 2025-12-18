@@ -73,7 +73,7 @@
              <input type="file" id="see-it-upload" accept="image/*" style="display: none;" />
              <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
           </div>
-          <div class="see-it-version-badge">See It v1.0.22</div>
+          <div class="see-it-version-badge">See It v1.0.23</div>
         </div>
       </div>
 
@@ -83,8 +83,10 @@
         <p class="see-it-step-description">Paint over anything you want to remove, or skip to place the product.</p>
 
         <div class="see-it-canvas-wrapper" id="see-it-canvas-wrapper">
-          <img id="see-it-room-preview" src="" alt="Room Preview" />
-          <canvas id="see-it-mask-canvas"></canvas>
+          <div class="see-it-image-container">
+            <img id="see-it-room-preview" src="" alt="Room Preview" />
+            <canvas id="see-it-mask-canvas"></canvas>
+          </div>
           <div id="see-it-cleanup-loading" class="see-it-loading-overlay hidden">
             <div class="see-it-spinner"></div>
             <p>Removing...</p>
