@@ -566,19 +566,44 @@ export async function cleanupRoom(
     requestId: string = "cleanup"
 ): Promise<string> {
     const logContext = createLogContext("cleanup", requestId, "start", {});
-    logger.info(logContext, "Processing room cleanup with Gemini");
-
-    // Track buffers for explicit cleanup
-    let maskBuffer: Buffer | null = null;
-    let roomBuffer: Buffer | null = null;
-    let outputBuffer: Buffer | null = null;
+    logger.info(logContext, "Processing room cleanup with Prodia (fast)");
 
     try {
-        const maskBase64 = maskDataUrl.split(',')[1];
-        maskBuffer = Buffer.from(maskBase64, 'base64');
-        roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
+        // Use Prodia for fast object removal (~190ms vs seconds with Gemini)
+        const { removeObjectsFromUrl } = await import("./object-remover.server");
 
-        const prompt = `Using the provided room image and mask image:
+        const result = await removeObjectsFromUrl(roomImageUrl, maskDataUrl, requestId);
+
+        logger.info(
+            { ...logContext, stage: "prodia-complete" },
+            `Prodia cleanup done in ${result.processingTimeMs}ms`
+        );
+
+        // Upload result to GCS
+        const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+        const url = await uploadToGCS(key, result.imageBuffer, 'image/png', logContext);
+
+        return url;
+
+    } catch (prodiaError) {
+        // Fallback to Gemini if Prodia fails (e.g., missing API key)
+        const errorMsg = prodiaError instanceof Error ? prodiaError.message : "Unknown error";
+        logger.warn(
+            { ...logContext, stage: "prodia-fallback" },
+            `Prodia failed (${errorMsg}), falling back to Gemini`
+        );
+
+        // Original Gemini implementation as fallback
+        let maskBuffer: Buffer | null = null;
+        let roomBuffer: Buffer | null = null;
+        let outputBuffer: Buffer | null = null;
+
+        try {
+            const maskBase64 = maskDataUrl.split(',')[1];
+            maskBuffer = Buffer.from(maskBase64, 'base64');
+            roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
+
+            const prompt = `Using the provided room image and mask image:
 The white regions in the mask indicate objects to be removed.
 Remove objects in the masked (white) areas and fill with appropriate background.
 Match the surrounding context - floor, wall, or whatever is around the masked area.
@@ -586,28 +611,25 @@ Do NOT alter any pixels outside the masked region.
 Maintain consistent lighting and perspective.
 The result should look natural, as if nothing was ever there.`;
 
-        const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
-            model: IMAGE_MODEL_PRO,
-            logContext
-        });
+            const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
+                model: IMAGE_MODEL_PRO,
+                logContext
+            });
 
-        // Clean up input buffers after Gemini call
-        roomBuffer = null;
-        maskBuffer = null;
+            roomBuffer = null;
+            maskBuffer = null;
 
-        outputBuffer = Buffer.from(base64Data, 'base64');
-        const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-        const url = await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
+            outputBuffer = Buffer.from(base64Data, 'base64');
+            const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+            const url = await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
 
-        // Clean up output buffer after upload
-        outputBuffer = null;
-
-        return url;
-    } finally {
-        // Explicit cleanup in finally block
-        maskBuffer = null;
-        roomBuffer = null;
-        outputBuffer = null;
+            outputBuffer = null;
+            return url;
+        } finally {
+            maskBuffer = null;
+            roomBuffer = null;
+            outputBuffer = null;
+        }
     }
 }
 

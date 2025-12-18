@@ -488,3 +488,194 @@ export async function segmentWithPointPrompt(
         throw error;
     }
 }
+
+/**
+ * Point with coordinates and label
+ */
+interface PointInput {
+    x: number;  // 0-1 normalized
+    y: number;  // 0-1 normalized
+    label: number;  // 1 = include, 0 = exclude
+}
+
+/**
+ * Get mask from SAM using multiple points (for preview).
+ * Returns the raw mask buffer and original image buffer.
+ */
+export async function getMultiPointMask(
+    imageUrl: string,
+    points: PointInput[],
+    requestId: string = "multi-point-mask"
+): Promise<{ maskBuffer: Buffer; originalBuffer: Buffer; width: number; height: number }> {
+    const logContext = createLogContext("segment", requestId, "multi-point-mask", {});
+
+    logger.info(
+        { ...logContext, stage: "start" },
+        `Getting mask for ${points.length} points`
+    );
+
+    const client = getReplicateClient();
+
+    // Download image to get dimensions
+    const imgResponse = await fetch(imageUrl);
+    if (!imgResponse.ok) {
+        throw new Error(`Failed to download image: ${imgResponse.status}`);
+    }
+
+    const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
+    const metadata = await sharp(imgBuffer).metadata();
+    const width = metadata.width || 1000;
+    const height = metadata.height || 1000;
+
+    // Convert normalized coords to pixels
+    const pointCoords = points.map(p => [
+        Math.round(p.x * width),
+        Math.round(p.y * height)
+    ]);
+    const pointLabels = points.map(p => p.label);
+
+    logger.info(
+        { ...logContext, stage: "coords" },
+        `Points: ${JSON.stringify(pointCoords)}, Labels: ${JSON.stringify(pointLabels)}`
+    );
+
+    // Call SAM 2
+    const output = await client.run(
+        "meta/sam-2:fe97b453a6455861e3bac769b441ca1f1086110da7466dbb65cf1eecfd60dc83",
+        {
+            input: {
+                image: imageUrl,
+                point_coords: JSON.stringify(pointCoords),
+                point_labels: pointLabels.join(","),
+            }
+        }
+    );
+
+    logger.info(
+        { ...logContext, stage: "api-complete" },
+        `SAM API returned`
+    );
+
+    // Extract mask URL
+    const maskUrl = extractMaskUrl(output, logContext);
+
+    if (!maskUrl) {
+        throw new Error("No mask returned from SAM");
+    }
+
+    // Download mask
+    const maskResponse = await fetch(maskUrl);
+    if (!maskResponse.ok) {
+        throw new Error(`Failed to download mask: ${maskResponse.status}`);
+    }
+
+    const maskBuffer = Buffer.from(await maskResponse.arrayBuffer());
+
+    return {
+        maskBuffer,
+        originalBuffer: imgBuffer,
+        width,
+        height,
+    };
+}
+
+/**
+ * Apply multi-point mask to create transparent PNG.
+ */
+export async function applyMultiPointMask(
+    imageUrl: string,
+    points: PointInput[],
+    requestId: string = "apply-mask"
+): Promise<GroundedSamResult> {
+    const logContext = createLogContext("segment", requestId, "apply-mask", {});
+
+    logger.info(
+        { ...logContext, stage: "start" },
+        `Applying mask for ${points.length} points`
+    );
+
+    const { maskBuffer, originalBuffer, width, height } = await getMultiPointMask(
+        imageUrl,
+        points,
+        requestId
+    );
+
+    // Convert mask to alpha channel
+    const grayscaleMask = await sharp(maskBuffer)
+        .resize({ width, height, fit: 'fill' })
+        .grayscale()
+        .raw()
+        .toBuffer();
+
+    const originalRgba = await sharp(originalBuffer)
+        .ensureAlpha()
+        .raw()
+        .toBuffer();
+
+    // Apply mask as alpha channel
+    const resultBuffer = Buffer.alloc(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+        resultBuffer[i * 4] = originalRgba[i * 4];         // R
+        resultBuffer[i * 4 + 1] = originalRgba[i * 4 + 1]; // G
+        resultBuffer[i * 4 + 2] = originalRgba[i * 4 + 2]; // B
+        resultBuffer[i * 4 + 3] = grayscaleMask[i];        // A from mask
+    }
+
+    const result = await sharp(resultBuffer, {
+        raw: { width, height, channels: 4 }
+    })
+        .png()
+        .toBuffer();
+
+    logger.info(
+        { ...logContext, stage: "complete" },
+        `Mask applied, result size: ${result.length} bytes`
+    );
+
+    return {
+        imageBase64: result.toString('base64'),
+    };
+}
+
+/**
+ * Helper to extract mask URL from SAM output (handles FileOutput objects)
+ */
+function extractMaskUrl(output: unknown, logContext: ReturnType<typeof createLogContext>): string | null {
+    const extractUrl = (value: unknown): string | null => {
+        if (typeof value === 'string') {
+            return value;
+        }
+        if (value && typeof value === 'object') {
+            const obj = value as Record<string, unknown>;
+            if (typeof obj.url === 'function') {
+                const url = (obj.url as () => string)();
+                if (typeof url === 'string') return url;
+            }
+            if (typeof obj.href === 'string') return obj.href;
+            if (typeof obj.url === 'string') return obj.url;
+            const str = String(value);
+            if (str && str.startsWith('http')) return str;
+        }
+        return null;
+    };
+
+    if (output && typeof output === 'object' && !Array.isArray(output)) {
+        const outputObj = output as Record<string, unknown>;
+
+        if (outputObj.combined_mask) {
+            const url = extractUrl(outputObj.combined_mask);
+            if (url) return url;
+        }
+
+        if (outputObj.individual_masks && Array.isArray(outputObj.individual_masks) && outputObj.individual_masks.length > 0) {
+            const url = extractUrl(outputObj.individual_masks[0]);
+            if (url) return url;
+        }
+    }
+
+    if (Array.isArray(output) && output.length > 0) {
+        return extractUrl(output[0]);
+    }
+
+    return extractUrl(output);
+}
