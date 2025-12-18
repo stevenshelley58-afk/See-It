@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Result
     const resultDiv = $('see-it-result');
     const statusText = $('see-it-status');
-    const errorDiv = $('see-it-error');
+    const errorDiv = $('see-it-global-error') || $('see-it-error');
     const actionsDiv = $('see-it-actions');
     const btnAdjust = $('see-it-adjust-placement');
     const btnRetry = $('see-it-retry');

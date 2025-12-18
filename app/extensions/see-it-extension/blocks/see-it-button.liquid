@@ -56,6 +56,7 @@
   <div id="see-it-modal" class="see-it-modal hidden">
     <div class="see-it-modal-content">
       <span class="see-it-close">&times;</span>
+      <div id="see-it-global-error" class="see-it-error hidden"></div>
 
       <!-- Step 0: Welcome -->
       <div id="see-it-step-welcome" class="see-it-step">
@@ -84,7 +85,7 @@
 
         <div class="see-it-canvas-wrapper" id="see-it-canvas-wrapper">
           <div class="see-it-image-container">
-            <img id="see-it-room-preview" src="" alt="Room Preview" />
+            <img id="see-it-room-preview" src="" alt="Room Preview" width="400" height="300" />
             <canvas id="see-it-mask-canvas"></canvas>
           </div>
           <div id="see-it-cleanup-loading" class="see-it-loading-overlay hidden">
