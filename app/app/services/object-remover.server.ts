@@ -46,14 +46,12 @@ export async function removeObjectsFast(
         // Build multipart form data
         const boundary = `----ProdiaBoundary${Date.now()}`;
 
-        // Job config for Flux Dev inpainting (higher quality than Schnell)
+        // Job config for Flux Schnell - FAST (~190ms)
         const jobConfig = JSON.stringify({
-            type: "inference.flux.dev.inpainting.v2",
+            type: "inference.flux.schnell.inpainting.v2",
             config: {
-                prompt: "empty space, clean background that matches the surrounding area, natural seamless fill, photorealistic",
-                steps: 25,  // More steps = better quality
-                strength: 0.95,  // High strength for object removal
-                guidance_scale: 3.5,  // Balanced guidance
+                prompt: "clean empty background, seamless natural fill",
+                steps: 4,  // Schnell optimized for 2-4 steps
             }
         });
 
