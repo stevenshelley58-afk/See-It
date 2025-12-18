@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.30';
+    const VERSION = '1.0.31';
     console.log('[See It] Modal loaded', VERSION);
 
     // --- DOM ---
@@ -127,65 +127,61 @@ document.addEventListener('DOMContentLoaded', function () {
         };
     };
 
-    // Drawing state - completely isolated
+    // Drawing state
     let drawing = false;
     let currentStroke = [];
+    let lastDrawEndTime = 0;  // Track when drawing ended for cooldown
 
-    const onStart = (e) => {
-        if (!ctx) return;
-        e.preventDefault();
-        e.stopPropagation();
-        drawing = true;
-        currentStroke = [];
-        const pos = getPos(e);
-        currentStroke.push(pos);
-        ctx.beginPath();
-        ctx.moveTo(pos.x, pos.y);
-    };
-
-    const onMove = (e) => {
-        if (!drawing || !ctx) return;
-        e.preventDefault();
-        const pos = getPos(e);
-        currentStroke.push(pos);
-        ctx.lineTo(pos.x, pos.y);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(pos.x, pos.y);
-    };
-
-    const onEnd = (e) => {
-        if (!drawing) return;
-        e.preventDefault();
-        e.stopPropagation();
-        drawing = false;
-        if (currentStroke.length > 0) {
-            strokes.push([...currentStroke]);
-        }
-        currentStroke = [];
-        ctx?.beginPath();
-        updateButtons();
-    };
-
-    // Attach canvas events - mouse and touch separately for maximum compatibility
+    // Use pointer events with CAPTURE to keep events on canvas
     if (maskCanvas) {
-        // Mouse events
-        maskCanvas.addEventListener('mousedown', onStart);
-        maskCanvas.addEventListener('mousemove', onMove);
-        maskCanvas.addEventListener('mouseup', onEnd);
-        maskCanvas.addEventListener('mouseleave', onEnd);
+        maskCanvas.style.touchAction = 'none';
 
-        // Touch events
-        maskCanvas.addEventListener('touchstart', onStart, { passive: false });
-        maskCanvas.addEventListener('touchmove', onMove, { passive: false });
-        maskCanvas.addEventListener('touchend', onEnd, { passive: false });
-        maskCanvas.addEventListener('touchcancel', onEnd);
-
-        // Prevent any click events from the canvas
-        maskCanvas.addEventListener('click', (e) => {
+        maskCanvas.addEventListener('pointerdown', (e) => {
+            if (!ctx) return;
             e.preventDefault();
-            e.stopPropagation();
-        }, true);
+            maskCanvas.setPointerCapture(e.pointerId);  // CAPTURE all events
+            drawing = true;
+            currentStroke = [];
+            const pos = getPos(e);
+            currentStroke.push(pos);
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+        });
+
+        maskCanvas.addEventListener('pointermove', (e) => {
+            if (!drawing || !ctx) return;
+            e.preventDefault();
+            const pos = getPos(e);
+            currentStroke.push(pos);
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+        });
+
+        maskCanvas.addEventListener('pointerup', (e) => {
+            if (!drawing) return;
+            e.preventDefault();
+            maskCanvas.releasePointerCapture(e.pointerId);
+            drawing = false;
+            lastDrawEndTime = Date.now();  // Set cooldown timestamp
+            if (currentStroke.length > 0) {
+                strokes.push([...currentStroke]);
+            }
+            currentStroke = [];
+            ctx?.beginPath();
+            updateButtons();
+        });
+
+        maskCanvas.addEventListener('pointercancel', (e) => {
+            if (drawing) {
+                maskCanvas.releasePointerCapture(e.pointerId);
+                drawing = false;
+                currentStroke = [];
+                ctx?.beginPath();
+                updateButtons();
+            }
+        });
     }
 
     const redrawStrokes = () => {
@@ -213,9 +209,13 @@ document.addEventListener('DOMContentLoaded', function () {
         updateButtons();
     });
 
-    // --- Remove Button (simple click) ---
+    // --- Remove Button with cooldown guard ---
     if (btnRemove) {
         btnRemove.addEventListener('click', async function(e) {
+            // Ignore clicks within 300ms of drawing end (prevents trackpad auto-click)
+            if (Date.now() - lastDrawEndTime < 300) {
+                return;
+            }
             // Only proceed if truly enabled
             if (this.disabled || state.isCleaningUp || !state.uploadComplete || strokes.length === 0) {
                 return;
