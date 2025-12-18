@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.24';
-    console.log('[See It] see-it-modal.js loaded', { VERSION });
+    const VERSION = '1.0.25';
+    console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // --- DOM Elements ---
     const $ = id => document.getElementById(id);
