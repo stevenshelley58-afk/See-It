@@ -31,9 +31,17 @@ export function ManualSegmentModal({
     sourceImageUrl,
     productImages = [],
     onSuccess,
+    startInDrawMode = false, // Skip auto, go straight to draw
 }) {
     // State
-    const [step, setStep] = useState("auto"); // "auto" | "draw" | "upload"
+    const [step, setStep] = useState(startInDrawMode ? "draw" : "auto"); // "auto" | "draw" | "upload"
+
+    // Reset step when modal opens with different mode
+    useEffect(() => {
+        if (open) {
+            setStep(startInDrawMode ? "draw" : "auto");
+        }
+    }, [open, startInDrawMode]);
     const [previewUrl, setPreviewUrl] = useState(null);
     const [error, setError] = useState(null);
     const [uploadedFile, setUploadedFile] = useState(null);

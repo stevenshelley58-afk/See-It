@@ -102,7 +102,7 @@ export async function removeBackgroundFast(
             headers: {
                 "Authorization": `Bearer ${apiToken}`,
                 "Content-Type": `multipart/form-data; boundary=${boundary}`,
-                "Accept": "image/png",  // Get PNG directly without multipart wrapper
+                "Accept": "multipart/form-data; image/png",
             },
             body,
         });
@@ -116,7 +116,57 @@ export async function removeBackgroundFast(
             throw new Error(`Prodia API error: ${response.status} - ${errorText}`);
         }
 
-        const resultBuffer = Buffer.from(await response.arrayBuffer());
+        // Parse multipart response to extract the PNG
+        const responseBuffer = Buffer.from(await response.arrayBuffer());
+        const contentTypeHeader = response.headers.get("content-type") || "";
+
+        let resultBuffer: Buffer;
+
+        if (contentTypeHeader.includes("multipart")) {
+            // Extract boundary from content-type header
+            const boundaryMatch = contentTypeHeader.match(/boundary=([^;]+)/);
+            if (!boundaryMatch) {
+                throw new Error("No boundary found in multipart response");
+            }
+            const respBoundary = boundaryMatch[1].trim();
+
+            // Find the PNG part in the multipart response
+            const boundaryBuffer = Buffer.from(`--${respBoundary}`);
+            const parts = [];
+            let start = 0;
+            let idx = responseBuffer.indexOf(boundaryBuffer, start);
+
+            while (idx !== -1) {
+                if (start > 0) {
+                    parts.push(responseBuffer.slice(start, idx - 2)); // -2 for \r\n
+                }
+                start = idx + boundaryBuffer.length + 2; // +2 for \r\n
+                idx = responseBuffer.indexOf(boundaryBuffer, start);
+            }
+
+            // Find the part with image/png content
+            let pngBuffer: Buffer | null = null;
+            for (const part of parts) {
+                const partStr = part.toString('utf8', 0, Math.min(500, part.length));
+                if (partStr.includes("image/png")) {
+                    // Find the empty line that separates headers from body
+                    const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+                    if (headerEnd !== -1) {
+                        pngBuffer = part.slice(headerEnd + 4);
+                        break;
+                    }
+                }
+            }
+
+            if (!pngBuffer) {
+                throw new Error("No PNG found in multipart response");
+            }
+            resultBuffer = pngBuffer;
+        } else {
+            // Direct PNG response
+            resultBuffer = responseBuffer;
+        }
+
         const processingTimeMs = Date.now() - startTime;
 
         logger.info(
