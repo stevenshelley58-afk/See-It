@@ -20,10 +20,8 @@ import {
  *
  * Flow:
  * 1. Prodia auto-removes background (fast, one-click)
- * 2. If not perfect → "Adjust" → Two options:
- *    a) Click mode: Click on product → SAM segments it
- *    b) Draw mode: Paint over product to keep (if SAM fails)
- * 3. Apply selection
+ * 2. If not perfect → Draw over the product to keep
+ * 3. Upload as fallback
  */
 export function ManualSegmentModal({
     open,
@@ -35,23 +33,20 @@ export function ManualSegmentModal({
     onSuccess,
 }) {
     // State
-    const [step, setStep] = useState("auto"); // "auto" | "adjust" | "upload"
+    const [step, setStep] = useState("auto"); // "auto" | "draw" | "upload"
     const [previewUrl, setPreviewUrl] = useState(null);
     const [error, setError] = useState(null);
     const [uploadedFile, setUploadedFile] = useState(null);
     const [selectedImageUrl, setSelectedImageUrl] = useState(sourceImageUrl);
 
-    // Adjust mode state
-    const [adjustMode, setAdjustMode] = useState("click"); // "click" | "draw"
-    const [points, setPoints] = useState([]);
-    const [maskOverlayUrl, setMaskOverlayUrl] = useState(null);
+    // Draw mode state
     const [imageDimensions, setImageDimensions] = useState(null);
     const [brushSize, setBrushSize] = useState(30);
     const [isDrawing, setIsDrawing] = useState(false);
 
     // Canvas refs
     const canvasRef = useRef(null);
-    const maskCanvasRef = useRef(null); // Hidden canvas for drawing mask
+    const maskCanvasRef = useRef(null);
     const imageRef = useRef(null);
 
     // Progress
@@ -61,15 +56,11 @@ export function ManualSegmentModal({
 
     // Fetchers
     const autoFetcher = useFetcher();
-    const previewFetcher = useFetcher();
-    const applyFetcher = useFetcher();
     const maskFetcher = useFetcher();
     const uploadFetcher = useFetcher();
 
     const isLoading =
         autoFetcher.state !== "idle" ||
-        previewFetcher.state !== "idle" ||
-        applyFetcher.state !== "idle" ||
         maskFetcher.state !== "idle" ||
         uploadFetcher.state !== "idle";
 
@@ -142,17 +133,14 @@ export function ManualSegmentModal({
         }
     }, [autoFetcher.data, autoFetcher.state, stopProgress]);
 
-    // === ADJUST MODE ===
-    const handleStartAdjust = useCallback(() => {
-        setStep("adjust");
-        setAdjustMode("click");
-        setPoints([]);
-        setMaskOverlayUrl(null);
+    // === DRAW MODE ===
+    const handleStartDraw = useCallback(() => {
+        setStep("draw");
     }, []);
 
     // Load image for canvas
     useEffect(() => {
-        if (step !== "adjust" || !selectedImageUrl) return;
+        if (step !== "draw" || !selectedImageUrl) return;
 
         const img = new Image();
         img.crossOrigin = "anonymous";
@@ -177,9 +165,9 @@ export function ManualSegmentModal({
         img.src = selectedImageUrl;
     }, [step, selectedImageUrl]);
 
-    // Initialize mask canvas when switching to draw mode
+    // Initialize mask canvas
     useEffect(() => {
-        if (adjustMode !== "draw" || !maskCanvasRef.current || !imageDimensions) return;
+        if (step !== "draw" || !maskCanvasRef.current || !imageDimensions) return;
 
         const maskCanvas = maskCanvasRef.current;
         maskCanvas.width = imageDimensions.naturalWidth;
@@ -187,10 +175,10 @@ export function ManualSegmentModal({
         const ctx = maskCanvas.getContext("2d");
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-    }, [adjustMode, imageDimensions]);
+    }, [step, imageDimensions]);
 
-    // Draw main canvas
-    useEffect(() => {
+    // Draw main canvas with overlay
+    const renderCanvas = useCallback(() => {
         if (!canvasRef.current || !imageRef.current || !imageDimensions) return;
 
         const canvas = canvasRef.current;
@@ -201,125 +189,35 @@ export function ManualSegmentModal({
         // Draw image
         ctx.drawImage(imageRef.current, 0, 0, imageDimensions.displayWidth, imageDimensions.displayHeight);
 
-        if (adjustMode === "click") {
-            // Draw SAM points
-            points.forEach((pt) => {
-                const x = pt.x * imageDimensions.displayWidth;
-                const y = pt.y * imageDimensions.displayHeight;
-                ctx.beginPath();
-                ctx.arc(x, y, 14, 0, Math.PI * 2);
-                ctx.fillStyle = pt.label === 1 ? "rgba(34, 197, 94, 0.9)" : "rgba(239, 68, 68, 0.9)";
-                ctx.fill();
-                ctx.strokeStyle = "white";
-                ctx.lineWidth = 3;
-                ctx.stroke();
-                ctx.fillStyle = "white";
-                ctx.font = "bold 18px Arial";
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
-                ctx.fillText(pt.label === 1 ? "+" : "−", x, y);
-            });
-        } else if (adjustMode === "draw" && maskCanvasRef.current) {
-            // Draw mask overlay (green tint on painted areas)
-            const maskCanvas = maskCanvasRef.current;
-            ctx.save();
-            ctx.globalAlpha = 0.4;
-            ctx.globalCompositeOperation = "source-atop";
-
-            // Scale mask to display size
+        // Draw mask overlay
+        if (maskCanvasRef.current) {
             const tempCanvas = document.createElement("canvas");
             tempCanvas.width = imageDimensions.displayWidth;
             tempCanvas.height = imageDimensions.displayHeight;
             const tempCtx = tempCanvas.getContext("2d");
-            tempCtx.drawImage(maskCanvas, 0, 0, imageDimensions.displayWidth, imageDimensions.displayHeight);
+            tempCtx.drawImage(maskCanvasRef.current, 0, 0, imageDimensions.displayWidth, imageDimensions.displayHeight);
 
-            // Get mask data and draw green overlay where white
             const maskData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
             for (let i = 0; i < maskData.data.length; i += 4) {
                 if (maskData.data[i] > 128) {
-                    // White area - make green
                     maskData.data[i] = 34;
                     maskData.data[i + 1] = 197;
                     maskData.data[i + 2] = 94;
-                    maskData.data[i + 3] = 180;
+                    maskData.data[i + 3] = 150;
                 } else {
-                    // Black area - transparent
                     maskData.data[i + 3] = 0;
                 }
             }
             tempCtx.putImageData(maskData, 0, 0);
-
-            ctx.restore();
-            ctx.globalAlpha = 0.5;
             ctx.drawImage(tempCanvas, 0, 0);
-            ctx.globalAlpha = 1;
         }
-    }, [imageDimensions, points, adjustMode]);
+    }, [imageDimensions]);
 
-    // === CLICK MODE (SAM) ===
-    const handleCanvasClick = useCallback((e) => {
-        if (isLoading || !imageDimensions || adjustMode !== "click") return;
-
-        const canvas = canvasRef.current;
-        const rect = canvas.getBoundingClientRect();
-        const x = (e.clientX - rect.left) / rect.width;
-        const y = (e.clientY - rect.top) / rect.height;
-        const label = e.shiftKey ? 0 : 1;
-
-        const newPoints = [...points, { x, y, label }];
-        setPoints(newPoints);
-
-        const formData = new FormData();
-        formData.append("productId", productId);
-        formData.append("points", JSON.stringify(newPoints));
-
-        previewFetcher.submit(formData, {
-            method: "post",
-            action: "/api/products/segment-preview",
-        });
-    }, [isLoading, imageDimensions, adjustMode, points, productId, previewFetcher]);
-
-    // Handle preview result
     useEffect(() => {
-        if (previewFetcher.data && previewFetcher.state === "idle") {
-            if (previewFetcher.data.success) {
-                setMaskOverlayUrl(previewFetcher.data.maskOverlayUrl);
-            } else {
-                setError(previewFetcher.data.error || "SAM failed - try drawing instead");
-            }
-        }
-    }, [previewFetcher.data, previewFetcher.state]);
+        renderCanvas();
+    }, [renderCanvas]);
 
-    // Apply SAM selection
-    const handleApplySAM = useCallback(() => {
-        if (points.length === 0) return;
-
-        startProgress(["Applying selection...", "Creating transparent image..."]);
-
-        const formData = new FormData();
-        formData.append("productId", productId);
-        formData.append("points", JSON.stringify(points));
-
-        applyFetcher.submit(formData, {
-            method: "post",
-            action: "/api/products/segment-apply",
-        });
-    }, [points, productId, applyFetcher, startProgress]);
-
-    // Handle SAM apply result
-    useEffect(() => {
-        if (applyFetcher.data && applyFetcher.state === "idle") {
-            stopProgress(applyFetcher.data.success);
-            if (applyFetcher.data.success) {
-                onSuccess?.();
-                onClose();
-            } else {
-                setError(applyFetcher.data.error || "Failed - try drawing instead");
-            }
-        }
-    }, [applyFetcher.data, applyFetcher.state, stopProgress, onSuccess, onClose]);
-
-    // === DRAW MODE ===
+    // Drawing handlers
     const getDrawCoords = useCallback((e) => {
         const canvas = canvasRef.current;
         const rect = canvas.getBoundingClientRect();
@@ -342,7 +240,7 @@ export function ManualSegmentModal({
     }, [imageDimensions]);
 
     const drawOnMask = useCallback((x, y) => {
-        if (!maskCanvasRef.current) return;
+        if (!maskCanvasRef.current || !imageDimensions) return;
 
         const ctx = maskCanvasRef.current.getContext("2d");
         const scaledBrush = brushSize * (imageDimensions.naturalWidth / imageDimensions.displayWidth);
@@ -354,22 +252,21 @@ export function ManualSegmentModal({
     }, [brushSize, imageDimensions]);
 
     const handleDrawStart = useCallback((e) => {
-        if (adjustMode !== "draw" || isLoading) return;
+        if (isLoading || !imageDimensions) return;
         e.preventDefault();
         setIsDrawing(true);
         const coords = getDrawCoords(e);
         drawOnMask(coords.x, coords.y);
-    }, [adjustMode, isLoading, getDrawCoords, drawOnMask]);
+        renderCanvas();
+    }, [isLoading, imageDimensions, getDrawCoords, drawOnMask, renderCanvas]);
 
     const handleDrawMove = useCallback((e) => {
-        if (!isDrawing || adjustMode !== "draw") return;
+        if (!isDrawing || !imageDimensions) return;
         e.preventDefault();
         const coords = getDrawCoords(e);
         drawOnMask(coords.x, coords.y);
-
-        // Trigger re-render to show overlay
-        setPoints([...points]);
-    }, [isDrawing, adjustMode, getDrawCoords, drawOnMask, points]);
+        renderCanvas();
+    }, [isDrawing, imageDimensions, getDrawCoords, drawOnMask, renderCanvas]);
 
     const handleDrawEnd = useCallback(() => {
         setIsDrawing(false);
@@ -402,7 +299,7 @@ export function ManualSegmentModal({
                 onSuccess?.();
                 onClose();
             } else {
-                setError(maskFetcher.data.error || "Failed to apply mask");
+                setError(maskFetcher.data.error || "Failed to apply");
             }
         }
     }, [maskFetcher.data, maskFetcher.state, stopProgress, onSuccess, onClose]);
@@ -413,26 +310,8 @@ export function ManualSegmentModal({
         const ctx = maskCanvasRef.current.getContext("2d");
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, imageDimensions.naturalWidth, imageDimensions.naturalHeight);
-        setPoints([...points]); // Trigger re-render
-    }, [imageDimensions, points]);
-
-    // Undo last SAM point
-    const handleUndo = useCallback(() => {
-        if (points.length === 0) return;
-        const newPoints = points.slice(0, -1);
-        setPoints(newPoints);
-        setMaskOverlayUrl(null);
-
-        if (newPoints.length > 0) {
-            const formData = new FormData();
-            formData.append("productId", productId);
-            formData.append("points", JSON.stringify(newPoints));
-            previewFetcher.submit(formData, {
-                method: "post",
-                action: "/api/products/segment-preview",
-            });
-        }
-    }, [points, productId, previewFetcher]);
+        renderCanvas();
+    }, [imageDimensions, renderCanvas]);
 
     // === UPLOAD ===
     const handleDrop = useCallback((_dropFiles, acceptedFiles) => {
@@ -469,7 +348,7 @@ export function ManualSegmentModal({
         }
     }, [uploadFetcher.data, uploadFetcher.state, stopProgress, onSuccess, onClose]);
 
-    // === CONFIRM (save auto result) ===
+    // === CONFIRM ===
     const handleConfirm = useCallback(() => {
         onSuccess?.();
         onClose();
@@ -484,9 +363,7 @@ export function ManualSegmentModal({
         setPreviewUrl(null);
         setError(null);
         setUploadedFile(null);
-        setPoints([]);
-        setMaskOverlayUrl(null);
-        setAdjustMode("click");
+        setImageDimensions(null);
         setProgressStage("");
         setProgressPercent(0);
         setSelectedImageUrl(sourceImageUrl);
@@ -527,7 +404,7 @@ export function ManualSegmentModal({
                         </BlockStack>
                     )}
 
-                    {/* === AUTO MODE (default) === */}
+                    {/* === AUTO MODE === */}
                     {step === "auto" && (
                         <BlockStack gap="300">
                             {/* Image selector */}
@@ -627,8 +504,8 @@ export function ManualSegmentModal({
                                         <Button variant="primary" onClick={handleConfirm}>
                                             Looks Good - Save
                                         </Button>
-                                        <Button onClick={handleStartAdjust}>
-                                            Adjust Selection
+                                        <Button onClick={handleStartDraw}>
+                                            Adjust
                                         </Button>
                                         <Button
                                             onClick={handleAutoRemove}
@@ -645,55 +522,27 @@ export function ManualSegmentModal({
                         </BlockStack>
                     )}
 
-                    {/* === ADJUST MODE === */}
-                    {step === "adjust" && (
+                    {/* === DRAW MODE === */}
+                    {step === "draw" && (
                         <BlockStack gap="300">
-                            {/* Mode toggle */}
-                            <InlineStack gap="200">
-                                <Button
-                                    pressed={adjustMode === "click"}
-                                    onClick={() => setAdjustMode("click")}
-                                    size="slim"
-                                >
-                                    Click to Select
-                                </Button>
-                                <Button
-                                    pressed={adjustMode === "draw"}
-                                    onClick={() => setAdjustMode("draw")}
-                                    size="slim"
-                                >
-                                    Draw to Keep
-                                </Button>
-                            </InlineStack>
-
-                            {/* Instructions */}
                             <Banner tone="info">
-                                {adjustMode === "click" ? (
-                                    <p>
-                                        <strong>Click on the product</strong> you want to keep.
-                                        Shift+click to mark areas to remove.
-                                    </p>
-                                ) : (
-                                    <p>
-                                        <strong>Paint over the product</strong> you want to keep.
-                                        Green areas will be kept, everything else removed.
-                                    </p>
-                                )}
+                                <p>
+                                    <strong>Paint over the product</strong> you want to keep.
+                                    Green = kept, everything else removed.
+                                </p>
                             </Banner>
 
-                            {/* Brush size slider for draw mode */}
-                            {adjustMode === "draw" && (
-                                <div style={{ width: "200px" }}>
-                                    <RangeSlider
-                                        label={`Brush size: ${brushSize}px`}
-                                        value={brushSize}
-                                        onChange={setBrushSize}
-                                        min={10}
-                                        max={100}
-                                        step={5}
-                                    />
-                                </div>
-                            )}
+                            {/* Brush size */}
+                            <div style={{ width: "200px" }}>
+                                <RangeSlider
+                                    label={`Brush: ${brushSize}px`}
+                                    value={brushSize}
+                                    onChange={setBrushSize}
+                                    min={10}
+                                    max={100}
+                                    step={5}
+                                />
+                            </div>
 
                             {/* Canvas */}
                             <div style={{ position: "relative", display: "inline-block" }}>
@@ -701,44 +550,23 @@ export function ManualSegmentModal({
                                     <>
                                         <canvas
                                             ref={canvasRef}
-                                            onClick={adjustMode === "click" ? handleCanvasClick : undefined}
-                                            onMouseDown={adjustMode === "draw" ? handleDrawStart : undefined}
-                                            onMouseMove={adjustMode === "draw" ? handleDrawMove : undefined}
-                                            onMouseUp={adjustMode === "draw" ? handleDrawEnd : undefined}
-                                            onMouseLeave={adjustMode === "draw" ? handleDrawEnd : undefined}
-                                            onTouchStart={adjustMode === "draw" ? handleDrawStart : undefined}
-                                            onTouchMove={adjustMode === "draw" ? handleDrawMove : undefined}
-                                            onTouchEnd={adjustMode === "draw" ? handleDrawEnd : undefined}
+                                            onMouseDown={handleDrawStart}
+                                            onMouseMove={handleDrawMove}
+                                            onMouseUp={handleDrawEnd}
+                                            onMouseLeave={handleDrawEnd}
+                                            onTouchStart={handleDrawStart}
+                                            onTouchMove={handleDrawMove}
+                                            onTouchEnd={handleDrawEnd}
                                             style={{
                                                 display: "block",
                                                 border: "2px solid #2563eb",
                                                 borderRadius: "8px",
-                                                cursor: isLoading ? "wait" : (adjustMode === "click" ? "crosshair" : "cell"),
+                                                cursor: isLoading ? "wait" : "crosshair",
                                                 touchAction: "none",
                                             }}
                                         />
-                                        {/* Hidden mask canvas for drawing */}
                                         <canvas ref={maskCanvasRef} style={{ display: "none" }} />
 
-                                        {/* SAM overlay */}
-                                        {adjustMode === "click" && maskOverlayUrl && (
-                                            <img
-                                                src={maskOverlayUrl}
-                                                alt="Preview"
-                                                style={{
-                                                    position: "absolute",
-                                                    top: 0,
-                                                    left: 0,
-                                                    width: imageDimensions.displayWidth,
-                                                    height: imageDimensions.displayHeight,
-                                                    borderRadius: "8px",
-                                                    pointerEvents: "none",
-                                                    opacity: 0.6,
-                                                }}
-                                            />
-                                        )}
-
-                                        {/* Loading overlay */}
                                         {isLoading && (
                                             <div style={{
                                                 position: "absolute",
@@ -771,45 +599,22 @@ export function ManualSegmentModal({
                                 )}
                             </div>
 
-                            {/* Status */}
                             <Text variant="bodySm" tone="subdued">
-                                {adjustMode === "click"
-                                    ? (points.length === 0
-                                        ? "Click on the product to start"
-                                        : `${points.length} point${points.length > 1 ? "s" : ""} • Green = keep, Red = remove`)
-                                    : "Paint over the product you want to keep"}
+                                Paint over the product you want to keep
                             </Text>
 
-                            {/* Action buttons */}
+                            {/* Buttons */}
                             <InlineStack gap="200">
-                                {adjustMode === "click" ? (
-                                    <>
-                                        <Button
-                                            variant="primary"
-                                            onClick={handleApplySAM}
-                                            loading={applyFetcher.state !== "idle"}
-                                            disabled={points.length === 0}
-                                        >
-                                            Apply Selection
-                                        </Button>
-                                        <Button onClick={handleUndo} disabled={points.length === 0 || isLoading}>
-                                            Undo
-                                        </Button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Button
-                                            variant="primary"
-                                            onClick={handleApplyDrawn}
-                                            loading={maskFetcher.state !== "idle"}
-                                        >
-                                            Apply Drawing
-                                        </Button>
-                                        <Button onClick={handleClearDrawing} disabled={isLoading}>
-                                            Clear
-                                        </Button>
-                                    </>
-                                )}
+                                <Button
+                                    variant="primary"
+                                    onClick={handleApplyDrawn}
+                                    loading={maskFetcher.state !== "idle"}
+                                >
+                                    Apply
+                                </Button>
+                                <Button onClick={handleClearDrawing} disabled={isLoading}>
+                                    Clear
+                                </Button>
                                 <Button onClick={() => setStep("auto")}>
                                     Back
                                 </Button>
