@@ -1,10 +1,10 @@
 /**
- * Fast Object Removal Service using Prodia API
+ * Object Removal Service using Prodia API
  *
- * Uses Flux Schnell inpainting for ~190ms latency
+ * Uses Flux Dev inpainting for high quality results
  * Removes objects from images based on mask (white = remove)
  *
- * Docs: https://docs.prodia.com/job-types/inference-flux-schnell-inpainting-v2/
+ * Docs: https://docs.prodia.com/job-types/inference-flux-dev-inpainting-v2/
  */
 
 import { logger, createLogContext } from "../utils/logger.server";
@@ -17,7 +17,7 @@ export interface ObjectRemovalResult {
 }
 
 /**
- * Remove objects from an image using Prodia Flux Schnell inpainting
+ * Remove objects from an image using Prodia Flux Dev inpainting
  *
  * @param imageBuffer - Buffer of the source image
  * @param maskBuffer - Buffer of the mask (white = areas to remove/inpaint)
@@ -46,12 +46,14 @@ export async function removeObjectsFast(
         // Build multipart form data
         const boundary = `----ProdiaBoundary${Date.now()}`;
 
-        // Job config for Flux Schnell inpainting
+        // Job config for Flux Dev inpainting (higher quality than Schnell)
         const jobConfig = JSON.stringify({
-            type: "inference.flux.schnell.inpainting.v2",
+            type: "inference.flux.dev.inpainting.v2",
             config: {
-                prompt: "clean empty background, matching surrounding area, seamless natural fill",
-                steps: 2,  // Flux Schnell is optimized for low steps
+                prompt: "empty space, clean background that matches the surrounding area, natural seamless fill, photorealistic",
+                steps: 25,  // More steps = better quality
+                strength: 0.95,  // High strength for object removal
+                guidance_scale: 3.5,  // Balanced guidance
             }
         });
 
