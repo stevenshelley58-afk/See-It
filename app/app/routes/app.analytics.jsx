@@ -107,12 +107,12 @@ export const loader = async ({ request }) => {
     }
 
     // Get top products by visualization count
-    const productStats = await prisma.renderJob.groupBy({
+    // Get top products - filter out null productIds in JS since Prisma groupBy has issues with { not: null }
+    const allProductStats = await prisma.renderJob.groupBy({
         by: ['productId'],
         where: {
             shopId: shop.id,
-            status: "completed",
-            productId: { not: null }
+            status: "completed"
         },
         _count: { productId: true },
         orderBy: {
@@ -120,8 +120,13 @@ export const loader = async ({ request }) => {
                 productId: 'desc'
             }
         },
-        take: 5
+        take: 10
     });
+    
+    // Filter out null productIds and take top 5
+    const productStats = allProductStats
+        .filter(stat => stat.productId != null)
+        .slice(0, 5);
 
     // Get product titles from Shopify
     const productIds = productStats.map(stat => stat.productId.replace('gid://shopify/Product/', ''));
