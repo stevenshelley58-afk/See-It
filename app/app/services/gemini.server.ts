@@ -561,68 +561,9 @@ export async function prepareProduct(
 }
 
 /**
- * Compute bounding box of mask (white pixels)
- * Returns { x, y, width, height } or null if mask is empty
- */
-async function computeMaskBbox(
-    maskBuffer: Buffer,
-    padding: number = 0.15,  // 15% padding
-    minPadding: number = 50   // minimum 50px padding
-): Promise<{ x: number; y: number; width: number; height: number; fullWidth: number; fullHeight: number } | null> {
-    const { data, info } = await sharp(maskBuffer)
-        .ensureAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-
-    const { width, height, channels } = info;
-    let minX = width, minY = height, maxX = 0, maxY = 0;
-    let hasWhite = false;
-
-    // Scan for white pixels (alpha >= 16 or RGB > 200)
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const idx = (y * width + x) * channels;
-            // Check if pixel is "white" (high value in any channel)
-            const r = data[idx];
-            const g = data[idx + 1];
-            const b = data[idx + 2];
-            const a = channels === 4 ? data[idx + 3] : 255;
-            
-            if ((r > 200 || g > 200 || b > 200) && a > 16) {
-                hasWhite = true;
-                if (x < minX) minX = x;
-                if (x > maxX) maxX = x;
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
-            }
-        }
-    }
-
-    if (!hasWhite) return null;
-
-    // Calculate padding
-    const bboxWidth = maxX - minX + 1;
-    const bboxHeight = maxY - minY + 1;
-    const padX = Math.max(minPadding, Math.round(bboxWidth * padding));
-    const padY = Math.max(minPadding, Math.round(bboxHeight * padding));
-
-    // Apply padding with bounds checking
-    const x = Math.max(0, minX - padX);
-    const y = Math.max(0, minY - padY);
-    const cropWidth = Math.min(width - x, bboxWidth + 2 * padX);
-    const cropHeight = Math.min(height - y, bboxHeight + 2 * padY);
-
-    return { x, y, width: cropWidth, height: cropHeight, fullWidth: width, fullHeight: height };
-}
-
-/**
- * Optimized room cleanup with bbox cropping for speed
+ * Simple room cleanup - remove objects marked in mask using Gemini
  * 
- * Speed optimizations:
- * 1. Bbox cropping - only send masked region + padding (5-20x fewer pixels)
- * 2. 768px max for preview - faster processing
- * 3. JPEG input - smaller payload
- * 4. Short fixed prompt - less processing
+ * Mask convention: WHITE = remove, BLACK = keep
  */
 export async function cleanupRoom(
     roomImageUrl: string,
@@ -632,165 +573,63 @@ export async function cleanupRoom(
     const logContext = createLogContext("cleanup", requestId, "start", {});
     const startTime = Date.now();
     
-    logger.info(logContext, "Processing room cleanup with optimized Gemini Flash");
-
-    let maskBuffer: Buffer | null = null;
-    let roomBuffer: Buffer | null = null;
-    let outputBuffer: Buffer | null = null;
-    let croppedRoom: Buffer | null = null;
-    let croppedMask: Buffer | null = null;
+    logger.info(logContext, "Processing room cleanup with Gemini");
 
     try {
         // Parse mask from data URL
         const maskBase64 = maskDataUrl.split(',')[1];
-        maskBuffer = Buffer.from(maskBase64, 'base64');
+        let maskBuffer = Buffer.from(maskBase64, 'base64');
         
-        // Download room image (already resized to 2048 max by downloadToBuffer)
-        roomBuffer = await downloadToBuffer(roomImageUrl, logContext, 2048);
+        // Download room image
+        const roomBuffer = await downloadToBuffer(roomImageUrl, logContext, 1024);
 
         // Get room dimensions
         const roomMeta = await sharp(roomBuffer).metadata();
         const roomWidth = roomMeta.width!;
         const roomHeight = roomMeta.height!;
 
-        // Resize mask to match room dimensions
+        logger.info(
+            { ...logContext, stage: "dimensions" },
+            `Room: ${roomWidth}x${roomHeight}`
+        );
+
+        // Resize mask to match room dimensions exactly
         maskBuffer = await sharp(maskBuffer)
             .resize(roomWidth, roomHeight, { fit: 'fill' })
             .png()
             .toBuffer();
 
-        // Compute bbox of mask
-        const bbox = await computeMaskBbox(maskBuffer, 0.20, 60);
-        
-        if (!bbox) {
-            logger.warn(
-                { ...logContext, stage: "bbox" },
-                "No mask content found, returning original image"
-            );
-            // Return original image URL if no mask
-            return roomImageUrl;
-        }
-
-        // Calculate crop area percentage
-        const fullArea = roomWidth * roomHeight;
-        const cropArea = bbox.width * bbox.height;
-        const cropPercent = (cropArea / fullArea * 100).toFixed(1);
-        const pixelReduction = (fullArea / cropArea).toFixed(1);
-
-        logger.info(
-            { ...logContext, stage: "bbox" },
-            `Bbox: ${bbox.width}x${bbox.height} at (${bbox.x},${bbox.y}) - ${cropPercent}% of image (${pixelReduction}x pixel reduction)`
-        );
-
-        // DISABLED: Cropping was causing issues with Gemini removing wrong objects
-        // The AI needs full image context to understand what to remove vs keep
-        const shouldCrop = false; // Disabled for accuracy - was: cropArea < fullArea * 0.5
-        
-        let inputRoom: Buffer;
-        let inputMask: Buffer;
-        let maxDim = 768; // Preview resolution for speed
-
-        if (shouldCrop) {
-            // Crop both room and mask to bbox
-            croppedRoom = await sharp(roomBuffer)
-                .extract({ left: bbox.x, top: bbox.y, width: bbox.width, height: bbox.height })
-                .resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
-                .jpeg({ quality: 80 }) // JPEG for smaller payload
-                .toBuffer();
-
-            croppedMask = await sharp(maskBuffer)
-                .extract({ left: bbox.x, top: bbox.y, width: bbox.width, height: bbox.height })
-                .resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
-                .png()
-                .toBuffer();
-
-            inputRoom = croppedRoom;
-            inputMask = croppedMask;
-
-            logger.info(
-                { ...logContext, stage: "crop" },
-                `Cropped to ${bbox.width}x${bbox.height}, resized to max ${maxDim}px (room: ${inputRoom.length} bytes, mask: ${inputMask.length} bytes)`
-            );
-        } else {
-            // Send full image but resize for speed
-            inputRoom = await sharp(roomBuffer)
-                .resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
-                .jpeg({ quality: 80 })
-                .toBuffer();
-
-            inputMask = await sharp(maskBuffer)
-                .resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
-                .png()
-                .toBuffer();
-
-            logger.info(
-                { ...logContext, stage: "resize" },
-                `Full image resized to max ${maxDim}px (room: ${inputRoom.length} bytes, mask: ${inputMask.length} bytes)`
-            );
-        }
-
-        // Short fixed prompt for speed
-        const prompt = "Remove masked object. Fill seamlessly. Keep unmasked areas unchanged.";
+        // Simple prompt - Gemini understands mask-based inpainting
+        const prompt = `Edit this image: Remove the objects shown in WHITE in the second image (mask). Fill those areas naturally to match the surrounding background. Keep all BLACK areas unchanged.`;
 
         logger.info(
             { ...logContext, stage: "gemini-call" },
-            `Calling Gemini Flash (${inputRoom.length + inputMask.length} bytes total)`
+            `Calling Gemini (room: ${roomBuffer.length} bytes, mask: ${maskBuffer.length} bytes)`
         );
 
         const geminiStart = Date.now();
-        const base64Data = await callGemini(prompt, [inputRoom, inputMask], {
+        const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
             model: IMAGE_MODEL_FAST,
             logContext
         });
         const geminiTime = Date.now() - geminiStart;
 
-        // Clean up input buffers
-        croppedRoom = null;
-        croppedMask = null;
+        const outputBuffer = Buffer.from(base64Data, 'base64');
 
-        outputBuffer = Buffer.from(base64Data, 'base64');
+        // Resize output to match original room dimensions
+        const finalBuffer = await sharp(outputBuffer)
+            .resize(roomWidth, roomHeight, { fit: 'fill' })
+            .jpeg({ quality: 90 })
+            .toBuffer();
 
-        // If we cropped, we need to composite the result back into the original
-        let finalBuffer: Buffer;
-        if (shouldCrop && bbox) {
-            // Get output dimensions
-            const outputMeta = await sharp(outputBuffer).metadata();
-            
-            // Scale output back to original crop size
-            const scaledOutput = await sharp(outputBuffer)
-                .resize(bbox.width, bbox.height, { fit: 'fill' })
-                .toBuffer();
-
-            // Composite back into original room image
-            finalBuffer = await sharp(roomBuffer)
-                .composite([{
-                    input: scaledOutput,
-                    left: bbox.x,
-                    top: bbox.y
-                }])
-                .jpeg({ quality: 90 })
-                .toBuffer();
-
-            logger.info(
-                { ...logContext, stage: "composite" },
-                `Composited ${outputMeta.width}x${outputMeta.height} result back at (${bbox.x},${bbox.y})`
-            );
-        } else {
-            // Just resize output to original dimensions
-            finalBuffer = await sharp(outputBuffer)
-                .resize(roomWidth, roomHeight, { fit: 'fill' })
-                .jpeg({ quality: 90 })
-                .toBuffer();
-        }
-
-        // Upload final result
+        // Upload result
         const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
         const url = await uploadToGCS(key, finalBuffer, 'image/jpeg', logContext);
 
         const totalTime = Date.now() - startTime;
         logger.info(
             { ...logContext, stage: "complete" },
-            `Object removal complete: total=${totalTime}ms, gemini=${geminiTime}ms, cropped=${shouldCrop}, reduction=${pixelReduction}x`
+            `Cleanup complete: total=${totalTime}ms, gemini=${geminiTime}ms`
         );
 
         return url;
@@ -802,12 +641,6 @@ export async function cleanupRoom(
             error
         );
         throw error;
-    } finally {
-        maskBuffer = null;
-        roomBuffer = null;
-        outputBuffer = null;
-        croppedRoom = null;
-        croppedMask = null;
     }
 }
 
