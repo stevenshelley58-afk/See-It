@@ -704,23 +704,33 @@ export async function compositeScene(
         // Step 2: AI polish
         const styleDescription = stylePreset === 'neutral' ? 'natural and realistic' : stylePreset;
         
-        // Build the prompt with optional product context
-        let prompt = `This image shows a product placed into a room scene.`;
+        // Build the prompt - merchant context is wrapped with clear instructions
+        const contextSection = productContext && productContext.trim()
+            ? `
+IMPORTANT PRODUCT INFORMATION (from merchant):
+"${productContext.trim()}"
+Use this information to understand the product's nature, typical size, and how it should appear in the room.
+`
+            : '';
         
-        if (productContext) {
-            prompt += `\n\nProduct context: ${productContext}`;
-        }
-        
-        prompt += `
-The product is already positioned - do NOT move, resize, reposition, or warp the product.
-Make the composite look photorealistic by:
-1. Harmonizing the lighting on the product to match the room's light sources
-2. Adding appropriate shadows beneath and around the product
-3. Adding subtle reflections if on a reflective surface (especially important for mirrors)
-4. Ensuring color temperature consistency
-5. Making the product look naturally integrated into the room environment
+        const prompt = `You are compositing a product into a room photograph.
+
+${contextSection}TASK: Make this composite look like a professional interior design photo.
+
+CRITICAL RULES:
+- The product is already positioned correctly - do NOT move, resize, or reposition it
+- Keep the product's exact shape, proportions, and details unchanged
+
+ENHANCE THE REALISM BY:
+1. Match the product's lighting to the room's light sources (direction, intensity, color temperature)
+2. Add natural shadows beneath and around the product appropriate for the surface it's on
+3. If the product is reflective (mirrors, glass, metal), add subtle reflections of the room
+4. Blend edge transitions naturally - no harsh cutouts
+5. Ensure the product looks like it belongs in this specific room
+
 Style: ${styleDescription}
-Keep the product's exact position, size, and shape unchanged.`;
+
+Output a single photorealistic image.`;
 
         const aspectRatio = roomWidth > roomHeight ? "16:9" : roomHeight > roomWidth ? "9:16" : "1:1";
 

@@ -137,7 +137,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     // Get product context from the asset (merchant-provided description)
-    const productContext = productAsset?.productContext || "";
+    const productContext = productAsset?.productContext?.trim() || "";
+    
+    if (productContext) {
+        logger.info(
+            { ...logContext, stage: "product-context" },
+            `Using merchant product context: "${productContext.substring(0, 100)}${productContext.length > 100 ? '...' : ''}"`
+        );
+    }
 
     const roomSession = await prisma.roomSession.findUnique({
         where: { id: room_session_id }
