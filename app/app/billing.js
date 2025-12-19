@@ -7,8 +7,8 @@ export const PLANS = {
         amount: 0.0,
         currencyCode: "USD",
         interval: BillingInterval.Every30Days,
-        dailyQuota: 10,
-        monthlyQuota: 300,
+        dailyQuota: 100,  // Increased for testing
+        monthlyQuota: 3000,
     },
     PRO: {
         id: "pro",

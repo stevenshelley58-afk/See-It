@@ -589,8 +589,20 @@ document.addEventListener('DOMContentLoaded', function () {
         })
         .then(r => r.json())
         .then(data => {
+            // Check for any error response first
+            if (data.error) {
+                let errorMsg = 'Render failed';
+                if (data.error === 'room_not_found') errorMsg = 'Session expired, please re-upload';
+                else if (data.error === 'rate_limit_exceeded') errorMsg = 'Please wait a moment before trying again';
+                else if (data.error === 'quota_exceeded') errorMsg = 'Daily limit reached';
+                else if (data.message) errorMsg = data.message;
+                showError(errorMsg);
+                actionsDiv.classList.remove('hidden');
+                btnRetry?.classList.remove('hidden');
+                return;
+            }
             if (data.status === 'failed') {
-                showError(data.error === 'room_not_found' ? 'Session expired, please re-upload' : 'Render failed');
+                showError('Render failed');
                 actionsDiv.classList.remove('hidden');
                 btnRetry?.classList.remove('hidden');
                 return;
