@@ -1,5 +1,5 @@
 # See It App Spec
-Version: 0.4
+Version: 0.5
 Last updated: 2026-02-15
 Status: In use
 
@@ -68,6 +68,8 @@ room-original/{shop_id}/{room_session_id}/{uuid}.jpg
 room-cleaned/{shop_id}/{room_session_id}/{uuid}.jpg
 product-prepared/{shop_id}/{product_id}/{asset_id}.png
 composites/{shop_id}/{render_job_id}.jpg
+saved-rooms/{shop_id}/{saved_room_id}/original.jpg
+saved-rooms/{shop_id}/{saved_room_id}/cleaned.jpg
 ```
 
 Retention expectations:
@@ -76,6 +78,7 @@ Retention expectations:
 - Room cleaned variants: ~24–72 hours
 - Composites: ~30 days
 - Prepared product assets: indefinite until uninstall/cleanup
+- Saved rooms: indefinite until explicitly deleted by shopper or shop cleanup
 
 ### Security and limits
 
@@ -130,6 +133,31 @@ External Shopify proxy paths (what the theme extension calls):
   - `status`: `queued | processing | completed | failed`
   - `image_url` when `completed`
   - `error_code` / `error_message` when `failed`
+
+- `POST /apps/see-it/shopper/identify`  
+  Associates a shopper email with the current shop session for Saved Rooms functionality:
+  - Input: `{ email }` (string, validated email format)
+  - Output: `{ shopper_token }` (JWT-like token, scoped to shop + email, stored client-side)
+  - Behavior: validates email format, lowercases it, creates or finds a `SavedRoomOwner` record, issues a signed token for subsequent requests. The token is opaque to the client and must be sent as `X-Shopper-Token` header or `shopper_token` query param.
+
+- `GET /apps/see-it/rooms`  
+  Lists saved rooms for the authenticated shopper:
+  - Auth: requires `shopper_token` (via header `X-Shopper-Token` or query param `shopper_token`)
+  - Output: `{ rooms: [{ id, title, preview_url, created_at }] }` where `preview_url` is a short-lived signed URL (1 hour TTL)
+
+- `POST /apps/see-it/rooms/save`  
+  Saves a room session as a persistent saved room:
+  - Auth: requires `shopper_token`
+  - Input: `{ room_session_id, title? }` (optional title for the saved room)
+  - Output: `{ saved_room_id, preview_url }`
+  - Behavior: copies room image file(s) from the session's GCS key(s) into the `saved-rooms/{shop_id}/{saved_room_id}/` prefix. Creates a `SavedRoom` DB record linked to the `SavedRoomOwner`. The original session can still expire/be deleted; saved rooms are independent.
+
+- `POST /apps/see-it/rooms/delete`  
+  Deletes a saved room:
+  - Auth: requires `shopper_token`
+  - Input: `{ saved_room_id }`
+  - Output: `{ ok: true }`
+  - Behavior: verifies ownership, deletes the `SavedRoom` DB record, and deletes associated GCS files.
 
 Implementation detail (current template): these external paths are handled via Remix routes under `app/app/routes/app-proxy.*` but the **contract** above is what must remain stable.
 
@@ -195,6 +223,7 @@ Relationships:
 - 1 → many `room_sessions`
 - 1 → many `render_jobs`
 - 1 → many `usage_daily`
+- 1 → many `saved_room_owners`
 
 ### `product_assets`
 
@@ -226,8 +255,10 @@ Tracks a shopper’s room-upload session.
 
 - `id` (uuid, pk) — `room_session_id`
 - `shop_id` (uuid, fk → `shops.id`)
-- `original_room_image_url` (text, null)
-- `cleaned_room_image_url` (text, null)
+- `original_room_image_url` (text, null) — legacy signed URL (deprecated in favor of key-based URLs)
+- `cleaned_room_image_url` (text, null) — legacy signed URL (deprecated in favor of key-based URLs)
+- `original_room_image_key` (text, null) — GCS key for the original room image (stable reference)
+- `cleaned_room_image_key` (text, null) — GCS key for cleaned variant (stable reference)
 - `gemini_file_uri` (text, null) — optional URI for Gemini file uploads
 - `created_at` (timestamptz, not null)
 - `expires_at` (timestamptz, not null)
@@ -286,6 +317,42 @@ Constraints:
 - Unique `(shop_id, date)`
 - Many → 1 `shop`
 
+### `saved_room_owners`
+
+Represents a shopper who has saved rooms, identified by email address.
+
+- `id` (uuid, pk)
+- `shop_id` (uuid, fk → `shops.id`)
+- `email` (text, not null) — lowercased email address
+- `created_at` (timestamptz, not null, default now)
+
+Constraints & relationships:
+
+- Unique `(shop_id, email)` — one owner record per shop+email combination
+- Many → 1 `shop`
+- 1 → many `saved_rooms`
+
+### `saved_rooms`
+
+Persistent saved room images that shoppers can reuse across sessions.
+
+- `id` (uuid, pk)
+- `shop_id` (uuid, fk → `shops.id`)
+- `owner_id` (uuid, fk → `saved_room_owners.id`)
+- `title` (text, null) — optional user-provided title
+- `original_image_key` (text, not null) — GCS key for the original room image (e.g., `saved-rooms/{shop_id}/{id}/original.jpg`)
+- `cleaned_image_key` (text, null) — optional GCS key for cleaned variant
+- `created_at` (timestamptz, not null, default now)
+- `updated_at` (timestamptz, not null, updated on save)
+
+Constraints & relationships:
+
+- Many → 1 `shop`
+- Many → 1 `saved_room_owner`
+- Index on `(shop_id, owner_id)` for efficient listing
+
+Note: Saved rooms are independent of `room_sessions`. When a room is saved, the image files are copied from the session's temporary storage into the persistent `saved-rooms/` prefix. The original session can still expire and be cleaned up; saved rooms persist until explicitly deleted.
+
 ### Shopify metafields (product level)
 
 Namespace: `see_it`
@@ -338,6 +405,9 @@ Any **material change** to the app (routes, payloads, schema, auth behavior, maj
    - Only after the spec and contracts are updated should code changes be implemented.
 
 ## Changelog
+
+- **0.5 — 2026-02-15**  
+  Added Saved Rooms feature with email-gated shopper identity. New app-proxy routes: `POST /apps/see-it/shopper/identify`, `GET /apps/see-it/rooms`, `POST /apps/see-it/rooms/save`, `POST /apps/see-it/rooms/delete`. New DB tables: `saved_room_owners` and `saved_rooms` for persistent room storage independent of temporary sessions. Storage layout extended with `saved-rooms/` prefix. Room sessions schema extended with `original_room_image_key` and `cleaned_room_image_key` fields for stable GCS references.
 
 - **0.4 — 2026-02-15**  
   Documented existing mask upload helper, prepared-asset fetch endpoint, and admin batch prepare route; added room session `gemini_file_uri` and product asset `error_message` fields to the canonical schema; clarified canonical room upload path.

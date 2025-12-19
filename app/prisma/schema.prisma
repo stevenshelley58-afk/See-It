@@ -41,10 +41,12 @@ model Shop {
   createdAt     DateTime  @default(now()) @map("created_at")
   uninstalledAt DateTime? @map("uninstalled_at")
 
-  productAssets ProductAsset[]
-  roomSessions  RoomSession[]
-  renderJobs    RenderJob[]
-  usageDaily    UsageDaily[]
+  productAssets    ProductAsset[]
+  roomSessions     RoomSession[]
+  renderJobs       RenderJob[]
+  usageDaily       UsageDaily[]
+  savedRoomOwners  SavedRoomOwner[]
+  savedRooms       SavedRoom[]
 
   @@map("shops")
 }
@@ -139,4 +141,35 @@ model UsageDaily {
 
   @@unique([shopId, date])
   @@map("usage_daily")
+}
+
+model SavedRoomOwner {
+  id        String      @id @default(uuid())
+  shopId    String      @map("shop_id")
+  email     String      // Lowercased email address
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  savedRooms SavedRoom[]
+
+  @@unique([shopId, email])
+  @@index([shopId, email])
+  @@map("saved_room_owners")
+}
+
+model SavedRoom {
+  id              String          @id @default(uuid())
+  shopId          String          @map("shop_id")
+  ownerId         String          @map("owner_id")
+  title           String?         // Optional user-provided title
+  originalImageKey String         @map("original_image_key") // GCS key for the original room image
+  cleanedImageKey String?         @map("cleaned_image_key")  // Optional GCS key for cleaned variant
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  shop  Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  owner SavedRoomOwner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, ownerId])
+  @@map("saved_rooms")
 }

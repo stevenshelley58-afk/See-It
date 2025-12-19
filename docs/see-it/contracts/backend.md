@@ -19,6 +19,10 @@ POST /apps/see-it/room/cleanup
 POST /apps/see-it/render
 GET  /apps/see-it/product/prepared
 GET  /apps/see-it/render/:jobId
+POST /apps/see-it/shopper/identify
+GET  /apps/see-it/rooms
+POST /apps/see-it/rooms/save
+POST /apps/see-it/rooms/delete
 ```
 
 Rules:
@@ -64,6 +68,7 @@ Rules:
 ## Auth and security rules
 
 - All app proxy requests must validate the Shopify HMAC signature and shop identity before doing any work.
+- Saved Rooms endpoints (`GET /apps/see-it/rooms`, `POST /apps/see-it/rooms/save`, `POST /apps/see-it/rooms/delete`) additionally require a `shopper_token` (issued by `POST /apps/see-it/shopper/identify`) for ownership verification. The token must be validated server-side and must match the shop context.
 - All admin endpoints must validate Shopify session tokens and ensure tenant isolation by `shop_id`.
 - No changes to auth logic, HMAC validation, or multi-tenant isolation are allowed without updating:
   - This contract file

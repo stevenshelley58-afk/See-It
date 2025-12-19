@@ -1,57 +1,80 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.26';
+    const VERSION = '2.0.0';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // --- DOM Elements ---
     const $ = id => document.getElementById(id);
     const trigger = $('see-it-trigger');
     const modal = $('see-it-modal');
-    const closeBtn = document.querySelector('.see-it-close');
 
     if (!trigger || !modal) {
         console.log('[See It] Button not rendered - product may not have a featured image');
         return;
     }
 
-    // Steps
-    const stepWelcome = $('see-it-step-welcome');
-    const stepEdit = $('see-it-step-edit-room');
-    const stepPlace = $('see-it-step-place');
-    const stepResult = $('see-it-step-result');
+    // Screens
+    const screenEntry = $('see-it-screen-entry');
+    const screenPrepare = $('see-it-screen-prepare');
+    const screenPosition = $('see-it-screen-position');
+    const screenResult = $('see-it-screen-result');
 
-    // Welcome
-    const uploadBtn = $('see-it-btn-upload');
-    const cameraBtn = $('see-it-btn-camera');
-    const uploadInput = $('see-it-upload');
+    // Entry screen elements
+    const btnCloseEntry = $('see-it-close-entry');
+    const btnTakePhoto = $('see-it-btn-take-photo');
+    const btnUpload = $('see-it-btn-upload');
+    const btnSaved = $('see-it-btn-saved');
+    const uploadInput = $('see-it-upload-input');
     const cameraInput = $('see-it-camera-input');
 
-    // Edit
+    // Prepare screen elements
+    const btnBackPrepare = $('see-it-back-prepare');
     const roomPreview = $('see-it-room-preview');
     const maskCanvas = $('see-it-mask-canvas');
-    const btnConfirmRoom = $('see-it-confirm-room');
-    const btnBackToWelcome = $('see-it-back-to-welcome');
-    const cleanupLoading = $('see-it-cleanup-loading');
-    const uploadIndicator = $('see-it-upload-indicator');
     const btnUndo = $('see-it-undo-btn');
     const btnClear = $('see-it-clear-btn');
     const btnRemove = $('see-it-remove-btn');
+    const btnConfirmRoom = $('see-it-confirm-room');
+    const cleanupLoading = $('see-it-cleanup-loading');
+    const uploadIndicator = $('see-it-upload-indicator');
 
-    // Place
+    // Position screen elements
+    const btnBackPosition = $('see-it-back-position');
     const roomImage = $('see-it-room-image');
     const productContainer = $('see-it-product-container');
     const productImage = $('see-it-product-image');
-    const scaleSlider = $('see-it-scale-slider');
-    const scaleValue = $('see-it-scale-value');
     const btnGenerate = $('see-it-generate');
+    const saveRoomToggle = $('see-it-save-room-toggle');
+    const toggleSwitch = saveRoomToggle?.closest('.see-it-toggle-switch');
 
-    // Result
-    const resultDiv = $('see-it-result');
+    // Toggle switch handler
+    saveRoomToggle?.addEventListener('change', (e) => {
+        if (toggleSwitch) {
+            if (e.target.checked) {
+                toggleSwitch.classList.add('checked');
+            } else {
+                toggleSwitch.classList.remove('checked');
+            }
+        }
+    });
+
+    // Result screen elements
+    const btnCloseResult = $('see-it-close-result');
+    const resultImage = $('see-it-result-image');
     const statusText = $('see-it-status');
+    const statusTextContainer = $('see-it-status-text');
+    const btnShare = $('see-it-share');
+    const btnAdjust = $('see-it-adjust');
+    const btnNewRoom = $('see-it-new-room');
     const errorDiv = $('see-it-global-error') || $('see-it-error');
-    const actionsDiv = $('see-it-actions');
-    const btnAdjust = $('see-it-adjust-placement');
-    const btnRetry = $('see-it-retry');
-    const btnStartOver = $('see-it-start-over');
+
+    // Email/Saved Rooms modals
+    const emailModal = $('see-it-email-modal');
+    const emailInput = $('see-it-email-input');
+    const btnEmailSubmit = $('see-it-email-submit');
+    const btnEmailCancel = $('see-it-email-cancel');
+    const savedRoomsModal = $('see-it-saved-rooms-modal');
+    const savedRoomsList = $('see-it-saved-rooms-list');
+    const btnSavedRoomsClose = $('see-it-saved-rooms-close');
 
     // --- State ---
     let state = {
@@ -61,27 +84,61 @@ document.addEventListener('DOMContentLoaded', function () {
         localImageDataUrl: null,
         productImageUrl: trigger?.dataset.productImage || '',
         productId: trigger?.dataset.productId || '',
+        productTitle: trigger?.dataset.productTitle || '',
+        productPrice: trigger?.dataset.productPrice || '',
         scale: 1.0,
         x: 0,
         y: 0,
         isUploading: false,
         isCleaningUp: false,
-        uploadComplete: false
+        uploadComplete: false,
+        shopperToken: localStorage.getItem('see_it_shopper_token'),
+        currentScreen: 'entry'
     };
 
     // Canvas state
     let ctx = null;
     let isDrawing = false;
     let strokes = [];
-    const BRUSH_COLOR = 'rgba(138, 43, 226, 0.7)';
+    const BRUSH_COLOR = 'rgba(139, 92, 246, 0.7)';
 
     const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
 
-    // --- Helpers ---
-    const showStep = (step) => {
-        [stepWelcome, stepEdit, stepPlace, stepResult].forEach(s => s?.classList.add('hidden'));
-        step?.classList.remove('hidden');
-        if (step === stepEdit) initCanvas();
+    // --- Screen Navigation with Smooth Transitions ---
+    const showScreen = (screenName) => {
+        const screens = {
+            entry: screenEntry,
+            prepare: screenPrepare,
+            position: screenPosition,
+            result: screenResult
+        };
+
+        const targetScreen = screens[screenName];
+        if (!targetScreen) return;
+
+        // Get current active screen
+        const currentScreenEl = screens[state.currentScreen];
+        if (currentScreenEl && currentScreenEl !== targetScreen) {
+            // Mark current as prev for exit animation
+            currentScreenEl.classList.add('prev');
+            currentScreenEl.classList.remove('active');
+            
+            // Wait for transition, then remove prev class
+            setTimeout(() => {
+                currentScreenEl.classList.remove('prev');
+            }, 300);
+        }
+
+        // Show new screen
+        targetScreen.classList.add('active');
+        state.currentScreen = screenName;
+
+        // Initialize screen-specific functionality
+        if (screenName === 'prepare') {
+            initCanvas();
+        } else if (screenName === 'position') {
+            initPosition();
+        }
     };
 
     const showError = (msg) => {
@@ -94,22 +151,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const resetError = () => errorDiv?.classList.add('hidden');
 
-    const updateButtons = () => {
-        const hasStrokes = strokes.length > 0;
-        if (btnUndo) btnUndo.disabled = !hasStrokes;
-        if (btnClear) btnClear.disabled = !hasStrokes;
-        if (btnRemove) {
-            const canRemove = hasStrokes && !state.isCleaningUp && state.uploadComplete;
-            btnRemove.disabled = !canRemove;
-            btnRemove.textContent = hasStrokes && !state.uploadComplete ? 'Uploading...' : 'Remove';
-        }
-    };
-
-    const updateUploadIndicator = () => {
-        uploadIndicator?.classList.toggle('hidden', !state.isUploading);
-    };
-
-    // --- Canvas Drawing ---
+    // --- Canvas Drawing (Prepare Screen) ---
     const initCanvas = () => {
         if (!maskCanvas || !roomPreview) return;
 
@@ -132,7 +174,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         ctx.clearRect(0, 0, natW, natH);
         strokes = [];
-        updateButtons();
+        updatePaintButtons();
 
         console.log('[See It] Canvas init:', natW, 'x', natH);
     };
@@ -151,6 +193,7 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     let currentStroke = [];
+    let justFinishedDrawing = false;
 
     const startDraw = (e) => {
         if (!ctx) return;
@@ -182,9 +225,11 @@ document.addEventListener('DOMContentLoaded', function () {
         if (currentStroke.length > 0) {
             strokes.push([...currentStroke]);
             currentStroke = [];
+            justFinishedDrawing = true;
+            Promise.resolve().then(() => { justFinishedDrawing = false; });
         }
         ctx?.beginPath();
-        updateButtons();
+        updatePaintButtons();
     };
 
     const redrawStrokes = () => {
@@ -199,65 +244,42 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     };
 
-    // Canvas drawing - pointer events with complete isolation
-    let justFinishedDrawing = false;
+    const updatePaintButtons = () => {
+        const hasStrokes = strokes.length > 0;
+        if (btnUndo) btnUndo.disabled = !hasStrokes;
+        if (btnClear) btnClear.disabled = !hasStrokes;
+        if (btnRemove) {
+            const canRemove = hasStrokes && !state.isCleaningUp && state.uploadComplete;
+            btnRemove.disabled = !canRemove;
+        }
+    };
 
+    // Canvas event listeners
     if (maskCanvas) {
-        maskCanvas.style.touchAction = 'none'; // Prevent browser gestures
-
-        maskCanvas.addEventListener('pointerdown', (e) => {
-            e.stopPropagation();
-            startDraw(e);
-        });
-
-        maskCanvas.addEventListener('pointermove', (e) => {
-            e.stopPropagation();
-            draw(e);
-        });
-
-        maskCanvas.addEventListener('pointerup', (e) => {
-            e.stopPropagation();
-            if (isDrawing) {
-                justFinishedDrawing = true;
-                // Clear after microtask (not a timer - just next event loop)
-                Promise.resolve().then(() => { justFinishedDrawing = false; });
-            }
-            stopDraw(e);
-        });
-
-        maskCanvas.addEventListener('pointerleave', (e) => {
-            e.stopPropagation();
-            if (isDrawing) {
-                justFinishedDrawing = true;
-                Promise.resolve().then(() => { justFinishedDrawing = false; });
-            }
-            stopDraw(e);
-        });
-
-        maskCanvas.addEventListener('pointercancel', (e) => {
-            e.stopPropagation();
-            stopDraw(e);
-        });
+        maskCanvas.style.touchAction = 'none';
+        maskCanvas.addEventListener('pointerdown', (e) => { e.stopPropagation(); startDraw(e); });
+        maskCanvas.addEventListener('pointermove', (e) => { e.stopPropagation(); draw(e); });
+        maskCanvas.addEventListener('pointerup', (e) => { e.stopPropagation(); stopDraw(e); });
+        maskCanvas.addEventListener('pointerleave', (e) => { e.stopPropagation(); stopDraw(e); });
+        maskCanvas.addEventListener('pointercancel', (e) => { e.stopPropagation(); stopDraw(e); });
     }
 
     btnUndo?.addEventListener('click', () => {
         if (strokes.length > 0) {
             strokes.pop();
             redrawStrokes();
-            updateButtons();
+            updatePaintButtons();
         }
     });
 
     btnClear?.addEventListener('click', () => {
         strokes = [];
         ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        updateButtons();
+        updatePaintButtons();
     });
 
-    // Generate mask
     const generateMask = () => {
         if (!maskCanvas || !ctx) return null;
-
         const w = maskCanvas.width;
         const h = maskCanvas.height;
         if (w === 0 || h === 0) return null;
@@ -286,9 +308,140 @@ document.addEventListener('DOMContentLoaded', function () {
         return out.toDataURL('image/png');
     };
 
-    // --- API ---
+    // --- Product Positioning (Position Screen) ---
+    const initPosition = () => {
+        if (roomImage) roomImage.src = getActiveRoomUrl();
+        if (productImage) productImage.src = state.productImageUrl;
+        state.x = 0;
+        state.y = 0;
+        state.scale = 1.0;
+        updateTransform();
+    };
+
+    const updateTransform = () => {
+        if (productContainer) {
+            productContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+        }
+    };
+
+    let isDragging = false, startX, startY, initX, initY;
+    let isPinching = false, initialDistance = 0, initialScale = 1;
+
+    // Drag handlers
+    productContainer?.addEventListener('mousedown', (e) => {
+        if (e.target.classList.contains('resize-handle')) return;
+        e.preventDefault();
+        isDragging = true;
+        productContainer.classList.add('is-dragging');
+        startX = e.clientX;
+        startY = e.clientY;
+        initX = state.x;
+        initY = state.y;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        state.x = initX + (e.clientX - startX);
+        state.y = initY + (e.clientY - startY);
+        updateTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+        isDragging = false;
+        productContainer?.classList.remove('is-dragging');
+    });
+
+    // Touch handlers with pinch-to-resize
+    productContainer?.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+            // Pinch gesture
+            e.preventDefault();
+            isPinching = true;
+            isDragging = false;
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            initialDistance = Math.hypot(
+                touch2.clientX - touch1.clientX,
+                touch2.clientY - touch1.clientY
+            );
+            initialScale = state.scale;
+        } else if (e.touches.length === 1 && !e.target.classList.contains('resize-handle')) {
+            // Single touch drag
+            isDragging = true;
+            productContainer.classList.add('is-dragging');
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            initX = state.x;
+            initY = state.y;
+        }
+    }, { passive: false });
+
+    window.addEventListener('touchmove', (e) => {
+        if (isPinching && e.touches.length === 2) {
+            e.preventDefault();
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            const currentDistance = Math.hypot(
+                touch2.clientX - touch1.clientX,
+                touch2.clientY - touch1.clientY
+            );
+            const scaleFactor = currentDistance / initialDistance;
+            state.scale = Math.max(0.2, Math.min(5, initialScale * scaleFactor));
+            updateTransform();
+        } else if (isDragging && e.touches.length === 1) {
+            state.x = initX + (e.touches[0].clientX - startX);
+            state.y = initY + (e.touches[0].clientY - startY);
+            updateTransform();
+        }
+    }, { passive: true });
+
+    window.addEventListener('touchend', () => {
+        isDragging = false;
+        isPinching = false;
+        productContainer?.classList.remove('is-dragging');
+    });
+
+    // Resize handles (desktop)
+    document.querySelectorAll('.resize-handle').forEach(handle => {
+        let resizing = false, startDist = 0, startScale = 1;
+
+        const getDist = (x, y) => {
+            const rect = productContainer.getBoundingClientRect();
+            return Math.hypot(x - (rect.left + rect.width/2), y - (rect.top + rect.height/2));
+        };
+
+        const onDown = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            resizing = true;
+            const cx = e.clientX || e.touches[0].clientX;
+            const cy = e.clientY || e.touches[0].clientY;
+            startDist = getDist(cx, cy);
+            startScale = state.scale;
+        };
+
+        const onMove = (e) => {
+            if (!resizing) return;
+            const cx = e.clientX || e.touches?.[0]?.clientX;
+            const cy = e.clientY || e.touches?.[0]?.clientY;
+            if (cx == null) return;
+            state.scale = Math.max(0.2, Math.min(5, startScale * (getDist(cx, cy) / startDist)));
+            updateTransform();
+        };
+
+        const onUp = () => { resizing = false; };
+
+        handle.addEventListener('mousedown', onDown);
+        handle.addEventListener('touchstart', onDown, { passive: false });
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('touchmove', onMove, { passive: true });
+        window.addEventListener('mouseup', onUp);
+        window.addEventListener('touchend', onUp);
+    });
+
+    // --- API Calls ---
     const startSession = async () => {
-        const res = await fetch('/apps/see-it/room/start', { method: 'POST' });
+        const res = await fetch('/apps/see-it/room/upload', { method: 'POST' });
         if (!res.ok) throw new Error('Failed to start session');
         return res.json();
     };
@@ -322,16 +475,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 mask_data_url: maskDataUrl
             })
         });
-        
         if (!res.ok) {
-            let errorMessage = 'Cleanup failed';
-            try {
-                const err = await res.json();
-                errorMessage = err.message || errorMessage;
-            } catch {}
-            throw new Error(errorMessage);
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message || 'Cleanup failed');
         }
-        
         return res.json();
     };
 
@@ -344,11 +491,48 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch { return null; }
     };
 
-    // --- Flow ---
+    // --- Saved Rooms API ---
+    const identifyShopper = async (email) => {
+        const res = await fetch('/apps/see-it/shopper/identify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        if (!res.ok) throw new Error('Failed to identify');
+        return res.json();
+    };
+
+    const getSavedRooms = async () => {
+        if (!state.shopperToken) return [];
+        const res = await fetch('/apps/see-it/rooms', {
+            headers: { 'X-Shopper-Token': state.shopperToken }
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.rooms || [];
+    };
+
+    const saveRoom = async (roomSessionId, title) => {
+        if (!state.shopperToken) throw new Error('Not identified');
+        const res = await fetch('/apps/see-it/rooms/save', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Shopper-Token': state.shopperToken
+            },
+            body: JSON.stringify({ room_session_id: roomSessionId, title })
+        });
+        if (!res.ok) throw new Error('Failed to save room');
+        return res.json();
+    };
+
+    // --- Modal Open/Close ---
     trigger?.addEventListener('click', async () => {
         modal.classList.remove('hidden');
         resetError();
         state.productId = trigger.dataset.productId || state.productId;
+        state.productTitle = trigger.dataset.productTitle || state.productTitle;
+        state.productPrice = trigger.dataset.productPrice || state.productPrice;
 
         const preparedUrl = await fetchPreparedProduct(state.productId);
         state.productImageUrl = preparedUrl || trigger.dataset.productImage;
@@ -357,19 +541,25 @@ document.addEventListener('DOMContentLoaded', function () {
         if (state.sessionId && getActiveRoomUrl()) {
             roomPreview && (roomPreview.src = getActiveRoomUrl());
             roomImage && (roomImage.src = getActiveRoomUrl());
-            showStep(stepEdit);
+            showScreen('prepare');
         } else {
             state.originalRoomImageUrl = null;
             state.cleanedRoomImageUrl = null;
             state.sessionId = null;
             state.uploadComplete = false;
-            showStep(stepWelcome);
+            showScreen('entry');
         }
     });
 
-    closeBtn?.addEventListener('click', () => modal.classList.add('hidden'));
+    const closeModal = () => {
+        modal.classList.add('hidden');
+        showScreen('entry');
+    };
 
-    // Upload handler
+    btnCloseEntry?.addEventListener('click', closeModal);
+    btnCloseResult?.addEventListener('click', closeModal);
+
+    // --- File Upload Handler ---
     const handleFile = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -384,39 +574,40 @@ document.addEventListener('DOMContentLoaded', function () {
             state.localImageDataUrl = ev.target.result;
             if (roomPreview) roomPreview.src = state.localImageDataUrl;
             if (roomImage) roomImage.src = state.localImageDataUrl;
-            showStep(stepEdit);
+            showScreen('prepare');
         };
         reader.readAsDataURL(file);
 
         state.isUploading = true;
-        updateUploadIndicator();
-        updateButtons();
+        if (uploadIndicator) uploadIndicator.classList.remove('hidden');
+        updatePaintButtons();
 
         try {
             const session = await startSession();
-            state.sessionId = session.sessionId;
-            await uploadImage(file, session.uploadUrl);
+            state.sessionId = session.sessionId || session.room_session_id;
+            await uploadImage(file, session.uploadUrl || session.upload_url);
             const confirm = await confirmRoom(state.sessionId);
-            state.originalRoomImageUrl = confirm.roomImageUrl;
+            state.originalRoomImageUrl = confirm.roomImageUrl || confirm.room_image_url;
             state.uploadComplete = true;
-            console.log('[See It] Upload done');
         } catch (err) {
             console.error('[See It] Upload error:', err);
             showError('Upload failed: ' + err.message);
             state.sessionId = null;
         } finally {
             state.isUploading = false;
-            updateUploadIndicator();
-            updateButtons();
+            if (uploadIndicator) uploadIndicator.classList.add('hidden');
+            updatePaintButtons();
         }
     };
 
-    uploadBtn?.addEventListener('click', () => uploadInput?.click());
-    cameraBtn?.addEventListener('click', () => cameraInput?.click());
+    btnTakePhoto?.addEventListener('click', () => cameraInput?.click());
+    btnUpload?.addEventListener('click', () => uploadInput?.click());
     uploadInput?.addEventListener('change', handleFile);
     cameraInput?.addEventListener('change', handleFile);
 
-    btnBackToWelcome?.addEventListener('click', () => showStep(stepWelcome));
+    // --- Navigation ---
+    btnBackPrepare?.addEventListener('click', () => showScreen('entry'));
+    btnBackPosition?.addEventListener('click', () => showScreen('prepare'));
 
     btnConfirmRoom?.addEventListener('click', () => {
         if (state.isCleaningUp) return;
@@ -424,64 +615,36 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!url) return showError('Please upload an image first');
 
         if (state.isUploading) {
-            btnConfirmRoom.textContent = 'Finishing...';
-            btnConfirmRoom.disabled = true;
+            // Wait for upload
             const check = setInterval(() => {
-                if (!state.isUploading) {
+                if (!state.isUploading && state.uploadComplete) {
                     clearInterval(check);
-                    btnConfirmRoom.textContent = 'Continue';
-                    btnConfirmRoom.disabled = false;
-                    if (state.uploadComplete) proceed();
+                    showScreen('position');
                 }
             }, 100);
             return;
         }
-        proceed();
-
-        function proceed() {
-            if (roomImage) roomImage.src = getActiveRoomUrl();
-            showStep(stepPlace);
-            state.x = 0; state.y = 0; state.scale = 1.0;
-            updateTransform();
-        }
+        showScreen('position');
     });
 
-    // ============================================================
-    // REMOVE BUTTON - Simple click. justFinishedDrawing guards
-    // against synthetic clicks from lifting finger after drawing.
-    // ============================================================
+    // --- Remove Button ---
     btnRemove?.addEventListener('click', async () => {
-        if (btnRemove.disabled || justFinishedDrawing) {
-            console.log('[See It] Remove blocked:', { disabled: btnRemove.disabled, justFinishedDrawing });
-            return;
-        }
-        await doRemove();
-    });
-
-    async function doRemove() {
-        if (state.isCleaningUp || !state.sessionId || strokes.length === 0 || !state.uploadComplete) {
-            return;
-        }
-
-        console.log('[See It] Remove triggered', { strokes: strokes.length });
+        if (btnRemove.disabled || justFinishedDrawing || !state.sessionId || strokes.length === 0) return;
 
         state.isCleaningUp = true;
-        cleanupLoading?.classList.remove('hidden');
+        if (cleanupLoading) cleanupLoading.classList.remove('hidden');
         btnRemove.disabled = true;
-        btnRemove.textContent = 'Removing...';
-        if (btnUndo) btnUndo.disabled = true;
-        if (btnClear) btnClear.disabled = true;
+        btnUndo && (btnUndo.disabled = true);
+        btnClear && (btnClear.disabled = true);
 
         const strokesBackup = JSON.parse(JSON.stringify(strokes));
 
         try {
             const mask = generateMask();
-            if (!mask) {
-                throw new Error('Failed to generate mask');
-            }
+            if (!mask) throw new Error('Failed to generate mask');
 
             const result = await cleanupWithMask(mask);
-            state.cleanedRoomImageUrl = result.cleaned_room_image_url;
+            state.cleanedRoomImageUrl = result.cleaned_room_image_url || result.cleanedRoomImageUrl;
 
             if (roomPreview) {
                 roomPreview.src = state.cleanedRoomImageUrl;
@@ -491,7 +654,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
             strokes = [];
             ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-            console.log('[See It] Cleanup done');
         } catch (err) {
             console.error('[See It] Cleanup error:', err);
             strokes = strokesBackup;
@@ -499,116 +661,32 @@ document.addEventListener('DOMContentLoaded', function () {
             showError('Remove failed: ' + err.message);
         } finally {
             state.isCleaningUp = false;
-            cleanupLoading?.classList.add('hidden');
-            btnRemove.textContent = 'Remove';
-            updateButtons();
+            if (cleanupLoading) cleanupLoading.classList.add('hidden');
+            updatePaintButtons();
         }
-    }
-
-    // Place product
-    const updateTransform = () => {
-        if (productContainer) {
-            productContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
-        }
-        if (scaleValue) scaleValue.textContent = state.scale.toFixed(1);
-        if (scaleSlider) scaleSlider.value = state.scale;
-    };
-
-    let isDragging = false, startX, startY, initX, initY;
-
-    productContainer?.addEventListener('mousedown', (e) => {
-        if (e.target.classList.contains('resize-handle')) return;
-        e.preventDefault();
-        isDragging = true;
-        productContainer.classList.add('is-dragging');
-        startX = e.clientX; startY = e.clientY;
-        initX = state.x; initY = state.y;
     });
 
-    window.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
-        state.x = initX + (e.clientX - startX);
-        state.y = initY + (e.clientY - startY);
-        updateTransform();
-    });
-
-    window.addEventListener('mouseup', () => {
-        isDragging = false;
-        productContainer?.classList.remove('is-dragging');
-    });
-
-    productContainer?.addEventListener('touchstart', (e) => {
-        if (e.touches.length > 1 || e.target.classList.contains('resize-handle')) return;
-        isDragging = true;
-        productContainer.classList.add('is-dragging');
-        startX = e.touches[0].clientX; startY = e.touches[0].clientY;
-        initX = state.x; initY = state.y;
-    });
-
-    window.addEventListener('touchmove', (e) => {
-        if (!isDragging) return;
-        state.x = initX + (e.touches[0].clientX - startX);
-        state.y = initY + (e.touches[0].clientY - startY);
-        updateTransform();
-    }, { passive: true });
-
-    window.addEventListener('touchend', () => {
-        isDragging = false;
-        productContainer?.classList.remove('is-dragging');
-    });
-
-    // Resize handles
-    document.querySelectorAll('.resize-handle').forEach(handle => {
-        let resizing = false, startDist = 0, startScale = 1;
-
-        const getDist = (x, y) => {
-            const rect = productContainer.getBoundingClientRect();
-            return Math.hypot(x - (rect.left + rect.width/2), y - (rect.top + rect.height/2));
-        };
-
-        const onDown = (e) => {
-            e.stopPropagation(); e.preventDefault();
-            resizing = true;
-            const cx = e.clientX || e.touches[0].clientX;
-            const cy = e.clientY || e.touches[0].clientY;
-            startDist = getDist(cx, cy);
-            startScale = state.scale;
-        };
-
-        const onMove = (e) => {
-            if (!resizing) return;
-            const cx = e.clientX || e.touches?.[0]?.clientX;
-            const cy = e.clientY || e.touches?.[0]?.clientY;
-            if (cx == null) return;
-            state.scale = Math.max(0.2, Math.min(5, startScale * (getDist(cx, cy) / startDist)));
-            updateTransform();
-        };
-
-        const onUp = () => { resizing = false; };
-
-        handle.addEventListener('mousedown', onDown);
-        handle.addEventListener('touchstart', onDown, { passive: false });
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('touchmove', onMove, { passive: true });
-        window.addEventListener('mouseup', onUp);
-        window.addEventListener('touchend', onUp);
-    });
-
-    scaleSlider?.addEventListener('input', (e) => {
-        state.scale = parseFloat(e.target.value);
-        updateTransform();
-    });
-
-    // Generate
-    btnGenerate?.addEventListener('click', () => {
+    // --- Generate Render ---
+    btnGenerate?.addEventListener('click', async () => {
         if (!state.sessionId || !state.productId) return showError('Missing session or product');
         if (!roomImage || !productImage) return showError('Images not loaded');
 
-        showStep(stepResult);
+        // Save room if toggle is on
+        if (saveRoomToggle?.checked && state.shopperToken && state.sessionId) {
+            try {
+                await saveRoom(state.sessionId);
+            } catch (err) {
+                console.error('[See It] Failed to save room:', err);
+                // Continue anyway
+            }
+        }
+
+        showScreen('result');
         resetError();
-        statusText.textContent = 'Generating...';
-        resultDiv.innerHTML = '';
-        actionsDiv.classList.add('hidden');
+        if (statusText) statusText.textContent = 'Generating...';
+        if (statusTextContainer) statusTextContainer.classList.remove('hidden');
+        if (resultImage) resultImage.src = '';
+        btnShare?.parentElement?.classList.add('hidden');
 
         const roomRect = roomImage.getBoundingClientRect();
         const prodRect = productImage.getBoundingClientRect();
@@ -640,8 +718,8 @@ document.addEventListener('DOMContentLoaded', function () {
         .then(data => {
             if (data.status === 'failed') {
                 showError(data.error === 'room_not_found' ? 'Session expired, please re-upload' : 'Render failed');
-                actionsDiv.classList.remove('hidden');
-                btnRetry?.classList.remove('hidden');
+                if (statusTextContainer) statusTextContainer.classList.add('hidden');
+                btnShare?.parentElement?.classList.remove('hidden');
                 return;
             }
             if (data.job_id) pollStatus(data.job_id);
@@ -649,8 +727,8 @@ document.addEventListener('DOMContentLoaded', function () {
         })
         .catch(err => {
             showError('Error: ' + err.message);
-            actionsDiv.classList.remove('hidden');
-            btnRetry?.classList.remove('hidden');
+            if (statusTextContainer) statusTextContainer.classList.add('hidden');
+            btnShare?.parentElement?.classList.remove('hidden');
         });
     });
 
@@ -660,8 +738,8 @@ document.addEventListener('DOMContentLoaded', function () {
             if (++attempts > 30) {
                 clearInterval(interval);
                 showError('Timeout - please try again');
-                actionsDiv.classList.remove('hidden');
-                btnRetry?.classList.remove('hidden');
+                if (statusTextContainer) statusTextContainer.classList.add('hidden');
+                btnShare?.parentElement?.classList.remove('hidden');
                 return;
             }
 
@@ -670,28 +748,132 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(data => {
                 if (data.status === 'completed') {
                     clearInterval(interval);
-                    statusText.textContent = 'Done!';
-                    const img = document.createElement('img');
-                    img.src = data.imageUrl;
-                    resultDiv.appendChild(img);
-                    actionsDiv.classList.remove('hidden');
-                    btnRetry?.classList.add('hidden');
+                    if (statusText) statusText.textContent = 'Done!';
+                    if (statusTextContainer) statusTextContainer.classList.add('hidden');
+                    if (resultImage && data.imageUrl) resultImage.src = data.imageUrl;
+                    btnShare?.parentElement?.classList.remove('hidden');
                 } else if (data.status === 'failed') {
                     clearInterval(interval);
                     showError(data.errorMessage || 'Failed');
-                    actionsDiv.classList.remove('hidden');
-                    btnRetry?.classList.remove('hidden');
+                    if (statusTextContainer) statusTextContainer.classList.add('hidden');
+                    btnShare?.parentElement?.classList.remove('hidden');
                 }
             })
             .catch(() => {
                 clearInterval(interval);
                 showError('Network error');
-                actionsDiv.classList.remove('hidden');
-                btnRetry?.classList.remove('hidden');
+                if (statusTextContainer) statusTextContainer.classList.add('hidden');
+                btnShare?.parentElement?.classList.remove('hidden');
             });
         }, 2000);
     };
 
-    btnAdjust?.addEventListener('click', () => showStep(stepPlace));
-    btnStartOver?.addEventListener('click', () => showStep(stepWelcome));
+    // --- Result Actions ---
+    btnAdjust?.addEventListener('click', () => showScreen('position'));
+    btnNewRoom?.addEventListener('click', () => {
+        state.sessionId = null;
+        state.originalRoomImageUrl = null;
+        state.cleanedRoomImageUrl = null;
+        state.localImageDataUrl = null;
+        state.uploadComplete = false;
+        showScreen('entry');
+    });
+
+    // --- Share Functionality ---
+    btnShare?.addEventListener('click', async () => {
+        if (!resultImage || !resultImage.src) return;
+
+        if (navigator.share) {
+            try {
+                const response = await fetch(resultImage.src);
+                const blob = await response.blob();
+                const file = new File([blob], 'see-it-result.jpg', { type: 'image/jpeg' });
+                await navigator.share({ files: [file], title: 'See It Result' });
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    // Fallback to download
+                    downloadImage(resultImage.src);
+                }
+            }
+        } else {
+            downloadImage(resultImage.src);
+        }
+    });
+
+    const downloadImage = (url) => {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'see-it-result.jpg';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
+    // --- Saved Rooms ---
+    btnSaved?.addEventListener('click', async () => {
+        if (state.shopperToken) {
+            // Show saved rooms list
+            await showSavedRoomsList();
+        } else {
+            // Show email capture
+            emailModal?.classList.remove('hidden');
+        }
+    });
+
+    const showSavedRoomsList = async () => {
+        const rooms = await getSavedRooms();
+        if (!savedRoomsList) return;
+
+        savedRoomsList.innerHTML = '';
+        if (rooms.length === 0) {
+            savedRoomsList.innerHTML = '<p style="text-align: center; color: #737373; padding: 2rem;">No saved rooms yet</p>';
+        } else {
+            rooms.forEach(room => {
+                const item = document.createElement('div');
+                item.className = 'see-it-saved-room-item';
+                item.innerHTML = `
+                    <img src="${room.preview_url}" alt="${room.title || 'Room'}" />
+                    <div class="see-it-saved-room-item-info">
+                        <p class="see-it-saved-room-item-title">${room.title || 'Untitled Room'}</p>
+                        <p class="see-it-saved-room-item-date">${new Date(room.created_at).toLocaleDateString()}</p>
+                    </div>
+                `;
+                item.addEventListener('click', () => {
+                    // Load this room (would need backend endpoint to convert saved room to session)
+                    // For now, just close
+                    savedRoomsModal?.classList.add('hidden');
+                });
+                savedRoomsList.appendChild(item);
+            });
+        }
+        savedRoomsModal?.classList.remove('hidden');
+    };
+
+    btnSavedRoomsClose?.addEventListener('click', () => {
+        savedRoomsModal?.classList.add('hidden');
+    });
+
+    // --- Email Capture ---
+    btnEmailSubmit?.addEventListener('click', async () => {
+        const email = emailInput?.value?.trim();
+        if (!email || !email.includes('@')) {
+            showError('Please enter a valid email');
+            return;
+        }
+
+        try {
+            const result = await identifyShopper(email);
+            state.shopperToken = result.shopper_token;
+            localStorage.setItem('see_it_shopper_token', state.shopperToken);
+            emailModal?.classList.add('hidden');
+            // Now show saved rooms
+            await showSavedRoomsList();
+        } catch (err) {
+            showError('Failed to save email: ' + err.message);
+        }
+    });
+
+    btnEmailCancel?.addEventListener('click', () => {
+        emailModal?.classList.add('hidden');
+    });
 });

@@ -88,4 +88,40 @@ export class StorageService {
 
         return url;
     }
+
+    /**
+     * Copy a file from one GCS key to another
+     * Useful for copying room session images to saved-rooms storage
+     */
+    static async copyFile(fromKey: string, toKey: string): Promise<void> {
+        const bucket = storage.bucket(GCS_BUCKET);
+        const sourceFile = bucket.file(fromKey);
+        const destFile = bucket.file(toKey);
+
+        // Check if source exists
+        const [exists] = await sourceFile.exists();
+        if (!exists) {
+            throw new Error(`Source file does not exist: ${fromKey}`);
+        }
+
+        // Copy the file
+        await sourceFile.copy(destFile);
+    }
+
+    /**
+     * Delete a file from GCS
+     * Returns true if the file was deleted, false if it didn't exist
+     */
+    static async deleteFile(key: string): Promise<boolean> {
+        const bucket = storage.bucket(GCS_BUCKET);
+        const file = bucket.file(key);
+
+        try {
+            await file.delete({ ignoreNotFound: true });
+            return true;
+        } catch (error) {
+            console.error(`[StorageService] Failed to delete file ${key}:`, error);
+            return false;
+        }
+    }
 }

@@ -16,9 +16,11 @@ The following tables MUST exist with these names and roles:
 
 - `shops` — one row per installed Shopify shop.
 - `product_assets` — prepared product imagery and metadata per shop/product/source image.
-- `room_sessions` — shopper room upload sessions.
+- `room_sessions` — shopper room upload sessions (temporary, expire after ~24h).
 - `render_jobs` — individual composite render attempts.
 - `usage_daily` — aggregated per-day usage per shop.
+- `saved_room_owners` — shopper identities (email-scoped) for Saved Rooms feature.
+- `saved_rooms` — persistent saved room images that shoppers can reuse.
 
 These tables and their key columns are described in detail in `/docs/see-it/spec.md` (Database schema).
 
@@ -31,8 +33,11 @@ These tables and their key columns are described in detail in `/docs/see-it/spec
 - No new Prisma models or tables are allowed without a documented purpose and schema in `/docs/see-it/spec.md`.
 - Tracked columns include:
   - `room_sessions.gemini_file_uri` (text, nullable) for optional Gemini file uploads.
+  - `room_sessions.original_room_image_key` (text, nullable) and `cleaned_room_image_key` (text, nullable) for stable GCS references.
   - `product_assets.error_message` (text, nullable) for failure context.
-- Image binaries MUST NOT be stored in the database; only URLs and metadata are allowed.
+  - `saved_room_owners.email` (text, not null, lowercased) for shopper identity.
+  - `saved_rooms.original_image_key` (text, not null) and `cleaned_image_key` (text, nullable) for persistent GCS references.
+- Image binaries MUST NOT be stored in the database; only URLs, GCS keys, and metadata are allowed.
 
 ## Prisma & migrations
 
