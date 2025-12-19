@@ -8,47 +8,53 @@
   "settings": [
     {
       "type": "text",
-      "id": "button_label",
-      "label": "Button Label",
-      "default": "See it in your room"
+      "id": "heading",
+      "label": "Heading",
+      "default": "Try it before you buy"
     },
     {
-      "type": "select",
-      "id": "button_style",
-      "label": "Button Style",
-      "options": [
-        { "value": "primary", "label": "Primary" },
-        { "value": "secondary", "label": "Secondary" }
-      ],
-      "default": "primary"
+      "type": "text",
+      "id": "subtext",
+      "label": "Subtext",
+      "default": "See this piece in your space, to scale"
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Button Label",
+      "default": "Try it in your space"
     }
   ]
 }
 {% endschema %}
 
 {% comment %}
-  See It Button - Allows customers to visualize products in their room
-  Requirements:
-  - Must be on a product template
-  - Product must have a featured image
+  See It Button - Card style with heading, subtext, and CTA button
 {% endcomment %}
 
 {% if product != blank and product.featured_image != blank %}
   {% assign product_image_url = product.featured_image | image_url: width: 800 %}
-  {% assign button_class = 'see-it-primary-btn' %}
-  {% if block.settings.button_style == 'secondary' %}
-    {% assign button_class = 'see-it-secondary-btn' %}
-  {% endif %}
 
-  <div class="see-it-button-container" style="margin: 20px 0;">
+  <div class="see-it-card">
+    <div class="see-it-card__header">
+      <h3 class="see-it-card__title">{{ block.settings.heading }}</h3>
+      <p class="see-it-card__subtext">{{ block.settings.subtext }}</p>
+    </div>
+    
     <button
       id="see-it-trigger"
-      class="button {{ button_class }} see-it-btn"
+      class="see-it-card__button"
       data-product-id="{{ product.id }}"
       data-product-handle="{{ product.handle }}"
       data-product-image="{{ product_image_url }}"
       data-shop-domain="{{ shop.domain }}"
     >
+      <span class="see-it-card__button-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="6" width="20" height="14" rx="2"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+      </span>
       {{ block.settings.button_label }}
     </button>
   </div>
@@ -171,6 +177,5 @@
 {% else %}
   {% comment %}
     Product or featured image not available - render nothing
-    This prevents JavaScript errors from missing DOM elements
   {% endcomment %}
 {% endif %}

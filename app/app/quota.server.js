@@ -57,14 +57,14 @@ export async function incrementQuota(shopId, type, count = 1) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const updateData = {};
-    if (type === "render") {
-        updateData.compositeRenders = { increment: count };
-    } else if (type === "prep") {
-        updateData.prepRenders = { increment: count };
-    } else if (type === "cleanup") {
-        updateData.cleanupRenders = { increment: count };
-    }
+    // For create: use actual value (increment not allowed in create)
+    // For update: use increment for atomic updates
+    const field = type === "render" ? "compositeRenders"
+                : type === "prep" ? "prepRenders"
+                : type === "cleanup" ? "cleanupRenders"
+                : null;
+
+    if (!field) return true;
 
     // Use upsert to handle race conditions where usage record doesn't exist yet
     await prisma.usageDaily.upsert({
@@ -72,9 +72,11 @@ export async function incrementQuota(shopId, type, count = 1) {
         create: {
             shopId,
             date: today,
-            ...updateData,
+            [field]: count,  // Use actual value for create
         },
-        update: updateData,
+        update: {
+            [field]: { increment: count },  // Use increment for update
+        },
     });
 
     return true;

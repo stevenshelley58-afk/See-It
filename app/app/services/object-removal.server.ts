@@ -118,24 +118,42 @@ async function processMask(
         processedMask = processedMask.blur(featherSigma);
     }
 
-    // Get the final mask buffer
+    // Step 6: INVERT the mask for Prodia compatibility
+    // Our mask: white = areas to remove, black = areas to keep
+    // Prodia expects: white = areas to KEEP, black = areas to INPAINT
+    // So we need to invert: negate() flips black <-> white
+    processedMask = processedMask.negate();
+
+    // Step 7: Convert back to RGB for Prodia compatibility
+    // Prodia's inpainting API requires standard RGB PNG, not grayscale
+    processedMask = processedMask
+        .toColorspace('srgb')
+        .removeAlpha();
+
+    // Get the final mask buffer as RGB PNG
     const finalMaskBuffer = await processedMask
         .png()
         .toBuffer();
 
-    // Calculate mask coverage
+    // Calculate mask coverage (BEFORE inversion, so we measure original mask)
+    // Note: After inversion, white = keep, black = inpaint
+    // We want to report the % of pixels that will be INPAINTED (originally white, now black)
     const rawData = await sharp(finalMaskBuffer)
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-    let whitePixels = 0;
+    let blackPixels = 0; // After inversion, black = areas to inpaint
+    const channels = rawData.info.channels; // Should be 3 for RGB
     const totalPixels = rawData.info.width * rawData.info.height;
 
-    for (let i = 0; i < rawData.data.length; i++) {
-        if (rawData.data[i] > 128) whitePixels++;
+    // Check each pixel (step by channels since RGB has 3 bytes per pixel)
+    for (let i = 0; i < rawData.data.length; i += channels) {
+        // Average the RGB values to determine if pixel is dark (to be inpainted)
+        const avg = (rawData.data[i] + rawData.data[i + 1] + rawData.data[i + 2]) / 3;
+        if (avg < 128) blackPixels++; // Dark pixels = areas to inpaint
     }
 
-    const coveragePercent = (whitePixels / totalPixels) * 100;
+    const coveragePercent = (blackPixels / totalPixels) * 100;
 
     logger.info(
         { ...logContext, stage: "mask-process-complete" },

@@ -569,35 +569,36 @@ export async function cleanupRoom(
     logger.info(logContext, "Processing room cleanup with mask-driven inpainting");
 
     try {
-        // Use new object removal service with proper mask handling
+        // Try Prodia first (faster: ~2s vs Gemini's ~20s)
         const { removeObjectsFromUrl, isObjectRemovalAvailable } = await import("./object-removal.server");
 
-        if (!isObjectRemovalAvailable()) {
-            throw new Error("Object removal service unavailable - PRODIA_API_TOKEN not set");
+        if (isObjectRemovalAvailable()) {
+            try {
+                logger.info({ ...logContext, stage: "prodia-attempt" }, "Attempting Prodia inpainting");
+                const result = await removeObjectsFromUrl(roomImageUrl, maskDataUrl, requestId);
+
+                // Upload result to GCS
+                const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+                const url = await uploadToGCS(key, result.imageBuffer, 'image/jpeg', logContext);
+
+                logger.info(
+                    { ...logContext, stage: "inpaint-complete" },
+                    `Object removal done via Prodia: time=${result.processingTimeMs}ms, coverage=${result.maskCoveragePercent.toFixed(1)}%`
+                );
+
+                return url;
+            } catch (prodiaError) {
+                logger.warn(
+                    { ...logContext, stage: "prodia-fallback", error: String(prodiaError) },
+                    "Prodia failed, falling back to Gemini"
+                );
+                // Fall through to Gemini
+            }
         }
 
-        const result = await removeObjectsFromUrl(roomImageUrl, maskDataUrl, requestId);
-
-        logger.info(
-            { ...logContext, stage: "inpaint-complete" },
-            `Object removal done: time=${result.processingTimeMs}ms, coverage=${result.maskCoveragePercent.toFixed(2)}%, dimensions=${result.imageDimensions.width}x${result.imageDimensions.height}`
-        );
-
-        // Upload result to GCS
-        const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
-        const url = await uploadToGCS(key, result.imageBuffer, 'image/png', logContext);
-
-        return url;
-
-    } catch (inpaintError) {
-        // Fallback to Gemini if inpainting fails
-        const errorMsg = inpaintError instanceof Error ? inpaintError.message : "Unknown error";
-        logger.warn(
-            { ...logContext, stage: "inpaint-fallback" },
-            `Inpainting failed (${errorMsg}), falling back to Gemini`
-        );
-
-        // Gemini fallback implementation
+        // Fallback to Gemini
+        logger.info({ ...logContext, stage: "gemini-attempt" }, "Using Gemini for inpainting");
+        
         let maskBuffer: Buffer | null = null;
         let roomBuffer: Buffer | null = null;
         let outputBuffer: Buffer | null = null;
@@ -627,6 +628,11 @@ The result should look natural, as if nothing was ever there.`;
             const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
             const url = await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
 
+            logger.info(
+                { ...logContext, stage: "inpaint-complete" },
+                `Object removal complete via Gemini`
+            );
+
             outputBuffer = null;
             return url;
         } finally {
@@ -634,6 +640,12 @@ The result should look natural, as if nothing was ever there.`;
             roomBuffer = null;
             outputBuffer = null;
         }
+    } catch (error) {
+        logger.error(
+            { ...logContext, stage: "error", error: String(error) },
+            "Object removal failed"
+        );
+        throw error;
     }
 }
 

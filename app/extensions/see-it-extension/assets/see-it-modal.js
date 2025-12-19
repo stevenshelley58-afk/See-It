@@ -90,8 +90,29 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     // --- API ---
-    const startSession = async () => {
-        const res = await fetch('/apps/see-it/room/start', { method: 'POST' });
+    // Direct upload - sends file to our server which uploads to GCS (bypasses CORS issues)
+    const uploadImageDirect = async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const res = await fetch('/apps/see-it/room/upload-direct', {
+            method: 'POST',
+            body: formData
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message || 'Upload failed');
+        }
+        return res.json();
+    };
+
+    // Legacy functions kept for compatibility
+    const startSession = async (contentType = 'image/jpeg') => {
+        const res = await fetch('/apps/see-it/room/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content_type: contentType })
+        });
         if (!res.ok) throw new Error('Failed to start session');
         return res.json();
     };
@@ -268,9 +289,10 @@ document.addEventListener('DOMContentLoaded', function () {
             const maskDataUrl = generateMask();
             const result = await cleanupWithMask(state.sessionId, maskDataUrl);
 
-            if (result.cleanedImageUrl) {
-                state.roomImageUrl = result.cleanedImageUrl;
-                if (roomPreview) roomPreview.src = result.cleanedImageUrl;
+            if (result.cleanedRoomImageUrl || result.cleaned_room_image_url) {
+                const cleanedUrl = result.cleanedRoomImageUrl || result.cleaned_room_image_url;
+                state.roomImageUrl = cleanedUrl;
+                if (roomPreview) roomPreview.src = cleanedUrl;
                 strokes = [];
                 redrawStrokes();
                 updateButtons();
@@ -387,16 +409,14 @@ document.addEventListener('DOMContentLoaded', function () {
         };
         reader.readAsDataURL(file);
 
-        // Upload in background
+        // Upload in background using direct upload (bypasses GCS CORS issues)
         state.isUploading = true;
         if (uploadIndicator) uploadIndicator.classList.remove('hidden');
 
         try {
-            const session = await startSession();
-            state.sessionId = session.sessionId;
-            await uploadImage(file, session.uploadUrl);
-            const confirm = await confirmRoom(state.sessionId);
-            state.roomImageUrl = confirm.roomImageUrl;
+            const result = await uploadImageDirect(file);
+            state.sessionId = result.sessionId;
+            state.roomImageUrl = result.roomImageUrl;
             state.uploadComplete = true;
         } catch (err) {
             showError('Upload failed: ' + err.message);
@@ -524,16 +544,30 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!state.sessionId || !state.productId) return showError('Please wait for upload to complete');
         if (!roomImage || !productImage) return showError('Images not loaded');
 
+        // Calculate placement BEFORE switching steps (elements must be visible)
+        const roomRect = roomImage.getBoundingClientRect();
+        const prodRect = productImage.getBoundingClientRect();
+        
+        // Calculate center of product relative to room image
+        let placementX = 0.5; // Default to center
+        let placementY = 0.5;
+        
+        if (roomRect.width > 0 && roomRect.height > 0) {
+            const cx = prodRect.left + prodRect.width/2 - roomRect.left;
+            const cy = prodRect.top + prodRect.height/2 - roomRect.top;
+            placementX = Math.max(0, Math.min(1, cx / roomRect.width));
+            placementY = Math.max(0, Math.min(1, cy / roomRect.height));
+        }
+        
+        // Ensure valid numbers (not NaN)
+        if (!Number.isFinite(placementX)) placementX = 0.5;
+        if (!Number.isFinite(placementY)) placementY = 0.5;
+
         showStep(stepResult);
         resetError();
         statusText.textContent = 'Generating...';
         resultDiv.innerHTML = '';
         actionsDiv.classList.add('hidden');
-
-        const roomRect = roomImage.getBoundingClientRect();
-        const prodRect = productImage.getBoundingClientRect();
-        const cx = prodRect.left + prodRect.width/2 - roomRect.left;
-        const cy = prodRect.top + prodRect.height/2 - roomRect.top;
 
         fetch('/apps/see-it/render', {
             method: 'POST',
@@ -542,8 +576,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 room_session_id: state.sessionId,
                 product_id: state.productId,
                 placement: {
-                    x: Math.max(0, Math.min(1, cx / roomRect.width)),
-                    y: Math.max(0, Math.min(1, cy / roomRect.height)),
+                    x: placementX,
+                    y: placementY,
                     scale: state.scale || 1
                 },
                 config: {
