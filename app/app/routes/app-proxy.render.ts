@@ -76,13 +76,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
     }
 
-    const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+    const shop = await prisma.shop.findUnique({ 
+        where: { shopDomain: session.shop },
+        select: { id: true, settingsJson: true }
+    });
     if (!shop) {
         logger.error(
             { ...logContext, stage: "shop-lookup" },
             `Shop not found in database: ${session.shop}`
         );
         return json({ error: "Shop not found" }, { status: 404, headers: corsHeaders });
+    }
+
+    // Parse shop settings to get product context
+    let productContext = "";
+    try {
+        const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
+        productContext = settings.product_context || "";
+    } catch (e) {
+        logger.warn({ ...logContext, stage: "settings-parse" }, "Failed to parse shop settings");
     }
 
     // Update log context with shop info
@@ -199,7 +211,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             roomImageUrl,
             { x: placement.x, y: placement.y, scale: placement.scale || 1.0 },
             config?.style_preset || "neutral",
-            requestId
+            requestId,
+            productContext // Pass merchant's product description for better AI results
         );
 
         await prisma.renderJob.update({

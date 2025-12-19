@@ -1,32 +1,67 @@
 /**
  * DEV ONLY: Reset quota for testing
- * POST /api/reset-quota
+ * GET /api/reset-quota?shop=xxx - Reset quota for a specific shop
  * 
  * This endpoint:
  * 1. Increases the shop's daily quota to 100
  * 2. Resets today's usage to 0
  */
 
-import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { authenticate } from "../shopify.server";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import prisma from "../db.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-    // Only allow in development/test mode
-    if (process.env.NODE_ENV === "production" && process.env.ALLOW_QUOTA_RESET !== "true") {
-        return json({ error: "Not allowed in production" }, { status: 403 });
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+    // Only allow when ALLOW_QUOTA_RESET is set
+    if (process.env.ALLOW_QUOTA_RESET !== "true") {
+        return json({ error: "Not allowed - set ALLOW_QUOTA_RESET=true" }, { status: 403 });
     }
 
-    const { session } = await authenticate.admin(request);
-    const shopDomain = session.shop;
+    const url = new URL(request.url);
+    const shopDomain = url.searchParams.get("shop");
 
-    // Find the shop
+    // If no shop specified, reset ALL shops (for testing)
+    if (!shopDomain) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Update all shops to have 100 daily quota
+        const shopUpdate = await prisma.shop.updateMany({
+            data: { dailyQuota: 100 }
+        });
+
+        // Reset all usage for today
+        const usageUpdate = await prisma.usageDaily.updateMany({
+            where: { date: today },
+            data: {
+                compositeRenders: 0,
+                prepRenders: 0,
+                cleanupRenders: 0
+            }
+        });
+
+        return json({ 
+            success: true, 
+            message: "All quotas reset",
+            shopsUpdated: shopUpdate.count,
+            usageRecordsReset: usageUpdate.count
+        });
+    }
+
+    // Find the specific shop
     const shop = await prisma.shop.findFirst({
-        where: { shopDomain }
+        where: { shopDomain: { contains: shopDomain } }
     });
 
     if (!shop) {
-        return json({ error: "Shop not found" }, { status: 404 });
+        // List all shops for debugging
+        const allShops = await prisma.shop.findMany({
+            select: { id: true, shopDomain: true, dailyQuota: true }
+        });
+        return json({ 
+            error: "Shop not found", 
+            searchedFor: shopDomain,
+            availableShops: allShops 
+        }, { status: 404 });
     }
 
     // Update shop quota to 100
@@ -39,7 +74,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    await prisma.usageDaily.updateMany({
+    const usageUpdate = await prisma.usageDaily.updateMany({
         where: {
             shopId: shop.id,
             date: today
@@ -55,15 +90,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         success: true, 
         message: "Quota reset successfully",
         shopId: shop.id,
-        newDailyQuota: 100
-    });
-};
-
-// Also support GET for easy browser testing
-export const loader = async ({ request }: ActionFunctionArgs) => {
-    return json({ 
-        message: "POST to this endpoint to reset quota",
-        note: "Only works in dev mode or when ALLOW_QUOTA_RESET=true"
+        shopDomain: shop.shopDomain,
+        newDailyQuota: 100,
+        usageRecordsReset: usageUpdate.count
     });
 };
 

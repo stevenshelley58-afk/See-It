@@ -654,10 +654,11 @@ export async function compositeScene(
     roomImageUrl: string,
     placement: { x: number; y: number; scale: number },
     stylePreset: string = 'neutral',
-    requestId: string = "composite"
+    requestId: string = "composite",
+    productContext: string = "" // Merchant-provided product description
 ): Promise<string> {
     const logContext = createLogContext("render", requestId, "start", {});
-    logger.info(logContext, "Processing scene composite with Gemini");
+    logger.info(logContext, `Processing scene composite with Gemini${productContext ? ` (context: "${productContext.substring(0, 50)}...")` : ""}`);
 
     // Track buffers for explicit cleanup
     let productBuffer: Buffer | null = null;
@@ -702,13 +703,22 @@ export async function compositeScene(
 
         // Step 2: AI polish
         const styleDescription = stylePreset === 'neutral' ? 'natural and realistic' : stylePreset;
-        const prompt = `This image shows a product placed into a room scene.
+        
+        // Build the prompt with optional product context
+        let prompt = `This image shows a product placed into a room scene.`;
+        
+        if (productContext) {
+            prompt += `\n\nProduct context: ${productContext}`;
+        }
+        
+        prompt += `
 The product is already positioned - do NOT move, resize, reposition, or warp the product.
 Make the composite look photorealistic by:
 1. Harmonizing the lighting on the product to match the room's light sources
 2. Adding appropriate shadows beneath and around the product
-3. Adding subtle reflections if on a reflective surface
+3. Adding subtle reflections if on a reflective surface (especially important for mirrors)
 4. Ensuring color temperature consistency
+5. Making the product look naturally integrated into the room environment
 Style: ${styleDescription}
 Keep the product's exact position, size, and shape unchanged.`;
 

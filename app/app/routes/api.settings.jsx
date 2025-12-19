@@ -5,7 +5,8 @@ import prisma from "../db.server";
 const DEFAULT_SETTINGS = {
     style_preset: "neutral",
     automation_enabled: false,
-    show_quota: false
+    show_quota: false,
+    product_context: "" // Merchant-provided description to help AI understand the product
 };
 
 // GET /api/settings — read settings (spec Routes → Admin API)
@@ -37,7 +38,8 @@ export const action = async ({ request }) => {
     const settings = {
         style_preset: body.style_preset ?? DEFAULT_SETTINGS.style_preset,
         automation_enabled: body.automation_enabled ?? DEFAULT_SETTINGS.automation_enabled,
-        show_quota: body.show_quota ?? DEFAULT_SETTINGS.show_quota
+        show_quota: body.show_quota ?? DEFAULT_SETTINGS.show_quota,
+        product_context: body.product_context ?? DEFAULT_SETTINGS.product_context
     };
 
     await prisma.shop.update({
