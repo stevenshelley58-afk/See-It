@@ -701,34 +701,34 @@ export async function compositeScene(
         roomBuffer = null;
         resizedProduct = null;
 
-        // Step 2: AI polish
-        const styleDescription = stylePreset === 'neutral' ? 'natural and realistic' : stylePreset;
+        // Step 2: AI photorealistic integration
         
-        // Build the prompt - merchant context is wrapped with clear instructions
+        // Build the prompt - merchant context helps AI understand the product
         const contextSection = productContext && productContext.trim()
             ? `
-IMPORTANT PRODUCT INFORMATION (from merchant):
-"${productContext.trim()}"
-Use this information to understand the product's nature, typical size, and how it should appear in the room.
+PRODUCT INFORMATION: "${productContext.trim()}"
 `
             : '';
         
-        const prompt = `You are compositing a product into a room photograph.
+        const prompt = `You are a world-class CGI compositor creating a photorealistic product visualization.
 
-${contextSection}TASK: Make this composite look like a professional interior design photo.
+${contextSection}MISSION: Make this product look like it was PHYSICALLY PHOTOGRAPHED in this exact room. The result should be indistinguishable from a real photograph.
 
-CRITICAL RULES:
-- The product is already positioned correctly - do NOT move, resize, or reposition it
-- Keep the product's exact shape, proportions, and details unchanged
+CRITICAL CONSTRAINTS - NEVER VIOLATE:
+- The product position is LOCKED - do NOT move, resize, rotate, or reposition it AT ALL
+- If the product is on the floor, it STAYS on the floor - do NOT hang it on walls
+- The customer placed it exactly where they want it - respect their placement 100%
 
-ENHANCE THE REALISM BY:
-1. Match the product's lighting to the room's light sources (direction, intensity, color temperature)
-2. Add natural shadows beneath and around the product appropriate for the surface it's on
-3. If the product is reflective (mirrors, glass, metal), add subtle reflections of the room
-4. Blend edge transitions naturally - no harsh cutouts
-5. Ensure the product looks like it belongs in this specific room
+PHOTOREALISTIC INTEGRATION - Make it look REAL:
+1. LIGHTING: Analyze the room's light sources (windows, lamps, ambient). Apply the SAME lighting to the product - highlights, mid-tones, shadows must match the room's lighting direction and color temperature exactly
+2. SHADOWS: Add physically accurate shadows - soft shadows from ambient light, harder shadows from direct light sources. The shadow direction and intensity must match other objects in the room
+3. REFLECTIONS: For reflective surfaces (mirrors, glass, metal, glossy finishes), add accurate reflections of the surrounding room environment
+4. COLOR GRADING: Match the product's color temperature and contrast to the room's overall color grade
+5. EDGE INTEGRATION: Seamlessly blend the product edges - no visible cutout artifacts, halos, or unnatural boundaries
+6. DEPTH OF FIELD: If the room has any blur/bokeh, apply consistent depth of field to the product
+7. SURFACE INTERACTION: Show realistic contact - if on floor, show proper grounding; if near walls, show appropriate proximity shadows
 
-Style: ${styleDescription}
+The viewer should be SHOCKED at how real this looks - they should not be able to tell this is a composite.
 
 Output a single photorealistic image.`;
 

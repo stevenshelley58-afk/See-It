@@ -157,7 +157,7 @@ async function processMask(
 
     logger.info(
         { ...logContext, stage: "mask-process-complete" },
-        `Mask processed: coverage=${coveragePercent.toFixed(2)}%, white=${whitePixels}/${totalPixels}`
+        `Mask processed: coverage=${coveragePercent.toFixed(2)}%, inpaint=${blackPixels}/${totalPixels}`
     );
 
     return { processedMask: finalMaskBuffer, coveragePercent };
@@ -169,6 +169,7 @@ async function processMask(
 async function callProdiaInpaint(
     imageBuffer: Buffer,
     maskBuffer: Buffer,
+    imageDimensions: { width: number; height: number },
     logContext: ReturnType<typeof createLogContext>
 ): Promise<Buffer> {
     const apiToken = process.env.PRODIA_API_TOKEN;
@@ -179,11 +180,14 @@ async function callProdiaInpaint(
     // Build multipart form data
     const boundary = `----ProdiaInpaint${Date.now()}`;
 
+    // Include explicit dimensions to avoid Prodia defaulting to 512x512
     const jobConfig = JSON.stringify({
         type: "inference.flux.schnell.inpainting.v2",
         config: {
             prompt: CONFIG.INPAINT_PROMPT,
             steps: CONFIG.INPAINT_STEPS,
+            width: imageDimensions.width,
+            height: imageDimensions.height,
         }
     });
 
@@ -343,7 +347,12 @@ export async function removeObjects(input: ObjectRemovalInput): Promise<ObjectRe
         }
 
         // Step 3: Call Prodia for inpainting
-        const resultBuffer = await callProdiaInpaint(preparedImage, processedMask, logContext);
+        const resultBuffer = await callProdiaInpaint(
+            preparedImage, 
+            processedMask, 
+            { width, height },
+            logContext
+        );
 
         const processingTimeMs = Date.now() - startTime;
 

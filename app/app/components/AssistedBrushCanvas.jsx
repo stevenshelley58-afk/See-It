@@ -44,6 +44,13 @@ export function AssistedBrushCanvas({
 
     // Preview state for assisted mode
     const [previewMask, setPreviewMask] = useState(null);
+    
+    // Throttle ref for hover preview
+    const lastHoverTimeRef = useRef(0);
+    const HOVER_THROTTLE_MS = 50; // Limit hover updates to ~20fps
+    
+    // Pre-rendered checkerboard pattern (cached)
+    const checkerPatternRef = useRef(null);
 
     // Load images
     useEffect(() => {
@@ -125,18 +132,24 @@ export function AssistedBrushCanvas({
         const w = displayCanvas.width;
         const h = displayCanvas.height;
 
-        // Draw checkerboard
-        const checkSize = 16;
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, w, h);
-        ctx.fillStyle = "#e0e0e0";
-        for (let y = 0; y < h; y += checkSize) {
-            for (let x = 0; x < w; x += checkSize) {
-                if (((x / checkSize) + (y / checkSize)) % 2 === 1) {
-                    ctx.fillRect(x, y, checkSize, checkSize);
-                }
-            }
+        // Create and cache checkerboard pattern for performance
+        if (!checkerPatternRef.current) {
+            const checkSize = 16;
+            const patternCanvas = document.createElement("canvas");
+            patternCanvas.width = checkSize * 2;
+            patternCanvas.height = checkSize * 2;
+            const patternCtx = patternCanvas.getContext("2d");
+            patternCtx.fillStyle = "#ffffff";
+            patternCtx.fillRect(0, 0, checkSize * 2, checkSize * 2);
+            patternCtx.fillStyle = "#e0e0e0";
+            patternCtx.fillRect(checkSize, 0, checkSize, checkSize);
+            patternCtx.fillRect(0, checkSize, checkSize, checkSize);
+            checkerPatternRef.current = ctx.createPattern(patternCanvas, "repeat");
         }
+
+        // Draw checkerboard using cached pattern
+        ctx.fillStyle = checkerPatternRef.current;
+        ctx.fillRect(0, 0, w, h);
 
         // Get image data
         const origCtx = originalCanvas.getContext("2d");
@@ -167,15 +180,23 @@ export function AssistedBrushCanvas({
         ctx.drawImage(tempCanvas, 0, 0);
 
         // Draw preview mask overlay if exists (for assisted mode hover)
+        // Using ImageData for performance instead of individual fillRect calls
         if (previewMask) {
-            ctx.fillStyle = action === "restore" ? "rgba(34, 197, 94, 0.3)" : "rgba(239, 68, 68, 0.3)";
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    if (previewMask.data[y * w + x] === 1) {
-                        ctx.fillRect(x, y, 1, 1);
-                    }
+            const overlayData = ctx.getImageData(0, 0, w, h);
+            const overlayPixels = overlayData.data;
+            const [r, g, b] = action === "restore" ? [34, 197, 94] : [239, 68, 68];
+            const alpha = 0.3;
+            
+            for (let i = 0; i < previewMask.data.length; i++) {
+                if (previewMask.data[i] === 1) {
+                    const pixelIdx = i * 4;
+                    // Blend overlay color with existing pixel
+                    overlayPixels[pixelIdx] = Math.round(overlayPixels[pixelIdx] * (1 - alpha) + r * alpha);
+                    overlayPixels[pixelIdx + 1] = Math.round(overlayPixels[pixelIdx + 1] * (1 - alpha) + g * alpha);
+                    overlayPixels[pixelIdx + 2] = Math.round(overlayPixels[pixelIdx + 2] * (1 - alpha) + b * alpha);
                 }
             }
+            ctx.putImageData(overlayData, 0, 0);
         }
     }, [previewMask, action]);
 
@@ -349,6 +370,11 @@ export function AssistedBrushCanvas({
         const coords = getCanvasCoords(e);
 
         if (mode === "assisted" && !isDrawing) {
+            // Throttle hover preview for performance
+            const now = Date.now();
+            if (now - lastHoverTimeRef.current < HOVER_THROTTLE_MS) return;
+            lastHoverTimeRef.current = now;
+            
             // Show preview of what would be selected
             const mask = getFloodFillMask(coords.x, coords.y);
             setPreviewMask(mask);

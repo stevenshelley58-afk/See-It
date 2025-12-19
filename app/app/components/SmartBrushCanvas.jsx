@@ -168,6 +168,9 @@ export function SmartBrushCanvas({
         edgeCtx.putImageData(edgeImageData, 0, 0);
     }, []);
 
+    // Pre-rendered checkerboard pattern (cached)
+    const checkerPatternRef = useRef(null);
+    
     // Render the display canvas (checkerboard + image with current mask)
     const renderDisplay = useCallback(() => {
         if (!displayCanvasRef.current || !originalCanvasRef.current || !maskCanvasRef.current) return;
@@ -180,15 +183,24 @@ export function SmartBrushCanvas({
         const w = displayCanvas.width;
         const h = displayCanvas.height;
 
-        // Draw checkerboard background
-        const checkSize = 16;
-        for (let y = 0; y < h; y += checkSize) {
-            for (let x = 0; x < w; x += checkSize) {
-                const isLight = ((x / checkSize) + (y / checkSize)) % 2 === 0;
-                ctx.fillStyle = isLight ? "#ffffff" : "#e0e0e0";
-                ctx.fillRect(x, y, checkSize, checkSize);
-            }
+        // Create and cache checkerboard pattern for performance
+        if (!checkerPatternRef.current) {
+            const checkSize = 16;
+            const patternCanvas = document.createElement("canvas");
+            patternCanvas.width = checkSize * 2;
+            patternCanvas.height = checkSize * 2;
+            const patternCtx = patternCanvas.getContext("2d");
+            patternCtx.fillStyle = "#ffffff";
+            patternCtx.fillRect(0, 0, checkSize * 2, checkSize * 2);
+            patternCtx.fillStyle = "#e0e0e0";
+            patternCtx.fillRect(checkSize, 0, checkSize, checkSize);
+            patternCtx.fillRect(0, checkSize, checkSize, checkSize);
+            checkerPatternRef.current = ctx.createPattern(patternCanvas, "repeat");
         }
+
+        // Draw checkerboard background using cached pattern
+        ctx.fillStyle = checkerPatternRef.current;
+        ctx.fillRect(0, 0, w, h);
 
         // Get original and mask data
         const origCtx = originalCanvas.getContext("2d");
