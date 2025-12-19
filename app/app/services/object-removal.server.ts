@@ -161,7 +161,10 @@ async function processMask(
 }
 
 /**
- * Call Prodia API for inpainting
+ * Call Prodia API for inpainting using flux-fill model
+ * 
+ * Uses inference.flux-fill.dev.v1 which is the dedicated inpainting endpoint
+ * Requires: image (source), mask (areas to fill - white = fill)
  */
 async function callProdiaInpaint(
     imageBuffer: Buffer,
@@ -176,8 +179,9 @@ async function callProdiaInpaint(
     // Build multipart form data
     const boundary = `----ProdiaInpaint${Date.now()}`;
 
+    // Use flux-fill.dev.v1 - the dedicated inpainting model
     const jobConfig = JSON.stringify({
-        type: "inference.flux.schnell.inpainting.v2",
+        type: "inference.flux-fill.dev.v1",
         config: {
             prompt: CONFIG.INPAINT_PROMPT,
             steps: CONFIG.INPAINT_STEPS,
@@ -196,19 +200,19 @@ async function callProdiaInpaint(
     parts.push(Buffer.from(jobConfig));
     parts.push(Buffer.from('\r\n'));
 
-    // Image input part
+    // Image input part - the source image
     parts.push(Buffer.from(
         `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="input"; filename="image.png"\r\n` +
+        `Content-Disposition: form-data; name="image"; filename="image.png"\r\n` +
         `Content-Type: image/png\r\n\r\n`
     ));
     parts.push(imageBuffer);
     parts.push(Buffer.from('\r\n'));
 
-    // Mask input part
+    // Mask input part - white areas will be filled/inpainted
     parts.push(Buffer.from(
         `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="input"; filename="mask.png"\r\n` +
+        `Content-Disposition: form-data; name="mask"; filename="mask.png"\r\n` +
         `Content-Type: image/png\r\n\r\n`
     ));
     parts.push(maskBuffer);
@@ -221,7 +225,7 @@ async function callProdiaInpaint(
 
     logger.info(
         { ...logContext, stage: "prodia-call" },
-        `Calling Prodia API (body: ${body.length} bytes, model: flux.schnell.inpainting.v2)`
+        `Calling Prodia API (body: ${body.length} bytes, model: flux-fill.dev.v1)`
     );
 
     const response = await fetch(PRODIA_API_URL, {
@@ -241,6 +245,18 @@ async function callProdiaInpaint(
             `Prodia API error: ${response.status} - ${errorText}`
         );
         throw new Error(`Prodia API error: ${response.status} - ${errorText}`);
+    }
+
+    // Check if response is JSON (job status) or image
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+        // Job returned - need to poll for result
+        const jobResult = await response.json();
+        logger.info(
+            { ...logContext, stage: "prodia-job-created" },
+            `Job created: ${JSON.stringify(jobResult)}`
+        );
+        throw new Error(`Prodia returned job status instead of image. Job: ${JSON.stringify(jobResult)}`);
     }
 
     return Buffer.from(await response.arrayBuffer());
