@@ -1,16 +1,19 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { InlineStack, Button, Text, RangeSlider } from "@shopify/polaris";
+import {
+    rafThrottle,
+    debounce,
+    interpolateBrushStroke,
+} from "../utils/canvas-performance";
 
 /**
  * PaintBrushCanvas - Paint to select areas for background removal
  *
- * Paint modes:
- * - "keep" (green): Areas to KEEP (product)
- * - "remove" (red): Areas to REMOVE (background)
- *
- * The mask output has:
- * - White: Areas to KEEP
- * - Black: Areas to REMOVE (will be made transparent)
+ * PERFORMANCE OPTIMIZATIONS:
+ * - RAF-throttled mouse move handlers
+ * - Debounced mask export (avoids toDataURL on every stroke)
+ * - Brush stroke interpolation for smooth lines
+ * - Canvas arc drawing (GPU-accelerated)
  */
 export function PaintBrushCanvas({
     imageUrl,
@@ -22,6 +25,7 @@ export function PaintBrushCanvas({
     const containerRef = useRef(null);
     const canvasRef = useRef(null);
     const maskCanvasRef = useRef(null);
+    const lastPosRef = useRef(null); // For brush interpolation
     const [isDrawing, setIsDrawing] = useState(false);
     const [brushSize, setBrushSize] = useState(30);
     const [paintMode, setPaintMode] = useState("keep"); // "keep" or "remove"
@@ -140,11 +144,38 @@ export function PaintBrushCanvas({
         maskCtx.fill();
     }, [brushSize, paintMode]);
 
+    // PERFORMANCE: Debounced mask export (avoid toDataURL on every stroke end)
+    const debouncedExportMask = useMemo(() => debounce(() => {
+        if (maskCanvasRef.current && onMaskChange) {
+            const maskDataUrl = maskCanvasRef.current.toDataURL("image/png");
+            onMaskChange(maskDataUrl);
+        }
+    }, 100), [onMaskChange]);
+
+    // PERFORMANCE: RAF-throttled drawing with interpolation
+    const throttledDraw = useMemo(() => rafThrottle((x, y) => {
+        if (lastPosRef.current) {
+            const spacing = Math.max(2, brushSize * 0.3);
+            interpolateBrushStroke(
+                lastPosRef.current.x,
+                lastPosRef.current.y,
+                x,
+                y,
+                spacing,
+                (ix, iy) => draw(ix, iy)
+            );
+        } else {
+            draw(x, y);
+        }
+        lastPosRef.current = { x, y };
+    }), [draw, brushSize]);
+
     const handleStart = useCallback((e) => {
         if (disabled) return;
         e.preventDefault();
         setIsDrawing(true);
         const pos = getPosition(e);
+        lastPosRef.current = pos;
         draw(pos.x, pos.y);
     }, [disabled, getPosition, draw]);
 
@@ -152,19 +183,27 @@ export function PaintBrushCanvas({
         if (!isDrawing || disabled) return;
         e.preventDefault();
         const pos = getPosition(e);
-        draw(pos.x, pos.y);
-    }, [isDrawing, disabled, getPosition, draw]);
+        // PERFORMANCE: RAF-throttled with interpolation
+        throttledDraw(pos.x, pos.y);
+    }, [isDrawing, disabled, getPosition, throttledDraw]);
 
     const handleEnd = useCallback(() => {
         if (!isDrawing) return;
         setIsDrawing(false);
+        lastPosRef.current = null;
+        throttledDraw.cancel();
 
-        // Export mask and notify parent
-        if (maskCanvasRef.current && onMaskChange) {
-            const maskDataUrl = maskCanvasRef.current.toDataURL("image/png");
-            onMaskChange(maskDataUrl);
-        }
-    }, [isDrawing, onMaskChange]);
+        // PERFORMANCE: Debounced export
+        debouncedExportMask();
+    }, [isDrawing, throttledDraw, debouncedExportMask]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            throttledDraw.cancel();
+            debouncedExportMask.cancel();
+        };
+    }, [throttledDraw, debouncedExportMask]);
 
     // Reset mask to white (keep all)
     const handleClear = useCallback(() => {

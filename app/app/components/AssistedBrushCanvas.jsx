@@ -1,17 +1,25 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { InlineStack, Button, Text, RangeSlider, BlockStack, Badge } from "@shopify/polaris";
 import MagicWand from "magic-wand-tool";
+import {
+    rafThrottle,
+    debounce,
+    timeThrottle,
+    drawCheckerboard,
+    drawMaskOverlay,
+    interpolateBrushStroke,
+} from "../utils/canvas-performance";
 
 /**
  * AssistedBrushCanvas - Smart brush for refining background removal
  *
- * Two modes like Canva/Photoroom:
- * 1. ASSISTED MODE (default): Click on area → detects similar colors → applies action
- * 2. MANUAL MODE: Paint directly with brush
- *
- * Actions:
- * - RESTORE: Bring back areas that were incorrectly removed
- * - ERASE: Remove areas that should be transparent
+ * PERFORMANCE OPTIMIZATIONS:
+ * - RAF-throttled mouse move handlers
+ * - Throttled preview mask computation (50ms min interval for magic wand)
+ * - ImageData-based mask overlay (vs pixel-by-pixel fillRect)
+ * - Pre-rendered checkerboard pattern
+ * - Debounced export
+ * - Cached temp canvas for compositing
  */
 export function AssistedBrushCanvas({
     originalImageUrl,
@@ -26,6 +34,10 @@ export function AssistedBrushCanvas({
     const originalCanvasRef = useRef(null);
     const maskCanvasRef = useRef(null);
     const containerRef = useRef(null);
+
+    // PERFORMANCE: Cache temp canvas for compositing
+    const tempCanvasRef = useRef(null);
+    const lastPosRef = useRef(null); // For brush interpolation
 
     // Image refs
     const originalImgRef = useRef(null);
@@ -114,6 +126,7 @@ export function AssistedBrushCanvas({
     }, [imagesLoaded, dimensions]);
 
     // Render display with checkerboard + masked image
+    // OPTIMIZED: Pre-rendered checkerboard, cached temp canvas, ImageData overlay
     const renderDisplay = useCallback(() => {
         if (!displayCanvasRef.current || !originalCanvasRef.current || !maskCanvasRef.current) return;
 
@@ -125,18 +138,8 @@ export function AssistedBrushCanvas({
         const w = displayCanvas.width;
         const h = displayCanvas.height;
 
-        // Draw checkerboard
-        const checkSize = 16;
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, w, h);
-        ctx.fillStyle = "#e0e0e0";
-        for (let y = 0; y < h; y += checkSize) {
-            for (let x = 0; x < w; x += checkSize) {
-                if (((x / checkSize) + (y / checkSize)) % 2 === 1) {
-                    ctx.fillRect(x, y, checkSize, checkSize);
-                }
-            }
-        }
+        // PERFORMANCE: Draw checkerboard using pattern fill (1 call vs many)
+        drawCheckerboard(ctx, w, h, 16);
 
         // Get image data
         const origCtx = originalCanvas.getContext("2d");
@@ -144,13 +147,20 @@ export function AssistedBrushCanvas({
         const origData = origCtx.getImageData(0, 0, w, h);
         const maskData = maskCtx.getImageData(0, 0, w, h);
 
+        // PERFORMANCE: Reuse temp canvas instead of creating new one each render
+        if (!tempCanvasRef.current || tempCanvasRef.current.width !== w || tempCanvasRef.current.height !== h) {
+            tempCanvasRef.current = document.createElement("canvas");
+            tempCanvasRef.current.width = w;
+            tempCanvasRef.current.height = h;
+        }
+        const tempCanvas = tempCanvasRef.current;
+        const tempCtx = tempCanvas.getContext("2d");
+
         // Composite with mask alpha
-        const resultData = ctx.createImageData(w, h);
+        const resultData = tempCtx.createImageData(w, h);
         for (let i = 0; i < origData.data.length; i += 4) {
             const alpha = maskData.data[i + 3];
             if (alpha > 0) {
-                // Blend with checkerboard
-                const bg = resultData.data[i] || 255; // checkerboard is already drawn
                 resultData.data[i] = origData.data[i];
                 resultData.data[i + 1] = origData.data[i + 1];
                 resultData.data[i + 2] = origData.data[i + 2];
@@ -158,24 +168,12 @@ export function AssistedBrushCanvas({
             }
         }
 
-        // Draw result on top of checkerboard
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = w;
-        tempCanvas.height = h;
-        const tempCtx = tempCanvas.getContext("2d");
         tempCtx.putImageData(resultData, 0, 0);
         ctx.drawImage(tempCanvas, 0, 0);
 
-        // Draw preview mask overlay if exists (for assisted mode hover)
+        // PERFORMANCE: Draw preview mask overlay using ImageData (not pixel-by-pixel fillRect)
         if (previewMask) {
-            ctx.fillStyle = action === "restore" ? "rgba(34, 197, 94, 0.3)" : "rgba(239, 68, 68, 0.3)";
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    if (previewMask.data[y * w + x] === 1) {
-                        ctx.fillRect(x, y, 1, 1);
-                    }
-                }
-            }
+            drawMaskOverlay(ctx, previewMask, action === "restore" ? "green" : "red", 0.3);
         }
     }, [previewMask, action]);
 
@@ -323,6 +321,35 @@ export function AssistedBrushCanvas({
         onRefinedImage(exportCanvas.toDataURL("image/png"));
     }, [dimensions, onRefinedImage]);
 
+    // PERFORMANCE: Debounced export
+    const debouncedExport = useMemo(() => debounce(() => {
+        exportResult();
+    }, 100), [exportResult]);
+
+    // PERFORMANCE: Throttled preview mask computation (magic wand is expensive)
+    const throttledPreview = useMemo(() => timeThrottle((x, y) => {
+        const mask = getFloodFillMask(x, y);
+        setPreviewMask(mask);
+    }, 50), [getFloodFillMask]);
+
+    // PERFORMANCE: RAF-throttled brush painting with interpolation
+    const throttledPaintBrush = useMemo(() => rafThrottle((x, y) => {
+        if (lastPosRef.current) {
+            const spacing = Math.max(2, brushSize * 0.3);
+            interpolateBrushStroke(
+                lastPosRef.current.x,
+                lastPosRef.current.y,
+                x,
+                y,
+                spacing,
+                (ix, iy) => paintBrush(Math.round(ix), Math.round(iy))
+            );
+        } else {
+            paintBrush(x, y);
+        }
+        lastPosRef.current = { x, y };
+    }), [paintBrush, brushSize]);
+
     // Mouse/touch handlers
     const handleMouseDown = useCallback((e) => {
         if (disabled) return;
@@ -339,6 +366,7 @@ export function AssistedBrushCanvas({
         } else {
             // Manual painting
             setIsDrawing(true);
+            lastPosRef.current = coords;
             paintBrush(coords.x, coords.y);
         }
     }, [disabled, mode, getCanvasCoords, getFloodFillMask, applyToMask, paintBrush]);
@@ -349,28 +377,42 @@ export function AssistedBrushCanvas({
         const coords = getCanvasCoords(e);
 
         if (mode === "assisted" && !isDrawing) {
-            // Show preview of what would be selected
-            const mask = getFloodFillMask(coords.x, coords.y);
-            setPreviewMask(mask);
+            // PERFORMANCE: Throttled preview computation
+            throttledPreview(coords.x, coords.y);
         } else if (mode === "manual" && isDrawing) {
-            paintBrush(coords.x, coords.y);
+            // PERFORMANCE: RAF-throttled painting with interpolation
+            throttledPaintBrush(coords.x, coords.y);
         }
-    }, [disabled, mode, isDrawing, getCanvasCoords, getFloodFillMask, paintBrush]);
+    }, [disabled, mode, isDrawing, getCanvasCoords, throttledPreview, throttledPaintBrush]);
 
     const handleMouseUp = useCallback(() => {
         if (isDrawing) {
             setIsDrawing(false);
-            exportResult();
+            lastPosRef.current = null;
+            throttledPaintBrush.cancel();
+            debouncedExport();
         }
-    }, [isDrawing, exportResult]);
+    }, [isDrawing, throttledPaintBrush, debouncedExport]);
 
     const handleMouseLeave = useCallback(() => {
         setPreviewMask(null);
+        throttledPreview.cancel();
         if (isDrawing) {
             setIsDrawing(false);
-            exportResult();
+            lastPosRef.current = null;
+            throttledPaintBrush.cancel();
+            debouncedExport();
         }
-    }, [isDrawing, exportResult]);
+    }, [isDrawing, throttledPreview, throttledPaintBrush, debouncedExport]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            throttledPreview.cancel();
+            throttledPaintBrush.cancel();
+            debouncedExport.cancel();
+        };
+    }, [throttledPreview, throttledPaintBrush, debouncedExport]);
 
     // Reset to original processed result
     const handleReset = useCallback(() => {
