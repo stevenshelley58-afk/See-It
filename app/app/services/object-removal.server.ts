@@ -29,12 +29,14 @@ const CONFIG = {
     MASK_FEATHER_SIGMA: 4,      // Gaussian blur sigma for feathering
     MASK_THRESHOLD: 128,        // Threshold for binary mask (0-255)
 
-    // Prodia settings
-    INPAINT_STEPS: 4,           // Schnell optimized for 2-4 steps
-    INPAINT_PROMPT: "clean empty background, seamless natural fill, match surrounding textures",
+    // Prodia settings - using SDXL for best quality/speed balance
+    INPAINT_MODEL: "inference.sdxl.inpainting.v1",  // SDXL is more stable than Flux for realistic inpainting
+    INPAINT_STEPS: 25,          // SDXL needs more steps (20-30 recommended)
+    INPAINT_PROMPT: "clean empty room background, seamless natural fill, photorealistic, match surrounding textures and lighting",
+    NEGATIVE_PROMPT: "artifacts, distortion, blurry, low quality, unrealistic, cartoon, anime, painting",
 
-    // Limits
-    MAX_IMAGE_DIMENSION: 2048,  // Resize if larger
+    // Limits - keep at 1024 for SDXL (optimal resolution)
+    MAX_IMAGE_DIMENSION: 1024,  // SDXL works best at 1024x1024
     MIN_MASK_COVERAGE: 0.001,   // 0.1% minimum mask coverage
     MAX_MASK_COVERAGE: 0.8,     // 80% maximum - something's wrong if more
 };
@@ -161,10 +163,10 @@ async function processMask(
 }
 
 /**
- * Call Prodia API for inpainting using flux.dev.inpainting model
+ * Call Prodia API for inpainting using SDXL model
  * 
- * Uses inference.flux.dev.inpainting.v2 - higher quality than schnell
- * Requires two "input" files: image first, then mask
+ * Uses inference.sdxl.inpainting.v1 - best balance of speed and quality for realistic photos
+ * SDXL is more stable than Flux for photorealistic inpainting
  */
 async function callProdiaInpaint(
     imageBuffer: Buffer,
@@ -179,12 +181,14 @@ async function callProdiaInpaint(
     // Build multipart form data
     const boundary = `----ProdiaInpaint${Date.now()}`;
 
-    // Use flux.dev.inpainting.v2 - better quality than schnell
+    // Use SDXL inpainting - best for realistic photo inpainting
     const jobConfig = JSON.stringify({
-        type: "inference.flux.dev.inpainting.v2",
+        type: CONFIG.INPAINT_MODEL,
         config: {
             prompt: CONFIG.INPAINT_PROMPT,
+            negative_prompt: CONFIG.NEGATIVE_PROMPT,
             steps: CONFIG.INPAINT_STEPS,
+            cfg_scale: 7,  // Guidance scale for SDXL
         }
     });
 
@@ -226,7 +230,7 @@ async function callProdiaInpaint(
 
     logger.info(
         { ...logContext, stage: "prodia-call" },
-        `Calling Prodia API (body: ${body.length} bytes, model: flux.dev.inpainting.v2)`
+        `Calling Prodia API (body: ${body.length} bytes, model: ${CONFIG.INPAINT_MODEL})`
     );
 
     const response = await fetch(PRODIA_API_URL, {

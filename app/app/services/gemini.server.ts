@@ -566,20 +566,48 @@ export async function cleanupRoom(
     requestId: string = "cleanup"
 ): Promise<string> {
     const logContext = createLogContext("cleanup", requestId, "start", {});
-    logger.info(logContext, "Processing room cleanup with Gemini (best quality for photo inpainting)");
-
-    // Use Gemini directly - it produces much better results for realistic photo inpainting
-    // than Prodia's flux models which are designed for AI art generation
-    let maskBuffer: Buffer | null = null;
-    let roomBuffer: Buffer | null = null;
-    let outputBuffer: Buffer | null = null;
+    logger.info(logContext, "Processing room cleanup with Prodia SDXL (fast) + Gemini fallback");
 
     try {
-        const maskBase64 = maskDataUrl.split(',')[1];
-        maskBuffer = Buffer.from(maskBase64, 'base64');
-        roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
+        // Try Prodia SDXL first - it's faster (~3-5s vs ~15-20s for Gemini)
+        const { removeObjectsFromUrl, isObjectRemovalAvailable } = await import("./object-removal.server");
 
-        const prompt = `Using the provided room image and mask image:
+        if (!isObjectRemovalAvailable()) {
+            throw new Error("Object removal service unavailable - PRODIA_API_TOKEN not set");
+        }
+
+        const result = await removeObjectsFromUrl(roomImageUrl, maskDataUrl, requestId);
+
+        logger.info(
+            { ...logContext, stage: "inpaint-complete" },
+            `Object removal done: time=${result.processingTimeMs}ms, coverage=${result.maskCoveragePercent.toFixed(2)}%, dimensions=${result.imageDimensions.width}x${result.imageDimensions.height}`
+        );
+
+        // Upload result to GCS
+        const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+        const url = await uploadToGCS(key, result.imageBuffer, 'image/png', logContext);
+
+        return url;
+
+    } catch (inpaintError) {
+        // Fallback to Gemini if Prodia fails
+        const errorMsg = inpaintError instanceof Error ? inpaintError.message : "Unknown error";
+        logger.warn(
+            { ...logContext, stage: "inpaint-fallback" },
+            `Prodia inpainting failed (${errorMsg}), falling back to Gemini`
+        );
+
+        // Gemini fallback implementation
+        let maskBuffer: Buffer | null = null;
+        let roomBuffer: Buffer | null = null;
+        let outputBuffer: Buffer | null = null;
+
+        try {
+            const maskBase64 = maskDataUrl.split(',')[1];
+            maskBuffer = Buffer.from(maskBase64, 'base64');
+            roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
+
+            const prompt = `Using the provided room image and mask image:
 The white regions in the mask indicate objects to be removed.
 Remove objects in the masked (white) areas and fill with appropriate background.
 Match the surrounding context - floor, wall, or whatever is around the masked area.
@@ -587,42 +615,25 @@ Do NOT alter any pixels outside the masked region.
 Maintain consistent lighting and perspective.
 The result should look natural, as if nothing was ever there.`;
 
-        logger.info(
-            { ...logContext, stage: "gemini-inpaint" },
-            `Calling Gemini for object removal (room: ${roomBuffer.length} bytes, mask: ${maskBuffer.length} bytes)`
-        );
+            const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
+                model: IMAGE_MODEL_PRO,
+                logContext
+            });
 
-        const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
-            model: IMAGE_MODEL_PRO,
-            logContext
-        });
+            roomBuffer = null;
+            maskBuffer = null;
 
-        roomBuffer = null;
-        maskBuffer = null;
+            outputBuffer = Buffer.from(base64Data, 'base64');
+            const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+            const url = await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
 
-        outputBuffer = Buffer.from(base64Data, 'base64');
-        const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-        const url = await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
-
-        logger.info(
-            { ...logContext, stage: "complete" },
-            `Object removal complete: ${url.substring(0, 80)}...`
-        );
-
-        outputBuffer = null;
-        return url;
-    } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : "Unknown error";
-        logger.error(
-            { ...logContext, stage: "error" },
-            `Room cleanup failed: ${errorMsg}`,
-            error
-        );
-        throw error;
-    } finally {
-        maskBuffer = null;
-        roomBuffer = null;
-        outputBuffer = null;
+            outputBuffer = null;
+            return url;
+        } finally {
+            maskBuffer = null;
+            roomBuffer = null;
+            outputBuffer = null;
+        }
     }
 }
 
