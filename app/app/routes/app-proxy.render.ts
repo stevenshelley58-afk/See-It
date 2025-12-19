@@ -118,8 +118,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     // Product asset is optional - we can render without background removal
+    // Include renderInstructions for custom AI prompts
     const productAsset = await prisma.productAsset.findFirst({
-        where: { shopId: shop.id, productId: product_id }
+        where: { shopId: shop.id, productId: product_id },
+        select: {
+            id: true,
+            preparedImageUrl: true,
+            preparedImageKey: true,
+            sourceImageUrl: true,
+            status: true,
+            renderInstructions: true,
+        }
     });
 
     const roomSession = await prisma.roomSession.findUnique({
@@ -194,12 +203,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         // Call Gemini directly - no more Cloud Run!
+        // Pass custom product instructions if available
         const imageUrl = await compositeScene(
             productImageUrl,
             roomImageUrl,
             { x: placement.x, y: placement.y, scale: placement.scale || 1.0 },
             config?.style_preset || "neutral",
-            requestId
+            requestId,
+            productAsset?.renderInstructions || undefined
         );
 
         await prisma.renderJob.update({

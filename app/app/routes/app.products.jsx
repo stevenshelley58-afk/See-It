@@ -110,7 +110,8 @@ export const loader = async ({ request }) => {
             }
             assetsMap[`gid://shopify/Product/${a.productId}`] = {
                 ...a,
-                preparedImageUrlFresh
+                preparedImageUrlFresh,
+                renderInstructions: a.renderInstructions || ""
             };
         }
     }
