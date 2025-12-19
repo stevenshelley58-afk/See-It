@@ -682,8 +682,9 @@ export async function cleanupRoom(
             `Bbox: ${bbox.width}x${bbox.height} at (${bbox.x},${bbox.y}) - ${cropPercent}% of image (${pixelReduction}x pixel reduction)`
         );
 
-        // Decide whether to crop based on mask coverage
-        const shouldCrop = cropArea < fullArea * 0.5; // Crop if mask is less than 50% of image
+        // DISABLED: Cropping was causing issues with Gemini removing wrong objects
+        // The AI needs full image context to understand what to remove vs keep
+        const shouldCrop = false; // Disabled for accuracy - was: cropArea < fullArea * 0.5
         
         let inputRoom: Buffer;
         let inputMask: Buffer;
