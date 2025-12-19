@@ -76,37 +76,80 @@
               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
             </svg>
           </button>
-          <span class="see-it-header-title">Preview</span>
+          <span class="see-it-header-title see-it-header-title-mobile">Preview</span>
+          <span class="see-it-header-title see-it-header-title-desktop">See It In Your Room</span>
           <div class="w-5"></div>
         </div>
 
-        <!-- Product card -->
-        <div class="see-it-product-card">
-          <div class="see-it-product-image-container">
-            <img id="see-it-entry-product-image" src="{{ product_image_url }}" alt="{{ product_title }}" />
+        <!-- Mobile Layout -->
+        <div class="see-it-entry-mobile">
+          <!-- Product card -->
+          <div class="see-it-product-card">
+            <div class="see-it-product-image-container">
+              <img id="see-it-entry-product-image" src="{{ product_image_url }}" alt="{{ product_title }}" />
+            </div>
+            <div class="see-it-product-info">
+              <p class="see-it-product-title" id="see-it-entry-product-title">{{ product_title }}</p>
+              <p class="see-it-product-price" id="see-it-entry-product-price">{{ product_price }}</p>
+            </div>
           </div>
-          <div class="see-it-product-info">
-            <p class="see-it-product-title" id="see-it-entry-product-title">{{ product_title }}</p>
-            <p class="see-it-product-price" id="see-it-entry-product-price">{{ product_price }}</p>
+
+          <!-- Content -->
+          <div class="see-it-entry-content">
+            <h1 class="see-it-entry-title">See it in your space</h1>
+            <p class="see-it-entry-description">Snap a photo of your room.</p>
+
+            <button class="see-it-btn-primary" id="see-it-btn-take-photo">
+              <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/>
+              </svg>
+              Take Photo
+            </button>
+
+            <div class="see-it-entry-actions">
+              <button class="see-it-btn-secondary" id="see-it-btn-upload">Upload</button>
+              <button class="see-it-btn-secondary" id="see-it-btn-saved">Saved</button>
+            </div>
           </div>
         </div>
 
-        <!-- Content -->
-        <div class="see-it-entry-content">
-          <h1 class="see-it-entry-title">See it in your space</h1>
-          <p class="see-it-entry-description">Snap a photo of your room.</p>
+        <!-- Desktop Layout -->
+        <div class="see-it-entry-desktop">
+          <!-- Left: Product -->
+          <div class="see-it-entry-desktop-left">
+            <div class="see-it-product-card">
+              <div class="see-it-product-image-container">
+                <img id="see-it-entry-product-image-desktop" src="{{ product_image_url }}" alt="{{ product_title }}" />
+              </div>
+              <div class="see-it-product-info">
+                <p class="see-it-product-title" id="see-it-entry-product-title-desktop">{{ product_title }}</p>
+                <p class="see-it-product-price" id="see-it-entry-product-price-desktop">{{ product_price }}</p>
+              </div>
+            </div>
+          </div>
 
-          <button class="see-it-btn-primary" id="see-it-btn-take-photo">
-            <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/>
-              <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/>
-            </svg>
-            Take Photo
-          </button>
+          <!-- Right: Options -->
+          <div class="see-it-entry-desktop-right">
+            <div class="see-it-entry-content">
+              <h1 class="see-it-entry-title">See it in your space</h1>
+              <p class="see-it-entry-description">Take a photo of your room and see exactly how this piece looks.</p>
 
-          <div class="see-it-entry-actions">
-            <button class="see-it-btn-secondary" id="see-it-btn-upload">Upload</button>
-            <button class="see-it-btn-secondary" id="see-it-btn-saved">Saved</button>
+              <button class="see-it-btn-primary" id="see-it-btn-take-photo-desktop">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/>
+                </svg>
+                Take Photo
+              </button>
+
+              <div class="see-it-entry-actions">
+                <button class="see-it-btn-secondary" id="see-it-btn-upload-desktop">Upload Photo</button>
+                <button class="see-it-btn-secondary" id="see-it-btn-saved-desktop">Saved Rooms</button>
+              </div>
+
+              <p class="see-it-entry-time-hint">Takes about 20 seconds</p>
+            </div>
           </div>
         </div>
 
@@ -125,41 +168,92 @@
             </svg>
             <span>Back</span>
           </button>
-          <span class="see-it-header-title">Prepare</span>
-          <div class="w-12"></div>
+          <span class="see-it-header-title see-it-header-title-mobile">Prepare</span>
+          <span class="see-it-header-title see-it-header-title-desktop">Prepare Your Room</span>
+          <button class="see-it-btn-close see-it-btn-close-desktop" id="see-it-close-prepare-desktop">
+            <span>Close</span>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
         </div>
 
-        <!-- Room photo container -->
-        <div class="see-it-prepare-room-container">
-          <div class="see-it-room-image-wrapper">
-            <img id="see-it-room-preview" src="" alt="Room Preview" />
-            <canvas id="see-it-mask-canvas"></canvas>
-            
-            <!-- Example paint stroke indicator (shown when drawing) -->
-            <div id="see-it-paint-indicator" class="see-it-paint-indicator hidden"></div>
-          </div>
-        </div>
-
-        <!-- Paint controls -->
-        <div class="see-it-prepare-controls">
-          <p class="see-it-prepare-hint">Paint over anything to remove, or skip.</p>
-
-          <!-- Paint tools row -->
-          <div class="see-it-paint-tools">
-            <div class="see-it-brush-indicator">
-              <div class="see-it-brush-circle">
-                <div class="see-it-brush-dot"></div>
-              </div>
-              <span>Paint to remove</span>
+        <!-- Mobile Layout -->
+        <div class="see-it-prepare-mobile">
+          <!-- Room photo container -->
+          <div class="see-it-prepare-room-container">
+            <div class="see-it-room-image-wrapper">
+              <img id="see-it-room-preview" src="" alt="Room Preview" />
+              <canvas id="see-it-mask-canvas"></canvas>
+              
+              <!-- Example paint stroke indicator (shown when drawing) -->
+              <div id="see-it-paint-indicator" class="see-it-paint-indicator hidden"></div>
             </div>
-            <button class="see-it-tool-btn" id="see-it-undo-btn" disabled>Undo</button>
-            <button class="see-it-tool-btn" id="see-it-clear-btn" disabled>Clear</button>
           </div>
 
-          <!-- Action buttons -->
-          <div class="see-it-prepare-actions">
-            <button class="see-it-btn-secondary" id="see-it-remove-btn" disabled>Remove</button>
-            <button class="see-it-btn-primary" id="see-it-confirm-room">Continue</button>
+          <!-- Paint controls -->
+          <div class="see-it-prepare-controls">
+            <p class="see-it-prepare-hint">Paint over anything to remove, or skip.</p>
+
+            <!-- Paint tools row -->
+            <div class="see-it-paint-tools">
+              <div class="see-it-brush-indicator">
+                <div class="see-it-brush-circle">
+                  <div class="see-it-brush-dot"></div>
+                </div>
+                <span>Paint to remove</span>
+              </div>
+              <button class="see-it-tool-btn" id="see-it-undo-btn" disabled>Undo</button>
+              <button class="see-it-tool-btn" id="see-it-clear-btn" disabled>Clear</button>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="see-it-prepare-actions">
+              <button class="see-it-btn-secondary" id="see-it-remove-btn" disabled>Remove</button>
+              <button class="see-it-btn-primary" id="see-it-confirm-room">Continue</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Desktop Layout -->
+        <div class="see-it-prepare-desktop">
+          <!-- Left: Room image -->
+          <div class="see-it-prepare-desktop-left">
+            <div class="see-it-prepare-room-container">
+              <div class="see-it-room-image-wrapper">
+                <img id="see-it-room-preview-desktop" src="" alt="Room Preview" />
+                <canvas id="see-it-mask-canvas-desktop"></canvas>
+                
+                <!-- Example paint stroke indicator (shown when drawing) -->
+                <div id="see-it-paint-indicator-desktop" class="see-it-paint-indicator hidden"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Controls -->
+          <div class="see-it-prepare-desktop-right">
+            <div class="see-it-prepare-controls">
+              <h2 class="see-it-prepare-controls-title">Remove objects</h2>
+              <p class="see-it-prepare-hint">Paint over anything you want removed from the photo, or skip this step.</p>
+
+              <!-- Brush indicator -->
+              <div class="see-it-brush-indicator-desktop">
+                <div class="see-it-brush-circle">
+                  <div class="see-it-brush-dot"></div>
+                </div>
+                <span>Brush tool</span>
+              </div>
+
+              <div class="see-it-prepare-tool-actions">
+                <button class="see-it-tool-btn" id="see-it-undo-btn-desktop" disabled>Undo</button>
+                <button class="see-it-tool-btn" id="see-it-clear-btn-desktop" disabled>Clear</button>
+              </div>
+
+              <div class="see-it-prepare-actions">
+                <button class="see-it-btn-secondary" id="see-it-remove-btn-desktop" disabled>Remove Selected</button>
+                <button class="see-it-btn-primary" id="see-it-confirm-room-desktop">Continue</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -186,78 +280,197 @@
             </svg>
             <span>Back</span>
           </button>
-          <span class="see-it-header-title">Position</span>
-          <div class="w-12"></div>
+          <span class="see-it-header-title see-it-header-title-mobile">Position</span>
+          <span class="see-it-header-title see-it-header-title-desktop">Position Product</span>
+          <button class="see-it-btn-close see-it-btn-close-desktop" id="see-it-close-position-desktop">
+            <span>Close</span>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
         </div>
 
-        <!-- Room with product -->
-        <div class="see-it-position-room-container">
-          <div class="see-it-room-image-wrapper">
-            <img id="see-it-room-image" src="" alt="Room" />
-            
-            <!-- Product overlay -->
-            <div id="see-it-product-container" class="see-it-product-overlay">
-              <img id="see-it-product-image" src="" alt="Product" class="see-it-product-overlay-img" />
-              <!-- Resize handles for desktop -->
-              <div class="resize-handle handle-tl"></div>
-              <div class="resize-handle handle-tr"></div>
-              <div class="resize-handle handle-bl"></div>
-              <div class="resize-handle handle-br"></div>
-            </div>
+        <!-- Mobile Layout -->
+        <div class="see-it-position-mobile">
+          <!-- Room with product -->
+          <div class="see-it-position-room-container">
+            <div class="see-it-room-image-wrapper">
+              <img id="see-it-room-image" src="" alt="Room" />
+              
+              <!-- Product overlay -->
+              <div id="see-it-product-container" class="see-it-product-overlay">
+                <img id="see-it-product-image" src="" alt="Product" class="see-it-product-overlay-img" />
+                <!-- Resize handles for desktop -->
+                <div class="resize-handle handle-tl"></div>
+                <div class="resize-handle handle-tr"></div>
+                <div class="resize-handle handle-bl"></div>
+                <div class="resize-handle handle-br"></div>
+              </div>
 
-            <!-- Instruction pill -->
-            <div class="see-it-instruction-pill">
-              <p>Drag to move · Pinch to resize</p>
+              <!-- Instruction pill -->
+              <div class="see-it-instruction-pill">
+                <p>Drag to move · Pinch to resize</p>
+              </div>
             </div>
+          </div>
+
+          <!-- Controls -->
+          <div class="see-it-position-controls">
+            <!-- Save room toggle -->
+            <label class="see-it-save-room-toggle">
+              <span>Save room for later</span>
+              <div class="see-it-toggle-switch">
+                <input type="checkbox" id="see-it-save-room-toggle" />
+                <div class="see-it-toggle-slider"></div>
+              </div>
+            </label>
+
+            <!-- Generate button -->
+            <button class="see-it-btn-primary" id="see-it-generate">Generate</button>
           </div>
         </div>
 
-        <!-- Controls -->
-        <div class="see-it-position-controls">
-          <!-- Save room toggle -->
-          <label class="see-it-save-room-toggle">
-            <span>Save room for later</span>
-            <div class="see-it-toggle-switch">
-              <input type="checkbox" id="see-it-save-room-toggle" />
-              <div class="see-it-toggle-slider"></div>
-            </div>
-          </label>
+        <!-- Desktop Layout -->
+        <div class="see-it-position-desktop">
+          <!-- Left: Room with product -->
+          <div class="see-it-position-desktop-left">
+            <div class="see-it-position-room-container">
+              <div class="see-it-room-image-wrapper">
+                <img id="see-it-room-image-desktop" src="" alt="Room" />
+                
+                <!-- Product overlay -->
+                <div id="see-it-product-container-desktop" class="see-it-product-overlay">
+                  <img id="see-it-product-image-desktop" src="" alt="Product" class="see-it-product-overlay-img" />
+                  <!-- Resize handles for desktop -->
+                  <div class="resize-handle handle-tl"></div>
+                  <div class="resize-handle handle-tr"></div>
+                  <div class="resize-handle handle-bl"></div>
+                  <div class="resize-handle handle-br"></div>
+                </div>
 
-          <!-- Generate button -->
-          <button class="see-it-btn-primary" id="see-it-generate">Generate</button>
+                <!-- Instruction pill -->
+                <div class="see-it-instruction-pill">
+                  <p>Drag to move · Drag corners to resize</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Controls -->
+          <div class="see-it-position-desktop-right">
+            <div class="see-it-position-controls">
+              <h2 class="see-it-position-controls-title">Position the mirror</h2>
+              <p class="see-it-position-controls-hint">Drag it where you want it. Drag the corners to resize.</p>
+
+              <!-- Save room toggle -->
+              <label class="see-it-save-room-toggle">
+                <span>Save room for later</span>
+                <div class="see-it-toggle-switch">
+                  <input type="checkbox" id="see-it-save-room-toggle-desktop" />
+                  <div class="see-it-toggle-slider"></div>
+                </div>
+              </label>
+
+              <!-- Generate button -->
+              <button class="see-it-btn-primary" id="see-it-generate-desktop">Generate</button>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- Screen 4: Result -->
       <div id="see-it-screen-result" class="see-it-screen">
-        <!-- Result image -->
-        <div class="see-it-result-container">
-          <div class="see-it-result-image-wrapper">
-            <img id="see-it-result-image" src="" alt="Result" />
+        <!-- Header -->
+        <div class="see-it-header">
+          <button class="see-it-btn-back see-it-btn-adjust" id="see-it-back-result">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+            </svg>
+            <span>Adjust</span>
+          </button>
+          <span class="see-it-header-title see-it-header-title-mobile"></span>
+          <span class="see-it-header-title see-it-header-title-desktop">Result</span>
+          <button class="see-it-btn-close see-it-btn-close-desktop" id="see-it-close-result-desktop">
+            <span>Close</span>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
 
-            <!-- Success badge -->
-            <div class="see-it-success-badge">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-              </svg>
-              Complete
+        <!-- Mobile Layout -->
+        <div class="see-it-result-mobile">
+          <!-- Result image -->
+          <div class="see-it-result-container">
+            <div class="see-it-result-image-wrapper">
+              <img id="see-it-result-image" src="" alt="Result" />
+
+              <!-- Success badge -->
+              <div class="see-it-success-badge">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                </svg>
+                Complete
+              </div>
+
+              <!-- Close -->
+              <button class="see-it-btn-close-overlay" id="see-it-close-result">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
             </div>
+          </div>
 
-            <!-- Close -->
-            <button class="see-it-btn-close-overlay" id="see-it-close-result">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
-              </svg>
-            </button>
+          <!-- Actions -->
+          <div class="see-it-result-actions">
+            <button class="see-it-btn-primary" id="see-it-share">Share</button>
+            <div class="see-it-result-secondary-actions">
+              <button class="see-it-btn-secondary" id="see-it-adjust">Adjust</button>
+              <button class="see-it-btn-secondary" id="see-it-new-room">New Room</button>
+            </div>
           </div>
         </div>
 
-        <!-- Actions -->
-        <div class="see-it-result-actions">
-          <button class="see-it-btn-primary" id="see-it-share">Share</button>
-          <div class="see-it-result-secondary-actions">
-            <button class="see-it-btn-secondary" id="see-it-adjust">Adjust</button>
-            <button class="see-it-btn-secondary" id="see-it-new-room">New Room</button>
+        <!-- Desktop Layout -->
+        <div class="see-it-result-desktop">
+          <!-- Left: Result image -->
+          <div class="see-it-result-desktop-left">
+            <div class="see-it-result-container">
+              <div class="see-it-result-image-wrapper">
+                <img id="see-it-result-image-desktop" src="" alt="Result" />
+
+                <!-- Success badge -->
+                <div class="see-it-success-badge">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                  </svg>
+                  Complete
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Actions -->
+          <div class="see-it-result-desktop-right">
+            <div class="see-it-result-actions">
+              <h2 class="see-it-result-actions-title">Your room</h2>
+              <p class="see-it-result-actions-hint">Here's how the <span id="see-it-result-product-title-text">{{ product_title }}</span> looks in your space.</p>
+
+              <!-- Product summary -->
+              <div class="see-it-result-product-summary">
+                <div class="see-it-result-product-image">
+                  <img id="see-it-result-product-image" src="{{ product_image_url }}" alt="{{ product_title }}" />
+                </div>
+                <div class="see-it-result-product-info">
+                  <p class="see-it-result-product-title" id="see-it-result-product-title">{{ product_title }}</p>
+                  <p class="see-it-result-product-price" id="see-it-result-product-price">{{ product_price }}</p>
+                </div>
+              </div>
+
+              <button class="see-it-btn-primary" id="see-it-share-desktop">Share Image</button>
+              <button class="see-it-btn-secondary" id="see-it-new-room-desktop">Try Another Room</button>
+            </div>
           </div>
         </div>
 

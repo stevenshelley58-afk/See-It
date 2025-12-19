@@ -23,48 +23,74 @@ document.addEventListener('DOMContentLoaded', function () {
     const btnTakePhoto = $('see-it-btn-take-photo');
     const btnUpload = $('see-it-btn-upload');
     const btnSaved = $('see-it-btn-saved');
+    // Desktop entry elements
+    const btnTakePhotoDesktop = $('see-it-btn-take-photo-desktop');
+    const btnUploadDesktop = $('see-it-btn-upload-desktop');
+    const btnSavedDesktop = $('see-it-btn-saved-desktop');
     const uploadInput = $('see-it-upload-input');
     const cameraInput = $('see-it-camera-input');
 
     // Prepare screen elements
     const btnBackPrepare = $('see-it-back-prepare');
+    const btnClosePrepareDesktop = $('see-it-close-prepare-desktop');
     const roomPreview = $('see-it-room-preview');
+    const roomPreviewDesktop = $('see-it-room-preview-desktop');
     const maskCanvas = $('see-it-mask-canvas');
+    const maskCanvasDesktop = $('see-it-mask-canvas-desktop');
     const btnUndo = $('see-it-undo-btn');
     const btnClear = $('see-it-clear-btn');
     const btnRemove = $('see-it-remove-btn');
     const btnConfirmRoom = $('see-it-confirm-room');
+    // Desktop prepare elements
+    const btnUndoDesktop = $('see-it-undo-btn-desktop');
+    const btnClearDesktop = $('see-it-clear-btn-desktop');
+    const btnRemoveDesktop = $('see-it-remove-btn-desktop');
+    const btnConfirmRoomDesktop = $('see-it-confirm-room-desktop');
     const cleanupLoading = $('see-it-cleanup-loading');
     const uploadIndicator = $('see-it-upload-indicator');
 
     // Position screen elements
     const btnBackPosition = $('see-it-back-position');
+    const btnClosePositionDesktop = $('see-it-close-position-desktop');
     const roomImage = $('see-it-room-image');
+    const roomImageDesktop = $('see-it-room-image-desktop');
     const productContainer = $('see-it-product-container');
+    const productContainerDesktop = $('see-it-product-container-desktop');
     const productImage = $('see-it-product-image');
+    const productImageDesktop = $('see-it-product-image-desktop');
     const btnGenerate = $('see-it-generate');
+    const btnGenerateDesktop = $('see-it-generate-desktop');
     const saveRoomToggle = $('see-it-save-room-toggle');
+    const saveRoomToggleDesktop = $('see-it-save-room-toggle-desktop');
     const toggleSwitch = saveRoomToggle?.closest('.see-it-toggle-switch');
+    const toggleSwitchDesktop = saveRoomToggleDesktop?.closest('.see-it-toggle-switch');
 
     // Toggle switch handler
-    saveRoomToggle?.addEventListener('change', (e) => {
-        if (toggleSwitch) {
+    const handleToggleChange = (e, toggleSwitchEl) => {
+        if (toggleSwitchEl) {
             if (e.target.checked) {
-                toggleSwitch.classList.add('checked');
+                toggleSwitchEl.classList.add('checked');
             } else {
-                toggleSwitch.classList.remove('checked');
+                toggleSwitchEl.classList.remove('checked');
             }
         }
-    });
+    };
+    saveRoomToggle?.addEventListener('change', (e) => handleToggleChange(e, toggleSwitch));
+    saveRoomToggleDesktop?.addEventListener('change', (e) => handleToggleChange(e, toggleSwitchDesktop));
 
     // Result screen elements
     const btnCloseResult = $('see-it-close-result');
+    const btnCloseResultDesktop = $('see-it-close-result-desktop');
+    const btnBackResult = $('see-it-back-result');
     const resultImage = $('see-it-result-image');
+    const resultImageDesktop = $('see-it-result-image-desktop');
     const statusText = $('see-it-status');
     const statusTextContainer = $('see-it-status-text');
     const btnShare = $('see-it-share');
+    const btnShareDesktop = $('see-it-share-desktop');
     const btnAdjust = $('see-it-adjust');
     const btnNewRoom = $('see-it-new-room');
+    const btnNewRoomDesktop = $('see-it-new-room-desktop');
     const errorDiv = $('see-it-global-error') || $('see-it-error');
 
     // Email/Saved Rooms modals
@@ -136,6 +162,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Initialize screen-specific functionality
         if (screenName === 'prepare') {
             initCanvas();
+            setupCanvasOnPrepare();
         } else if (screenName === 'position') {
             initPosition();
         }
@@ -153,20 +180,31 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Canvas Drawing (Prepare Screen) ---
     const initCanvas = () => {
-        if (!maskCanvas || !roomPreview) return;
+        // Use desktop or mobile canvas/image
+        const activeCanvas = maskCanvasDesktop || maskCanvas;
+        const activePreview = roomPreviewDesktop || roomPreview;
+        
+        if (!activeCanvas || !activePreview) return;
 
-        if (!roomPreview.complete || !roomPreview.naturalWidth) {
-            roomPreview.onload = initCanvas;
+        if (!activePreview.complete || !activePreview.naturalWidth) {
+            activePreview.onload = initCanvas;
             return;
         }
 
-        const natW = roomPreview.naturalWidth;
-        const natH = roomPreview.naturalHeight;
+        const natW = activePreview.naturalWidth;
+        const natH = activePreview.naturalHeight;
 
-        maskCanvas.width = natW;
-        maskCanvas.height = natH;
+        activeCanvas.width = natW;
+        activeCanvas.height = natH;
+        
+        // Also sync the other canvas if both exist
+        if (maskCanvas && maskCanvasDesktop && maskCanvas !== activeCanvas) {
+            const otherCanvas = activeCanvas === maskCanvas ? maskCanvasDesktop : maskCanvas;
+            otherCanvas.width = natW;
+            otherCanvas.height = natH;
+        }
 
-        ctx = maskCanvas.getContext('2d');
+        ctx = activeCanvas.getContext('2d');
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.strokeStyle = BRUSH_COLOR;
@@ -180,12 +218,15 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const getCanvasPos = (e) => {
-        const rect = maskCanvas.getBoundingClientRect();
+        const activeCanvas = maskCanvasDesktop || maskCanvas;
+        if (!activeCanvas) return { x: 0, y: 0 };
+        
+        const rect = activeCanvas.getBoundingClientRect();
         const touch = e.touches?.[0] || e.changedTouches?.[0] || null;
         const clientX = touch ? touch.clientX : e.clientX;
         const clientY = touch ? touch.clientY : e.clientY;
-        const scaleX = maskCanvas.width / rect.width;
-        const scaleY = maskCanvas.height / rect.height;
+        const scaleX = activeCanvas.width / rect.width;
+        const scaleY = activeCanvas.height / rect.height;
         return {
             x: (clientX - rect.left) * scaleX,
             y: (clientY - rect.top) * scaleY
@@ -234,7 +275,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const redrawStrokes = () => {
         if (!ctx) return;
-        ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        const activeCanvas = maskCanvasDesktop || maskCanvas;
+        if (!activeCanvas) return;
+        
+        ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
         strokes.forEach(stroke => {
             if (stroke.length === 0) return;
             ctx.beginPath();
@@ -242,6 +286,24 @@ document.addEventListener('DOMContentLoaded', function () {
             stroke.forEach(p => ctx.lineTo(p.x, p.y));
             ctx.stroke();
         });
+        
+        // Sync to other canvas if both exist
+        if (maskCanvas && maskCanvasDesktop && activeCanvas !== maskCanvas) {
+            const otherCanvas = activeCanvas === maskCanvas ? maskCanvasDesktop : maskCanvas;
+            const otherCtx = otherCanvas.getContext('2d');
+            otherCtx.clearRect(0, 0, otherCanvas.width, otherCanvas.height);
+            otherCtx.lineCap = 'round';
+            otherCtx.lineJoin = 'round';
+            otherCtx.strokeStyle = BRUSH_COLOR;
+            otherCtx.lineWidth = ctx.lineWidth;
+            strokes.forEach(stroke => {
+                if (stroke.length === 0) return;
+                otherCtx.beginPath();
+                otherCtx.moveTo(stroke[0].x, stroke[0].y);
+                stroke.forEach(p => otherCtx.lineTo(p.x, p.y));
+                otherCtx.stroke();
+            });
+        }
     };
 
     const updatePaintButtons = () => {
@@ -252,17 +314,31 @@ document.addEventListener('DOMContentLoaded', function () {
             const canRemove = hasStrokes && !state.isCleaningUp && state.uploadComplete;
             btnRemove.disabled = !canRemove;
         }
+        // Desktop buttons
+        if (btnUndoDesktop) btnUndoDesktop.disabled = !hasStrokes;
+        if (btnClearDesktop) btnClearDesktop.disabled = !hasStrokes;
+        if (btnRemoveDesktop) {
+            const canRemove = hasStrokes && !state.isCleaningUp && state.uploadComplete;
+            btnRemoveDesktop.disabled = !canRemove;
+        }
     };
 
     // Canvas event listeners
-    if (maskCanvas) {
-        maskCanvas.style.touchAction = 'none';
-        maskCanvas.addEventListener('pointerdown', (e) => { e.stopPropagation(); startDraw(e); });
-        maskCanvas.addEventListener('pointermove', (e) => { e.stopPropagation(); draw(e); });
-        maskCanvas.addEventListener('pointerup', (e) => { e.stopPropagation(); stopDraw(e); });
-        maskCanvas.addEventListener('pointerleave', (e) => { e.stopPropagation(); stopDraw(e); });
-        maskCanvas.addEventListener('pointercancel', (e) => { e.stopPropagation(); stopDraw(e); });
-    }
+    const setupCanvasListeners = (canvas) => {
+        if (!canvas) return;
+        canvas.style.touchAction = 'none';
+        canvas.addEventListener('pointerdown', (e) => { e.stopPropagation(); startDraw(e); });
+        canvas.addEventListener('pointermove', (e) => { e.stopPropagation(); draw(e); });
+        canvas.addEventListener('pointerup', (e) => { e.stopPropagation(); stopDraw(e); });
+        canvas.addEventListener('pointerleave', (e) => { e.stopPropagation(); stopDraw(e); });
+        canvas.addEventListener('pointercancel', (e) => { e.stopPropagation(); stopDraw(e); });
+    };
+    
+    // Setup canvas listeners when screens are shown
+    const setupCanvasOnPrepare = () => {
+        if (maskCanvas) setupCanvasListeners(maskCanvas);
+        if (maskCanvasDesktop) setupCanvasListeners(maskCanvasDesktop);
+    };
 
     btnUndo?.addEventListener('click', () => {
         if (strokes.length > 0) {
@@ -274,14 +350,34 @@ document.addEventListener('DOMContentLoaded', function () {
 
     btnClear?.addEventListener('click', () => {
         strokes = [];
-        ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        const activeCanvas = maskCanvasDesktop || maskCanvas;
+        if (ctx && activeCanvas) ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+        redrawStrokes();
+        updatePaintButtons();
+    });
+    
+    // Desktop undo/clear buttons
+    btnUndoDesktop?.addEventListener('click', () => {
+        if (strokes.length > 0) {
+            strokes.pop();
+            redrawStrokes();
+            updatePaintButtons();
+        }
+    });
+    
+    btnClearDesktop?.addEventListener('click', () => {
+        strokes = [];
+        const activeCanvas = maskCanvasDesktop || maskCanvas;
+        if (ctx && activeCanvas) ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+        redrawStrokes();
         updatePaintButtons();
     });
 
     const generateMask = () => {
-        if (!maskCanvas || !ctx) return null;
-        const w = maskCanvas.width;
-        const h = maskCanvas.height;
+        const activeCanvas = maskCanvasDesktop || maskCanvas;
+        if (!activeCanvas || !ctx) return null;
+        const w = activeCanvas.width;
+        const h = activeCanvas.height;
         if (w === 0 || h === 0) return null;
 
         const out = document.createElement('canvas');
@@ -310,8 +406,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Product Positioning (Position Screen) ---
     const initPosition = () => {
-        if (roomImage) roomImage.src = getActiveRoomUrl();
-        if (productImage) productImage.src = state.productImageUrl;
+        const activeRoomImage = roomImageDesktop || roomImage;
+        const activeProductImage = productImageDesktop || productImage;
+        const activeProductContainer = productContainerDesktop || productContainer;
+        
+        if (activeRoomImage) activeRoomImage.src = getActiveRoomUrl();
+        if (roomImage && roomImage !== activeRoomImage) roomImage.src = getActiveRoomUrl();
+        if (roomImageDesktop && roomImageDesktop !== activeRoomImage) roomImageDesktop.src = getActiveRoomUrl();
+        
+        if (activeProductImage) activeProductImage.src = state.productImageUrl;
+        if (productImage && productImage !== activeProductImage) productImage.src = state.productImageUrl;
+        if (productImageDesktop && productImageDesktop !== activeProductImage) productImageDesktop.src = state.productImageUrl;
+        
         state.x = 0;
         state.y = 0;
         state.scale = 1.0;
@@ -319,25 +425,64 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const updateTransform = () => {
-        if (productContainer) {
-            productContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+        const activeContainer = productContainerDesktop || productContainer;
+        if (activeContainer) {
+            activeContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+        }
+        // Sync to other container if both exist
+        if (productContainer && productContainerDesktop && activeContainer !== productContainer) {
+            const otherContainer = activeContainer === productContainer ? productContainerDesktop : productContainer;
+            otherContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
         }
     };
 
     let isDragging = false, startX, startY, initX, initY;
     let isPinching = false, initialDistance = 0, initialScale = 1;
 
-    // Drag handlers
-    productContainer?.addEventListener('mousedown', (e) => {
-        if (e.target.classList.contains('resize-handle')) return;
-        e.preventDefault();
-        isDragging = true;
-        productContainer.classList.add('is-dragging');
-        startX = e.clientX;
-        startY = e.clientY;
-        initX = state.x;
-        initY = state.y;
-    });
+    // Drag handlers - setup for both mobile and desktop containers
+    const setupDragHandlers = (container) => {
+        if (!container) return;
+        
+        container.addEventListener('mousedown', (e) => {
+            if (e.target.classList.contains('resize-handle')) return;
+            e.preventDefault();
+            isDragging = true;
+            container.classList.add('is-dragging');
+            startX = e.clientX;
+            startY = e.clientY;
+            initX = state.x;
+            initY = state.y;
+        });
+
+        // Touch handlers with pinch-to-resize
+        container.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                // Pinch gesture
+                e.preventDefault();
+                isPinching = true;
+                isDragging = false;
+                const touch1 = e.touches[0];
+                const touch2 = e.touches[1];
+                initialDistance = Math.hypot(
+                    touch2.clientX - touch1.clientX,
+                    touch2.clientY - touch1.clientY
+                );
+                initialScale = state.scale;
+            } else if (e.touches.length === 1 && !e.target.classList.contains('resize-handle')) {
+                // Single touch drag
+                isDragging = true;
+                container.classList.add('is-dragging');
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+                initX = state.x;
+                initY = state.y;
+            }
+        }, { passive: false });
+    };
+    
+    // Setup drag handlers for both containers
+    if (productContainer) setupDragHandlers(productContainer);
+    if (productContainerDesktop) setupDragHandlers(productContainerDesktop);
 
     window.addEventListener('mousemove', (e) => {
         if (!isDragging) return;
@@ -349,32 +494,8 @@ document.addEventListener('DOMContentLoaded', function () {
     window.addEventListener('mouseup', () => {
         isDragging = false;
         productContainer?.classList.remove('is-dragging');
+        productContainerDesktop?.classList.remove('is-dragging');
     });
-
-    // Touch handlers with pinch-to-resize
-    productContainer?.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 2) {
-            // Pinch gesture
-            e.preventDefault();
-            isPinching = true;
-            isDragging = false;
-            const touch1 = e.touches[0];
-            const touch2 = e.touches[1];
-            initialDistance = Math.hypot(
-                touch2.clientX - touch1.clientX,
-                touch2.clientY - touch1.clientY
-            );
-            initialScale = state.scale;
-        } else if (e.touches.length === 1 && !e.target.classList.contains('resize-handle')) {
-            // Single touch drag
-            isDragging = true;
-            productContainer.classList.add('is-dragging');
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-            initX = state.x;
-            initY = state.y;
-        }
-    }, { passive: false });
 
     window.addEventListener('touchmove', (e) => {
         if (isPinching && e.touches.length === 2) {
@@ -399,16 +520,19 @@ document.addEventListener('DOMContentLoaded', function () {
         isDragging = false;
         isPinching = false;
         productContainer?.classList.remove('is-dragging');
+        productContainerDesktop?.classList.remove('is-dragging');
     });
 
-    // Resize handles (desktop)
-    document.querySelectorAll('.resize-handle').forEach(handle => {
-        let resizing = false, startDist = 0, startScale = 1;
+    // Resize handles (desktop) - work with both containers
+    const setupResizeHandles = (container) => {
+        if (!container) return;
+        container.querySelectorAll('.resize-handle').forEach(handle => {
+            let resizing = false, startDist = 0, startScale = 1;
 
-        const getDist = (x, y) => {
-            const rect = productContainer.getBoundingClientRect();
-            return Math.hypot(x - (rect.left + rect.width/2), y - (rect.top + rect.height/2));
-        };
+            const getDist = (x, y) => {
+                const rect = container.getBoundingClientRect();
+                return Math.hypot(x - (rect.left + rect.width/2), y - (rect.top + rect.height/2));
+            };
 
         const onDown = (e) => {
             e.stopPropagation();
@@ -431,13 +555,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const onUp = () => { resizing = false; };
 
-        handle.addEventListener('mousedown', onDown);
-        handle.addEventListener('touchstart', onDown, { passive: false });
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('touchmove', onMove, { passive: true });
-        window.addEventListener('mouseup', onUp);
-        window.addEventListener('touchend', onUp);
-    });
+            handle.addEventListener('mousedown', onDown);
+            handle.addEventListener('touchstart', onDown, { passive: false });
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('touchmove', onMove, { passive: true });
+            window.addEventListener('mouseup', onUp);
+            window.addEventListener('touchend', onUp);
+        });
+    };
+    
+    if (productContainer) setupResizeHandles(productContainer);
+    if (productContainerDesktop) setupResizeHandles(productContainerDesktop);
 
     // --- API Calls ---
     const startSession = async () => {
@@ -537,10 +665,14 @@ document.addEventListener('DOMContentLoaded', function () {
         const preparedUrl = await fetchPreparedProduct(state.productId);
         state.productImageUrl = preparedUrl || trigger.dataset.productImage;
         if (productImage) productImage.src = state.productImageUrl;
+        if (productImageDesktop) productImageDesktop.src = state.productImageUrl;
 
         if (state.sessionId && getActiveRoomUrl()) {
-            roomPreview && (roomPreview.src = getActiveRoomUrl());
-            roomImage && (roomImage.src = getActiveRoomUrl());
+            const activeUrl = getActiveRoomUrl();
+            if (roomPreview) roomPreview.src = activeUrl;
+            if (roomPreviewDesktop) roomPreviewDesktop.src = activeUrl;
+            if (roomImage) roomImage.src = activeUrl;
+            if (roomImageDesktop) roomImageDesktop.src = activeUrl;
             showScreen('prepare');
         } else {
             state.originalRoomImageUrl = null;
@@ -558,6 +690,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     btnCloseEntry?.addEventListener('click', closeModal);
     btnCloseResult?.addEventListener('click', closeModal);
+    btnClosePrepareDesktop?.addEventListener('click', closeModal);
+    btnClosePositionDesktop?.addEventListener('click', closeModal);
+    btnCloseResultDesktop?.addEventListener('click', closeModal);
+    btnBackResult?.addEventListener('click', () => showScreen('position'));
 
     // --- File Upload Handler ---
     const handleFile = async (e) => {
@@ -573,7 +709,9 @@ document.addEventListener('DOMContentLoaded', function () {
         reader.onload = (ev) => {
             state.localImageDataUrl = ev.target.result;
             if (roomPreview) roomPreview.src = state.localImageDataUrl;
+            if (roomPreviewDesktop) roomPreviewDesktop.src = state.localImageDataUrl;
             if (roomImage) roomImage.src = state.localImageDataUrl;
+            if (roomImageDesktop) roomImageDesktop.src = state.localImageDataUrl;
             showScreen('prepare');
         };
         reader.readAsDataURL(file);
@@ -602,6 +740,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
     btnTakePhoto?.addEventListener('click', () => cameraInput?.click());
     btnUpload?.addEventListener('click', () => uploadInput?.click());
+    btnTakePhotoDesktop?.addEventListener('click', () => cameraInput?.click());
+    btnUploadDesktop?.addEventListener('click', () => uploadInput?.click());
+    btnSavedDesktop?.addEventListener('click', async () => {
+        if (state.shopperToken) {
+            await showSavedRoomsList();
+        } else {
+            emailModal?.classList.remove('hidden');
+        }
+    });
     uploadInput?.addEventListener('change', handleFile);
     cameraInput?.addEventListener('change', handleFile);
 
@@ -609,7 +756,7 @@ document.addEventListener('DOMContentLoaded', function () {
     btnBackPrepare?.addEventListener('click', () => showScreen('entry'));
     btnBackPosition?.addEventListener('click', () => showScreen('prepare'));
 
-    btnConfirmRoom?.addEventListener('click', () => {
+    const handleConfirmRoom = () => {
         if (state.isCleaningUp) return;
         const url = getActiveRoomUrl();
         if (!url) return showError('Please upload an image first');
@@ -625,10 +772,13 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         showScreen('position');
-    });
+    };
+    
+    btnConfirmRoom?.addEventListener('click', handleConfirmRoom);
+    btnConfirmRoomDesktop?.addEventListener('click', handleConfirmRoom);
 
     // --- Remove Button ---
-    btnRemove?.addEventListener('click', async () => {
+    const handleRemove = async () => {
         if (btnRemove.disabled || justFinishedDrawing || !state.sessionId || strokes.length === 0) return;
 
         state.isCleaningUp = true;
@@ -650,7 +800,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 roomPreview.src = state.cleanedRoomImageUrl;
                 roomPreview.onload = initCanvas;
             }
+            if (roomPreviewDesktop) {
+                roomPreviewDesktop.src = state.cleanedRoomImageUrl;
+                roomPreviewDesktop.onload = initCanvas;
+            }
             if (roomImage) roomImage.src = state.cleanedRoomImageUrl;
+            if (roomImageDesktop) roomImageDesktop.src = state.cleanedRoomImageUrl;
 
             strokes = [];
             ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
@@ -664,15 +819,18 @@ document.addEventListener('DOMContentLoaded', function () {
             if (cleanupLoading) cleanupLoading.classList.add('hidden');
             updatePaintButtons();
         }
-    });
+    };
+    
+    btnRemove?.addEventListener('click', handleRemove);
+    btnRemoveDesktop?.addEventListener('click', handleRemove);
 
     // --- Generate Render ---
-    btnGenerate?.addEventListener('click', async () => {
+    const handleGenerate = async () => {
         if (!state.sessionId || !state.productId) return showError('Missing session or product');
-        if (!roomImage || !productImage) return showError('Images not loaded');
 
-        // Save room if toggle is on
-        if (saveRoomToggle?.checked && state.shopperToken && state.sessionId) {
+        // Save room if toggle is on (check both mobile and desktop toggles)
+        const shouldSaveRoom = (saveRoomToggle?.checked || saveRoomToggleDesktop?.checked) && state.shopperToken && state.sessionId;
+        if (shouldSaveRoom) {
             try {
                 await saveRoom(state.sessionId);
             } catch (err) {
@@ -688,8 +846,12 @@ document.addEventListener('DOMContentLoaded', function () {
         if (resultImage) resultImage.src = '';
         btnShare?.parentElement?.classList.add('hidden');
 
-        const roomRect = roomImage.getBoundingClientRect();
-        const prodRect = productImage.getBoundingClientRect();
+        const activeRoomImage = roomImageDesktop || roomImage;
+        const activeProductImage = productImageDesktop || productImage;
+        if (!activeRoomImage || !activeProductImage) return showError('Images not loaded');
+        
+        const roomRect = activeRoomImage.getBoundingClientRect();
+        const prodRect = activeProductImage.getBoundingClientRect();
 
         const cx = prodRect.left + prodRect.width/2 - roomRect.left;
         const cy = prodRect.top + prodRect.height/2 - roomRect.top;
@@ -730,7 +892,10 @@ document.addEventListener('DOMContentLoaded', function () {
             if (statusTextContainer) statusTextContainer.classList.add('hidden');
             btnShare?.parentElement?.classList.remove('hidden');
         });
-    });
+    };
+    
+    btnGenerate?.addEventListener('click', handleGenerate);
+    btnGenerateDesktop?.addEventListener('click', handleGenerate);
 
     const pollStatus = (jobId) => {
         let attempts = 0;
@@ -751,7 +916,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (statusText) statusText.textContent = 'Done!';
                     if (statusTextContainer) statusTextContainer.classList.add('hidden');
                     if (resultImage && data.imageUrl) resultImage.src = data.imageUrl;
+                    if (resultImageDesktop && data.imageUrl) resultImageDesktop.src = data.imageUrl;
                     btnShare?.parentElement?.classList.remove('hidden');
+                    btnShareDesktop?.parentElement?.classList.remove('hidden');
                 } else if (data.status === 'failed') {
                     clearInterval(interval);
                     showError(data.errorMessage || 'Failed');
@@ -770,35 +937,42 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Result Actions ---
     btnAdjust?.addEventListener('click', () => showScreen('position'));
-    btnNewRoom?.addEventListener('click', () => {
+    const handleNewRoom = () => {
         state.sessionId = null;
         state.originalRoomImageUrl = null;
         state.cleanedRoomImageUrl = null;
         state.localImageDataUrl = null;
         state.uploadComplete = false;
         showScreen('entry');
-    });
+    };
+    
+    btnNewRoom?.addEventListener('click', handleNewRoom);
+    btnNewRoomDesktop?.addEventListener('click', handleNewRoom);
 
     // --- Share Functionality ---
-    btnShare?.addEventListener('click', async () => {
-        if (!resultImage || !resultImage.src) return;
+    const handleShare = async () => {
+        const activeResultImage = resultImageDesktop || resultImage;
+        if (!activeResultImage || !activeResultImage.src) return;
 
         if (navigator.share) {
             try {
-                const response = await fetch(resultImage.src);
+                const response = await fetch(activeResultImage.src);
                 const blob = await response.blob();
                 const file = new File([blob], 'see-it-result.jpg', { type: 'image/jpeg' });
                 await navigator.share({ files: [file], title: 'See It Result' });
             } catch (err) {
                 if (err.name !== 'AbortError') {
                     // Fallback to download
-                    downloadImage(resultImage.src);
+                    downloadImage(activeResultImage.src);
                 }
             }
         } else {
-            downloadImage(resultImage.src);
+            downloadImage(activeResultImage.src);
         }
-    });
+    };
+    
+    btnShare?.addEventListener('click', handleShare);
+    btnShareDesktop?.addEventListener('click', handleShare);
 
     const downloadImage = (url) => {
         const a = document.createElement('a');
