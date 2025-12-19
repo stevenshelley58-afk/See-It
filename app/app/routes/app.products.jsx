@@ -241,6 +241,17 @@ const styles = `
 .prod-btn.adj{background:#2563eb;color:#fff}
 .prod-btn.err{background:#ea4335;color:#fff}
 .prod-placeholder{font-size:11px;color:#999}
+.prod-context{padding:0 16px 12px;border-top:1px solid #f0f0f0;margin-top:-1px}
+.prod-context-toggle{display:flex;align-items:center;justify-content:space-between;padding:8px 0;cursor:pointer;font-size:12px;color:#666}
+.prod-context-toggle:hover{color:#1a1a1a}
+.prod-context-input{width:100%;padding:8px 10px;border:1px solid #e0e0e0;border-radius:6px;font-size:12px;font-family:inherit;resize:vertical;min-height:60px;margin-top:4px}
+.prod-context-input:focus{outline:none;border-color:#1a1a1a}
+.prod-context-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end}
+.prod-context-btn{padding:6px 12px;border-radius:6px;font-size:11px;font-weight:500;border:none;cursor:pointer;font-family:inherit}
+.prod-context-btn.save{background:#1a1a1a;color:#fff}
+.prod-context-btn.cancel{background:#f0f0f0;color:#666}
+.prod-context-hint{font-size:10px;color:#999;margin-top:4px}
+.prod-context-saved{font-size:11px;color:#2e7d32;display:flex;align-items:center;gap:4px}
 .spin{width:20px;height:20px;border:2px solid #e0e0e0;border-top-color:#1a1a1a;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .paging{display:flex;justify-content:center;gap:8px;padding:20px 0}
@@ -279,6 +290,12 @@ export default function Products() {
     const [statusFilter, setStatusFilter] = useState("all");
     const [processingId, setProcessingId] = useState(null);
     const [toast, setToast] = useState(null);
+    
+    // Product context state
+    const [expandedContext, setExpandedContext] = useState(null); // productId of expanded context
+    const [editingContext, setEditingContext] = useState({}); // { productId: "text" }
+    const [savingContext, setSavingContext] = useState(null); // productId being saved
+    const contextFetcher = useFetcher();
 
     // Image selection modal
     const [modalOpen, setModalOpen] = useState(false);
@@ -295,6 +312,46 @@ export default function Products() {
         setToast({ msg, type });
         setTimeout(() => setToast(null), 3500);
     }, []);
+
+    // Handle context save response
+    useEffect(() => {
+        if (contextFetcher.state === "idle" && contextFetcher.data) {
+            setSavingContext(null);
+            if (contextFetcher.data.success) {
+                showToast("AI prompt saved!", "success");
+                setExpandedContext(null);
+            } else if (contextFetcher.data.error) {
+                showToast(contextFetcher.data.error, "err");
+            }
+        }
+    }, [contextFetcher.state, contextFetcher.data, showToast]);
+
+    // Save product context
+    const handleSaveContext = useCallback((productId) => {
+        const numId = productId.split('/').pop();
+        setSavingContext(productId);
+        const fd = new FormData();
+        fd.append("productId", numId);
+        fd.append("productContext", editingContext[productId] || "");
+        contextFetcher.submit(fd, { method: "post", action: "/api/products/context" });
+    }, [contextFetcher, editingContext]);
+
+    // Toggle context expansion
+    const toggleContext = useCallback((productId) => {
+        if (expandedContext === productId) {
+            setExpandedContext(null);
+        } else {
+            setExpandedContext(productId);
+            // Initialize editing value from asset if not already set
+            const asset = assetsMap[productId];
+            if (!(productId in editingContext)) {
+                setEditingContext(prev => ({
+                    ...prev,
+                    [productId]: asset?.productContext || ""
+                }));
+            }
+        }
+    }, [expandedContext, assetsMap, editingContext]);
 
     // Handle API responses
     useEffect(() => {
@@ -540,6 +597,51 @@ export default function Products() {
                                                     </button>
                                                 )}
                                             </div>
+                                        )}
+                                    </div>
+
+                                    {/* AI Prompt Section */}
+                                    <div className="prod-context">
+                                        <div 
+                                            className="prod-context-toggle"
+                                            onClick={() => toggleContext(product.id)}
+                                        >
+                                            <span>
+                                                {asset?.productContext ? '✓ AI Prompt' : '+ Add AI Prompt'}
+                                            </span>
+                                            <span>{expandedContext === product.id ? '▲' : '▼'}</span>
+                                        </div>
+                                        
+                                        {expandedContext === product.id && (
+                                            <>
+                                                <textarea
+                                                    className="prod-context-input"
+                                                    placeholder="e.g., Large floor-standing mirror with ornate gold frame, 6 feet tall, designed to lean against walls..."
+                                                    value={editingContext[product.id] ?? asset?.productContext ?? ""}
+                                                    onChange={(e) => setEditingContext(prev => ({
+                                                        ...prev,
+                                                        [product.id]: e.target.value
+                                                    }))}
+                                                />
+                                                <div className="prod-context-hint">
+                                                    Describe the product to help AI create better visualizations
+                                                </div>
+                                                <div className="prod-context-actions">
+                                                    <button 
+                                                        className="prod-context-btn cancel"
+                                                        onClick={() => setExpandedContext(null)}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                    <button 
+                                                        className="prod-context-btn save"
+                                                        onClick={() => handleSaveContext(product.id)}
+                                                        disabled={savingContext === product.id}
+                                                    >
+                                                        {savingContext === product.id ? 'Saving...' : 'Save'}
+                                                    </button>
+                                                </div>
+                                            </>
                                         )}
                                     </div>
                                 </div>

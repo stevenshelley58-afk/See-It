@@ -88,14 +88,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ error: "Shop not found" }, { status: 404, headers: corsHeaders });
     }
 
-    // Parse shop settings to get product context
-    let productContext = "";
-    try {
-        const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
-        productContext = settings.product_context || "";
-    } catch (e) {
-        logger.warn({ ...logContext, stage: "settings-parse" }, "Failed to parse shop settings");
-    }
+    // Product context will be fetched from ProductAsset below
 
     // Update log context with shop info
     const shopLogContext = { ...logContext, shopId: shop.id, productId: product_id };
@@ -130,9 +123,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     // Product asset is optional - we can render without background removal
+    // Also fetch productContext for better AI prompts
     const productAsset = await prisma.productAsset.findFirst({
-        where: { shopId: shop.id, productId: product_id }
+        where: { shopId: shop.id, productId: product_id },
+        select: {
+            id: true,
+            preparedImageUrl: true,
+            preparedImageKey: true,
+            sourceImageUrl: true,
+            productContext: true,
+            status: true
+        }
     });
+
+    // Get product context from the asset (merchant-provided description)
+    const productContext = productAsset?.productContext || "";
 
     const roomSession = await prisma.roomSession.findUnique({
         where: { id: room_session_id }

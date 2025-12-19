@@ -54,6 +54,7 @@ model ProductAsset {
   shopId           String   @map("shop_id")
   productId        String   @map("product_id")
   productTitle     String?  @map("product_title") // Product title for Grounded SAM text prompt
+  productContext   String?  @map("product_context") // Merchant-provided description for better AI composites
   variantId        String?  @map("variant_id")
   sourceImageId    String   @map("source_image_id")
   sourceImageUrl   String   @map("source_image_url")
