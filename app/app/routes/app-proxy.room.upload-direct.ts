@@ -110,7 +110,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         // Upload directly to GCS
         const key = `rooms/${shop.id}/${roomSession.id}/${filename}`;
-        const publicUrl = await StorageService.uploadBuffer(key, imageBuffer, finalContentType);
+        // Note: uploadBuffer signature is (buffer, key, contentType)
+        const publicUrl = await StorageService.uploadBuffer(imageBuffer, key, finalContentType);
 
         // Store the GCS key for future URL generation
         await prisma.roomSession.update({
