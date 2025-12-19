@@ -166,6 +166,13 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+.see-it-btn-close svg,
+.see-it-btn-back svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
 .see-it-btn-close:active,
 .see-it-btn-back:active {
   transform: scale(0.98);
@@ -198,6 +205,8 @@
   padding: 0.875rem;
   font-size: 0.9375rem;
   width: 100%;
+  flex-shrink: 0;
+  flex-grow: 0;
 }
 
 .see-it-btn-primary:active {
@@ -211,12 +220,20 @@
   transform: none;
 }
 
+.see-it-btn-primary svg,
+.see-it-btn-secondary svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+}
+
 .see-it-btn-secondary {
   background: #f5f5f5;
   color: #525252;
   padding: 0.75rem;
   font-size: 0.875rem;
   flex: 1;
+  flex-grow: 0;
 }
 
 .see-it-btn-secondary:active {
@@ -277,6 +294,7 @@
   padding: 1.25rem;
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
 }
 
 .see-it-entry-title {
@@ -677,6 +695,12 @@
   gap: 0.25rem;
 }
 
+.see-it-success-badge svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+}
+
 .see-it-btn-close-overlay {
   position: absolute;
   top: 0.75rem;
@@ -700,6 +724,12 @@
 .see-it-btn-close-overlay:active {
   transform: scale(0.98);
   opacity: 0.9;
+}
+
+.see-it-btn-close-overlay svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
 }
 
 .see-it-result-actions {
