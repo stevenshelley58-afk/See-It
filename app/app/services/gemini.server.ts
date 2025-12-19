@@ -706,25 +706,37 @@ export async function compositeScene(
         roomBuffer = null;
         resizedProduct = null;
 
-        // Step 2: AI polish
-        const styleDescription = stylePreset === 'neutral' ? 'natural and realistic' : stylePreset;
+        // Step 2: AI polish with final render prompt
+        const productInstructionsText = productInstructions?.trim() || 'None provided.';
         
-        // Build prompt with optional custom product instructions
-        let prompt = `This image shows a product placed into a room scene.
-The product is already positioned - do NOT move, resize, reposition, or warp the product.
-Make the composite look photorealistic by:
-1. Harmonizing the lighting on the product to match the room's light sources
-2. Adding appropriate shadows beneath and around the product
-3. Adding subtle reflections if on a reflective surface
-4. Ensuring color temperature consistency
-Style: ${styleDescription}`;
+        const prompt = `You are performing a realistic product placement into a real photograph.
 
-        // Add custom product instructions if provided
-        if (productInstructions && productInstructions.trim()) {
-            prompt += `\n\nProduct-specific instructions:\n${productInstructions.trim()}`;
-        }
+Primary task:
+Insert the provided product image into the scene at the specified position, scale, and orientation.
 
-        prompt += `\nKeep the product's exact position, size, and shape unchanged.`;
+Hard constraints (must follow):
+- Preserve the product's exact shape, proportions, materials, and colors.
+- Preserve the room's existing geometry, perspective, walls, floors, and lighting.
+- Do not move, resize, or alter any unmasked objects in the scene.
+- Do not invent additional decor or structural elements.
+- Do not change camera angle or room layout.
+
+Physical realism rules:
+- The product must interact correctly with gravity.
+- The product must rest on appropriate surfaces unless explicitly stated otherwise.
+- Add a natural contact shadow where the product meets the surface.
+- Match lighting direction, intensity, and color temperature from the scene.
+
+Geometric alignment rules:
+- If the product is placed against a wall or surface, it must align to the plane of that surface.
+- The product must rotate and skew to match the wall's angle and perspective.
+- The product must not face the camera unless the wall itself faces the camera.
+
+Product-specific instructions:
+${productInstructionsText}
+
+Final check:
+If there is any conflict between realism assumptions and the product-specific instructions, the product-specific instructions override realism assumptions.`;
 
         const aspectRatio = roomWidth > roomHeight ? "16:9" : roomHeight > roomWidth ? "9:16" : "1:1";
 
