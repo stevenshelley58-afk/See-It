@@ -1,18 +1,24 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { InlineStack, Button, Text, RangeSlider, BlockStack } from "@shopify/polaris";
+import {
+    rafThrottle,
+    debounce,
+    drawCheckerboard,
+    getROIImageData,
+    applyCircularBrushToAlpha,
+    interpolateBrushStroke,
+} from "../utils/canvas-performance";
 
 /**
  * SmartBrushCanvas - Edge-aware brush for refining background removal
  *
- * This is NOT for painting the entire selection manually.
- * It's for REFINING the AI's result:
- * - "Restore" brush: Brings back areas the AI incorrectly removed
- * - "Erase" brush: Removes areas the AI missed
- *
- * Smart features:
- * - Edge detection: Brush snaps to object boundaries
- * - Feathered edges: Smooth transitions
- * - Preview overlay: See what's being changed in real-time
+ * PERFORMANCE OPTIMIZATIONS:
+ * - RAF-throttled mouse move handlers (60fps max)
+ * - Pre-rendered checkerboard pattern (pattern fill vs pixel-by-pixel)
+ * - Region-of-interest (ROI) ImageData access (only brush area, not full canvas)
+ * - Cached edge data reference (no repeated getImageData)
+ * - Debounced export (100ms after last stroke)
+ * - Brush stroke interpolation for smooth lines
  */
 export function SmartBrushCanvas({
     originalImageUrl,      // Original product image
@@ -27,6 +33,10 @@ export function SmartBrushCanvas({
     const originalCanvasRef = useRef(null);  // Original image (hidden)
     const maskCanvasRef = useRef(null);      // Current transparency mask (hidden)
     const edgeCanvasRef = useRef(null);      // Edge detection (hidden)
+
+    // Performance: Cache edge data to avoid repeated getImageData calls
+    const edgeDataRef = useRef(null);
+    const lastPosRef = useRef(null); // For brush interpolation
 
     const [isDrawing, setIsDrawing] = useState(false);
     const [brushSize, setBrushSize] = useState(25);
@@ -114,7 +124,7 @@ export function SmartBrushCanvas({
         renderDisplay();
     }, [imagesLoaded, dimensions]);
 
-    // Compute edge detection map
+    // Compute edge detection map - optimized with cached edge data
     const computeEdges = useCallback(() => {
         if (!originalCanvasRef.current || !edgeCanvasRef.current) return;
 
@@ -128,32 +138,35 @@ export function SmartBrushCanvas({
         const w = origCanvas.width;
         const h = origCanvas.height;
 
-        // Simple Sobel edge detection
+        // Pre-compute grayscale values for faster access
+        const gray = new Uint8ClampedArray(w * h);
+        for (let i = 0; i < gray.length; i++) {
+            const idx = i * 4;
+            gray[i] = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+        }
+
+        // Simple Sobel edge detection with cached grayscale
         const edges = new Uint8ClampedArray(w * h);
 
         for (let y = 1; y < h - 1; y++) {
+            const yOffset = y * w;
+            const yOffsetUp = (y - 1) * w;
+            const yOffsetDown = (y + 1) * w;
+
             for (let x = 1; x < w - 1; x++) {
-                const idx = (y * w + x) * 4;
-
-                // Get grayscale values of neighbors
-                const getGray = (dx, dy) => {
-                    const i = ((y + dy) * w + (x + dx)) * 4;
-                    return (data[i] + data[i + 1] + data[i + 2]) / 3;
-                };
-
-                // Sobel kernels
+                // Sobel kernels using pre-computed grayscale
                 const gx = (
-                    -getGray(-1, -1) + getGray(1, -1) +
-                    -2 * getGray(-1, 0) + 2 * getGray(1, 0) +
-                    -getGray(-1, 1) + getGray(1, 1)
+                    -gray[yOffsetUp + x - 1] + gray[yOffsetUp + x + 1] +
+                    -2 * gray[yOffset + x - 1] + 2 * gray[yOffset + x + 1] +
+                    -gray[yOffsetDown + x - 1] + gray[yOffsetDown + x + 1]
                 );
                 const gy = (
-                    -getGray(-1, -1) - 2 * getGray(0, -1) - getGray(1, -1) +
-                    getGray(-1, 1) + 2 * getGray(0, 1) + getGray(1, 1)
+                    -gray[yOffsetUp + x - 1] - 2 * gray[yOffsetUp + x] - gray[yOffsetUp + x + 1] +
+                    gray[yOffsetDown + x - 1] + 2 * gray[yOffsetDown + x] + gray[yOffsetDown + x + 1]
                 );
 
                 const magnitude = Math.sqrt(gx * gx + gy * gy);
-                edges[y * w + x] = Math.min(255, magnitude);
+                edges[yOffset + x] = Math.min(255, magnitude);
             }
         }
 
@@ -166,9 +179,17 @@ export function SmartBrushCanvas({
             edgeImageData.data[i * 4 + 3] = 255;
         }
         edgeCtx.putImageData(edgeImageData, 0, 0);
+
+        // PERFORMANCE: Cache full edge data for brush operations
+        edgeDataRef.current = {
+            data: edges,
+            width: w,
+            height: h
+        };
     }, []);
 
     // Render the display canvas (checkerboard + image with current mask)
+    // OPTIMIZED: Uses pre-rendered checkerboard pattern instead of pixel-by-pixel
     const renderDisplay = useCallback(() => {
         if (!displayCanvasRef.current || !originalCanvasRef.current || !maskCanvasRef.current) return;
 
@@ -180,15 +201,8 @@ export function SmartBrushCanvas({
         const w = displayCanvas.width;
         const h = displayCanvas.height;
 
-        // Draw checkerboard background
-        const checkSize = 16;
-        for (let y = 0; y < h; y += checkSize) {
-            for (let x = 0; x < w; x += checkSize) {
-                const isLight = ((x / checkSize) + (y / checkSize)) % 2 === 0;
-                ctx.fillStyle = isLight ? "#ffffff" : "#e0e0e0";
-                ctx.fillRect(x, y, checkSize, checkSize);
-            }
-        }
+        // PERFORMANCE: Draw checkerboard using pattern fill (1 call vs w*h/256 calls)
+        drawCheckerboard(ctx, w, h, 16);
 
         // Get original and mask data
         const origCtx = originalCanvas.getContext("2d");
@@ -197,17 +211,27 @@ export function SmartBrushCanvas({
         const maskData = maskCtx.getImageData(0, 0, w, h);
 
         // Composite: original pixels with mask alpha
-        const resultData = ctx.getImageData(0, 0, w, h);
+        // Use a temporary canvas for proper alpha compositing
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = w;
+        tempCanvas.height = h;
+        const tempCtx = tempCanvas.getContext("2d");
+
+        // Apply mask alpha to original image
+        const resultData = tempCtx.createImageData(w, h);
         for (let i = 0; i < origData.data.length; i += 4) {
-            const alpha = maskData.data[i + 3] / 255;
+            const alpha = maskData.data[i + 3];
             if (alpha > 0) {
                 resultData.data[i] = origData.data[i];
                 resultData.data[i + 1] = origData.data[i + 1];
                 resultData.data[i + 2] = origData.data[i + 2];
-                resultData.data[i + 3] = maskData.data[i + 3];
+                resultData.data[i + 3] = alpha;
             }
         }
-        ctx.putImageData(resultData, 0, 0);
+        tempCtx.putImageData(resultData, 0, 0);
+
+        // Draw composite on top of checkerboard
+        ctx.drawImage(tempCanvas, 0, 0);
     }, []);
 
     // Get canvas position from event
@@ -232,99 +256,130 @@ export function SmartBrushCanvas({
         };
     }, []);
 
-    // Apply brush stroke
+    // Apply brush stroke - OPTIMIZED with ROI processing and cached edge data
     const applyBrush = useCallback((x, y) => {
-        if (!maskCanvasRef.current || !edgeCanvasRef.current) return;
+        if (!maskCanvasRef.current) return;
 
         const maskCanvas = maskCanvasRef.current;
-        const edgeCanvas = edgeCanvasRef.current;
         const maskCtx = maskCanvas.getContext("2d");
-        const edgeCtx = edgeCanvas.getContext("2d");
 
         const w = maskCanvas.width;
         const h = maskCanvas.height;
-        const radius = brushSize * (w / dimensions.width); // Scale to natural resolution
+        const radius = Math.round(brushSize * (w / dimensions.width)); // Scale to natural resolution
 
-        // Get edge data for smart brush
-        const edgeData = edgeSnap ? edgeCtx.getImageData(
-            Math.max(0, x - radius),
-            Math.max(0, y - radius),
-            Math.min(radius * 2, w - x + radius),
-            Math.min(radius * 2, h - y + radius)
-        ) : null;
+        // PERFORMANCE: Only get ImageData for the brush region (ROI), not full canvas
+        const roiX = Math.max(0, Math.floor(x - radius));
+        const roiY = Math.max(0, Math.floor(y - radius));
+        const roiW = Math.min(w - roiX, Math.ceil(radius * 2));
+        const roiH = Math.min(h - roiY, Math.ceil(radius * 2));
 
-        // Get current mask data
-        const maskData = maskCtx.getImageData(0, 0, w, h);
+        if (roiW <= 0 || roiH <= 0) return;
+
+        const maskData = maskCtx.getImageData(roiX, roiY, roiW, roiH);
+
+        // PERFORMANCE: Use cached edge data instead of getImageData on every stroke
+        const cachedEdges = edgeSnap ? edgeDataRef.current : null;
+
+        const radiusSq = radius * radius;
 
         // Apply brush with edge awareness
-        for (let dy = -radius; dy <= radius; dy++) {
-            for (let dx = -radius; dx <= radius; dx++) {
-                const px = x + dx;
-                const py = y + dy;
+        for (let roiDy = 0; roiDy < roiH; roiDy++) {
+            const py = roiY + roiDy;
+            const dy = py - y;
+            const dySq = dy * dy;
 
-                if (px < 0 || px >= w || py < 0 || py >= h) continue;
+            for (let roiDx = 0; roiDx < roiW; roiDx++) {
+                const px = roiX + roiDx;
+                const dx = px - x;
+                const distSq = dx * dx + dySq;
 
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist > radius) continue;
+                if (distSq > radiusSq) continue;
 
-                // Feathered edge falloff
+                const dist = Math.sqrt(distSq);
+                // Feathered edge falloff - quadratic for smoother edges
                 let strength = 1 - (dist / radius);
-                strength = strength * strength; // Quadratic falloff for smoother edges
+                strength = strength * strength;
 
                 // Edge snap: reduce strength near edges if crossing them
-                if (edgeSnap && edgeData) {
-                    const edgeX = dx + radius;
-                    const edgeY = dy + radius;
-                    if (edgeX >= 0 && edgeX < edgeData.width && edgeY >= 0 && edgeY < edgeData.height) {
-                        const edgeIdx = (edgeY * edgeData.width + edgeX) * 4;
-                        const edgeStrength = edgeData.data[edgeIdx] / 255;
-                        // Reduce brush effect at strong edges
-                        strength *= (1 - edgeStrength * 0.8);
-                    }
+                if (cachedEdges && px >= 0 && px < cachedEdges.width && py >= 0 && py < cachedEdges.height) {
+                    const edgeStrength = cachedEdges.data[py * cachedEdges.width + px] / 255;
+                    // Reduce brush effect at strong edges
+                    strength *= (1 - edgeStrength * 0.8);
                 }
 
-                const idx = (py * w + px) * 4 + 3; // Alpha channel
+                const idx = (roiDy * roiW + roiDx) * 4 + 3; // Alpha channel
                 const currentAlpha = maskData.data[idx];
 
                 if (brushMode === "restore") {
-                    // Restore: increase alpha (bring back original)
                     maskData.data[idx] = Math.min(255, currentAlpha + strength * 255);
                 } else {
-                    // Erase: decrease alpha (make transparent)
                     maskData.data[idx] = Math.max(0, currentAlpha - strength * 255);
                 }
             }
         }
 
-        maskCtx.putImageData(maskData, 0, 0);
+        // PERFORMANCE: Only put back the ROI region, not full canvas
+        maskCtx.putImageData(maskData, roiX, roiY);
         renderDisplay();
     }, [brushSize, brushMode, edgeSnap, dimensions, renderDisplay]);
+
+    // Debounced export to avoid toDataURL on every stroke end
+    const debouncedExport = useMemo(() => debounce(() => {
+        if (onRefinedImage && displayCanvasRef.current) {
+            const dataUrl = displayCanvasRef.current.toDataURL("image/png");
+            onRefinedImage(dataUrl);
+        }
+    }, 100), [onRefinedImage]);
 
     const handleStart = useCallback((e) => {
         if (disabled) return;
         e.preventDefault();
         setIsDrawing(true);
         const pos = getPosition(e);
+        lastPosRef.current = pos;
         applyBrush(pos.x, pos.y);
     }, [disabled, getPosition, applyBrush]);
+
+    // PERFORMANCE: RAF-throttled move handler with brush interpolation
+    const throttledApplyBrush = useMemo(() => rafThrottle((x, y) => {
+        if (lastPosRef.current) {
+            const spacing = Math.max(2, brushSize * 0.3); // Spacing based on brush size
+            interpolateBrushStroke(
+                lastPosRef.current.x,
+                lastPosRef.current.y,
+                x,
+                y,
+                spacing,
+                (ix, iy) => applyBrush(Math.round(ix), Math.round(iy))
+            );
+        }
+        lastPosRef.current = { x, y };
+    }), [applyBrush, brushSize]);
 
     const handleMove = useCallback((e) => {
         if (!isDrawing || disabled) return;
         e.preventDefault();
         const pos = getPosition(e);
-        applyBrush(pos.x, pos.y);
-    }, [isDrawing, disabled, getPosition, applyBrush]);
+        throttledApplyBrush(pos.x, pos.y);
+    }, [isDrawing, disabled, getPosition, throttledApplyBrush]);
 
     const handleEnd = useCallback(() => {
         if (!isDrawing) return;
         setIsDrawing(false);
+        lastPosRef.current = null;
+        throttledApplyBrush.cancel();
 
-        // Export refined image
-        if (onRefinedImage && displayCanvasRef.current) {
-            const dataUrl = displayCanvasRef.current.toDataURL("image/png");
-            onRefinedImage(dataUrl);
-        }
-    }, [isDrawing, onRefinedImage]);
+        // PERFORMANCE: Debounced export (100ms after last stroke)
+        debouncedExport();
+    }, [isDrawing, throttledApplyBrush, debouncedExport]);
+
+    // Cleanup throttle/debounce on unmount
+    useEffect(() => {
+        return () => {
+            throttledApplyBrush.cancel();
+            debouncedExport.cancel();
+        };
+    }, [throttledApplyBrush, debouncedExport]);
 
     // Reset to original processed result
     const handleReset = useCallback(() => {

@@ -655,30 +655,40 @@ export async function compositeScene(
     let outputBuffer: Buffer | null = null;
 
     try {
-        productBuffer = await downloadToBuffer(preparedProductImageUrl, logContext);
-        roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
+        // PERFORMANCE: Download both images in parallel
+        const [productResult, roomResult] = await Promise.all([
+            downloadToBuffer(preparedProductImageUrl, logContext),
+            downloadToBuffer(roomImageUrl, logContext)
+        ]);
+        productBuffer = productResult;
+        roomBuffer = roomResult;
 
-        // Step 1: Mechanical placement with Sharp
-        const roomMetadata = await sharp(roomBuffer).metadata();
+        // PERFORMANCE: Get both metadata in parallel
+        const [roomMetadata, productMetadata] = await Promise.all([
+            sharp(roomBuffer).metadata(),
+            sharp(productBuffer).metadata()
+        ]);
+
         const roomWidth = roomMetadata.width || 1920;
         const roomHeight = roomMetadata.height || 1080;
-
         const pixelX = Math.round(roomWidth * placement.x);
         const pixelY = Math.round(roomHeight * placement.y);
 
-        const productMetadata = await sharp(productBuffer).metadata();
         const newWidth = Math.round((productMetadata.width || 500) * placement.scale);
 
-        resizedProduct = await sharp(productBuffer)
+        // PERFORMANCE: Single pipeline for resize + get metadata
+        const resizedResult = await sharp(productBuffer)
             .resize({ width: newWidth })
-            .toBuffer();
+            .toBuffer({ resolveWithObject: true });
+
+        resizedProduct = resizedResult.data;
 
         // Clean up original product buffer - no longer needed after resize
         productBuffer = null;
 
-        const resizedMeta = await sharp(resizedProduct).metadata();
-        const adjustedX = Math.max(0, pixelX - Math.round((resizedMeta.width || 0) / 2));
-        const adjustedY = Math.max(0, pixelY - Math.round((resizedMeta.height || 0) / 2));
+        // Use info from resize result instead of another metadata call
+        const adjustedX = Math.max(0, pixelX - Math.round(resizedResult.info.width / 2));
+        const adjustedY = Math.max(0, pixelY - Math.round(resizedResult.info.height / 2));
 
         guideImageBuffer = await sharp(roomBuffer)
             .composite([{ input: resizedProduct, top: adjustedY, left: adjustedX }])
