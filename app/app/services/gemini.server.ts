@@ -566,74 +566,59 @@ export async function cleanupRoom(
     requestId: string = "cleanup"
 ): Promise<string> {
     const logContext = createLogContext("cleanup", requestId, "start", {});
-    logger.info(logContext, "Processing room cleanup with Prodia SDXL (fast) + Gemini fallback");
+    logger.info(logContext, "Processing room cleanup with Gemini Flash (fast + good quality)");
+
+    // Use Gemini Flash directly - fast (~5-8s) and good quality
+    // Prodia models keep failing or producing bad results
+    let maskBuffer: Buffer | null = null;
+    let roomBuffer: Buffer | null = null;
+    let outputBuffer: Buffer | null = null;
 
     try {
-        // Try Prodia SDXL first - it's faster (~3-5s vs ~15-20s for Gemini)
-        const { removeObjectsFromUrl, isObjectRemovalAvailable } = await import("./object-removal.server");
+        const maskBase64 = maskDataUrl.split(',')[1];
+        maskBuffer = Buffer.from(maskBase64, 'base64');
+        roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
 
-        if (!isObjectRemovalAvailable()) {
-            throw new Error("Object removal service unavailable - PRODIA_API_TOKEN not set");
-        }
-
-        const result = await removeObjectsFromUrl(roomImageUrl, maskDataUrl, requestId);
+        const prompt = `Remove the objects marked in white in the mask image.
+Fill the removed areas with appropriate background that matches the surrounding context.
+Keep all other pixels unchanged. Make it look natural.`;
 
         logger.info(
-            { ...logContext, stage: "inpaint-complete" },
-            `Object removal done: time=${result.processingTimeMs}ms, coverage=${result.maskCoveragePercent.toFixed(2)}%, dimensions=${result.imageDimensions.width}x${result.imageDimensions.height}`
+            { ...logContext, stage: "gemini-flash-inpaint" },
+            `Calling Gemini Flash for object removal (room: ${roomBuffer.length} bytes, mask: ${maskBuffer.length} bytes)`
         );
 
-        // Upload result to GCS
-        const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
-        const url = await uploadToGCS(key, result.imageBuffer, 'image/png', logContext);
+        const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
+            model: IMAGE_MODEL_FAST,  // Use Flash for speed
+            logContext
+        });
 
+        roomBuffer = null;
+        maskBuffer = null;
+
+        outputBuffer = Buffer.from(base64Data, 'base64');
+        const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+        const url = await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
+
+        logger.info(
+            { ...logContext, stage: "complete" },
+            `Object removal complete: ${url.substring(0, 80)}...`
+        );
+
+        outputBuffer = null;
         return url;
-
-    } catch (inpaintError) {
-        // Fallback to Gemini if Prodia fails
-        const errorMsg = inpaintError instanceof Error ? inpaintError.message : "Unknown error";
-        logger.warn(
-            { ...logContext, stage: "inpaint-fallback" },
-            `Prodia inpainting failed (${errorMsg}), falling back to Gemini`
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        logger.error(
+            { ...logContext, stage: "error" },
+            `Room cleanup failed: ${errorMsg}`,
+            error
         );
-
-        // Gemini fallback implementation
-        let maskBuffer: Buffer | null = null;
-        let roomBuffer: Buffer | null = null;
-        let outputBuffer: Buffer | null = null;
-
-        try {
-            const maskBase64 = maskDataUrl.split(',')[1];
-            maskBuffer = Buffer.from(maskBase64, 'base64');
-            roomBuffer = await downloadToBuffer(roomImageUrl, logContext);
-
-            const prompt = `Using the provided room image and mask image:
-The white regions in the mask indicate objects to be removed.
-Remove objects in the masked (white) areas and fill with appropriate background.
-Match the surrounding context - floor, wall, or whatever is around the masked area.
-Do NOT alter any pixels outside the masked region.
-Maintain consistent lighting and perspective.
-The result should look natural, as if nothing was ever there.`;
-
-            const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
-                model: IMAGE_MODEL_PRO,
-                logContext
-            });
-
-            roomBuffer = null;
-            maskBuffer = null;
-
-            outputBuffer = Buffer.from(base64Data, 'base64');
-            const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-            const url = await uploadToGCS(key, outputBuffer, 'image/jpeg', logContext);
-
-            outputBuffer = null;
-            return url;
-        } finally {
-            maskBuffer = null;
-            roomBuffer = null;
-            outputBuffer = null;
-        }
+        throw error;
+    } finally {
+        maskBuffer = null;
+        roomBuffer = null;
+        outputBuffer = null;
     }
 }
 
