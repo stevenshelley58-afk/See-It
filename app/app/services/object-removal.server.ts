@@ -161,10 +161,10 @@ async function processMask(
 }
 
 /**
- * Call Prodia API for inpainting using flux-fill model
+ * Call Prodia API for inpainting using flux.dev.inpainting model
  * 
- * Uses inference.flux-fill.dev.v1 which is the dedicated inpainting endpoint
- * Requires: image (source), mask (areas to fill - white = fill)
+ * Uses inference.flux.dev.inpainting.v2 - higher quality than schnell
+ * Requires two "input" files: image first, then mask
  */
 async function callProdiaInpaint(
     imageBuffer: Buffer,
@@ -179,9 +179,9 @@ async function callProdiaInpaint(
     // Build multipart form data
     const boundary = `----ProdiaInpaint${Date.now()}`;
 
-    // Use flux-fill.dev.v1 - the dedicated inpainting model
+    // Use flux.dev.inpainting.v2 - better quality than schnell
     const jobConfig = JSON.stringify({
-        type: "inference.flux-fill.dev.v1",
+        type: "inference.flux.dev.inpainting.v2",
         config: {
             prompt: CONFIG.INPAINT_PROMPT,
             steps: CONFIG.INPAINT_STEPS,
@@ -189,6 +189,7 @@ async function callProdiaInpaint(
     });
 
     // Construct multipart body
+    // NOTE: Both image and mask use "input" as the field name
     const parts: Buffer[] = [];
 
     // Job config part
@@ -200,19 +201,19 @@ async function callProdiaInpaint(
     parts.push(Buffer.from(jobConfig));
     parts.push(Buffer.from('\r\n'));
 
-    // Image input part - the source image
+    // Image input part - the source image (first input)
     parts.push(Buffer.from(
         `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="image"; filename="image.png"\r\n` +
+        `Content-Disposition: form-data; name="input"; filename="image.png"\r\n` +
         `Content-Type: image/png\r\n\r\n`
     ));
     parts.push(imageBuffer);
     parts.push(Buffer.from('\r\n'));
 
-    // Mask input part - white areas will be filled/inpainted
+    // Mask input part - areas to inpaint (second input)
     parts.push(Buffer.from(
         `--${boundary}\r\n` +
-        `Content-Disposition: form-data; name="mask"; filename="mask.png"\r\n` +
+        `Content-Disposition: form-data; name="input"; filename="mask.png"\r\n` +
         `Content-Type: image/png\r\n\r\n`
     ));
     parts.push(maskBuffer);
@@ -225,7 +226,7 @@ async function callProdiaInpaint(
 
     logger.info(
         { ...logContext, stage: "prodia-call" },
-        `Calling Prodia API (body: ${body.length} bytes, model: flux-fill.dev.v1)`
+        `Calling Prodia API (body: ${body.length} bytes, model: flux.dev.inpainting.v2)`
     );
 
     const response = await fetch(PRODIA_API_URL, {
