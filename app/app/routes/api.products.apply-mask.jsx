@@ -7,6 +7,20 @@ import { removeBackgroundFast, isBackgroundRemoverAvailable } from "../services/
 import sharp from "sharp";
 
 /**
+ * Extract image ID from Shopify CDN URL
+ */
+function extractImageId(url) {
+    try {
+        const urlObj = new URL(url);
+        const pathname = urlObj.pathname;
+        const filename = pathname.split('/').pop()?.split('.')[0];
+        return filename || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * POST /api/products/apply-mask
  *
  * SMART mask application - combines user's rough selection with AI edge detection.
@@ -220,14 +234,19 @@ export const action = async ({ request }) => {
                 },
             });
         } else {
+            const sourceImageId = extractImageId(sourceImageUrl) || `img-${Date.now()}`;
             await prisma.productAsset.create({
                 data: {
                     shopId: shop.id,
                     productId,
+                    sourceImageId,
                     sourceImageUrl,
                     preparedImageKey,
                     preparedImageUrl,
                     status: "ready",
+                    prepStrategy: "manual",
+                    promptVersion: 1,
+                    createdAt: new Date(),
                 },
             });
         }

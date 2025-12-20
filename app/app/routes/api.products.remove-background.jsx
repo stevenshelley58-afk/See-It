@@ -6,6 +6,23 @@ import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 
 /**
+ * Extract image ID from Shopify CDN URL
+ * e.g., "https://cdn.shopify.com/s/files/.../double-iron-caddy-900895.jpg?v=1729945400"
+ * returns "double-iron-caddy-900895" or a hash of the URL
+ */
+function extractImageId(url) {
+    try {
+        const urlObj = new URL(url);
+        const pathname = urlObj.pathname;
+        // Get filename without extension
+        const filename = pathname.split('/').pop()?.split('.')[0];
+        return filename || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * POST /api/products/remove-background
  *
  * One-click background removal using Prodia API
@@ -60,12 +77,19 @@ export const action = async ({ request }) => {
 
         // Create asset if it doesn't exist
         if (!asset) {
+            // Extract image ID from URL or generate a unique one
+            const sourceImageId = extractImageId(sourceImageUrl) || `img-${Date.now()}`;
+            
             asset = await prisma.productAsset.create({
                 data: {
                     shopId: shop.id,
                     productId: productId,
+                    sourceImageId: sourceImageId,
                     sourceImageUrl: sourceImageUrl,
                     status: "processing",
+                    prepStrategy: "manual",
+                    promptVersion: 1,
+                    createdAt: new Date(),
                 },
             });
             logger.info(logContext, `Created new ProductAsset for product ${productId}`);

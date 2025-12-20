@@ -12,23 +12,6 @@
       background: #f5f5f5;
       min-height: 100vh;
     }
-    /* Force visibility for testing */
-    .see-it-modal {
-      display: flex !important;
-      position: fixed !important;
-      opacity: 1 !important;
-    }
-    .see-it-screen.active {
-      opacity: 1 !important;
-      transform: translateX(0) !important;
-      pointer-events: all !important;
-    }
-    .see-it-entry-mobile,
-    .see-it-prepare-mobile,
-    .see-it-position-mobile,
-    .see-it-result-mobile {
-      display: flex !important;
-    }
     .test-buttons {
       position: fixed;
       bottom: 20px;
@@ -58,6 +41,32 @@
       background: #e5e5e5;
       color: #525252;
     }
+    /* Force modal to show */
+    .see-it-modal {
+      display: flex !important;
+      position: fixed !important;
+      opacity: 1 !important;
+    }
+    .see-it-screen.active {
+      opacity: 1 !important;
+      transform: translateX(0) !important;
+      pointer-events: all !important;
+    }
+    /* Desktop mode toggle - uncomment to test desktop */
+    @media (min-width: 800px) {
+      .see-it-entry-mobile,
+      .see-it-prepare-mobile,
+      .see-it-position-mobile,
+      .see-it-result-mobile {
+        display: none !important;
+      }
+      .see-it-entry-desktop,
+      .see-it-prepare-desktop,
+      .see-it-position-desktop,
+      .see-it-result-desktop {
+        display: flex !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -76,6 +85,7 @@
     
     <!-- Screen 1: Entry -->
     <div id="see-it-screen-entry" class="see-it-screen see-it-screen-entry active">
+      
       <!-- Mobile Layout -->
       <div class="see-it-entry-mobile">
         <!-- Dark gradient header with product card -->
@@ -127,6 +137,50 @@
         <div class="see-it-step-indicator">
           <p class="see-it-step-number">1. Entry</p>
           <p class="see-it-step-hint">Choose how to add room</p>
+        </div>
+      </div>
+
+      <!-- Desktop Layout -->
+      <div class="see-it-entry-desktop">
+        <!-- Left: Product -->
+        <div class="see-it-entry-desktop-left">
+          <div class="see-it-product-card">
+            <div class="see-it-product-image-container">
+              <div style="width: 120px; height: 150px; background: linear-gradient(to bottom, #fcd34d, #fbbf24); border-radius: 12px;"></div>
+            </div>
+            <div class="see-it-product-info">
+              <p class="see-it-product-title">Vintage Mirror</p>
+              <p class="see-it-product-price">$1,000</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Options -->
+        <div class="see-it-entry-desktop-right">
+          <button class="see-it-btn-close" id="see-it-close-entry-desktop">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+          <div class="see-it-entry-content">
+            <h1 class="see-it-entry-title">See it in your space</h1>
+            <p class="see-it-entry-description">Take a photo of your room and see exactly how this piece looks.</p>
+
+            <button class="see-it-btn-primary" id="see-it-btn-take-photo-desktop">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/>
+              </svg>
+              Take Photo
+            </button>
+
+            <div class="see-it-entry-actions">
+              <button class="see-it-btn-secondary" id="see-it-btn-upload-desktop">Upload Photo</button>
+              <button class="see-it-btn-secondary" id="see-it-btn-saved-desktop">Saved Rooms</button>
+            </div>
+
+            <p class="see-it-entry-time-hint">Takes about 20 seconds</p>
+          </div>
         </div>
       </div>
     </div>
@@ -190,6 +244,43 @@
           <p class="see-it-step-hint">Remove objects (optional)</p>
         </div>
       </div>
+
+      <!-- Desktop Layout -->
+      <div class="see-it-prepare-desktop">
+        <div class="see-it-prepare-left">
+          <div class="see-it-room-canvas-container">
+            <div style="width: 100%; height: 400px; background: #d4d4d4; border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+              <div style="width: 100px; height: 130px; background: #a78bfa; border-radius: 8px; opacity: 0.7;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="see-it-prepare-right">
+          <button class="see-it-btn-close" id="see-it-close-prepare-desktop">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+          <h2 class="see-it-prepare-title">Prepare Room</h2>
+          <p class="see-it-prepare-desc">Paint over any objects you want to remove from the photo, or skip this step.</p>
+          
+          <div class="see-it-prepare-tools">
+            <div class="see-it-brush-size-control">
+              <label>Brush Size</label>
+              <input type="range" min="10" max="100" value="30" />
+            </div>
+          </div>
+          
+          <div class="see-it-prepare-actions">
+            <button class="see-it-btn-secondary">Undo</button>
+            <button class="see-it-btn-secondary">Clear</button>
+          </div>
+          
+          <div class="see-it-prepare-main-actions">
+            <button class="see-it-btn-secondary">Remove Objects</button>
+            <button class="see-it-btn-primary">Continue</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Screen 3: Position Product -->
@@ -243,6 +334,33 @@
           <p class="see-it-step-hint">Place product, then generate</p>
         </div>
       </div>
+
+      <!-- Desktop Layout -->
+      <div class="see-it-position-desktop">
+        <div class="see-it-position-left">
+          <div class="see-it-room-canvas-container">
+            <div style="width: 100%; height: 400px; background: #d4d4d4; border-radius: 12px; display: flex; align-items: center; justify-content: center;">
+              <div style="width: 80px; height: 100px; background: linear-gradient(to bottom, #fcd34d, #fbbf24); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);"></div>
+            </div>
+          </div>
+        </div>
+        <div class="see-it-position-right">
+          <button class="see-it-btn-close" id="see-it-close-position-desktop">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+          <h2 class="see-it-position-title">Position Product</h2>
+          <p class="see-it-position-desc">Drag and resize the product to place it where you want in your room.</p>
+          
+          <label class="see-it-save-toggle">
+            <input type="checkbox" />
+            <span>Save room for later</span>
+          </label>
+          
+          <button class="see-it-btn-primary">Generate</button>
+        </div>
+      </div>
     </div>
 
     <!-- Screen 4: Result -->
@@ -286,6 +404,38 @@
           </div>
         </div>
       </div>
+
+      <!-- Desktop Layout -->
+      <div class="see-it-result-desktop">
+        <div class="see-it-result-left">
+          <div class="see-it-result-image-container">
+            <div style="width: 100%; height: 400px; background: #d4d4d4; border-radius: 12px;"></div>
+          </div>
+        </div>
+        <div class="see-it-result-right">
+          <button class="see-it-btn-close" id="see-it-close-result-desktop">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+          
+          <div class="see-it-result-success">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span>Complete!</span>
+          </div>
+          
+          <h2 class="see-it-result-title">Your room is ready</h2>
+          <p class="see-it-result-desc">Share it or make adjustments.</p>
+          
+          <div class="see-it-result-actions">
+            <button class="see-it-btn-primary">Share</button>
+            <button class="see-it-btn-secondary">Adjust Position</button>
+            <button class="see-it-btn-secondary">Try New Room</button>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -318,4 +468,3 @@ function showScreen(screenName) {
 
 </body>
 </html>
-
