@@ -12,6 +12,16 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
     }
 
+    // --- Modal placement & scroll lock (prevents Shopify theme containers from breaking position:fixed) ---
+    const ensureModalPortaled = () => {
+        if (modal.parentElement !== document.body) {
+            document.body.appendChild(modal);
+        }
+    };
+
+    const lockScroll = () => document.documentElement.classList.add('see-it-modal-open');
+    const unlockScroll = () => document.documentElement.classList.remove('see-it-modal-open');
+
     // Screens
     const screenEntry = $('see-it-screen-entry');
     const screenPrepare = $('see-it-screen-prepare');
@@ -657,6 +667,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Modal Open/Close ---
     trigger?.addEventListener('click', async () => {
+        ensureModalPortaled();
+        lockScroll();
         modal.classList.remove('hidden');
         resetError();
         state.productId = trigger.dataset.productId || state.productId;
@@ -686,6 +698,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const closeModal = () => {
         modal.classList.add('hidden');
+        unlockScroll();
         showScreen('entry');
     };
 

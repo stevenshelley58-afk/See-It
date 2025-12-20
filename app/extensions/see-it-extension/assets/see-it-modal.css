@@ -99,6 +99,12 @@ h1, h2, p, button, span {
   overflow: hidden;
 }
 
+/* Prevent background page scroll while the modal is open */
+html.see-it-modal-open,
+html.see-it-modal-open body {
+  overflow: hidden !important;
+}
+
 /* Screen System - Smooth Transitions */
 .see-it-screen {
   position: absolute;
@@ -1632,15 +1638,40 @@ h1, h2, p, button, span {
 
 /* Desktop Layout */
 @media (min-width: 768px) {
+  .see-it-modal {
+    padding: 28px;
+  }
+
   .see-it-modal-content {
-    width: 100%;
+    width: min(1120px, calc(100vw - 56px));
+    height: min(760px, calc(100vh - 56px));
     max-width: none;
-    height: 100%;
-    border-radius: 0;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 28px 80px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.3);
   }
 
   .see-it-screen {
     background: white;
+    overflow: hidden;
+  }
+
+  /* Desktop: keep scrolling contained to the right-side control panels */
+  .see-it-entry-desktop,
+  .see-it-prepare-desktop,
+  .see-it-position-desktop,
+  .see-it-result-desktop {
+    min-height: 0;
+  }
+
+  .see-it-entry-desktop-right,
+  .see-it-prepare-desktop-right,
+  .see-it-position-desktop-right,
+  .see-it-result-desktop-right {
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
   }
 
   .see-it-header {
