@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Entry screen elements
     const btnCloseEntry = $('see-it-close-entry');
+    const btnCloseEntryDesktop = $('see-it-close-entry-desktop');
     const btnTakePhoto = $('see-it-btn-take-photo');
     const btnUpload = $('see-it-btn-upload');
     const btnSaved = $('see-it-btn-saved');
@@ -689,6 +690,7 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     btnCloseEntry?.addEventListener('click', closeModal);
+    btnCloseEntryDesktop?.addEventListener('click', closeModal);
     btnCloseResult?.addEventListener('click', closeModal);
     btnClosePrepareDesktop?.addEventListener('click', closeModal);
     btnClosePositionDesktop?.addEventListener('click', closeModal);

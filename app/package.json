@@ -22,6 +22,7 @@
     "test:watch": "vitest",
     "shopify": "shopify",
     "prisma": "prisma",
+    "set-unlimited": "node scripts/set-unlimited-credits.js",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite"
   },
