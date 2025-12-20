@@ -333,9 +333,9 @@ h1, h2, p, button, span {
 
 /* Dark gradient header area */
 .see-it-entry-header-dark {
-  background: linear-gradient(180deg, #3d3d3d 0%, #525252 50%, #e5e5e5 100%);
-  padding: 1rem 1.25rem 1.5rem 1.25rem;
-  border-radius: 0 0 1.5rem 1.5rem;
+  background: linear-gradient(180deg, #404040 0%, #525252 40%, #a3a3a3 70%, #f5f5f5 100%);
+  padding: 1.25rem 1.25rem 1.75rem 1.25rem;
+  border-radius: 0 0 1.75rem 1.75rem;
 }
 
 .see-it-entry-header-top {
@@ -383,17 +383,26 @@ h1, h2, p, button, span {
   background: white;
   border-radius: 1rem;
   overflow: hidden;
-  margin: 0 0.5rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  margin: 0 1.5rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 .see-it-product-image-compact {
-  height: 7rem;
-  background: linear-gradient(to bottom, #fef3c7, #fde68a);
+  height: 6.5rem;
+  background: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.75rem;
+  padding: 1rem;
+}
+
+.see-it-product-image-compact img {
+  max-width: 4rem;
+  max-height: 5rem;
+  object-fit: contain;
+  background: linear-gradient(to bottom, #fcd34d, #fbbf24);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
 }
 
 .see-it-product-image-compact img {
