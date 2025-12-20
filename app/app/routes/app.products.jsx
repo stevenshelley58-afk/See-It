@@ -1,5 +1,5 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, useSearchParams, useNavigation, useRouteError, isRouteErrorResponse, useRevalidator, Link } from "@remix-run/react";
+import { useLoaderData, useFetcher, useRouteError, isRouteErrorResponse, useRevalidator, Link } from "@remix-run/react";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { Modal, BlockStack, InlineStack, Text } from "@shopify/polaris";
@@ -8,7 +8,7 @@ import prisma from "../db.server";
 import { PLANS } from "../billing";
 import { StorageService } from "../services/storage.server";
 import { ManualSegmentModal } from "../components/ManualSegmentModal";
-import { PageShell, Button, ProductCard } from "../components/ui";
+import { PageShell, Button } from "../components/ui";
 
 export const loader = async ({ request }) => {
     const { admin, session, billing } = await authenticate.admin(request);
@@ -150,14 +150,11 @@ export const loader = async ({ request }) => {
 };
 
 export default function Products() {
-    const { products, assetsMap, statusCounts, pageInfo, usage, quota, isPro, filter: initialFilter } = useLoaderData();
+    const { products, assetsMap, usage, quota, isPro } = useLoaderData();
     const singleFetcher = useFetcher();
     const revalidator = useRevalidator();
-    const navigation = useNavigation();
-    const [params, setParams] = useSearchParams();
 
     // UI state
-    const [statusFilter, setStatusFilter] = useState(initialFilter || "all");
     const [processingId, setProcessingId] = useState(null);
     const [toast, setToast] = useState(null);
 
@@ -214,45 +211,6 @@ export default function Products() {
         setAdjustProduct(product);
     }, []);
 
-    // Pagination
-    const handlePage = useCallback((dir) => {
-        const cursor = dir === "next" ? pageInfo.endCursor : pageInfo.startCursor;
-        setParams(p => {
-            p.set("cursor", cursor);
-            p.set("direction", dir);
-            return p;
-        });
-    }, [pageInfo, setParams]);
-
-    // Update filter in URL
-    const handleFilterChange = useCallback((filter) => {
-        setStatusFilter(filter);
-        setParams(p => {
-            p.set("filter", filter);
-            p.delete("cursor");
-            p.delete("direction");
-            return p;
-        });
-    }, [setParams]);
-
-    // Filter products
-    const filtered = products.filter(p => {
-        if (statusFilter === "all") return true;
-        const a = assetsMap[p.id];
-        const status = a?.status || "unprepared";
-        if (statusFilter === "pending") return status === "pending" || status === "processing";
-        return status === statusFilter;
-    });
-
-    const isLoading = navigation.state === "loading";
-
-    const filterCounts = {
-        all: products.length,
-        ready: statusCounts.ready,
-        pending: statusCounts.pending + (statusCounts.processing || 0),
-        error: statusCounts.failed,
-    };
-
     return (
         <>
             <TitleBar title="See It Products" />
@@ -288,80 +246,17 @@ export default function Products() {
                     )}
                 </div>
 
-                {/* Filters - Horizontal scroll on mobile */}
-                <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 md:overflow-visible">
-                    {['all', 'ready', 'pending', 'error'].map(filterKey => (
-                        <button
-                            key={filterKey}
-                            onClick={() => handleFilterChange(filterKey)}
-                            className={`px-3 py-1.5 text-sm rounded-lg transition-colors flex-shrink-0 ${
-                                statusFilter === filterKey
-                                    ? 'bg-neutral-900 text-white'
-                                    : 'bg-neutral-100 text-neutral-600 active:bg-neutral-200'
-                            }`}
-                        >
-                            {filterKey.charAt(0).toUpperCase() + filterKey.slice(1)} ({filterCounts[filterKey]})
-                        </button>
-                    ))}
+                {/* Product listing removed */}
+                <div className="bg-white rounded-xl border border-neutral-200 p-5 text-sm text-neutral-700">
+                    <div className="font-medium text-neutral-900">Product listing removed</div>
+                    <div className="mt-1">
+                        This screen no longer renders the product grid. You can still use actions like syncing, preparing by ID (via API),
+                        and manual workflows from other screens.
+                    </div>
+                    <div className="mt-3 text-neutral-500">
+                        Products fetched: <span className="text-neutral-900 font-medium">{products.length}</span>
+                    </div>
                 </div>
-
-                {/* Products Grid - 2 cols mobile, 4 cols desktop */}
-                {isLoading ? (
-                    <div className="flex justify-center items-center py-16">
-                        <div className="w-8 h-8 border-2 border-neutral-200 border-t-neutral-900 rounded-full animate-spin" />
-                    </div>
-                ) : filtered.length === 0 ? (
-                    <div className="text-center py-16">
-                        <h3 className="text-neutral-900 font-medium mb-2">No products</h3>
-                        <p className="text-sm text-neutral-500">Try a different filter or add products to your store</p>
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-                        {filtered.map(product => {
-                            const asset = assetsMap[product.id];
-                            const status = asset?.status || "unprepared";
-                            const isBusy = status === "pending" || status === "processing" || processingId === product.id;
-                            const hasMulti = product.images?.edges?.length > 1;
-
-                            return (
-                                <ProductCard
-                                    key={product.id}
-                                    product={product}
-                                    asset={asset}
-                                    status={status}
-                                    isBusy={isBusy}
-                                    hasMulti={hasMulti}
-                                    onPrepare={handlePrepare}
-                                    onAdjust={openAdjustModal}
-                                    onRedo={handlePrepare}
-                                    onRetry={handlePrepare}
-                                    onManual={(product) => openAdjustModal(product)}
-                                    onImageSelect={openImageModal}
-                                />
-                            );
-                        })}
-                    </div>
-                )}
-
-                {/* Pagination */}
-                {(pageInfo.hasNextPage || pageInfo.hasPreviousPage) && (
-                    <div className="flex justify-center gap-2 pt-4">
-                        <Button
-                            variant="secondary"
-                            onClick={() => handlePage("previous")}
-                            disabled={!pageInfo.hasPreviousPage || isLoading}
-                        >
-                            ← Prev
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => handlePage("next")}
-                            disabled={!pageInfo.hasNextPage || isLoading}
-                        >
-                            Next →
-                        </Button>
-                    </div>
-                )}
             </PageShell>
 
             {/* Toast */}
