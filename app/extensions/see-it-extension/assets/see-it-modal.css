@@ -73,16 +73,17 @@ h1, h2, p, button, span {
 .see-it-modal {
   position: fixed;
   z-index: 99999;
-  left: 0;
-  top: 0;
+  inset: 0;
   width: 100%;
-  height: 100%;
+  height: 100vh; /* Fallback for browsers without dvh/svh support */
+  height: 100dvh; /* Dynamic viewport height - adjusts for mobile browser UI */
   overflow: hidden;
-  background-color: rgba(0, 0, 0, 0.6);
+  /* Light "app glass" backdrop (not a dark tint) */
+  background-color: rgba(245, 245, 245, 0.88);
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(14px);
 }
 
 .see-it-modal.hidden {
@@ -92,7 +93,8 @@ h1, h2, p, button, span {
 .see-it-modal-content {
   position: relative;
   width: 100%;
-  height: 100%;
+  height: 100vh; /* Fallback */
+  height: 100dvh; /* Dynamic viewport height */
   background: white;
   display: flex;
   flex-direction: column;
@@ -111,7 +113,8 @@ html.see-it-modal-open body {
   top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
+  height: 100vh; /* Fallback */
+  height: 100dvh; /* Dynamic viewport height */
   display: flex;
   flex-direction: column;
   background: linear-gradient(180deg, #FAFAFA 0%, #FFFFFF 100%);
@@ -323,8 +326,8 @@ html.see-it-modal-open body {
   display: flex;
   flex-direction: column;
   flex: 1;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  min-height: 0; /* Allow flex shrinking */
+  overflow: visible; /* Remove nested scroll - parent .see-it-screen handles scrolling */
   background: #fff;
 }
 
