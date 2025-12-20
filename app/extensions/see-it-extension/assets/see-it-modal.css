@@ -326,25 +326,27 @@ html.see-it-modal-open body {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 0; /* Allow flex shrinking */
-  overflow: visible; /* Remove nested scroll - parent .see-it-screen handles scrolling */
-  background: #fff;
+  padding: 1.5rem 1.25rem;
+  padding-bottom: 2rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
-/* Hide default header on entry screen mobile */
+/* Show header on entry screen mobile */
 .see-it-screen-entry .see-it-header {
-  display: none;
+  display: flex;
 }
 
 .see-it-header-desktop-only {
   display: none;
 }
 
-/* Dark gradient header area */
+/* Light gradient header area */
 .see-it-entry-header-dark {
-  background: linear-gradient(180deg, #404040 0%, #525252 40%, #a3a3a3 70%, #f5f5f5 100%);
-  padding: 1.25rem 1.25rem 1.75rem 1.25rem;
-  border-radius: 0 0 1.75rem 1.75rem;
+  background: linear-gradient(180deg, #fff 0%, #fafafa 55%, #f3f4f6 100%);
+  padding: 1.5rem 1.5rem 1.75rem 1.5rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 0 0 1.5rem 1.5rem;
 }
 
 .see-it-entry-header-top {
@@ -357,7 +359,7 @@ html.see-it-modal-open body {
 .see-it-btn-close-light {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: #525252;
   cursor: pointer;
   padding: 0.5rem;
   display: flex;
@@ -376,11 +378,11 @@ html.see-it-modal-open body {
 }
 
 .see-it-entry-header-label {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 0.6875rem;
+  color: #737373;
+  font-size: 0.75rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .see-it-header-spacer {
@@ -449,7 +451,7 @@ html.see-it-modal-open body {
 
 /* Legacy product card (for desktop) */
 .see-it-product-card {
-  margin: 0 auto 2rem auto;
+  margin: 0 0 2rem 0;
   border-radius: 1rem;
   overflow: hidden;
   background: white;
@@ -457,6 +459,7 @@ html.see-it-modal-open body {
   border: 1px solid rgba(0, 0, 0, 0.04);
   max-width: 100%;
   width: 100%;
+  align-self: center;
 }
 
 .see-it-product-image-container {
@@ -499,16 +502,17 @@ html.see-it-modal-open body {
 
 .see-it-entry-content {
   flex: 1;
-  padding: 1.25rem 1.25rem 0 1.25rem;
+  padding: 0;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
   width: 100%;
+  text-align: left;
 }
 
 .see-it-entry-title {
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.125rem;
+  font-weight: 600;
   color: #1a1a1a;
   letter-spacing: -0.02em;
   margin: 0 0 0.375rem 0;
@@ -519,7 +523,7 @@ html.see-it-modal-open body {
 .see-it-entry-description {
   color: #737373;
   font-size: 0.875rem;
-  margin: 0 0 1.25rem 0;
+  margin: 0 0 1.5rem 0;
   line-height: 1.5;
   font-weight: 400;
   text-align: left;
