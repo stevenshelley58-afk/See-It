@@ -104,7 +104,9 @@ h1, h2, p, button, span {
 }
 
 /* Prevent background page scroll while the modal is open */
-html.see-it-modal-open,
+html.see-it-modal-open {
+  overflow: hidden !important;
+}
 html.see-it-modal-open body {
   overflow: hidden !important;
 }

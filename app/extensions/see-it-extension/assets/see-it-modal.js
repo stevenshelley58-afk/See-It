@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // --- Modal placement & scroll lock (prevents Shopify theme containers from breaking position:fixed) ---
+    let savedScrollY = 0;
+    
     const ensureModalPortaled = () => {
         if (modal.parentElement !== document.body) {
             document.body.appendChild(modal);
@@ -23,17 +25,25 @@ document.addEventListener('DOMContentLoaded', function () {
         modal.style.left = '0';
         modal.style.right = '0';
         modal.style.bottom = '0';
+        modal.style.width = '100%';
+        modal.style.height = '100%';
         modal.style.transform = 'none';
+        modal.style.zIndex = '999999';
     };
 
     const lockScroll = () => {
+        savedScrollY = window.scrollY;
         document.documentElement.classList.add('see-it-modal-open');
-        // Also set overflow on body directly in case theme overrides the class
-        document.body.style.overflow = 'hidden';
+        document.body.style.top = `-${savedScrollY}px`;
+        document.body.style.position = 'fixed';
+        document.body.style.width = '100%';
     };
     const unlockScroll = () => {
         document.documentElement.classList.remove('see-it-modal-open');
-        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.width = '';
+        window.scrollTo(0, savedScrollY);
     };
 
     // Screens
