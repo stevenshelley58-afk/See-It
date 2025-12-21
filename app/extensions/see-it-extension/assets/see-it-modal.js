@@ -17,10 +17,24 @@ document.addEventListener('DOMContentLoaded', function () {
         if (modal.parentElement !== document.body) {
             document.body.appendChild(modal);
         }
+        // Ensure modal has inline styles to override any theme interference
+        modal.style.position = 'fixed';
+        modal.style.top = '0';
+        modal.style.left = '0';
+        modal.style.right = '0';
+        modal.style.bottom = '0';
+        modal.style.transform = 'none';
     };
 
-    const lockScroll = () => document.documentElement.classList.add('see-it-modal-open');
-    const unlockScroll = () => document.documentElement.classList.remove('see-it-modal-open');
+    const lockScroll = () => {
+        document.documentElement.classList.add('see-it-modal-open');
+        // Also set overflow on body directly in case theme overrides the class
+        document.body.style.overflow = 'hidden';
+    };
+    const unlockScroll = () => {
+        document.documentElement.classList.remove('see-it-modal-open');
+        document.body.style.overflow = '';
+    };
 
     // Screens
     const screenEntry = $('see-it-screen-entry');
