@@ -1009,6 +1009,31 @@ document.addEventListener('DOMContentLoaded', function () {
         return res.json();
     };
 
+    /**
+     * Poll for job status (reuses existing render/:jobId endpoint)
+     */
+    const pollJobStatus = async (jobId, maxAttempts = 60) => {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const res = await fetch(`/apps/see-it/render/${jobId}`);
+            if (!res.ok) {
+                throw new Error(`Failed to poll job status: ${res.status}`);
+            }
+            const data = await res.json();
+            const status = data.status || data.job_status;
+            
+            if (status === 'completed') {
+                return data;
+            } else if (status === 'failed') {
+                const errorMsg = data.error_message || data.errorMessage || 'Cleanup failed';
+                throw new Error(errorMsg);
+            }
+            
+            // Wait 1 second before next poll (exponential backoff could be added if needed)
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        throw new Error('Cleanup timed out - job did not complete in time');
+    };
+
     const cleanupWithMask = async (maskDataUrl) => {
         console.log('[See It] Calling cleanup endpoint with sessionId:', state.sessionId);
         const res = await fetch('/apps/see-it/room/cleanup', {
@@ -1023,14 +1048,33 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             console.error('[See It] Cleanup error response:', err);
-            throw new Error(err.message || 'Cleanup failed');
+            throw new Error(err.message || err.error || 'Cleanup failed');
         }
         const data = await res.json();
-        console.log('[See It] Cleanup response data:', {
-            hasCleanedUrl: !!(data.cleaned_room_image_url || data.cleanedRoomImageUrl),
-            urlPreview: (data.cleaned_room_image_url || data.cleanedRoomImageUrl || 'MISSING')?.substring(0, 100)
-        });
-        return data;
+        const jobId = data.job_id || data.jobId;
+        const status = data.status;
+        
+        // If already completed, return immediately
+        if (status === 'completed') {
+            console.log('[See It] Cleanup completed immediately');
+            return {
+                cleaned_room_image_url: data.cleaned_room_image_url || data.cleanedRoomImageUrl,
+                cleanedRoomImageUrl: data.cleaned_room_image_url || data.cleanedRoomImageUrl
+            };
+        }
+        
+        // Otherwise poll for completion
+        if (!jobId) {
+            throw new Error('No job_id in cleanup response');
+        }
+        
+        console.log('[See It] Cleanup queued, polling job:', jobId);
+        const jobResult = await pollJobStatus(jobId);
+        
+        return {
+            cleaned_room_image_url: jobResult.image_url || jobResult.imageUrl,
+            cleanedRoomImageUrl: jobResult.image_url || jobResult.imageUrl
+        };
     };
 
     const fetchPreparedProduct = async (productId) => {
