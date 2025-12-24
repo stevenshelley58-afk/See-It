@@ -216,6 +216,16 @@
 
         <!-- Desktop Layout -->
         <div class="see-it-prepare-desktop">
+          <!-- Header with Back button -->
+          <div class="see-it-prepare-desktop-header">
+            <button class="see-it-btn-back-text" id="see-it-back-prepare-desktop">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+              </svg>
+              <span>Back</span>
+            </button>
+          </div>
+
           <!-- Left: Room image -->
           <div class="see-it-prepare-desktop-left">
             <div class="see-it-prepare-room-container">
@@ -232,15 +242,23 @@
           <!-- Right: Controls -->
           <div class="see-it-prepare-desktop-right">
             <div class="see-it-prepare-controls">
-              <h2 class="see-it-prepare-controls-title">Remove objects</h2>
-              <p class="see-it-prepare-hint">Paint over anything you want removed from the photo, or skip this step.</p>
+              <h2 class="see-it-prepare-controls-title">Prepare Room</h2>
+              <p class="see-it-prepare-hint">Draw over anything you want gone, or skip this step.</p>
 
-              <!-- Brush indicator -->
-              <div class="see-it-brush-indicator-desktop">
-                <div class="see-it-brush-circle">
-                  <div class="see-it-brush-dot"></div>
+              <!-- Brush Size Selector -->
+              <div class="see-it-brush-size-selector">
+                <p class="see-it-brush-size-label">BRUSH SIZE</p>
+                <div class="see-it-brush-size-buttons">
+                  <button class="see-it-brush-size-btn" data-size="small" id="see-it-brush-small-desktop" aria-label="Small brush">
+                    <div class="see-it-brush-size-dot-small"></div>
+                  </button>
+                  <button class="see-it-brush-size-btn see-it-brush-size-btn-active" data-size="medium" id="see-it-brush-medium-desktop" aria-label="Medium brush">
+                    <div class="see-it-brush-size-dot-medium"></div>
+                  </button>
+                  <button class="see-it-brush-size-btn" data-size="large" id="see-it-brush-large-desktop" aria-label="Large brush">
+                    <div class="see-it-brush-size-dot-large"></div>
+                  </button>
                 </div>
-                <span>Brush tool</span>
               </div>
 
               <div class="see-it-prepare-tool-actions">
@@ -249,8 +267,8 @@
               </div>
 
               <div class="see-it-prepare-actions">
-                <button class="see-it-btn-secondary" id="see-it-remove-btn-desktop" disabled>Remove Selected</button>
-                <button class="see-it-btn-primary" id="see-it-confirm-room-desktop">Continue</button>
+                <button class="see-it-btn-secondary" id="see-it-remove-btn-desktop" disabled>Erase</button>
+                <button class="see-it-btn-primary" id="see-it-confirm-room-desktop">Skip</button>
               </div>
             </div>
           </div>

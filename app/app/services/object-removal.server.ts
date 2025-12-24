@@ -98,8 +98,10 @@ async function processMask(
         });
     }
 
-    // Step 2: Convert to grayscale and extract single channel
-    pipeline = pipeline.grayscale().removeAlpha();
+    // Step 2: Flatten onto black background, then convert to grayscale
+    // This ensures white strokes on transparent background are preserved
+    // (transparent areas become black, white strokes stay white)
+    pipeline = pipeline.flatten({ background: { r: 0, g: 0, b: 0 } }).grayscale();
 
     // Step 3: Threshold to binary (ensure pure black/white)
     pipeline = pipeline.threshold(CONFIG.MASK_THRESHOLD);

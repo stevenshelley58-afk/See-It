@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.29';
+    const VERSION = '1.0.27';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
     
     // Helper: check if element is visible (has non-zero dimensions)
@@ -160,6 +160,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Prepare screen elements
     const btnBackPrepare = $('see-it-back-prepare');
+    const btnBackPrepareDesktop = $('see-it-back-prepare-desktop');
     const btnClosePrepareDesktop = $('see-it-close-prepare-desktop');
     const roomPreview = $('see-it-room-preview');
     const roomPreviewDesktop = $('see-it-room-preview-desktop');
@@ -174,6 +175,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const btnClearDesktop = $('see-it-clear-btn-desktop');
     const btnRemoveDesktop = $('see-it-remove-btn-desktop');
     const btnConfirmRoomDesktop = $('see-it-confirm-room-desktop');
+    const btnBrushSmallDesktop = $('see-it-brush-small-desktop');
+    const btnBrushMediumDesktop = $('see-it-brush-medium-desktop');
+    const btnBrushLargeDesktop = $('see-it-brush-large-desktop');
     const cleanupLoading = $('see-it-cleanup-loading');
     const uploadIndicator = $('see-it-upload-indicator');
 
@@ -287,6 +291,8 @@ document.addEventListener('DOMContentLoaded', function () {
     let activePreviewEl = null;
     let isDrawing = false;
     let strokes = [];
+    let brushSize = 'medium'; // 'small', 'medium', 'large'
+    let hasErased = false; // Track if object removal has been performed
     const BRUSH_COLOR = 'rgba(139, 92, 246, 0.9)';
 
     const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
@@ -324,6 +330,8 @@ document.addEventListener('DOMContentLoaded', function () {
         if (screenName === 'prepare') {
             initCanvas();
             setupCanvasOnPrepare();
+            // Initialize brush size selector
+            updateBrushSize(brushSize);
             // Ensure button states are correct even if canvas isn't ready yet
             updatePaintButtons();
         } else if (screenName === 'position') {
@@ -378,14 +386,57 @@ document.addEventListener('DOMContentLoaded', function () {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.strokeStyle = BRUSH_COLOR;
-        ctx.lineWidth = Math.max(20, Math.min(60, natW / 15));
+        
+        // Set line width based on brush size
+        const baseWidth = natW / 15;
+        let lineWidth;
+        if (brushSize === 'small') {
+            lineWidth = Math.max(15, Math.min(25, baseWidth * 0.5));
+        } else if (brushSize === 'large') {
+            lineWidth = Math.max(50, Math.min(80, baseWidth * 1.5));
+        } else { // medium (default)
+            lineWidth = Math.max(30, Math.min(50, baseWidth));
+        }
+        ctx.lineWidth = lineWidth;
         ctx.globalCompositeOperation = 'source-over';
 
         ctx.clearRect(0, 0, natW, natH);
         strokes = [];
         updatePaintButtons();
 
-        console.log('[See It] Canvas init:', natW, 'x', natH);
+        console.log('[See It] Canvas init:', natW, 'x', natH, 'brush:', brushSize, 'lineWidth:', lineWidth);
+    };
+
+    // Update brush size and canvas line width
+    const updateBrushSize = (size) => {
+        brushSize = size;
+        if (!ctx) return;
+        
+        const activeCanvas = ctx.canvas || (maskCanvasDesktop || maskCanvas);
+        if (!activeCanvas) return;
+        
+        const natW = activeCanvas.width;
+        const baseWidth = natW / 15;
+        let lineWidth;
+        if (brushSize === 'small') {
+            lineWidth = Math.max(15, Math.min(25, baseWidth * 0.5));
+        } else if (brushSize === 'large') {
+            lineWidth = Math.max(50, Math.min(80, baseWidth * 1.5));
+        } else { // medium (default)
+            lineWidth = Math.max(30, Math.min(50, baseWidth));
+        }
+        ctx.lineWidth = lineWidth;
+        
+        // Update button active states
+        if (btnBrushSmallDesktop) {
+            btnBrushSmallDesktop.classList.toggle('see-it-brush-size-btn-active', size === 'small');
+        }
+        if (btnBrushMediumDesktop) {
+            btnBrushMediumDesktop.classList.toggle('see-it-brush-size-btn-active', size === 'medium');
+        }
+        if (btnBrushLargeDesktop) {
+            btnBrushLargeDesktop.classList.toggle('see-it-brush-size-btn-active', size === 'large');
+        }
     };
 
     const getCanvasPos = (e) => {
@@ -539,9 +590,9 @@ document.addEventListener('DOMContentLoaded', function () {
             btnRemove.disabled = !canRemoveMobile;
         }
         
-        // Update Skip/Continue button text
+        // Update Skip/Continue button text (mobile)
         if (btnConfirmRoom) {
-            if (hasStrokes) {
+            if (hasErased) {
                 btnConfirmRoom.textContent = 'Continue';
             } else {
                 btnConfirmRoom.textContent = 'Skip';
@@ -554,6 +605,15 @@ document.addEventListener('DOMContentLoaded', function () {
         if (btnRemoveDesktop) {
             const canRemove = hasStrokes && !state.isCleaningUp && state.uploadComplete;
             btnRemoveDesktop.disabled = !canRemove;
+        }
+        
+        // Update Skip/Continue button text (desktop)
+        if (btnConfirmRoomDesktop) {
+            if (hasErased) {
+                btnConfirmRoomDesktop.textContent = 'Continue';
+            } else {
+                btnConfirmRoomDesktop.textContent = 'Skip';
+            }
         }
     };
 
@@ -606,6 +666,11 @@ document.addEventListener('DOMContentLoaded', function () {
         redrawStrokes();
         updatePaintButtons();
     });
+
+    // Brush size button handlers
+    btnBrushSmallDesktop?.addEventListener('click', () => updateBrushSize('small'));
+    btnBrushMediumDesktop?.addEventListener('click', () => updateBrushSize('medium'));
+    btnBrushLargeDesktop?.addEventListener('click', () => updateBrushSize('large'));
 
     const generateMask = () => {
         // Use the canvas that has the context
@@ -946,6 +1011,8 @@ document.addEventListener('DOMContentLoaded', function () {
         state.originalRoomImageUrl = null;
         state.sessionId = null;
         state.uploadComplete = false;
+        hasErased = false; // Reset erase state for new upload
+        brushSize = 'medium'; // Reset brush size to default
 
         state.isUploading = true;
         if (uploadIndicator) uploadIndicator.classList.remove('hidden');
@@ -1003,6 +1070,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Navigation ---
     btnBackPrepare?.addEventListener('click', () => showScreen('entry'));
+    btnBackPrepareDesktop?.addEventListener('click', () => showScreen('entry'));
     btnBackPosition?.addEventListener('click', () => showScreen('prepare'));
 
     const handleConfirmRoom = () => {
@@ -1087,6 +1155,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 const desktopCtx = maskCanvasDesktop.getContext('2d');
                 desktopCtx?.clearRect(0, 0, maskCanvasDesktop.width, maskCanvasDesktop.height);
             }
+            hasErased = true; // Mark that object removal has been performed
             console.log('[See It] Cleanup complete, strokes cleared');
         } catch (err) {
             console.error('[See It] Cleanup error:', err);
@@ -1318,6 +1387,8 @@ document.addEventListener('DOMContentLoaded', function () {
         state.cleanedRoomImageUrl = null;
         state.localImageDataUrl = null;
         state.uploadComplete = false;
+        hasErased = false; // Reset erase state for new room
+        brushSize = 'medium'; // Reset brush size to default
         showScreen('entry');
     };
     

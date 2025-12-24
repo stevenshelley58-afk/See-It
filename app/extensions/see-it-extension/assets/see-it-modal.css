@@ -2109,6 +2109,104 @@ html.see-it-modal-open body {
     margin-bottom: 0.75rem;
   }
 
+  /* Desktop Prepare Header */
+  .see-it-prepare-desktop-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 1.25rem 2rem;
+    background: white;
+    border-bottom: 1px solid #f0f0f0;
+    z-index: 10;
+  }
+
+  .see-it-prepare-desktop {
+    position: relative;
+    padding-top: 4.5rem;
+  }
+
+  /* Brush Size Selector */
+  .see-it-brush-size-selector {
+    margin-bottom: 1.5rem;
+  }
+
+  .see-it-brush-size-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #a3a3a3;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0 0 0.75rem 0;
+  }
+
+  .see-it-brush-size-buttons {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .see-it-brush-size-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 50%;
+    border: 2px solid #e5e5e5;
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .see-it-brush-size-btn:hover {
+    border-color: #d4d4d4;
+  }
+
+  .see-it-brush-size-btn-active {
+    border-color: #1a1a1a;
+    background: #fafafa;
+  }
+
+  .see-it-brush-size-dot-small {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: #1a1a1a;
+  }
+
+  .see-it-brush-size-dot-medium {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    background: #1a1a1a;
+  }
+
+  .see-it-brush-size-dot-large {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background: #1a1a1a;
+  }
+
+  /* Update desktop prepare controls spacing */
+  .see-it-prepare-desktop-right .see-it-prepare-controls-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin: 0 0 0.5rem 0;
+    letter-spacing: -0.01em;
+  }
+
+  .see-it-prepare-desktop-right .see-it-prepare-hint {
+    color: #737373;
+    font-size: 0.875rem;
+    margin: 0 0 2rem 0;
+    line-height: 1.5;
+  }
+
   /* Position screen - split layout */
   .see-it-position-mobile {
     display: none;
