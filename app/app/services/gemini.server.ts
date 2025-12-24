@@ -751,17 +751,16 @@ STRICT CONSTRAINTS:
                     .png()
                     .toBuffer();
             } else {
-                // Ratios differ - use cover (center-crop) to maintain pixel alignment with mask.
-                // Contain+pad would offset the content and break mask alignment.
+                // Ratios differ - use fill (stretch) to maintain coordinate alignment with mask.
+                // Gemini generated its output based on original coordinates, so we must map
+                // coordinates linearly: Gemini(x,y) → (x*targetW/outputW, y*targetH/outputH)
+                // This is exactly what 'fill' does. Cover/contain would shift the content.
                 logger.warn(
                     { ...logContext, stage: "dimension-mismatch" },
-                    `Gemini returned different aspect ratio, using cover (center-crop) for mask alignment: ${outputWidth}x${outputHeight} (ratio ${outputRatio.toFixed(3)}) -> ${roomWidth}x${roomHeight} (ratio ${targetRatio.toFixed(3)})`
+                    `Gemini returned different aspect ratio, using fill (stretch) for coordinate alignment: ${outputWidth}x${outputHeight} (ratio ${outputRatio.toFixed(3)}) -> ${roomWidth}x${roomHeight} (ratio ${targetRatio.toFixed(3)})`
                 );
                 resizedGeminiOutput = await sharp(geminiOutputBuffer)
-                    .resize(roomWidth, roomHeight, { 
-                        fit: 'cover',        // Scale to cover, crop edges to maintain center alignment
-                        position: 'center'   // Crop from center to keep mask-aligned content
-                    })
+                    .resize(roomWidth, roomHeight, { fit: 'fill' })
                     .png()
                     .toBuffer();
             }
@@ -1042,12 +1041,9 @@ If there is any conflict between realism assumptions and the product-specific in
                     .png()
                     .toBuffer();
             } else {
-                // Use cover (center-crop) to maintain pixel alignment with placement mask
+                // Use fill (stretch) to maintain coordinate alignment with placement mask
                 resizedGeminiOutput = await sharp(outputBuffer)
-                    .resize(roomWidth, roomHeight, {
-                        fit: 'cover',
-                        position: 'center'
-                    })
+                    .resize(roomWidth, roomHeight, { fit: 'fill' })
                     .png()
                     .toBuffer();
             }
