@@ -340,11 +340,14 @@ export async function removeObjects(input: ObjectRemovalInput): Promise<ObjectRe
             logContext
         );
 
-        // Validate mask coverage
-        if (coveragePercent < CONFIG.MIN_MASK_COVERAGE) {
+        // Validate mask coverage (CONFIG values are decimals, coveragePercent is 0-100)
+        const minCoveragePercent = CONFIG.MIN_MASK_COVERAGE * 100;
+        const maxCoveragePercent = CONFIG.MAX_MASK_COVERAGE * 100;
+        
+        if (coveragePercent < minCoveragePercent) {
             logger.warn(
                 { ...logContext, stage: "mask-validation" },
-                `Mask coverage too low: ${coveragePercent.toFixed(2)}% < ${CONFIG.MIN_MASK_COVERAGE}%`
+                `Mask coverage too low: ${coveragePercent.toFixed(2)}% < ${minCoveragePercent}%`
             );
             // Return original image if mask is essentially empty
             return {
@@ -355,10 +358,10 @@ export async function removeObjects(input: ObjectRemovalInput): Promise<ObjectRe
             };
         }
 
-        if (coveragePercent > CONFIG.MAX_MASK_COVERAGE) {
+        if (coveragePercent > maxCoveragePercent) {
             logger.warn(
                 { ...logContext, stage: "mask-validation" },
-                `Mask coverage suspiciously high: ${coveragePercent.toFixed(2)}% > ${CONFIG.MAX_MASK_COVERAGE * 100}%`
+                `Mask coverage suspiciously high: ${coveragePercent.toFixed(2)}% > ${maxCoveragePercent}%`
             );
         }
 

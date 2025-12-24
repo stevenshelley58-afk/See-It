@@ -1087,6 +1087,54 @@ html.see-it-modal-open body {
   line-height: 1.5;
 }
 
+/* Mobile Brush Size Selector */
+.see-it-brush-size-selector-mobile {
+  margin-bottom: 1.5rem;
+}
+
+.see-it-brush-size-label-mobile {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #a3a3a3;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 0.75rem 0;
+  text-align: center;
+}
+
+.see-it-brush-size-buttons-mobile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.see-it-brush-size-btn-mobile {
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border-radius: 50%;
+  border: 2px solid #e5e5e5;
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.see-it-brush-size-btn-mobile:active {
+  transform: scale(0.95);
+}
+
+.see-it-brush-size-btn-mobile.see-it-brush-size-btn-active {
+  border-color: #1a1a1a;
+  background: #fafafa;
+}
+
 /* Secondary buttons: Undo and Clear */
 .see-it-prepare-secondary-buttons {
   display: flex;
@@ -2173,22 +2221,34 @@ html.see-it-modal-open body {
   .see-it-brush-size-dot-small {
     width: 0.5rem;
     height: 0.5rem;
+    min-width: 0.5rem;
+    min-height: 0.5rem;
     border-radius: 50%;
     background: #1a1a1a;
+    display: block;
+    flex-shrink: 0;
   }
 
   .see-it-brush-size-dot-medium {
     width: 1rem;
     height: 1rem;
+    min-width: 1rem;
+    min-height: 1rem;
     border-radius: 50%;
     background: #1a1a1a;
+    display: block;
+    flex-shrink: 0;
   }
 
   .see-it-brush-size-dot-large {
     width: 1.5rem;
     height: 1.5rem;
+    min-width: 1.5rem;
+    min-height: 1.5rem;
     border-radius: 50%;
     background: #1a1a1a;
+    display: block;
+    flex-shrink: 0;
   }
 
   /* Update desktop prepare controls spacing */

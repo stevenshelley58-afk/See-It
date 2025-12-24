@@ -178,6 +178,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const btnBrushSmallDesktop = $('see-it-brush-small-desktop');
     const btnBrushMediumDesktop = $('see-it-brush-medium-desktop');
     const btnBrushLargeDesktop = $('see-it-brush-large-desktop');
+    const btnBrushSmallMobile = $('see-it-brush-small-mobile');
+    const btnBrushMediumMobile = $('see-it-brush-medium-mobile');
+    const btnBrushLargeMobile = $('see-it-brush-large-mobile');
     const cleanupLoading = $('see-it-cleanup-loading');
     const uploadIndicator = $('see-it-upload-indicator');
 
@@ -427,7 +430,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         ctx.lineWidth = lineWidth;
         
-        // Update button active states
+        // Update button active states (desktop)
         if (btnBrushSmallDesktop) {
             btnBrushSmallDesktop.classList.toggle('see-it-brush-size-btn-active', size === 'small');
         }
@@ -436,6 +439,17 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         if (btnBrushLargeDesktop) {
             btnBrushLargeDesktop.classList.toggle('see-it-brush-size-btn-active', size === 'large');
+        }
+        
+        // Update button active states (mobile)
+        if (btnBrushSmallMobile) {
+            btnBrushSmallMobile.classList.toggle('see-it-brush-size-btn-active', size === 'small');
+        }
+        if (btnBrushMediumMobile) {
+            btnBrushMediumMobile.classList.toggle('see-it-brush-size-btn-active', size === 'medium');
+        }
+        if (btnBrushLargeMobile) {
+            btnBrushLargeMobile.classList.toggle('see-it-brush-size-btn-active', size === 'large');
         }
     };
 
@@ -671,6 +685,11 @@ document.addEventListener('DOMContentLoaded', function () {
     btnBrushSmallDesktop?.addEventListener('click', () => updateBrushSize('small'));
     btnBrushMediumDesktop?.addEventListener('click', () => updateBrushSize('medium'));
     btnBrushLargeDesktop?.addEventListener('click', () => updateBrushSize('large'));
+
+    // Mobile brush size button handlers
+    btnBrushSmallMobile?.addEventListener('click', () => updateBrushSize('small'));
+    btnBrushMediumMobile?.addEventListener('click', () => updateBrushSize('medium'));
+    btnBrushLargeMobile?.addEventListener('click', () => updateBrushSize('large'));
 
     const generateMask = () => {
         // Use the canvas that has the context
