@@ -950,9 +950,11 @@ export async function compositeScene(
 
         // Create a placement mask from the product alpha channel (best quality when product has transparency).
         // This mask is used to constrain Gemini edits and to hard-lock pixels outside the edit region.
+        // NOTE: Use 3 channels (RGB) then convert to grayscale - sharp 0.33+ doesn't support create with channels: 1
         const baseMask = await sharp({
-            create: { width: roomWidth, height: roomHeight, channels: 1, background: 0 }
+            create: { width: roomWidth, height: roomHeight, channels: 3, background: { r: 0, g: 0, b: 0 } }
         })
+            .grayscale()
             .png()
             .toBuffer();
 
