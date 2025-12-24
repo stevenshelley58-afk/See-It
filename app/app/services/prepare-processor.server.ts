@@ -413,10 +413,24 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                 await sleep(delay);
                             }
 
+                            let productWidthFraction: number | undefined = undefined;
+                            try {
+                                const cfg = job.configJson ? JSON.parse(job.configJson) : {};
+                                const v = cfg?.placement_meta?.product_width_fraction;
+                                if (Number.isFinite(v)) productWidthFraction = v;
+                            } catch {
+                                // Ignore malformed configJson; fall back to legacy placementScale behavior
+                            }
+
                             finalImageUrl = await compositeScene(
                                 productImageUrl,
                                 roomImageUrl,
-                                { x: job.placementX, y: job.placementY, scale: job.placementScale },
+                                {
+                                    x: job.placementX,
+                                    y: job.placementY,
+                                    scale: job.placementScale,
+                                    productWidthFraction,
+                                },
                                 job.stylePreset ?? "neutral",
                                 itemRequestId
                             );

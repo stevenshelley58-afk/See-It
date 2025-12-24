@@ -60,6 +60,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
     }
 
+    const productWidthFraction =
+        placement && Number.isFinite(placement.product_width_fraction)
+            ? placement.product_width_fraction
+            : undefined;
+
     // Validate room_session_id
     if (!room_session_id) {
         return json(
@@ -111,7 +116,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             placementScale: placement.scale || 1.0,
             stylePreset: config?.style_preset || "neutral",
             quality: config?.quality || "standard",
-            configJson: JSON.stringify(config || {}),
+            configJson: JSON.stringify({
+                ...(config || {}),
+                placement_meta: {
+                    ...(config?.placement_meta || {}),
+                    product_width_fraction: productWidthFraction,
+                },
+            }),
             status: "queued",
             createdAt: new Date(),
         }
@@ -207,7 +218,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const imageUrl = await compositeScene(
             productImageUrl,
             roomImageUrl,
-            { x: placement.x, y: placement.y, scale: placement.scale || 1.0 },
+            {
+                x: placement.x,
+                y: placement.y,
+                scale: placement.scale || 1.0,
+                productWidthFraction,
+            },
             config?.style_preset || "neutral",
             requestId,
             productAsset?.renderInstructions || undefined

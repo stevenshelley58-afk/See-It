@@ -1062,20 +1062,67 @@ document.addEventListener('DOMContentLoaded', function () {
         const activeRoomImage = roomImageDesktop || roomImage;
         const activeProductImage = productImageDesktop || productImage;
         if (!activeRoomImage || !activeProductImage) return showError('Images not loaded');
-        
-        const roomRect = activeRoomImage.getBoundingClientRect();
-        const prodRect = activeProductImage.getBoundingClientRect();
 
-        const cx = prodRect.left + prodRect.width/2 - roomRect.left;
-        const cy = prodRect.top + prodRect.height/2 - roomRect.top;
+        // object-fit: contain means the <img> element can be letterboxed inside its own box.
+        // Compute the actual rendered image area so placement maps correctly to real pixels server-side.
+        const getContainedImageBox = (imgEl) => {
+            const rect = imgEl.getBoundingClientRect();
+            const natW = imgEl.naturalWidth;
+            const natH = imgEl.naturalHeight;
+            if (!natW || !natH || !rect.width || !rect.height) return null;
+
+            const boxAR = rect.width / rect.height;
+            const imgAR = natW / natH;
+
+            let displayW, displayH, offsetX, offsetY;
+            if (imgAR > boxAR) {
+                // Image fits width; letterbox top/bottom
+                displayW = rect.width;
+                displayH = rect.width / imgAR;
+                offsetX = 0;
+                offsetY = (rect.height - displayH) / 2;
+            } else {
+                // Image fits height; letterbox left/right
+                displayH = rect.height;
+                displayW = rect.height * imgAR;
+                offsetY = 0;
+                offsetX = (rect.width - displayW) / 2;
+            }
+
+            return {
+                left: rect.left + offsetX,
+                top: rect.top + offsetY,
+                width: displayW,
+                height: displayH
+            };
+        };
+
+        const roomBox = getContainedImageBox(activeRoomImage);
+        if (!roomBox) return showError('Room image not ready');
+
+        const prodRect = activeProductImage.getBoundingClientRect();
+        const prodCenterX = prodRect.left + prodRect.width / 2;
+        const prodCenterY = prodRect.top + prodRect.height / 2;
+
+        const cx = prodCenterX - roomBox.left;
+        const cy = prodCenterY - roomBox.top;
+
+        const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+        const xNorm = clamp(cx / roomBox.width, 0, 1);
+        const yNorm = clamp(cy / roomBox.height, 0, 1);
+
+        // Extra placement hint: product width as fraction of the rendered room image width.
+        // This makes server-side sizing match what the user saw, regardless of device DPI or layout.
+        const productWidthFraction = clamp(prodRect.width / roomBox.width, 0.01, 1.5);
 
         const payload = {
             room_session_id: state.sessionId,
             product_id: state.productId,
             placement: {
-                x: Math.max(0, Math.min(1, cx / roomRect.width)),
-                y: Math.max(0, Math.min(1, cy / roomRect.height)),
-                scale: state.scale || 1
+                x: xNorm,
+                y: yNorm,
+                scale: state.scale || 1,
+                product_width_fraction: productWidthFraction
             },
             config: {
                 style_preset: 'neutral',

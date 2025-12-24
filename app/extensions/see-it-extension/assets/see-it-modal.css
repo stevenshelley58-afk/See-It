@@ -1425,6 +1425,8 @@ html.see-it-modal-open body {
 
 .see-it-product-overlay {
   position: absolute;
+  top: 50%;
+  left: 50%;
   cursor: move;
   touch-action: none;
   user-select: none;
@@ -1433,6 +1435,7 @@ html.see-it-modal-open body {
   padding: 0.25rem;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.1);
   transition: border-color 0.2s, box-shadow 0.2s;
+  transform-origin: center center;
 }
 
 .see-it-product-overlay.is-dragging {
