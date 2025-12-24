@@ -1,7 +1,7 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { cleanupRoom } from "../services/gemini.server";
+import { removeObjectsFromUrl } from "../services/object-removal.server";
 import { StorageService } from "../services/storage.server";
 import { validateSessionId, validateMaskDataUrl } from "../utils/validation.server";
 
@@ -135,8 +135,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                         await new Promise(resolve => setTimeout(resolve, 500 * attempt));
                     }
                     
-                    cleanedRoomImageUrl = await cleanupRoom(currentRoomUrl, sanitizedMaskUrl, requestId);
-                    console.log(`[Cleanup] Cleanup successful`, { requestId, attempt, urlPreview: cleanedRoomImageUrl.substring(0, 80) + '...' });
+                    // Use Prodia SDXL inpainting for object removal
+                    const result = await removeObjectsFromUrl(currentRoomUrl, sanitizedMaskUrl, requestId);
+                    
+                    // Upload result to GCS
+                    const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+                    await StorageService.uploadBuffer(result.imageBuffer, key, 'image/png');
+                    cleanedRoomImageUrl = await StorageService.getSignedReadUrl(key, 60 * 60 * 1000);
+                    
+                    console.log(`[Cleanup] Cleanup successful (Prodia)`, { 
+                        requestId, 
+                        attempt, 
+                        processingTimeMs: result.processingTimeMs,
+                        maskCoverage: result.maskCoveragePercent.toFixed(2) + '%',
+                        urlPreview: cleanedRoomImageUrl.substring(0, 80) + '...' 
+                    });
                     success = true;
                     break; // Success, exit retry loop
                 } catch (error) {
@@ -146,7 +159,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     // Don't retry on validation errors or permanent failures
                     if (lastError.message.includes('validation') || 
                         lastError.message.includes('Invalid') ||
-                        lastError.message.includes('not found')) {
+                        lastError.message.includes('not found') ||
+                        lastError.message.includes('coverage')) {
                         throw lastError;
                     }
                     
