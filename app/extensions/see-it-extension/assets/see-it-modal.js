@@ -2,6 +2,95 @@ document.addEventListener('DOMContentLoaded', function () {
     const VERSION = '1.0.26';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
+    // ============================================================================
+    // ASPECT RATIO NORMALIZATION (Gemini-compatible)
+    // ============================================================================
+    const GEMINI_SUPPORTED_RATIOS = [
+        { label: '1:1',   value: 1.0 },
+        { label: '4:5',   value: 0.8 },
+        { label: '5:4',   value: 1.25 },
+        { label: '3:4',   value: 0.75 },
+        { label: '4:3',   value: 4/3 },
+        { label: '2:3',   value: 2/3 },
+        { label: '3:2',   value: 1.5 },
+        { label: '9:16',  value: 9/16 },
+        { label: '16:9', value: 16/9 },
+        { label: '21:9', value: 21/9 },
+    ];
+
+    function findClosestGeminiRatio(width, height) {
+        const inputRatio = width / height;
+        let closest = GEMINI_SUPPORTED_RATIOS[0];
+        let minDiff = Math.abs(inputRatio - closest.value);
+        
+        for (const r of GEMINI_SUPPORTED_RATIOS) {
+            const diff = Math.abs(inputRatio - r.value);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = r;
+            }
+        }
+        return closest;
+    }
+
+    async function normalizeRoomImage(file, maxDimension = 2048) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                const { naturalWidth: w, naturalHeight: h } = img;
+                const closest = findClosestGeminiRatio(w, h);
+                
+                // Compute crop dimensions (center crop)
+                let cropW, cropH;
+                if (w / h > closest.value) {
+                    // Image is wider than target — crop sides
+                    cropH = h;
+                    cropW = Math.round(h * closest.value);
+                } else {
+                    // Image is taller than target — crop top/bottom
+                    cropW = w;
+                    cropH = Math.round(w / closest.value);
+                }
+                
+                const offsetX = Math.round((w - cropW) / 2);
+                const offsetY = Math.round((h - cropH) / 2);
+                
+                // Scale down if needed
+                let outW = cropW, outH = cropH;
+                if (Math.max(outW, outH) > maxDimension) {
+                    const scale = maxDimension / Math.max(outW, outH);
+                    outW = Math.round(outW * scale);
+                    outH = Math.round(outH * scale);
+                }
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = outW;
+                canvas.height = outH;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, offsetX, offsetY, cropW, cropH, 0, 0, outW, outH);
+                
+                canvas.toBlob(blob => {
+                    if (!blob) return reject(new Error('Canvas toBlob failed'));
+                    console.log('[See It] Room normalized:', {
+                        original: `${w}×${h}`,
+                        normalized: `${outW}×${outH}`,
+                        ratio: closest.label,
+                    });
+                    resolve({
+                        blob,
+                        width: outW,
+                        height: outH,
+                        ratio: closest.label,
+                        originalWidth: w,
+                        originalHeight: h,
+                    });
+                }, 'image/jpeg', 0.92);
+            };
+            img.onerror = () => reject(new Error('Image load failed'));
+            img.src = URL.createObjectURL(file);
+        });
+    }
+
     // --- DOM Elements ---
     const $ = id => document.getElementById(id);
     const trigger = $('see-it-trigger');
@@ -160,9 +249,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Canvas state
     let ctx = null;
+    let activePreviewEl = null;
     let isDrawing = false;
     let strokes = [];
-    const BRUSH_COLOR = 'rgba(139, 92, 246, 0.7)';
+    const BRUSH_COLOR = 'rgba(139, 92, 246, 0.9)';
 
     const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
 
@@ -199,6 +289,8 @@ document.addEventListener('DOMContentLoaded', function () {
         if (screenName === 'prepare') {
             initCanvas();
             setupCanvasOnPrepare();
+            // Ensure button states are correct even if canvas isn't ready yet
+            updatePaintButtons();
         } else if (screenName === 'position') {
             initPosition();
         }
@@ -216,9 +308,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Canvas Drawing (Prepare Screen) ---
     const initCanvas = () => {
-        // Use desktop or mobile canvas/image
-        const activeCanvas = maskCanvasDesktop || maskCanvas;
-        const activePreview = roomPreviewDesktop || roomPreview;
+        // Determine which canvas is actually visible
+        // Check if mobile canvas is visible (not hidden by CSS)
+        const mobileVisible = maskCanvas && maskCanvas.offsetParent !== null;
+        const desktopVisible = maskCanvasDesktop && maskCanvasDesktop.offsetParent !== null;
+        
+        // Prioritize visible canvas, fallback to mobile
+        const activeCanvas = (mobileVisible && maskCanvas) || (desktopVisible && maskCanvasDesktop) || maskCanvas || maskCanvasDesktop;
+        const activePreview = (mobileVisible && roomPreview) || (desktopVisible && roomPreviewDesktop) || roomPreview || roomPreviewDesktop;
         
         if (!activeCanvas || !activePreview) return;
 
@@ -226,6 +323,8 @@ document.addEventListener('DOMContentLoaded', function () {
             activePreview.onload = initCanvas;
             return;
         }
+
+        activePreviewEl = activePreview;
 
         const natW = activePreview.naturalWidth;
         const natH = activePreview.naturalHeight;
@@ -245,6 +344,7 @@ document.addEventListener('DOMContentLoaded', function () {
         ctx.lineJoin = 'round';
         ctx.strokeStyle = BRUSH_COLOR;
         ctx.lineWidth = Math.max(20, Math.min(60, natW / 15));
+        ctx.globalCompositeOperation = 'source-over';
 
         ctx.clearRect(0, 0, natW, natH);
         strokes = [];
@@ -254,18 +354,61 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const getCanvasPos = (e) => {
-        const activeCanvas = maskCanvasDesktop || maskCanvas;
-        if (!activeCanvas) return { x: 0, y: 0 };
+        // Determine which canvas was actually clicked/touched
+        const target = e.target;
+        let activeCanvas = null;
+        if (target === maskCanvas || target === maskCanvasDesktop) {
+            activeCanvas = target;
+        } else {
+            // Fallback: use mobile on mobile, desktop on desktop
+            const isMobile = window.innerWidth < 768;
+            activeCanvas = isMobile ? maskCanvas : (maskCanvasDesktop || maskCanvas);
+        }
+        if (!activeCanvas) return { x: 0, y: 0, valid: false };
         
         const rect = activeCanvas.getBoundingClientRect();
         const touch = e.touches?.[0] || e.changedTouches?.[0] || null;
         const clientX = touch ? touch.clientX : e.clientX;
         const clientY = touch ? touch.clientY : e.clientY;
-        const scaleX = activeCanvas.width / rect.width;
-        const scaleY = activeCanvas.height / rect.height;
+
+        // When the preview uses object-fit: contain, the image may be letterboxed.
+        // Map pointer coordinates into the actual rendered image area so strokes align with the natural image pixels.
+        const preview = (activeCanvas === maskCanvasDesktop ? roomPreviewDesktop : roomPreview) || activePreviewEl;
+        const natW = preview?.naturalWidth || activeCanvas.width;
+        const natH = preview?.naturalHeight || activeCanvas.height;
+        if (!natW || !natH || !rect.width || !rect.height) return { x: 0, y: 0, valid: false };
+
+        const canvasAR = rect.width / rect.height;
+        const imgAR = natW / natH;
+
+        let displayW, displayH, offsetX, offsetY;
+        if (imgAR > canvasAR) {
+            // Image fits width; letterbox top/bottom
+            displayW = rect.width;
+            displayH = rect.width / imgAR;
+            offsetX = 0;
+            offsetY = (rect.height - displayH) / 2;
+        } else {
+            // Image fits height; letterbox left/right
+            displayH = rect.height;
+            displayW = rect.height * imgAR;
+            offsetY = 0;
+            offsetX = (rect.width - displayW) / 2;
+        }
+
+        const xIn = (clientX - rect.left) - offsetX;
+        const yIn = (clientY - rect.top) - offsetY;
+        if (xIn < 0 || yIn < 0 || xIn > displayW || yIn > displayH) {
+            return { x: 0, y: 0, valid: false };
+        }
+
+        const scaleX = natW / displayW;
+        const scaleY = natH / displayH;
+
         return {
-            x: (clientX - rect.left) * scaleX,
-            y: (clientY - rect.top) * scaleY
+            x: xIn * scaleX,
+            y: yIn * scaleY,
+            valid: true
         };
     };
 
@@ -278,6 +421,10 @@ document.addEventListener('DOMContentLoaded', function () {
         isDrawing = true;
         currentStroke = [];
         const pos = getCanvasPos(e);
+        if (!pos.valid) {
+            isDrawing = false;
+            return;
+        }
         currentStroke.push(pos);
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
@@ -289,6 +436,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!isDrawing || !ctx) return;
         e.preventDefault();
         const pos = getCanvasPos(e);
+        if (!pos.valid) return;
         currentStroke.push(pos);
         ctx.lineTo(pos.x, pos.y);
         ctx.stroke();
@@ -311,7 +459,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const redrawStrokes = () => {
         if (!ctx) return;
-        const activeCanvas = maskCanvasDesktop || maskCanvas;
+        // Use the canvas that has the context
+        const activeCanvas = ctx.canvas || (maskCanvasDesktop || maskCanvas);
         if (!activeCanvas) return;
         
         ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
@@ -332,6 +481,7 @@ document.addEventListener('DOMContentLoaded', function () {
             otherCtx.lineJoin = 'round';
             otherCtx.strokeStyle = BRUSH_COLOR;
             otherCtx.lineWidth = ctx.lineWidth;
+            otherCtx.globalCompositeOperation = 'source-over';
             strokes.forEach(stroke => {
                 if (stroke.length === 0) return;
                 otherCtx.beginPath();
@@ -344,12 +494,25 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const updatePaintButtons = () => {
         const hasStrokes = strokes.length > 0;
+        
+        // Mobile buttons
         if (btnUndo) btnUndo.disabled = !hasStrokes;
         if (btnClear) btnClear.disabled = !hasStrokes;
         if (btnRemove) {
-            const canRemove = hasStrokes && !state.isCleaningUp && state.uploadComplete;
-            btnRemove.disabled = !canRemove;
+            // Erase button is enabled when there are strokes (for visual feedback)
+            // But actual remove action still requires uploadComplete
+            btnRemove.disabled = !hasStrokes;
         }
+        
+        // Update Skip/Continue button text
+        if (btnConfirmRoom) {
+            if (hasStrokes) {
+                btnConfirmRoom.textContent = 'Continue';
+            } else {
+                btnConfirmRoom.textContent = 'Skip';
+            }
+        }
+        
         // Desktop buttons
         if (btnUndoDesktop) btnUndoDesktop.disabled = !hasStrokes;
         if (btnClearDesktop) btnClearDesktop.disabled = !hasStrokes;
@@ -410,7 +573,8 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     const generateMask = () => {
-        const activeCanvas = maskCanvasDesktop || maskCanvas;
+        // Use the canvas that has the context
+        const activeCanvas = ctx?.canvas || (maskCanvasDesktop || maskCanvas);
         if (!activeCanvas || !ctx) return null;
         const w = activeCanvas.width;
         const h = activeCanvas.height;
@@ -747,25 +911,32 @@ document.addEventListener('DOMContentLoaded', function () {
         state.sessionId = null;
         state.uploadComplete = false;
 
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            state.localImageDataUrl = ev.target.result;
-            if (roomPreview) roomPreview.src = state.localImageDataUrl;
-            if (roomPreviewDesktop) roomPreviewDesktop.src = state.localImageDataUrl;
-            if (roomImage) roomImage.src = state.localImageDataUrl;
-            if (roomImageDesktop) roomImageDesktop.src = state.localImageDataUrl;
-            showScreen('prepare');
-        };
-        reader.readAsDataURL(file);
-
         state.isUploading = true;
         if (uploadIndicator) uploadIndicator.classList.remove('hidden');
         updatePaintButtons();
 
         try {
+            // Normalize aspect ratio to Gemini-compatible ratio
+            const normalized = await normalizeRoomImage(file);
+            state.chosenRatio = normalized.ratio; // Store for debugging
+            
+            // Use normalized blob for preview
+            const normalizedDataUrl = URL.createObjectURL(normalized.blob);
+            state.localImageDataUrl = normalizedDataUrl;
+            if (roomPreview) roomPreview.src = normalizedDataUrl;
+            if (roomPreviewDesktop) roomPreviewDesktop.src = normalizedDataUrl;
+            if (roomImage) roomImage.src = normalizedDataUrl;
+            if (roomImageDesktop) roomImageDesktop.src = normalizedDataUrl;
+            showScreen('prepare');
+
+            // Upload normalized image
             const session = await startSession();
             state.sessionId = session.sessionId || session.room_session_id;
-            await uploadImage(file, session.uploadUrl || session.upload_url);
+            
+            // Create a File object from the normalized blob for upload
+            const normalizedFile = new File([normalized.blob], file.name || 'room.jpg', { type: 'image/jpeg' });
+            await uploadImage(normalizedFile, session.uploadUrl || session.upload_url);
+            
             const confirm = await confirmRoom(state.sessionId);
             state.originalRoomImageUrl = confirm.roomImageUrl || confirm.room_image_url;
             state.uploadComplete = true;
@@ -819,9 +990,9 @@ document.addEventListener('DOMContentLoaded', function () {
     btnConfirmRoom?.addEventListener('click', handleConfirmRoom);
     btnConfirmRoomDesktop?.addEventListener('click', handleConfirmRoom);
 
-    // --- Remove Button ---
+    // --- Remove Button (Erase) ---
     const handleRemove = async () => {
-        if (btnRemove.disabled || justFinishedDrawing || !state.sessionId || strokes.length === 0) return;
+        if (btnRemove.disabled || justFinishedDrawing || !state.sessionId || strokes.length === 0 || !state.uploadComplete) return;
 
         state.isCleaningUp = true;
         if (cleanupLoading) cleanupLoading.classList.remove('hidden');

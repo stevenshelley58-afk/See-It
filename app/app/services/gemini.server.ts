@@ -24,6 +24,37 @@ const IMAGE_MODEL_FAST = GEMINI_IMAGE_MODEL_FAST;
 // Timeout configuration for Gemini API calls
 const GEMINI_TIMEOUT_MS = 60000; // 60 seconds
 
+// ============================================================================
+// ASPECT RATIO NORMALIZATION (Gemini-compatible)
+// ============================================================================
+const GEMINI_SUPPORTED_RATIOS = [
+    { label: '1:1',   value: 1.0 },
+    { label: '4:5',   value: 0.8 },
+    { label: '5:4',   value: 1.25 },
+    { label: '3:4',   value: 0.75 },
+    { label: '4:3',   value: 4/3 },
+    { label: '2:3',   value: 2/3 },
+    { label: '3:2',   value: 1.5 },
+    { label: '9:16',  value: 9/16 },
+    { label: '16:9', value: 16/9 },
+    { label: '21:9', value: 21/9 },
+];
+
+function findClosestGeminiRatio(width: number, height: number): { label: string; value: number } {
+    const inputRatio = width / height;
+    let closest = GEMINI_SUPPORTED_RATIOS[0];
+    let minDiff = Math.abs(inputRatio - closest.value);
+    
+    for (const r of GEMINI_SUPPORTED_RATIOS) {
+        const diff = Math.abs(inputRatio - r.value);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closest = r;
+        }
+    }
+    return closest;
+}
+
 /**
  * Error thrown when a Gemini API call times out
  */
@@ -210,7 +241,8 @@ async function callGemini(
         }
     }
 
-    const config: any = { responseModalities: ['IMAGE'] };
+    // Per Gemini docs: include TEXT alongside IMAGE for better results
+    const config: any = { responseModalities: ['TEXT', 'IMAGE'] };
     if (aspectRatio) {
         config.imageConfig = { aspectRatio };
     }
@@ -561,9 +593,13 @@ export async function prepareProduct(
 }
 
 /**
- * Simple room cleanup - remove objects marked in mask using Gemini
+ * Room cleanup - remove objects using Gemini with mask-as-hint approach
  * 
- * Mask convention: WHITE = remove, BLACK = keep
+ * The mask is a HINT for what to remove, not a strict pixel boundary.
+ * Gemini will identify and remove the intended object even if the mask is imperfect.
+ * We then composite the result to guarantee no changes outside the edit region.
+ * 
+ * Mask convention: WHITE = user intent area (object to remove), BLACK = keep unchanged
  */
 export async function cleanupRoom(
     roomImageUrl: string,
@@ -573,63 +609,227 @@ export async function cleanupRoom(
     const logContext = createLogContext("cleanup", requestId, "start", {});
     const startTime = Date.now();
     
-    logger.info(logContext, "Processing room cleanup with Gemini");
+    logger.info(logContext, "Processing room cleanup with Gemini (mask-as-hint mode)");
 
     try {
-        // Parse mask from data URL
-        const maskBase64 = maskDataUrl.split(',')[1];
-        let maskBuffer = Buffer.from(maskBase64, 'base64');
+        // ============================================================================
+        // STEP 1: Parse and prepare sourceRoomImage
+        // ============================================================================
+        const sourceRoomBuffer = await downloadToBuffer(roomImageUrl, logContext, 1024);
         
-        // Download room image
-        const roomBuffer = await downloadToBuffer(roomImageUrl, logContext, 1024);
-
-        // Get room dimensions
-        const roomMeta = await sharp(roomBuffer).metadata();
+        const roomMeta = await sharp(sourceRoomBuffer).metadata();
         const roomWidth = roomMeta.width!;
         const roomHeight = roomMeta.height!;
 
         logger.info(
-            { ...logContext, stage: "dimensions" },
-            `Room: ${roomWidth}x${roomHeight}`
+            { ...logContext, stage: "source-room-loaded" },
+            `sourceRoomImage: ${roomWidth}x${roomHeight}, ${sourceRoomBuffer.length} bytes`
         );
 
+        // ============================================================================
+        // STEP 2: Parse and prepare inpaintMaskImage (user-drawn mask as hint)
+        // ============================================================================
+        const maskBase64 = maskDataUrl.split(',')[1];
+        const rawMaskBuffer = Buffer.from(maskBase64, 'base64');
+        
         // Resize mask to match room dimensions exactly
-        maskBuffer = await sharp(maskBuffer)
+        const resizedMaskBuffer = await sharp(rawMaskBuffer)
             .resize(roomWidth, roomHeight, { fit: 'fill' })
             .png()
             .toBuffer();
 
-        // Simple prompt - Gemini understands mask-based inpainting
-        const prompt = `Edit this image: Remove the objects shown in WHITE in the second image (mask). Fill those areas naturally to match the surrounding background. Keep all BLACK areas unchanged.`;
+        // ============================================================================
+        // STEP 3: Create AI-assisted edit region (expand + feather for medium spill)
+        // This allows Gemini to "complete" object removal even if brush was imperfect
+        // ============================================================================
+        const MASK_EXPANSION_PX = 16;  // Medium spill - expand mask edges
+        const MASK_FEATHER_SIGMA = 6;  // Soft edges for natural blending
+
+        // Convert to grayscale, threshold to binary, expand, then feather
+        const editRegionMask = await sharp(resizedMaskBuffer)
+            .grayscale()
+            .removeAlpha()
+            .threshold(128)                           // Clean binary mask
+            .blur(Math.max(1, MASK_EXPANSION_PX * 0.7))  // Expand via blur
+            .threshold(64)                            // Re-threshold after expansion
+            .blur(MASK_FEATHER_SIGMA)                 // Feather edges
+            .png()
+            .toBuffer();
+
+        logger.info(
+            { ...logContext, stage: "edit-region-created" },
+            `editRegionMask: expansion=${MASK_EXPANSION_PX}px, feather=${MASK_FEATHER_SIGMA}px`
+        );
+
+        // ============================================================================
+        // STEP 4: Compute closest Gemini-supported aspect ratio
+        // ============================================================================
+        const exactAspectRatio = (roomWidth / roomHeight).toFixed(3);
+        const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
+
+        logger.info(
+            { ...logContext, stage: "dimensions" },
+            `Target dimensions: ${roomWidth}x${roomHeight}, aspect=${exactAspectRatio}, closest Gemini ratio: ${closestRatio.label}`
+        );
+
+        // ============================================================================
+        // STEP 5: Build Gemini prompt (mask-as-hint, strict constraints)
+        // ============================================================================
+        const inpaintPrompt = `INPAINTING TASK - OBJECT REMOVAL
+
+You are given two images:
+1. sourceRoomImage: A photograph of a room (${roomWidth}x${roomHeight} pixels)
+2. inpaintMaskImage: A mask showing the user's intent (white regions indicate the object to remove)
+
+INSTRUCTIONS:
+- Identify the object that overlaps the WHITE regions in the mask
+- REMOVE that entire object from the room (even parts slightly outside the white area)
+- FILL the removed area naturally with background that matches the surrounding floor, wall, or surface
+- The mask is a HINT - remove the complete object the user intended, not just the exact white pixels
+
+STRICT CONSTRAINTS:
+- Output image MUST maintain the EXACT same aspect ratio as the input (${exactAspectRatio}:1)
+- DO NOT change the camera angle, zoom, or framing
+- DO NOT extend, crop, or resize the image
+- DO NOT add any new objects, people, or furniture
+- DO NOT modify lighting, colors, or textures outside the removal area
+- Keep everything outside the object removal area UNCHANGED`;
 
         logger.info(
             { ...logContext, stage: "gemini-call" },
-            `Calling Gemini (room: ${roomBuffer.length} bytes, mask: ${maskBuffer.length} bytes)`
+            `Calling Gemini: sourceRoom=${sourceRoomBuffer.length}b, mask=${editRegionMask.length}b`
         );
 
+        // ============================================================================
+        // STEP 6: Call Gemini with computed aspect ratio to ensure consistent output
+        // ============================================================================
         const geminiStart = Date.now();
-        const base64Data = await callGemini(prompt, [roomBuffer, maskBuffer], {
+        const base64Data = await callGemini(inpaintPrompt, [sourceRoomBuffer, editRegionMask], {
             model: IMAGE_MODEL_FAST,
+            aspectRatio: closestRatio.label, // Pass computed ratio to ensure Gemini output matches
             logContext
         });
         const geminiTime = Date.now() - geminiStart;
 
-        const outputBuffer = Buffer.from(base64Data, 'base64');
+        const geminiOutputBuffer = Buffer.from(base64Data, 'base64');
 
-        // Resize output to match original room dimensions
-        const finalBuffer = await sharp(outputBuffer)
-            .resize(roomWidth, roomHeight, { fit: 'fill' })
-            .jpeg({ quality: 90 })
+        // ============================================================================
+        // STEP 7: Handle dimension mismatch WITHOUT stretching
+        // Use cover + center crop to preserve aspect ratio
+        // ============================================================================
+        const outputMeta = await sharp(geminiOutputBuffer).metadata();
+        const outputWidth = outputMeta.width!;
+        const outputHeight = outputMeta.height!;
+
+        logger.info(
+            { ...logContext, stage: "gemini-output" },
+            `Gemini output: ${outputWidth}x${outputHeight} (expected ${roomWidth}x${roomHeight}), geminiTime=${geminiTime}ms`
+        );
+
+        let resizedGeminiOutput: Buffer;
+        if (outputWidth !== roomWidth || outputHeight !== roomHeight) {
+            // Check if aspect ratios match (within tolerance)
+            const outputRatio = outputWidth / outputHeight;
+            const targetRatio = roomWidth / roomHeight;
+            const ratioDiff = Math.abs(outputRatio - targetRatio);
+            
+            if (ratioDiff < 0.01) {
+                // Ratios match - safe to resize without distortion
+                logger.info(
+                    { ...logContext, stage: "dimension-mismatch" },
+                    `Gemini returned different dimensions but same ratio, resizing: ${outputWidth}x${outputHeight} -> ${roomWidth}x${roomHeight}`
+                );
+                resizedGeminiOutput = await sharp(geminiOutputBuffer)
+                    .resize(roomWidth, roomHeight, { fit: 'fill' })
+                    .png()
+                    .toBuffer();
+            } else {
+                // Ratios differ - use contain with padding to avoid cropping
+                logger.warn(
+                    { ...logContext, stage: "dimension-mismatch" },
+                    `Gemini returned different aspect ratio, using contain+pad (NO crop/stretch): ${outputWidth}x${outputHeight} (ratio ${outputRatio.toFixed(3)}) -> ${roomWidth}x${roomHeight} (ratio ${targetRatio.toFixed(3)})`
+                );
+                resizedGeminiOutput = await sharp(geminiOutputBuffer)
+                    .resize(roomWidth, roomHeight, { 
+                        fit: 'contain',      // Scale to fit inside, may have padding
+                        background: { r: 255, g: 255, b: 255, alpha: 1 } // White padding
+                    })
+                    .png()
+                    .toBuffer();
+            }
+        } else {
+            resizedGeminiOutput = geminiOutputBuffer;
+        }
+
+        // ============================================================================
+        // STEP 8: Composite to lock pixels outside edit region
+        // Outside edit region: original sourceRoomImage
+        // Inside edit region: Gemini output
+        // Formula: result = original * (1 - mask) + gemini * mask
+        // This GUARANTEES no room extension/warping/drift
+        // ============================================================================
+        
+        // Create the composite mask (edit region determines where Gemini output is used)
+        // Mask should already be correct size, but ensure it matches
+        const compositeMask = await sharp(editRegionMask)
+            .resize(roomWidth, roomHeight, { fit: 'cover', position: 'center' })
+            .grayscale()
             .toBuffer();
 
-        // Upload result
+        // Get raw pixel data for proper alpha compositing
+        const [sourceRaw, geminiRaw, maskRaw] = await Promise.all([
+            sharp(sourceRoomBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+            sharp(resizedGeminiOutput).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+            sharp(compositeMask).raw().toBuffer({ resolveWithObject: true })
+        ]);
+
+        const { data: srcData, info: srcInfo } = sourceRaw;
+        const { data: gemData } = geminiRaw;
+        const { data: maskData } = maskRaw;
+
+        // Manual pixel blend: result = src * (1-alpha) + gemini * alpha
+        const resultData = Buffer.alloc(srcData.length);
+        const pixelCount = srcInfo.width * srcInfo.height;
+
+        for (let i = 0; i < pixelCount; i++) {
+            const srcIdx = i * 4;  // RGBA
+            const maskIdx = i;     // Grayscale mask
+            
+            const alpha = maskData[maskIdx] / 255;  // 0-1 range
+            const invAlpha = 1 - alpha;
+
+            // Blend RGB channels
+            resultData[srcIdx] = Math.round(srcData[srcIdx] * invAlpha + gemData[srcIdx] * alpha);         // R
+            resultData[srcIdx + 1] = Math.round(srcData[srcIdx + 1] * invAlpha + gemData[srcIdx + 1] * alpha); // G
+            resultData[srcIdx + 2] = Math.round(srcData[srcIdx + 2] * invAlpha + gemData[srcIdx + 2] * alpha); // B
+            resultData[srcIdx + 3] = 255;  // Full opacity
+        }
+
+        const compositeResult = await sharp(resultData, {
+            raw: {
+                width: srcInfo.width,
+                height: srcInfo.height,
+                channels: 4
+            }
+        })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+        logger.info(
+            { ...logContext, stage: "composite-complete" },
+            `Composite done: ${compositeResult.length} bytes, outside-mask locked to original`
+        );
+
+        // ============================================================================
+        // STEP 9: Upload result
+        // ============================================================================
         const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-        const url = await uploadToGCS(key, finalBuffer, 'image/jpeg', logContext);
+        const url = await uploadToGCS(key, compositeResult, 'image/jpeg', logContext);
 
         const totalTime = Date.now() - startTime;
         logger.info(
             { ...logContext, stage: "complete" },
-            `Cleanup complete: total=${totalTime}ms, gemini=${geminiTime}ms`
+            `Cleanup complete: total=${totalTime}ms, gemini=${geminiTime}ms, dimensions=${roomWidth}x${roomHeight}`
         );
 
         return url;
@@ -738,11 +938,17 @@ ${productInstructionsText}
 Final check:
 If there is any conflict between realism assumptions and the product-specific instructions, the product-specific instructions override realism assumptions.`;
 
-        const aspectRatio = roomWidth > roomHeight ? "16:9" : roomHeight > roomWidth ? "9:16" : "1:1";
+        // Compute closest Gemini-supported aspect ratio from actual room dimensions
+        const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
+        
+        logger.info(
+            { ...logContext, stage: "aspect-ratio" },
+            `Room image: ${roomWidth}×${roomHeight} → closest Gemini ratio: ${closestRatio.label}`
+        );
 
         const base64Data = await callGemini(prompt, guideImageBuffer, {
             model: IMAGE_MODEL_PRO,
-            aspectRatio,
+            aspectRatio: closestRatio.label,
             logContext
         });
 
