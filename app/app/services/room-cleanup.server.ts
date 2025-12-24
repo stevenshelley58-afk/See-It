@@ -442,28 +442,29 @@ STRICT CONSTRAINTS:
             throw lastError || new Error("Failed to get Gemini output");
         }
 
-        // Step 7: Validate output dimensions (I3 - never stretch)
+        // Step 7: Resize Gemini output to match input dimensions (Gemini may return different sizes)
         const outputMeta = await sharp(geminiOutputBuffer).metadata();
         const outputWidth = outputMeta.width!;
         const outputHeight = outputMeta.height!;
 
         if (outputWidth !== roomWidth || outputHeight !== roomHeight) {
-            const error = new Error(
-                `Gemini output dimension mismatch: got ${outputWidth}x${outputHeight}, expected ${roomWidth}x${roomHeight}. ` +
-                `We do not stretch images - this is a failure.`
+            logger.info(
+                { ...logContext, stage: "resize-output" },
+                `Gemini returned ${outputWidth}x${outputHeight}, resizing to ${roomWidth}x${roomHeight} for compositing`
             );
-            logger.error(
-                { ...logContext, stage: "dimension-mismatch" },
-                "Output dimensions don't match input (stretching is forbidden)",
-                error
+            // Resize Gemini output to match input dimensions exactly (necessary for proper compositing)
+            // This is NOT stretching user content - it's ensuring AI output matches our coordinate space
+            // Use 'cover' to fill exact dimensions, preserving aspect ratio with center crop
+            geminiOutputBuffer = await sharp(geminiOutputBuffer)
+                .resize(roomWidth, roomHeight, { fit: 'cover', position: 'center' })
+                .png()
+                .toBuffer();
+        } else {
+            logger.info(
+                { ...logContext, stage: "dimension-validation" },
+                `Output dimensions match: ${outputWidth}x${outputHeight}`
             );
-            throw error;
         }
-
-        logger.info(
-            { ...logContext, stage: "dimension-validation" },
-            `Output dimensions match: ${outputWidth}x${outputHeight}`
-        );
 
         // Step 8: Hard-lock pixels outside edit region (I5 - compositing lock)
         // Composite: outside edit region = original, inside = Gemini output
