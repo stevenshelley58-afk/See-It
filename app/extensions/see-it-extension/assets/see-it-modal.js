@@ -353,43 +353,59 @@ document.addEventListener('DOMContentLoaded', function () {
     const resetError = () => errorDiv?.classList.add('hidden');
 
     // --- Canvas Drawing (Prepare Screen) ---
-    const initCanvas = () => {
-        // Determine which canvas is actually visible
-        // Check if mobile canvas is visible (not hidden by CSS)
-        const mobileVisible = maskCanvas && maskCanvas.offsetParent !== null;
-        const desktopVisible = maskCanvasDesktop && maskCanvasDesktop.offsetParent !== null;
-        
-        // Prioritize visible canvas, fallback to mobile
-        const activeCanvas = (mobileVisible && maskCanvas) || (desktopVisible && maskCanvasDesktop) || maskCanvas || maskCanvasDesktop;
-        const activePreview = (mobileVisible && roomPreview) || (desktopVisible && roomPreviewDesktop) || roomPreview || roomPreviewDesktop;
-        
-        if (!activeCanvas || !activePreview) return;
+    // Track canvas initialization state
+    let canvasInitialized = false;
 
-        if (!activePreview.complete || !activePreview.naturalWidth) {
-            activePreview.onload = initCanvas;
+    const initCanvas = () => {
+        // Get the preview that has a loaded image (check BOTH, not just visible one)
+        // This avoids race conditions with CSS visibility during screen transitions
+        let sourcePreview = null;
+        if (roomPreview && roomPreview.complete && roomPreview.naturalWidth > 0) {
+            sourcePreview = roomPreview;
+        } else if (roomPreviewDesktop && roomPreviewDesktop.complete && roomPreviewDesktop.naturalWidth > 0) {
+            sourcePreview = roomPreviewDesktop;
+        }
+
+        // If no image loaded yet, set onload on BOTH previews and wait
+        if (!sourcePreview) {
+            console.log('[See It] Canvas init: waiting for image to load...');
+            if (roomPreview) roomPreview.onload = initCanvas;
+            if (roomPreviewDesktop) roomPreviewDesktop.onload = initCanvas;
             return;
         }
 
-        activePreviewEl = activePreview;
+        const natW = sourcePreview.naturalWidth;
+        const natH = sourcePreview.naturalHeight;
 
-        const natW = activePreview.naturalWidth;
-        const natH = activePreview.naturalHeight;
-
-        activeCanvas.width = natW;
-        activeCanvas.height = natH;
-        
-        // Also sync the other canvas if both exist
-        if (maskCanvas && maskCanvasDesktop && maskCanvas !== activeCanvas) {
-            const otherCanvas = activeCanvas === maskCanvas ? maskCanvasDesktop : maskCanvas;
-            otherCanvas.width = natW;
-            otherCanvas.height = natH;
+        if (natW === 0 || natH === 0) {
+            console.error('[See It] Canvas init: image has zero dimensions');
+            return;
         }
 
-        ctx = activeCanvas.getContext('2d');
+        activePreviewEl = sourcePreview;
+
+        // Initialize BOTH canvases to same dimensions (avoids mobile/desktop switching issues)
+        if (maskCanvas) {
+            maskCanvas.width = natW;
+            maskCanvas.height = natH;
+        }
+        if (maskCanvasDesktop) {
+            maskCanvasDesktop.width = natW;
+            maskCanvasDesktop.height = natH;
+        }
+
+        // Use mobile canvas as primary (always exists), desktop as fallback
+        const primaryCanvas = maskCanvas || maskCanvasDesktop;
+        if (!primaryCanvas) {
+            console.error('[See It] Canvas init: no canvas element found');
+            return;
+        }
+
+        ctx = primaryCanvas.getContext('2d');
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.strokeStyle = BRUSH_COLOR;
-        
+
         // Set line width based on brush size
         const baseWidth = natW / 15;
         let lineWidth;
@@ -405,9 +421,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
         ctx.clearRect(0, 0, natW, natH);
         strokes = [];
+        canvasInitialized = true;
         updatePaintButtons();
 
-        console.log('[See It] Canvas init:', natW, 'x', natH, 'brush:', brushSize, 'lineWidth:', lineWidth);
+        console.log('[See It] Canvas init SUCCESS:', natW, 'x', natH, 'brush:', brushSize, 'lineWidth:', lineWidth);
     };
 
     // Update brush size and canvas line width
@@ -532,7 +549,11 @@ document.addEventListener('DOMContentLoaded', function () {
     let justFinishedDrawing = false;
 
     const startDraw = (e) => {
-        if (!ctx) return;
+        if (!ctx) {
+            console.warn('[See It] startDraw: ctx not initialized, attempting init...');
+            initCanvas();
+            if (!ctx) return;
+        }
         e.preventDefault();
         isDrawing = true;
         currentStroke = [];
@@ -546,6 +567,8 @@ document.addEventListener('DOMContentLoaded', function () {
         ctx.moveTo(pos.x, pos.y);
         ctx.lineTo(pos.x + 0.1, pos.y + 0.1);
         ctx.stroke();
+        // Mirror to both canvases for consistent display
+        syncStrokeToBothCanvases();
     };
 
     const draw = (e) => {
@@ -558,6 +581,8 @@ document.addEventListener('DOMContentLoaded', function () {
         ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
+        // Mirror to both canvases for consistent display
+        syncStrokeToBothCanvases();
     };
 
     const stopDraw = (e) => {
@@ -571,6 +596,36 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         ctx?.beginPath();
         updatePaintButtons();
+        console.log('[See It] Stroke recorded, total strokes:', strokes.length);
+    };
+
+    // Sync strokes to both canvases so mobile/desktop show the same thing
+    const syncStrokeToBothCanvases = () => {
+        if (!maskCanvas || !maskCanvasDesktop) return;
+        // Redraw all strokes on both canvases
+        [maskCanvas, maskCanvasDesktop].forEach(canvas => {
+            const c = canvas.getContext('2d');
+            c.clearRect(0, 0, canvas.width, canvas.height);
+            c.lineCap = 'round';
+            c.lineJoin = 'round';
+            c.strokeStyle = BRUSH_COLOR;
+            c.lineWidth = ctx?.lineWidth || 30;
+            // Draw completed strokes
+            strokes.forEach(stroke => {
+                if (stroke.length === 0) return;
+                c.beginPath();
+                c.moveTo(stroke[0].x, stroke[0].y);
+                stroke.forEach(p => c.lineTo(p.x, p.y));
+                c.stroke();
+            });
+            // Draw current in-progress stroke
+            if (currentStroke.length > 0) {
+                c.beginPath();
+                c.moveTo(currentStroke[0].x, currentStroke[0].y);
+                currentStroke.forEach(p => c.lineTo(p.x, p.y));
+                c.stroke();
+            }
+        });
     };
 
     const redrawStrokes = () => {
@@ -708,25 +763,42 @@ document.addEventListener('DOMContentLoaded', function () {
     btnBrushLargeMobile?.addEventListener('click', () => updateBrushSize('large'));
 
     const generateMask = () => {
-        // Use the canvas that has the context
-        const activeCanvas = ctx?.canvas || (maskCanvasDesktop || maskCanvas);
-        if (!activeCanvas || !ctx) return null;
-        const w = activeCanvas.width;
-        const h = activeCanvas.height;
-        if (w === 0 || h === 0) return null;
+        // Get canvas dimensions from whichever canvas has them
+        const sourceCanvas = maskCanvas || maskCanvasDesktop;
+        if (!sourceCanvas) {
+            console.error('[See It] generateMask: no canvas element found');
+            return null;
+        }
+
+        const w = sourceCanvas.width;
+        const h = sourceCanvas.height;
+
+        if (w === 0 || h === 0) {
+            console.error('[See It] generateMask: canvas has zero dimensions', { w, h });
+            return null;
+        }
+
+        if (strokes.length === 0) {
+            console.error('[See It] generateMask: no strokes recorded');
+            return null;
+        }
+
+        // Use stored lineWidth or calculate from canvas width
+        const lineWidth = ctx?.lineWidth || Math.max(30, Math.min(50, w / 15));
 
         const out = document.createElement('canvas');
         out.width = w;
         out.height = h;
         const outCtx = out.getContext('2d');
 
+        // Black background = keep, White strokes = remove
         outCtx.fillStyle = '#000000';
         outCtx.fillRect(0, 0, w, h);
 
         outCtx.strokeStyle = '#FFFFFF';
         outCtx.lineCap = 'round';
         outCtx.lineJoin = 'round';
-        outCtx.lineWidth = ctx.lineWidth;
+        outCtx.lineWidth = lineWidth;
 
         strokes.forEach(stroke => {
             if (stroke.length === 0) return;
@@ -736,7 +808,14 @@ document.addEventListener('DOMContentLoaded', function () {
             outCtx.stroke();
         });
 
-        return out.toDataURL('image/png');
+        const dataUrl = out.toDataURL('image/png');
+        console.log('[See It] generateMask SUCCESS:', {
+            dimensions: `${w}x${h}`,
+            strokeCount: strokes.length,
+            lineWidth,
+            dataUrlLength: dataUrl.length
+        });
+        return dataUrl;
     };
 
     // --- Product Positioning (Position Screen) ---
@@ -1059,12 +1138,19 @@ document.addEventListener('DOMContentLoaded', function () {
         const file = e.target.files[0];
         if (!file) return;
 
+        // Reset ALL state for new upload
         state.cleanedRoomImageUrl = null;
         state.originalRoomImageUrl = null;
         state.sessionId = null;
         state.uploadComplete = false;
-        hasErased = false; // Reset erase state for new upload
-        brushSize = 'medium'; // Reset brush size to default
+        hasErased = false;
+        brushSize = 'medium';
+
+        // Reset canvas state - critical for object removal to work
+        strokes = [];
+        currentStroke = [];
+        ctx = null;
+        canvasInitialized = false;
 
         state.isUploading = true;
         if (uploadIndicator) uploadIndicator.classList.remove('hidden');
@@ -1074,15 +1160,38 @@ document.addEventListener('DOMContentLoaded', function () {
             // Normalize aspect ratio to Gemini-compatible ratio
             const normalized = await normalizeRoomImage(file);
             state.chosenRatio = normalized.ratio; // Store for debugging
-            
+
             // Use normalized blob for preview
             const normalizedDataUrl = URL.createObjectURL(normalized.blob);
             state.localImageDataUrl = normalizedDataUrl;
-            if (roomPreview) roomPreview.src = normalizedDataUrl;
-            if (roomPreviewDesktop) roomPreviewDesktop.src = normalizedDataUrl;
-            if (roomImage) roomImage.src = normalizedDataUrl;
-            if (roomImageDesktop) roomImageDesktop.src = normalizedDataUrl;
+
+            // Set image sources and wait for at least one to load before initializing canvas
+            const loadPromise = new Promise((resolve) => {
+                let loaded = false;
+                const onLoad = () => {
+                    if (!loaded) {
+                        loaded = true;
+                        resolve();
+                    }
+                };
+                if (roomPreview) {
+                    roomPreview.onload = onLoad;
+                    roomPreview.src = normalizedDataUrl;
+                }
+                if (roomPreviewDesktop) {
+                    roomPreviewDesktop.onload = onLoad;
+                    roomPreviewDesktop.src = normalizedDataUrl;
+                }
+                if (roomImage) roomImage.src = normalizedDataUrl;
+                if (roomImageDesktop) roomImageDesktop.src = normalizedDataUrl;
+                // Fallback timeout in case onload doesn't fire (shouldn't happen with blob URLs)
+                setTimeout(resolve, 100);
+            });
+
             showScreen('prepare');
+            await loadPromise;
+            console.log('[See It] Image loaded, initializing canvas...');
+            initCanvas();
 
             // Upload normalized image
             const session = await startSession();
@@ -1177,8 +1286,21 @@ document.addEventListener('DOMContentLoaded', function () {
         const strokesBackup = JSON.parse(JSON.stringify(strokes));
 
         try {
+            // Debug state before generating mask
+            console.log('[See It] handleRemove state:', {
+                sessionId: state.sessionId,
+                uploadComplete: state.uploadComplete,
+                strokeCount: strokes.length,
+                canvasInitialized,
+                ctxExists: !!ctx,
+                maskCanvasSize: maskCanvas ? `${maskCanvas.width}x${maskCanvas.height}` : 'none',
+                maskCanvasDesktopSize: maskCanvasDesktop ? `${maskCanvasDesktop.width}x${maskCanvasDesktop.height}` : 'none'
+            });
+
             const mask = generateMask();
-            if (!mask) throw new Error('Failed to generate mask');
+            if (!mask) {
+                throw new Error('Failed to generate mask - canvas may not be initialized');
+            }
 
             console.log('[See It] Sending cleanup request...');
             const result = await cleanupWithMask(mask);
