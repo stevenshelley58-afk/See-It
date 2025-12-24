@@ -751,15 +751,16 @@ STRICT CONSTRAINTS:
                     .png()
                     .toBuffer();
             } else {
-                // Ratios differ - use contain with padding to avoid cropping
+                // Ratios differ - use cover (center-crop) to maintain pixel alignment with mask.
+                // Contain+pad would offset the content and break mask alignment.
                 logger.warn(
                     { ...logContext, stage: "dimension-mismatch" },
-                    `Gemini returned different aspect ratio, using contain+pad (NO crop/stretch): ${outputWidth}x${outputHeight} (ratio ${outputRatio.toFixed(3)}) -> ${roomWidth}x${roomHeight} (ratio ${targetRatio.toFixed(3)})`
+                    `Gemini returned different aspect ratio, using cover (center-crop) for mask alignment: ${outputWidth}x${outputHeight} (ratio ${outputRatio.toFixed(3)}) -> ${roomWidth}x${roomHeight} (ratio ${targetRatio.toFixed(3)})`
                 );
                 resizedGeminiOutput = await sharp(geminiOutputBuffer)
                     .resize(roomWidth, roomHeight, { 
-                        fit: 'contain',      // Scale to fit inside, may have padding
-                        background: { r: 255, g: 255, b: 255, alpha: 1 } // White padding
+                        fit: 'cover',        // Scale to cover, crop edges to maintain center alignment
+                        position: 'center'   // Crop from center to keep mask-aligned content
                     })
                     .png()
                     .toBuffer();
@@ -1041,10 +1042,11 @@ If there is any conflict between realism assumptions and the product-specific in
                     .png()
                     .toBuffer();
             } else {
+                // Use cover (center-crop) to maintain pixel alignment with placement mask
                 resizedGeminiOutput = await sharp(outputBuffer)
                     .resize(roomWidth, roomHeight, {
-                        fit: 'contain',
-                        background: { r: 255, g: 255, b: 255, alpha: 1 }
+                        fit: 'cover',
+                        position: 'center'
                     })
                     .png()
                     .toBuffer();
