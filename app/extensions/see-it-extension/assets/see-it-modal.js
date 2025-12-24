@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- DOM Elements ---
     const $ = id => document.getElementById(id);
     const trigger = $('see-it-trigger');
+    const triggerWidget = trigger?.closest('.see-it-widget-hook');
     const modal = $('see-it-modal');
 
     if (!trigger || !modal) {
@@ -694,6 +695,7 @@ document.addEventListener('DOMContentLoaded', function () {
         ensureModalPortaled();
         lockScroll();
         modal.classList.remove('hidden');
+        if (triggerWidget) triggerWidget.style.display = 'none';
         resetError();
         state.productId = trigger.dataset.productId || state.productId;
         state.productTitle = trigger.dataset.productTitle || state.productTitle;
@@ -723,6 +725,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const closeModal = () => {
         modal.classList.add('hidden');
         unlockScroll();
+        if (triggerWidget) triggerWidget.style.display = '';
         showScreen('entry');
     };
 
