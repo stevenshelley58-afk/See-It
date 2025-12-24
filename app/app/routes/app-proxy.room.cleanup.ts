@@ -1,7 +1,8 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { removeObjectsFromUrl } from "../services/object-removal.server";
+import { removeObjectsFromUrl, isObjectRemovalAvailable } from "../services/object-removal.server";
+import { cleanupRoom } from "../services/gemini.server";
 import { StorageService } from "../services/storage.server";
 import { validateSessionId, validateMaskDataUrl } from "../utils/validation.server";
 import sharp from "sharp";
@@ -61,19 +62,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     const sanitizedSessionId = sessionResult.sanitized!;
 
-    // Validate mask data URL if provided (limit to 10MB)
-    let sanitizedMaskUrl: string | undefined;
-    if (mask_data_url) {
-        const maskResult = validateMaskDataUrl(mask_data_url, 10 * 1024 * 1024);
-        if (!maskResult.valid) {
-            console.error(`[Cleanup] Invalid mask data URL`, { requestId, error: maskResult.error });
-            return json({ status: "error", message: maskResult.error }, { status: 400 });
-        }
-        sanitizedMaskUrl = maskResult.sanitized;
-        console.log(`[Cleanup] Mask validated`, { requestId, maskLength: sanitizedMaskUrl.length });
-    } else {
-        console.warn(`[Cleanup] No mask provided`, { requestId });
+    // Validate mask data URL (limit to 10MB)
+    if (!mask_data_url) {
+        console.error(`[Cleanup] Missing mask data`, { requestId });
+        return json({ status: "error", message: "mask_data_url is required" }, { status: 400 });
     }
+
+    const maskResult = validateMaskDataUrl(mask_data_url, 10 * 1024 * 1024);
+    if (!maskResult.valid) {
+        console.error(`[Cleanup] Invalid mask data URL`, { requestId, error: maskResult.error });
+        return json({ status: "error", message: maskResult.error }, { status: 400 });
+    }
+    const sanitizedMaskUrl = maskResult.sanitized!;
+    console.log(`[Cleanup] Mask validated`, { requestId, maskLength: sanitizedMaskUrl.length });
 
     const roomSession = await prisma.roomSession.findFirst({
         where: {
@@ -116,18 +117,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             maskLength: sanitizedMaskUrl?.length || 0
         });
 
-        // If mask data is provided, attempt cleanup; otherwise echo the current image per spec stub allowance.
-        if (!sanitizedMaskUrl) {
-            console.log(`[Cleanup] No mask provided, returning current image`, { requestId });
-        }
-
         let cleanedRoomImageUrl: string;
-        if (sanitizedMaskUrl) {
+        let cleanupMethod: "prodia" | "gemini" = "prodia";
+        let maskCoveragePercent: number | null = null;
+
+        const prodiaAvailable = isObjectRemovalAvailable();
+        const geminiAvailable = !!process.env.GEMINI_API_KEY;
+
+        const isMaskError = (message: string) => /mask|coverage|empty/i.test(message);
+
+        const runProdiaCleanup = async () => {
             // Retry logic for transient failures (network, GCS, etc.)
             const MAX_RETRIES = 2;
             let lastError: Error | null = null;
-            let success = false;
-            
+
             for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
                 try {
                     if (attempt > 0) {
@@ -135,55 +138,77 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                         // Exponential backoff: 500ms, 1000ms
                         await new Promise(resolve => setTimeout(resolve, 500 * attempt));
                     }
-                    
+
                     // Use Prodia SDXL inpainting for object removal
                     const result = await removeObjectsFromUrl(currentRoomUrl, sanitizedMaskUrl, requestId);
-                    
+                    maskCoveragePercent = result.maskCoveragePercent;
+
                     // Normalize and convert to JPEG for better web compatibility and smaller size
                     const normalizedBuffer = await sharp(result.imageBuffer)
                         .jpeg({ quality: 90 })
                         .toBuffer();
-                    
+
                     // Upload result to GCS
                     const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-                    await StorageService.uploadBuffer(normalizedBuffer, key, 'image/jpeg');
-                    cleanedRoomImageUrl = await StorageService.getSignedReadUrl(key, 60 * 60 * 1000);
-                    
+                    cleanedRoomImageUrl = await StorageService.uploadBuffer(normalizedBuffer, key, 'image/jpeg');
+
                     console.log(`[Cleanup] Normalized image: ${result.imageBuffer.length} -> ${normalizedBuffer.length} bytes`);
-                    
-                    console.log(`[Cleanup] Cleanup successful (Prodia)`, { 
-                        requestId, 
-                        attempt, 
+
+                    console.log(`[Cleanup] Cleanup successful (Prodia)`, {
+                        requestId,
+                        attempt,
                         processingTimeMs: result.processingTimeMs,
                         maskCoverage: result.maskCoveragePercent.toFixed(2) + '%',
-                        urlPreview: cleanedRoomImageUrl.substring(0, 80) + '...' 
+                        urlPreview: cleanedRoomImageUrl.substring(0, 80) + '...'
                     });
-                    success = true;
-                    break; // Success, exit retry loop
+                    return;
                 } catch (error) {
                     lastError = error instanceof Error ? error : new Error(String(error));
                     console.error(`[Cleanup] Cleanup attempt ${attempt} failed`, { requestId, attempt, error: lastError.message });
-                    
+
                     // Don't retry on validation errors or permanent failures
-                    if (lastError.message.includes('validation') || 
+                    if (lastError.message.includes('validation') ||
                         lastError.message.includes('Invalid') ||
                         lastError.message.includes('not found') ||
                         lastError.message.includes('coverage')) {
                         throw lastError;
                     }
-                    
+
                     // If this was the last attempt, throw
                     if (attempt === MAX_RETRIES) {
                         throw lastError;
                     }
                 }
             }
-            
-            if (!success) {
-                throw lastError || new Error('Cleanup failed after retries');
+
+            throw lastError || new Error('Cleanup failed after retries');
+        };
+
+        const runGeminiCleanup = async () => {
+            cleanedRoomImageUrl = await cleanupRoom(currentRoomUrl, sanitizedMaskUrl, requestId);
+            cleanupMethod = "gemini";
+            console.log(`[Cleanup] Cleanup successful (Gemini)`, {
+                requestId,
+                urlPreview: cleanedRoomImageUrl.substring(0, 80) + '...'
+            });
+        };
+
+        if (prodiaAvailable) {
+            try {
+                await runProdiaCleanup();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (geminiAvailable && !isMaskError(message)) {
+                    console.warn(`[Cleanup] Prodia failed, falling back to Gemini`, { requestId, error: message });
+                    await runGeminiCleanup();
+                } else {
+                    throw error;
+                }
             }
+        } else if (geminiAvailable) {
+            await runGeminiCleanup();
         } else {
-            cleanedRoomImageUrl = currentRoomUrl;
+            throw new Error("Cleanup unavailable: configure PRODIA_API_TOKEN or GEMINI_API_KEY");
         }
 
         // Extract GCS key from the returned URL for future URL regeneration
@@ -203,7 +228,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({
             room_session_id: sanitizedSessionId,
             cleaned_room_image_url: cleanedRoomImageUrl,
-            cleanedRoomImageUrl: cleanedRoomImageUrl
+            cleanedRoomImageUrl: cleanedRoomImageUrl,
+            cleanup_method: cleanupMethod,
+            mask_coverage_percent: maskCoveragePercent
         });
 
     } catch (error) {

@@ -37,9 +37,12 @@ const CONFIG = {
 
     // Limits - keep at 1024 for SDXL (optimal resolution)
     MAX_IMAGE_DIMENSION: 1024,  // SDXL works best at 1024x1024
-    MIN_MASK_COVERAGE: 0.001,   // 0.1% minimum mask coverage
+    MIN_MASK_COVERAGE: 0.0,     // Allow ultra-small touch-ups (validation happens via white pixel count)
     MAX_MASK_COVERAGE: 0.8,     // 80% maximum - something's wrong if more
 };
+
+const PRODIA_POLL_INTERVAL_MS = 750;
+const PRODIA_MAX_POLL_MS = 30000;
 
 export interface ObjectRemovalResult {
     imageBuffer: Buffer;
@@ -58,6 +61,166 @@ export interface ObjectRemovalInput {
     };
 }
 
+function extractProdiaOutputUrl(job: any): string | null {
+    if (!job || typeof job !== "object") return null;
+
+    const candidates = [
+        job.output,
+        job.output_url,
+        job.image_url,
+        job.imageUrl,
+        job.result?.output,
+        job.result?.output_url,
+        job.result?.image_url,
+        job.result?.imageUrl,
+        job.job?.output,
+        job.job?.output_url,
+        job.job?.image_url,
+        job.job?.imageUrl,
+        job.job?.result?.output,
+        job.job?.result?.output_url,
+        job.job?.result?.image_url,
+        job.job?.result?.imageUrl,
+    ];
+
+    for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate.startsWith("http")) {
+            return candidate;
+        }
+        if (Array.isArray(candidate) && typeof candidate[0] === "string" && candidate[0].startsWith("http")) {
+            return candidate[0];
+        }
+        if (candidate && typeof candidate === "object") {
+            const url = candidate.url || candidate.image_url || candidate.imageUrl;
+            if (typeof url === "string" && url.startsWith("http")) {
+                return url;
+            }
+        }
+    }
+
+    return null;
+}
+
+function extractProdiaJobId(job: any): string | null {
+    if (!job || typeof job !== "object") return null;
+
+    const id = job.id || job.jobId || job.job_id || job.job?.id || job.job?.jobId || job.job?.job_id;
+    return typeof id === "string" ? id : id ? String(id) : null;
+}
+
+async function downloadProdiaOutput(url: string, logContext: ReturnType<typeof createLogContext>): Promise<Buffer> {
+    logger.info(
+        { ...logContext, stage: "prodia-output-download" },
+        `Downloading Prodia output: ${url.substring(0, 80)}...`
+    );
+
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Failed to download Prodia output: ${response.status}`);
+    }
+    return Buffer.from(await response.arrayBuffer());
+}
+
+async function pollProdiaJob(jobId: string, logContext: ReturnType<typeof createLogContext>): Promise<Buffer> {
+    const apiToken = process.env.PRODIA_API_TOKEN;
+    if (!apiToken) {
+        throw new Error("PRODIA_API_TOKEN environment variable is not set");
+    }
+
+    const deadline = Date.now() + PRODIA_MAX_POLL_MS;
+    let attempt = 0;
+
+    while (Date.now() < deadline) {
+        attempt += 1;
+        const response = await fetch(`${PRODIA_API_URL}/${jobId}`, {
+            headers: {
+                "Authorization": `Bearer ${apiToken}`,
+                "Accept": "application/json",
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => "");
+            throw new Error(`Prodia job status error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        const status = String(data.status || data.job?.status || "").toLowerCase();
+
+        logger.info(
+            { ...logContext, stage: "prodia-job-status" },
+            `Prodia job ${jobId} status: ${status || "unknown"} (attempt ${attempt})`
+        );
+
+        if (status === "succeeded" || status === "success" || status === "completed") {
+            const outputUrl = extractProdiaOutputUrl(data);
+            if (!outputUrl) {
+                throw new Error("Prodia job completed without output URL");
+            }
+            return downloadProdiaOutput(outputUrl, logContext);
+        }
+
+        if (status === "failed" || status === "error" || status === "canceled") {
+            const reason = data.error || data.message || data.job?.error || "Unknown error";
+            throw new Error(`Prodia job failed: ${reason}`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, PRODIA_POLL_INTERVAL_MS));
+    }
+
+    throw new Error(`Prodia job timed out after ${PRODIA_MAX_POLL_MS}ms`);
+}
+
+function extractImageFromMultipart(responseBuffer: Buffer, contentType: string): Buffer {
+    const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
+    if (!boundaryMatch) {
+        throw new Error("No boundary found in multipart response");
+    }
+
+    const boundary = boundaryMatch[1].trim().replace(/^\"|\"$/g, "");
+    const boundaryBuffer = Buffer.from(`--${boundary}`);
+    const parts: Buffer[] = [];
+    let start = 0;
+    let idx = responseBuffer.indexOf(boundaryBuffer, start);
+
+    while (idx !== -1) {
+        if (start > 0) {
+            parts.push(responseBuffer.slice(start, idx - 2));
+        }
+        start = idx + boundaryBuffer.length + 2;
+        idx = responseBuffer.indexOf(boundaryBuffer, start);
+    }
+
+    for (const part of parts) {
+        const headerEnd = part.indexOf(Buffer.from("\r\n\r\n"));
+        if (headerEnd === -1) continue;
+        const headerText = part.toString("utf8", 0, Math.min(headerEnd, 500));
+        if (headerText.includes("image/")) {
+            const body = part.slice(headerEnd + 4);
+            if (body.length === 0) {
+                continue;
+            }
+            return body;
+        }
+    }
+
+    throw new Error("No image part found in multipart response");
+}
+
+async function resolveProdiaJobResult(jobResult: any, logContext: ReturnType<typeof createLogContext>): Promise<Buffer> {
+    const directUrl = extractProdiaOutputUrl(jobResult);
+    if (directUrl) {
+        return downloadProdiaOutput(directUrl, logContext);
+    }
+
+    const jobId = extractProdiaJobId(jobResult);
+    if (!jobId) {
+        throw new Error("Prodia job response missing job id/output URL");
+    }
+
+    return pollProdiaJob(jobId, logContext);
+}
+
 /**
  * Process mask: expand, feather, and ensure correct dimensions
  * OPTIMIZED: Combined pipeline, single-pass coverage calculation
@@ -68,7 +231,7 @@ async function processMask(
     targetHeight: number,
     options: { expansionPx: number; featherSigma: number },
     logContext: ReturnType<typeof createLogContext>
-): Promise<{ processedMask: Buffer; coveragePercent: number }> {
+): Promise<{ processedMask: Buffer; coveragePercent: number; whitePixels: number }> {
     const { expansionPx, featherSigma } = options;
 
     logger.info(
@@ -161,7 +324,7 @@ async function processMask(
         `Mask processed: coverage=${coveragePercent.toFixed(2)}%, white=${whitePixels}/${totalPixels}`
     );
 
-    return { processedMask: finalMaskBuffer, coveragePercent };
+    return { processedMask: finalMaskBuffer, coveragePercent, whitePixels };
 }
 
 /**
@@ -240,7 +403,7 @@ async function callProdiaInpaint(
         headers: {
             "Authorization": `Bearer ${apiToken}`,
             "Content-Type": `multipart/form-data; boundary=${boundary}`,
-            "Accept": "image/png",
+            "Accept": "multipart/form-data; image/png",
         },
         body,
     });
@@ -254,19 +417,91 @@ async function callProdiaInpaint(
         throw new Error(`Prodia API error: ${response.status} - ${errorText}`);
     }
 
-    // Check if response is JSON (job status) or image
     const contentType = response.headers.get("content-type") || "";
+    const responseBuffer = Buffer.from(await response.arrayBuffer());
+
     if (contentType.includes("application/json")) {
-        // Job returned - need to poll for result
-        const jobResult = await response.json();
+        let jobResult: any;
+        try {
+            jobResult = JSON.parse(responseBuffer.toString("utf8"));
+        } catch (parseError) {
+            logger.error(
+                { ...logContext, stage: "prodia-json-parse" },
+                "Failed to parse JSON response from Prodia",
+                parseError
+            );
+            throw new Error("Prodia returned JSON but parsing failed");
+        }
+
         logger.info(
             { ...logContext, stage: "prodia-job-created" },
-            `Job created: ${JSON.stringify(jobResult)}`
+            `Prodia job response received`
         );
-        throw new Error(`Prodia returned job status instead of image. Job: ${JSON.stringify(jobResult)}`);
+        return resolveProdiaJobResult(jobResult, logContext);
     }
 
-    return Buffer.from(await response.arrayBuffer());
+    if (contentType.includes("multipart")) {
+        return extractImageFromMultipart(responseBuffer, contentType);
+    }
+
+    return responseBuffer;
+}
+
+async function compositeWithMask(
+    baseBuffer: Buffer,
+    inpaintBuffer: Buffer,
+    maskBuffer: Buffer,
+    logContext: ReturnType<typeof createLogContext>
+): Promise<Buffer> {
+    const [baseRaw, inpaintRaw] = await Promise.all([
+        sharp(baseBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+        sharp(inpaintBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+    ]);
+
+    const { data: baseData, info: baseInfo } = baseRaw;
+    const { data: inpaintData, info: inpaintInfo } = inpaintRaw;
+
+    if (baseInfo.width !== inpaintInfo.width || baseInfo.height !== inpaintInfo.height) {
+        throw new Error(`Composite size mismatch: base=${baseInfo.width}x${baseInfo.height}, inpaint=${inpaintInfo.width}x${inpaintInfo.height}`);
+    }
+
+    const maskPrepared = await sharp(maskBuffer)
+        .resize(baseInfo.width, baseInfo.height, { fit: "fill", kernel: "nearest" })
+        .grayscale()
+        .extractChannel(0)
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+    const { data: maskData } = maskPrepared;
+
+    const resultData = Buffer.alloc(baseData.length);
+    const pixelCount = baseInfo.width * baseInfo.height;
+
+    for (let i = 0; i < pixelCount; i++) {
+        const idx = i * 4;
+        const alpha = maskData[i] / 255;
+        const invAlpha = 1 - alpha;
+
+        resultData[idx] = Math.round(baseData[idx] * invAlpha + inpaintData[idx] * alpha);
+        resultData[idx + 1] = Math.round(baseData[idx + 1] * invAlpha + inpaintData[idx + 1] * alpha);
+        resultData[idx + 2] = Math.round(baseData[idx + 2] * invAlpha + inpaintData[idx + 2] * alpha);
+        resultData[idx + 3] = 255;
+    }
+
+    logger.info(
+        { ...logContext, stage: "composite" },
+        `Composite complete: ${baseInfo.width}x${baseInfo.height}`
+    );
+
+    return sharp(resultData, {
+        raw: {
+            width: baseInfo.width,
+            height: baseInfo.height,
+            channels: 4
+        }
+    })
+        .png()
+        .toBuffer();
 }
 
 /**
@@ -300,8 +535,8 @@ export async function removeObjects(input: ObjectRemovalInput): Promise<ObjectRe
         // Step 1: Get image dimensions and prepare image
         // PERFORMANCE: Single pipeline for metadata + resize + format conversion
         const imageMeta = await sharp(imageBuffer).metadata();
-        let width = imageMeta.width!;
-        let height = imageMeta.height!;
+        let width = imageMeta.width ?? 0;
+        let height = imageMeta.height ?? 0;
 
         logger.info(
             { ...logContext, stage: "image-metadata" },
@@ -332,7 +567,7 @@ export async function removeObjects(input: ObjectRemovalInput): Promise<ObjectRe
         height = prepared.info.height;
 
         // Step 2: Process mask (resize, expand, feather)
-        const { processedMask, coveragePercent } = await processMask(
+        const { processedMask, coveragePercent, whitePixels } = await processMask(
             maskBuffer,
             width,
             height,
@@ -347,15 +582,8 @@ export async function removeObjects(input: ObjectRemovalInput): Promise<ObjectRe
         if (coveragePercent < minCoveragePercent) {
             logger.warn(
                 { ...logContext, stage: "mask-validation" },
-                `Mask coverage too low: ${coveragePercent.toFixed(2)}% < ${minCoveragePercent}%`
+                `Mask coverage below recommended threshold: ${coveragePercent.toFixed(4)}% (min ${minCoveragePercent}%). Continuing anyway.`
             );
-            // Return original image if mask is essentially empty
-            return {
-                imageBuffer: preparedImage,
-                processingTimeMs: Date.now() - startTime,
-                maskCoveragePercent: coveragePercent,
-                imageDimensions: { width, height }
-            };
         }
 
         if (coveragePercent > maxCoveragePercent) {
@@ -365,21 +593,78 @@ export async function removeObjects(input: ObjectRemovalInput): Promise<ObjectRe
             );
         }
 
+        if (whitePixels === 0) {
+            throw new Error("Mask is empty - draw over the area you want to erase.");
+        }
+
         // Step 3: Call Prodia for inpainting
         const resultBuffer = await callProdiaInpaint(preparedImage, processedMask, logContext);
+
+        // Ensure Prodia output aligns to prepared dimensions
+        let alignedInpaint = resultBuffer;
+        const inpaintMeta = await sharp(resultBuffer).metadata();
+        if (inpaintMeta.width !== width || inpaintMeta.height !== height) {
+            logger.warn(
+                { ...logContext, stage: "inpaint-resize" },
+                `Prodia output size mismatch: ${inpaintMeta.width}x${inpaintMeta.height} -> ${width}x${height}`
+            );
+            alignedInpaint = await sharp(resultBuffer)
+                .resize(width, height, { fit: "fill" })
+                .png()
+                .toBuffer();
+        }
+
+        let baseForComposite = preparedImage;
+        let maskForComposite = processedMask;
+        let outputWidth = width;
+        let outputHeight = height;
+
+        // Restore original resolution if we had to downscale for Prodia
+        if (needsResize) {
+            const fullRes = await sharp(imageBuffer)
+                .rotate()
+                .png()
+                .toBuffer({ resolveWithObject: true });
+
+            baseForComposite = fullRes.data;
+            outputWidth = fullRes.info.width;
+            outputHeight = fullRes.info.height;
+
+            alignedInpaint = await sharp(alignedInpaint)
+                .resize(outputWidth, outputHeight, { fit: "fill" })
+                .png()
+                .toBuffer();
+
+            maskForComposite = await sharp(processedMask)
+                .resize(outputWidth, outputHeight, { fit: "fill", kernel: "nearest" })
+                .png()
+                .toBuffer();
+
+            logger.info(
+                { ...logContext, stage: "restore-resolution" },
+                `Upscaled inpaint + mask to original resolution ${outputWidth}x${outputHeight}`
+            );
+        }
+
+        const finalBuffer = await compositeWithMask(
+            baseForComposite,
+            alignedInpaint,
+            maskForComposite,
+            logContext
+        );
 
         const processingTimeMs = Date.now() - startTime;
 
         logger.info(
             { ...logContext, stage: "complete" },
-            `Object removal complete: time=${processingTimeMs}ms, coverage=${coveragePercent.toFixed(2)}%, dimensions=${width}x${height}, output=${resultBuffer.length} bytes`
+            `Object removal complete: time=${processingTimeMs}ms, coverage=${coveragePercent.toFixed(2)}%, dimensions=${outputWidth}x${outputHeight}, output=${finalBuffer.length} bytes`
         );
 
         return {
-            imageBuffer: resultBuffer,
+            imageBuffer: finalBuffer,
             processingTimeMs,
             maskCoveragePercent: coveragePercent,
-            imageDimensions: { width, height }
+            imageDimensions: { width: outputWidth, height: outputHeight }
         };
 
     } catch (error) {

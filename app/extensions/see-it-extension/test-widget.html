@@ -2,8 +2,154 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>See It Widget - Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+  <title>See It Widget - Premium Test</title>
+  <link rel="stylesheet" href="assets/see-it-modal.css">
+  <style>
+    /* Simulation of a Hostile Theme */
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: 'Times New Roman', serif; /* Hostile font */
+      background: #f4f4f4;
+      -webkit-font-smoothing: auto;
+    }
+    
+    h1 { font-style: italic; }
+    
+    /* Simulate a Shopify product page container */
+    .product-page-simulation {
+      max-width: 400px;
+      margin: 40px auto;
+      background: white;
+      padding: 20px;
+      border: 1px solid #ddd;
+    }
+    
+    .hostile-button-reset button {
+       /* Simulating a theme that breaks buttons */
+       all: unset; 
+    }
+  </style>
+</head>
+<body class="hostile-button-reset">
+
+  <div class="product-page-simulation">
+    <h1>Product Page (Theme)</h1>
+    <p>This mimics a merchant theme. The widget below should look Premium and unaffected by this font.</p>
+    
+    <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+
+    <!-- WIDGET START (Copied from see-it-button.liquid) -->
+    <div class="see-it-widget-hook">
+      <div class="see-it-widget-content">
+        <div class="see-it-widget-text">
+          <span class="see-it-widget-title">Try it in Your Home</span>
+          <span class="see-it-widget-description">Get a real view of this in your space.</span>
+        </div>
+      </div>
+      
+      <!-- Widget CTA -->
+      <button
+        id="see-it-trigger"
+        class="see-it-btn-primary-pill"
+        data-product-title="Example Sofa"
+        data-product-price="$999.00"
+        data-product-image="https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80"
+        type="button"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" stroke="currentColor" stroke-width="2" fill="none"/>
+          <path d="M12 2 L12 22" stroke="currentColor" stroke-width="2"/>
+          <path d="M22 7 L12 12 L2 7" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        See it in your room
+      </button>
+    </div>
+    <!-- WIDGET END -->
+
+  </div>
+
+  <!-- MODAL MARKUP (Copied from see-it-button.liquid) -->
+  <div id="see-it-modal" class="see-it-modal hidden">
+    <div class="see-it-modal-content">
+      <div id="see-it-global-error" class="see-it-hidden"></div>
+
+      <!-- ENTRY SCREEN -->
+      <div id="see-it-screen-entry" class="see-it-screen see-it-screen-entry active">
+         <div class="see-it-header">
+            <button class="see-it-btn-icon" id="see-it-close-entry" aria-label="Close">
+               <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+            <span class="see-it-header-title">PREVIEW</span>
+            <div style="width: 40px;"></div>
+         </div>
+
+         <div class="see-it-entry-content">
+            <div class="see-it-product-card-compact">
+               <img src="https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80" alt="Sofa">
+               <div class="see-it-product-info-compact">
+                  <p class="see-it-product-title-compact">Example Sofa</p>
+                  <p class="see-it-product-price-compact">$999.00</p>
+               </div>
+            </div>
+
+            <h1 class="see-it-entry-title">See it in your space</h1>
+            <p class="see-it-entry-description">Take a photo of your room to see how this looks instantly.</p>
+
+            <div class="see-it-entry-actions">
+               <button class="see-it-btn-primary-pill" id="see-it-btn-take-photo">
+                  <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/></svg>
+                  Take Photo
+               </button>
+               <button class="see-it-btn-outline-pill" id="see-it-btn-upload">Upload</button>
+            </div>
+         </div>
+      </div>
+
+      <!-- PREPARE SCREEN -->
+      <div id="see-it-screen-prepare" class="see-it-screen see-it-screen-prepare">
+         <div class="see-it-header">
+            <button class="see-it-btn-icon" id="see-it-back-prepare" aria-label="Back">
+               <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <span class="see-it-header-title">PREPARE ROOM</span>
+            <div style="width: 40px;"></div>
+         </div>
+
+         <div class="see-it-prepare-room-container">
+            <img id="see-it-room-preview" class="see-it-room-preview" src="" alt="Room">
+            <canvas id="see-it-mask-canvas" class="see-it-mask-canvas"></canvas>
+         </div>
+
+         <div class="see-it-prepare-bottom">
+            <p style="text-align: center; color: var(--si-muted); font-size: 14px; margin: 0;">Draw over objects to remove them.</p>
+            <div class="see-it-prepare-actions-row">
+               <button class="see-it-btn-outline-pill" id="see-it-undo-btn" disabled>Undo</button>
+               <button class="see-it-btn-outline-pill" id="see-it-remove-btn">Erase</button>
+               <button class="see-it-btn-primary-pill" id="see-it-confirm-room">Continue</button>
+            </div>
+         </div>
+      </div>
+      
+      <!-- Placeholder for other screens (abbreviated for test harness) -->
+  </div>
+
+  <script src="assets/see-it-modal.js"></script>
+  <script>
+    // Simple wire-up for the harness to mimic the real extension flow
+    document.getElementById('see-it-trigger').addEventListener('click', function() {
+       document.getElementById('see-it-modal').classList.remove('hidden');
+       document.body.style.overflow = 'hidden';
+    });
+    
+    document.getElementById('see-it-close-entry').addEventListener('click', function() {
+       document.getElementById('see-it-modal').classList.add('hidden');
+       document.body.style.overflow = '';
+    });
+  </script>
+</body>
+</html>
   <link rel="stylesheet" href="assets/see-it-modal.css">
   <style>
     body {

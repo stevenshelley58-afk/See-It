@@ -1133,8 +1133,21 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- Remove Button (Erase) ---
     const handleRemove = async () => {
         // Guard conditions - check state, not button disabled state (could be either mobile or desktop)
-        if (state.isCleaningUp || justFinishedDrawing || !state.sessionId || strokes.length === 0 || !state.uploadComplete) return;
+        if (state.isCleaningUp || justFinishedDrawing) return;
+        if (!state.sessionId) {
+            showError('Session expired, please re-upload your room image.');
+            return;
+        }
+        if (!state.uploadComplete) {
+            showError('Upload still finishing. Please wait a moment.');
+            return;
+        }
+        if (strokes.length === 0) {
+            showError('Draw over the object you want to remove.');
+            return;
+        }
 
+        resetError();
         state.isCleaningUp = true;
         if (cleanupLoading) cleanupLoading.classList.remove('hidden');
         // Disable both mobile and desktop buttons
@@ -1163,10 +1176,9 @@ document.addEventListener('DOMContentLoaded', function () {
             state.cleanedRoomImageUrl = newImageUrl;
             console.log('[See It] Setting new image URL:', newImageUrl.substring(0, 80) + '...');
 
-            // Force browser to reload image by adding cache-buster
-            // GCS signed URLs always contain '?', so use '&' to append cache buster
-            const cacheBuster = newImageUrl.includes('?') ? `&_cb=${Date.now()}` : `?_cb=${Date.now()}`;
-            const urlWithCacheBuster = newImageUrl + cacheBuster;
+            // IMPORTANT: Don't append extra query params to signed URLs or the signature will be invalid.
+            // Each cleanup result already returns a unique signed URL, so setting it directly busts caches.
+            const urlWithCacheBuster = newImageUrl;
 
             console.log('[See It] Setting image sources to:', urlWithCacheBuster.substring(0, 100) + '...');
             
