@@ -1006,22 +1006,46 @@ document.addEventListener('DOMContentLoaded', function () {
             const mask = generateMask();
             if (!mask) throw new Error('Failed to generate mask');
 
+            console.log('[See It] Sending cleanup request...');
             const result = await cleanupWithMask(mask);
-            state.cleanedRoomImageUrl = result.cleaned_room_image_url || result.cleanedRoomImageUrl;
+            console.log('[See It] Cleanup response:', result);
+            
+            const newImageUrl = result.cleaned_room_image_url || result.cleanedRoomImageUrl;
+            if (!newImageUrl) {
+                throw new Error('No cleaned image URL in response');
+            }
+            
+            state.cleanedRoomImageUrl = newImageUrl;
+            console.log('[See It] Setting new image URL:', newImageUrl.substring(0, 80) + '...');
+
+            // Force browser to reload image by adding cache-buster if needed
+            const cacheBuster = newImageUrl.includes('?') ? '' : `?t=${Date.now()}`;
+            const urlWithCacheBuster = newImageUrl + cacheBuster;
 
             if (roomPreview) {
-                roomPreview.src = state.cleanedRoomImageUrl;
-                roomPreview.onload = initCanvas;
+                roomPreview.src = urlWithCacheBuster;
+                roomPreview.onload = () => {
+                    console.log('[See It] roomPreview loaded new image');
+                    initCanvas();
+                };
             }
             if (roomPreviewDesktop) {
-                roomPreviewDesktop.src = state.cleanedRoomImageUrl;
-                roomPreviewDesktop.onload = initCanvas;
+                roomPreviewDesktop.src = urlWithCacheBuster;
+                roomPreviewDesktop.onload = () => {
+                    console.log('[See It] roomPreviewDesktop loaded new image');
+                    initCanvas();
+                };
             }
-            if (roomImage) roomImage.src = state.cleanedRoomImageUrl;
-            if (roomImageDesktop) roomImageDesktop.src = state.cleanedRoomImageUrl;
+            if (roomImage) roomImage.src = urlWithCacheBuster;
+            if (roomImageDesktop) roomImageDesktop.src = urlWithCacheBuster;
 
             strokes = [];
-            ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+            if (maskCanvas) ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+            if (maskCanvasDesktop) {
+                const desktopCtx = maskCanvasDesktop.getContext('2d');
+                desktopCtx?.clearRect(0, 0, maskCanvasDesktop.width, maskCanvasDesktop.height);
+            }
+            console.log('[See It] Cleanup complete, strokes cleared');
         } catch (err) {
             console.error('[See It] Cleanup error:', err);
             strokes = strokesBackup;
