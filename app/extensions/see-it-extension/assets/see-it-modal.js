@@ -357,34 +357,67 @@ document.addEventListener('DOMContentLoaded', function () {
     let canvasInitialized = false;
 
     const initCanvas = () => {
-        // Get the preview that has a loaded image (check BOTH, not just visible one)
-        // This avoids race conditions with CSS visibility during screen transitions
+        // CRITICAL: Use stored normalized dimensions (bulletproof matching)
+        // Don't rely on preview image naturalWidth/Height which may have rounding/EXIF issues
+        if (!state.normalizedWidth || !state.normalizedHeight) {
+            console.error('[See It] Canvas init: normalized dimensions not stored, falling back to preview');
+            // Fallback: Get the preview that has a loaded image (check BOTH, not just visible one)
+            let sourcePreview = null;
+            if (roomPreview && roomPreview.complete && roomPreview.naturalWidth > 0) {
+                sourcePreview = roomPreview;
+            } else if (roomPreviewDesktop && roomPreviewDesktop.complete && roomPreviewDesktop.naturalWidth > 0) {
+                sourcePreview = roomPreviewDesktop;
+            }
+
+            // If no image loaded yet, set onload on BOTH previews and wait
+            if (!sourcePreview) {
+                console.log('[See It] Canvas init: waiting for image to load...');
+                if (roomPreview) roomPreview.onload = initCanvas;
+                if (roomPreviewDesktop) roomPreviewDesktop.onload = initCanvas;
+                return;
+            }
+
+            const natW = sourcePreview.naturalWidth;
+            const natH = sourcePreview.naturalHeight;
+
+            if (natW === 0 || natH === 0) {
+                console.error('[See It] Canvas init: image has zero dimensions');
+                return;
+            }
+
+            // Store fallback dimensions for future use
+            state.normalizedWidth = natW;
+            state.normalizedHeight = natH;
+            activePreviewEl = sourcePreview;
+        }
+
+        // Use stored normalized dimensions (bulletproof)
+        const natW = state.normalizedWidth;
+        const natH = state.normalizedHeight;
+
+        console.log('[See It] Canvas init using stored dimensions:', natW, 'x', natH);
+
+        // Validate preview matches stored dimensions (sanity check)
         let sourcePreview = null;
         if (roomPreview && roomPreview.complete && roomPreview.naturalWidth > 0) {
             sourcePreview = roomPreview;
         } else if (roomPreviewDesktop && roomPreviewDesktop.complete && roomPreviewDesktop.naturalWidth > 0) {
             sourcePreview = roomPreviewDesktop;
         }
-
-        // If no image loaded yet, set onload on BOTH previews and wait
-        if (!sourcePreview) {
-            console.log('[See It] Canvas init: waiting for image to load...');
-            if (roomPreview) roomPreview.onload = initCanvas;
-            if (roomPreviewDesktop) roomPreviewDesktop.onload = initCanvas;
-            return;
+        
+        if (sourcePreview) {
+            const previewW = sourcePreview.naturalWidth;
+            const previewH = sourcePreview.naturalHeight;
+            if (Math.abs(previewW - natW) > 1 || Math.abs(previewH - natH) > 1) {
+                console.warn('[See It] Canvas init: preview dimensions mismatch!', {
+                    stored: `${natW}x${natH}`,
+                    preview: `${previewW}x${previewH}`
+                });
+            }
+            activePreviewEl = sourcePreview;
         }
 
-        const natW = sourcePreview.naturalWidth;
-        const natH = sourcePreview.naturalHeight;
-
-        if (natW === 0 || natH === 0) {
-            console.error('[See It] Canvas init: image has zero dimensions');
-            return;
-        }
-
-        activePreviewEl = sourcePreview;
-
-        // Initialize BOTH canvases to same dimensions (avoids mobile/desktop switching issues)
+        // Initialize BOTH canvases to stored normalized dimensions (bulletproof matching)
         if (maskCanvas) {
             maskCanvas.width = natW;
             maskCanvas.height = natH;
@@ -1204,6 +1237,11 @@ document.addEventListener('DOMContentLoaded', function () {
             // Normalize aspect ratio to Gemini-compatible ratio
             const normalized = await normalizeRoomImage(file);
             state.chosenRatio = normalized.ratio; // Store for debugging
+            
+            // CRITICAL: Store exact normalized dimensions for bulletproof mask matching
+            state.normalizedWidth = normalized.width;
+            state.normalizedHeight = normalized.height;
+            console.log('[See It] Stored normalized dimensions:', normalized.width, 'x', normalized.height);
 
             // Use normalized blob for preview
             const normalizedDataUrl = URL.createObjectURL(normalized.blob);
@@ -1234,7 +1272,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             showScreen('prepare');
             await loadPromise;
-            console.log('[See It] Image loaded, initializing canvas...');
+            console.log('[See It] Image loaded, initializing canvas with stored dimensions:', state.normalizedWidth, 'x', state.normalizedHeight);
             initCanvas();
 
             // Upload normalized image
@@ -1337,6 +1375,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 strokeCount: strokes.length,
                 canvasInitialized,
                 ctxExists: !!ctx,
+                normalizedDimensions: state.normalizedWidth && state.normalizedHeight ? `${state.normalizedWidth}x${state.normalizedHeight}` : 'not stored',
                 maskCanvasSize: maskCanvas ? `${maskCanvas.width}x${maskCanvas.height}` : 'none',
                 maskCanvasDesktopSize: maskCanvasDesktop ? `${maskCanvasDesktop.width}x${maskCanvasDesktop.height}` : 'none'
             });
