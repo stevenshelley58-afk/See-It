@@ -915,6 +915,7 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const cleanupWithMask = async (maskDataUrl) => {
+        console.log('[See It] Calling cleanup endpoint with sessionId:', state.sessionId);
         const res = await fetch('/apps/see-it/room/cleanup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -923,11 +924,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 mask_data_url: maskDataUrl
             })
         });
+        console.log('[See It] Cleanup response status:', res.status, res.statusText);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
+            console.error('[See It] Cleanup error response:', err);
             throw new Error(err.message || 'Cleanup failed');
         }
-        return res.json();
+        const data = await res.json();
+        console.log('[See It] Cleanup response data:', {
+            hasCleanedUrl: !!(data.cleaned_room_image_url || data.cleanedRoomImageUrl),
+            urlPreview: (data.cleaned_room_image_url || data.cleanedRoomImageUrl || 'MISSING')?.substring(0, 100)
+        });
+        return data;
     };
 
     const fetchPreparedProduct = async (productId) => {
@@ -1151,22 +1159,32 @@ document.addEventListener('DOMContentLoaded', function () {
             const cacheBuster = newImageUrl.includes('?') ? `&_cb=${Date.now()}` : `?_cb=${Date.now()}`;
             const urlWithCacheBuster = newImageUrl + cacheBuster;
 
+            console.log('[See It] Setting image sources to:', urlWithCacheBuster.substring(0, 100) + '...');
+            
             if (roomPreview) {
-                roomPreview.src = urlWithCacheBuster;
+                roomPreview.onerror = (e) => console.error('[See It] roomPreview FAILED to load:', e);
                 roomPreview.onload = () => {
-                    console.log('[See It] roomPreview loaded new image');
+                    console.log('[See It] roomPreview loaded new image successfully');
                     initCanvas();
                 };
+                roomPreview.src = urlWithCacheBuster;
             }
             if (roomPreviewDesktop) {
-                roomPreviewDesktop.src = urlWithCacheBuster;
+                roomPreviewDesktop.onerror = (e) => console.error('[See It] roomPreviewDesktop FAILED to load:', e);
                 roomPreviewDesktop.onload = () => {
-                    console.log('[See It] roomPreviewDesktop loaded new image');
+                    console.log('[See It] roomPreviewDesktop loaded new image successfully');
                     initCanvas();
                 };
+                roomPreviewDesktop.src = urlWithCacheBuster;
             }
-            if (roomImage) roomImage.src = urlWithCacheBuster;
-            if (roomImageDesktop) roomImageDesktop.src = urlWithCacheBuster;
+            if (roomImage) {
+                roomImage.onerror = (e) => console.error('[See It] roomImage FAILED to load:', e);
+                roomImage.src = urlWithCacheBuster;
+            }
+            if (roomImageDesktop) {
+                roomImageDesktop.onerror = (e) => console.error('[See It] roomImageDesktop FAILED to load:', e);
+                roomImageDesktop.src = urlWithCacheBuster;
+            }
 
             strokes = [];
             if (maskCanvas) ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);

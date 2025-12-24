@@ -1124,6 +1124,13 @@ html.see-it-modal-open body {
   transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
   padding: 0;
   -webkit-tap-highlight-color: transparent;
+  position: relative;
+  overflow: visible;
+}
+
+.see-it-brush-size-btn-mobile > * {
+  position: relative;
+  z-index: 1;
 }
 
 .see-it-brush-size-btn-mobile:active {
@@ -2197,6 +2204,8 @@ html.see-it-modal-open body {
   .see-it-brush-size-btn {
     width: 2.5rem;
     height: 2.5rem;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
     border-radius: 50%;
     border: 2px solid #e5e5e5;
     background: white;
@@ -2207,6 +2216,13 @@ html.see-it-modal-open body {
     transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
     padding: 0;
     -webkit-tap-highlight-color: transparent;
+    position: relative;
+    overflow: visible;
+  }
+  
+  .see-it-brush-size-btn > * {
+    position: relative;
+    z-index: 1;
   }
 
   .see-it-brush-size-btn:hover {
@@ -2225,8 +2241,10 @@ html.see-it-modal-open body {
     min-height: 0.5rem;
     border-radius: 50%;
     background: #1a1a1a;
-    display: block;
+    display: block !important;
     flex-shrink: 0;
+    visibility: visible !important;
+    opacity: 1 !important;
   }
 
   .see-it-brush-size-dot-medium {
@@ -2236,8 +2254,10 @@ html.see-it-modal-open body {
     min-height: 1rem;
     border-radius: 50%;
     background: #1a1a1a;
-    display: block;
+    display: block !important;
     flex-shrink: 0;
+    visibility: visible !important;
+    opacity: 1 !important;
   }
 
   .see-it-brush-size-dot-large {
@@ -2247,8 +2267,10 @@ html.see-it-modal-open body {
     min-height: 1.5rem;
     border-radius: 50%;
     background: #1a1a1a;
-    display: block;
+    display: block !important;
     flex-shrink: 0;
+    visibility: visible !important;
+    opacity: 1 !important;
   }
 
   /* Update desktop prepare controls spacing */
