@@ -8,17 +8,20 @@ import { getRequestId } from "../utils/request-context.server";
 function getCorsHeaders(shopDomain: string | null): Record<string, string> {
     // Only set CORS origin if we have a valid shop domain
     // Empty origin or "*" would be a security risk
-    if (!shopDomain) {
-        return {
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        };
-    }
-    return {
-        "Access-Control-Allow-Origin": `https://${shopDomain}`,
+    const headers: Record<string, string> = {
         "Access-Control-Allow-Methods": "GET, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        // Prevent caching to ensure fresh signed URLs are always returned
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
     };
+    
+    if (shopDomain) {
+        headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
+    }
+    
+    return headers;
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {

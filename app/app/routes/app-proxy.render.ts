@@ -1,4 +1,4 @@
-// Render endpoint - v1.0.18 - Fixed to allow product images without pre-prepared assets
+// Render endpoint - v1.0.19 - Added Cache-Control headers, imageKey storage, and immediate completion response
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -12,17 +12,21 @@ import { getRequestId } from "../utils/request-context.server";
 function getCorsHeaders(shopDomain: string | null): Record<string, string> {
     // Only set CORS origin if we have a valid shop domain
     // Empty origin or "*" would be a security risk
-    if (!shopDomain) {
-        return {
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        };
-    }
-    return {
-        "Access-Control-Allow-Origin": `https://${shopDomain}`,
+    const headers: Record<string, string> = {
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        // CRITICAL: Prevent caching of render responses
+        // Without this, browsers/proxies may cache responses and cause stale data
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
     };
+    
+    if (shopDomain) {
+        headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
+    }
+    
+    return headers;
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -215,7 +219,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         // Call Gemini directly - no more Cloud Run!
         // Pass custom product instructions if available
-        const imageUrl = await compositeScene(
+        const result = await compositeScene(
             productImageUrl,
             roomImageUrl,
             {
@@ -229,9 +233,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             productAsset?.renderInstructions || undefined
         );
 
+        // Store both URL and key - key enables URL regeneration when signed URL expires
         await prisma.renderJob.update({
             where: { id: job.id },
-            data: { status: "completed", imageUrl: imageUrl, completedAt: new Date() }
+            data: { 
+                status: "completed", 
+                imageUrl: result.imageUrl,
+                imageKey: result.imageKey,
+                completedAt: new Date() 
+            }
         });
 
         // Increment quota only after successful render
@@ -241,6 +251,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             { ...shopLogContext, stage: "complete" },
             `Render completed successfully: jobId=${job.id}`
         );
+
+        // Return job_id with status so client can skip polling if already complete
+        return json({ 
+            job_id: job.id,
+            status: "completed",
+            image_url: result.imageUrl,
+            imageUrl: result.imageUrl
+        }, { headers: corsHeaders });
     } catch (error) {
         logger.error(
             { ...shopLogContext, stage: "composite-error" },
@@ -257,5 +275,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
     }
 
-    return json({ job_id: job.id });
+    // If we get here, the job failed - still return job_id so client can poll for error details
+    return json({ job_id: job.id, status: "failed" }, { headers: corsHeaders });
 };

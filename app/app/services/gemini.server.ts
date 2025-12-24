@@ -291,7 +291,12 @@ async function callGemini(
             }
         }
 
-        throw new Error("No image in response");
+        // Log response structure for debugging
+        logger.error(
+            { ...context, stage: "response-parse-failed" },
+            `No image in Gemini response. Response structure: candidates=${!!candidates}, firstCandidate=${!!candidates?.[0]}, content=${!!candidates?.[0]?.content}, parts=${JSON.stringify(candidates?.[0]?.content?.parts?.map((p: any) => Object.keys(p)) || 'none')}`
+        );
+        throw new Error("No image in response - Gemini may have returned text only or blocked the request");
     } catch (error: any) {
         const duration = Date.now() - startTime;
 
@@ -663,10 +668,23 @@ export async function cleanupRoom(
             .png()
             .toBuffer();
 
+        // Calculate mask coverage to detect empty/invalid masks
+        const maskStats = await sharp(editRegionMask).stats();
+        const meanIntensity = maskStats.channels[0]?.mean || 0;
+        const maskCoveragePercent = (meanIntensity / 255) * 100;
+        
         logger.info(
             { ...logContext, stage: "edit-region-created" },
-            `editRegionMask: expansion=${MASK_EXPANSION_PX}px, feather=${MASK_FEATHER_SIGMA}px`
+            `editRegionMask: expansion=${MASK_EXPANSION_PX}px, feather=${MASK_FEATHER_SIGMA}px, coverage=${maskCoveragePercent.toFixed(2)}%`
         );
+
+        // Warn if mask coverage is very low (might indicate empty strokes)
+        if (maskCoveragePercent < 0.1) {
+            logger.warn(
+                { ...logContext, stage: "mask-validation" },
+                `Mask coverage very low (${maskCoveragePercent.toFixed(2)}%) - strokes may not be captured correctly`
+            );
+        }
 
         // ============================================================================
         // STEP 4: Compute closest Gemini-supported aspect ratio
@@ -712,7 +730,7 @@ STRICT CONSTRAINTS:
         // ============================================================================
         const geminiStart = Date.now();
         const base64Data = await callGemini(inpaintPrompt, [sourceRoomBuffer, editRegionMask], {
-            model: IMAGE_MODEL_FAST,
+            model: IMAGE_MODEL_PRO, // Use PRO model for room cleanup per config (MODEL_FOR_ROOM_CLEANUP)
             aspectRatio: closestRatio.label, // Pass computed ratio to ensure Gemini output matches
             logContext
         });
@@ -778,9 +796,11 @@ STRICT CONSTRAINTS:
         
         // Create the composite mask (edit region determines where Gemini output is used)
         // Mask should already be correct size, but ensure it matches
+        // IMPORTANT: Use .extractChannel(0) to guarantee single-channel output for pixel blending
         const compositeMask = await sharp(editRegionMask)
             .resize(roomWidth, roomHeight, { fit: 'fill', kernel: 'nearest' })
             .grayscale()
+            .extractChannel(0) // Ensure single channel for correct pixel indexing
             .toBuffer();
 
         // Get raw pixel data for proper alpha compositing
@@ -851,6 +871,11 @@ STRICT CONSTRAINTS:
     }
 }
 
+export interface CompositeResult {
+    imageUrl: string;
+    imageKey: string;
+}
+
 export async function compositeScene(
     preparedProductImageUrl: string,
     roomImageUrl: string,
@@ -858,7 +883,7 @@ export async function compositeScene(
     stylePreset: string = 'neutral',
     requestId: string = "composite",
     productInstructions?: string
-): Promise<string> {
+): Promise<CompositeResult> {
     const logContext = createLogContext("render", requestId, "start", {});
     logger.info(logContext, `Processing scene composite with Gemini${productInstructions ? ' (with custom instructions)' : ''}`);
 
@@ -1052,9 +1077,11 @@ If there is any conflict between realism assumptions and the product-specific in
         }
 
         // Composite lock: outside edit region, keep guide composite EXACTLY.
+        // IMPORTANT: Use .extractChannel(0) to guarantee single-channel output for pixel blending
         const compositeMask = await sharp(editRegionMask)
             .resize(roomWidth, roomHeight, { fit: 'fill', kernel: 'nearest' })
             .grayscale()
+            .extractChannel(0) // Ensure single channel for correct pixel indexing
             .toBuffer();
 
         const [baseRaw, gemRaw, maskRaw] = await Promise.all([
@@ -1094,7 +1121,7 @@ If there is any conflict between realism assumptions and the product-specific in
         const key = `composite/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
         const url = await uploadToGCS(key, lockedComposite, 'image/jpeg', logContext);
 
-        return url;
+        return { imageUrl: url, imageKey: key };
     } finally {
         // Explicit cleanup in finally block to help garbage collector
         productBuffer = null;

@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.26';
+    const VERSION = '1.0.28';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // ============================================================================
@@ -217,6 +217,38 @@ document.addEventListener('DOMContentLoaded', function () {
     const btnNewRoom = $('see-it-new-room');
     const btnNewRoomDesktop = $('see-it-new-room-desktop');
     const errorDiv = $('see-it-global-error') || $('see-it-error');
+
+    // Add load/error tracking for result images (debugging)
+    if (resultImage) {
+        resultImage.addEventListener('load', () => {
+            console.log('[See It] Result image loaded successfully (mobile):', { 
+                src: resultImage.src?.substring(0, 80),
+                naturalWidth: resultImage.naturalWidth,
+                naturalHeight: resultImage.naturalHeight
+            });
+        });
+        resultImage.addEventListener('error', (e) => {
+            console.error('[See It] Result image FAILED to load (mobile):', { 
+                src: resultImage.src?.substring(0, 80),
+                error: e 
+            });
+        });
+    }
+    if (resultImageDesktop) {
+        resultImageDesktop.addEventListener('load', () => {
+            console.log('[See It] Result image loaded successfully (desktop):', { 
+                src: resultImageDesktop.src?.substring(0, 80),
+                naturalWidth: resultImageDesktop.naturalWidth,
+                naturalHeight: resultImageDesktop.naturalHeight
+            });
+        });
+        resultImageDesktop.addEventListener('error', (e) => {
+            console.error('[See It] Result image FAILED to load (desktop):', { 
+                src: resultImageDesktop.src?.substring(0, 80),
+                error: e 
+            });
+        });
+    }
 
     // Email/Saved Rooms modals
     const emailModal = $('see-it-email-modal');
@@ -499,9 +531,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (btnUndo) btnUndo.disabled = !hasStrokes;
         if (btnClear) btnClear.disabled = !hasStrokes;
         if (btnRemove) {
-            // Erase button is enabled when there are strokes (for visual feedback)
-            // But actual remove action still requires uploadComplete
-            btnRemove.disabled = !hasStrokes;
+            // Erase button requires strokes AND upload complete (same logic as desktop)
+            const canRemoveMobile = hasStrokes && !state.isCleaningUp && state.uploadComplete;
+            btnRemove.disabled = !canRemoveMobile;
         }
         
         // Update Skip/Continue button text
@@ -992,13 +1024,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Remove Button (Erase) ---
     const handleRemove = async () => {
-        if (btnRemove.disabled || justFinishedDrawing || !state.sessionId || strokes.length === 0 || !state.uploadComplete) return;
+        // Guard conditions - check state, not button disabled state (could be either mobile or desktop)
+        if (state.isCleaningUp || justFinishedDrawing || !state.sessionId || strokes.length === 0 || !state.uploadComplete) return;
 
         state.isCleaningUp = true;
         if (cleanupLoading) cleanupLoading.classList.remove('hidden');
-        btnRemove.disabled = true;
-        btnUndo && (btnUndo.disabled = true);
-        btnClear && (btnClear.disabled = true);
+        // Disable both mobile and desktop buttons
+        if (btnRemove) btnRemove.disabled = true;
+        if (btnRemoveDesktop) btnRemoveDesktop.disabled = true;
+        if (btnUndo) btnUndo.disabled = true;
+        if (btnUndoDesktop) btnUndoDesktop.disabled = true;
+        if (btnClear) btnClear.disabled = true;
+        if (btnClearDesktop) btnClearDesktop.disabled = true;
 
         const strokesBackup = JSON.parse(JSON.stringify(strokes));
 
@@ -1018,8 +1055,9 @@ document.addEventListener('DOMContentLoaded', function () {
             state.cleanedRoomImageUrl = newImageUrl;
             console.log('[See It] Setting new image URL:', newImageUrl.substring(0, 80) + '...');
 
-            // Force browser to reload image by adding cache-buster if needed
-            const cacheBuster = newImageUrl.includes('?') ? '' : `?t=${Date.now()}`;
+            // Force browser to reload image by adding cache-buster
+            // GCS signed URLs always contain '?', so use '&' to append cache buster
+            const cacheBuster = newImageUrl.includes('?') ? `&_cb=${Date.now()}` : `?_cb=${Date.now()}`;
             const urlWithCacheBuster = newImageUrl + cacheBuster;
 
             if (roomPreview) {
@@ -1155,23 +1193,55 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         };
 
+        console.log('[See It] Sending render request:', { 
+            sessionId: state.sessionId, 
+            productId: state.productId,
+            placement: payload.placement 
+        });
+        
         fetch('/apps/see-it/render', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         })
-        .then(r => r.json())
+        .then(r => {
+            console.log('[See It] Render response status:', r.status);
+            return r.json();
+        })
         .then(data => {
+            console.log('[See It] Render response data:', { status: data.status, job_id: data.job_id, hasUrl: !!data.imageUrl });
+            
             if (data.status === 'failed') {
+                console.error('[See It] Render failed:', { error: data.error, message: data.message });
                 showError(data.error === 'room_not_found' ? 'Session expired, please re-upload' : 'Render failed');
                 if (statusTextContainer) statusTextContainer.classList.add('hidden');
                 btnShare?.parentElement?.classList.remove('hidden');
                 return;
             }
-            if (data.job_id) pollStatus(data.job_id);
-            else throw new Error('No job ID');
+            // Handle immediate completion (no polling needed)
+            if (data.status === 'completed' && data.imageUrl) {
+                console.log('[See It] Immediate completion - no polling needed');
+                if (statusText) statusText.textContent = 'Done!';
+                if (statusTextContainer) statusTextContainer.classList.add('hidden');
+                // Add cache-buster to ensure fresh image
+                const cacheBuster = data.imageUrl.includes('?') ? `&_cb=${Date.now()}` : `?_cb=${Date.now()}`;
+                const imageUrlWithCacheBuster = data.imageUrl + cacheBuster;
+                console.log('[See It] Setting result image (immediate):', imageUrlWithCacheBuster.substring(0, 80) + '...');
+                if (resultImage) resultImage.src = imageUrlWithCacheBuster;
+                if (resultImageDesktop) resultImageDesktop.src = imageUrlWithCacheBuster;
+                btnShare?.parentElement?.classList.remove('hidden');
+                btnShareDesktop?.parentElement?.classList.remove('hidden');
+                return;
+            }
+            if (data.job_id) {
+                console.log('[See It] Starting poll for job:', data.job_id);
+                pollStatus(data.job_id);
+            } else {
+                throw new Error('No job ID');
+            }
         })
         .catch(err => {
+            console.error('[See It] Render request error:', err);
             showError('Error: ' + err.message);
             if (statusTextContainer) statusTextContainer.classList.add('hidden');
             btnShare?.parentElement?.classList.remove('hidden');
@@ -1195,23 +1265,39 @@ document.addEventListener('DOMContentLoaded', function () {
             fetch(`/apps/see-it/render/${jobId}`)
             .then(r => r.json())
             .then(data => {
+                console.log('[See It] Poll response:', { attempt: attempts, status: data.status, hasUrl: !!data.imageUrl, jobId });
                 if (data.status === 'completed') {
                     clearInterval(interval);
                     if (statusText) statusText.textContent = 'Done!';
                     if (statusTextContainer) statusTextContainer.classList.add('hidden');
-                    if (resultImage && data.imageUrl) resultImage.src = data.imageUrl;
-                    if (resultImageDesktop && data.imageUrl) resultImageDesktop.src = data.imageUrl;
+                    // CRITICAL: Add cache-buster to ensure browser loads fresh image
+                    // Without this, browser may show cached image from previous render
+                    if (data.imageUrl) {
+                        const cacheBuster = data.imageUrl.includes('?') ? `&_cb=${Date.now()}` : `?_cb=${Date.now()}`;
+                        const imageUrlWithCacheBuster = data.imageUrl + cacheBuster;
+                        console.log('[See It] Setting result image:', { 
+                            url: imageUrlWithCacheBuster.substring(0, 80) + '...',
+                            hasResultImage: !!resultImage,
+                            hasResultImageDesktop: !!resultImageDesktop
+                        });
+                        if (resultImage) resultImage.src = imageUrlWithCacheBuster;
+                        if (resultImageDesktop) resultImageDesktop.src = imageUrlWithCacheBuster;
+                    } else {
+                        console.error('[See It] No imageUrl in completed response:', data);
+                    }
                     btnShare?.parentElement?.classList.remove('hidden');
                     btnShareDesktop?.parentElement?.classList.remove('hidden');
                 } else if (data.status === 'failed') {
                     clearInterval(interval);
+                    console.error('[See It] Render failed:', { errorMessage: data.errorMessage, errorCode: data.errorCode });
                     showError(data.errorMessage || 'Failed');
                     if (statusTextContainer) statusTextContainer.classList.add('hidden');
                     btnShare?.parentElement?.classList.remove('hidden');
                 }
             })
-            .catch(() => {
+            .catch((err) => {
                 clearInterval(interval);
+                console.error('[See It] Poll network error:', err);
                 showError('Network error');
                 if (statusTextContainer) statusTextContainer.classList.add('hidden');
                 btnShare?.parentElement?.classList.remove('hidden');
