@@ -87,7 +87,7 @@ Pick a single provider, wire it into `app/app/services/bg-removal.external.serve
 
 ## 4. Google Cloud Storage (Uploads, Signed URLs, CORS)
 
-The app currently uses GCS for room images, cleaned rooms, prepared assets, and composites.
+The app currently uses GCS for room images, prepared assets, and composites.
 
 - Signed URLs (V4)  
   https://cloud.google.com/storage/docs/access-control/signed-urls
@@ -104,7 +104,7 @@ When changing `StorageService` or presigned upload flows:
 
 ## 5. Gemini / Image Generation
 
-Gemini is used for room cleanup and composite polishing.
+Gemini is used for composite polishing.
 
 - Gemini API docs (image generation & multimodal)  
   https://ai.google.dev

@@ -170,8 +170,7 @@ Issues are grouped into 4 work packages by priority:
 #### B3: Add Request Limits (4 hours)
 
 1. **Add body size limit middleware** (2h)
-2. **Validate mask_data_url size** (1h)
-3. **Fix rate limiter memory leak** (3h)
+2. **Fix rate limiter memory leak** (3h)
    - Add LRU cache with max size
    - Implement TTL cleanup
 

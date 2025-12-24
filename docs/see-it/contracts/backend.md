@@ -13,9 +13,7 @@ Shopify external paths hit by the theme extension:
 
 ```text
 POST /apps/see-it/room/upload
-POST /apps/see-it/room/mask-start
 POST /apps/see-it/room/confirm
-POST /apps/see-it/room/cleanup
 POST /apps/see-it/render
 GET  /apps/see-it/product/prepared
 GET  /apps/see-it/render/:jobId
@@ -56,7 +54,6 @@ Rules:
 Backend ↔ image service endpoints:
 
 - `POST /product/prepare`
-- `POST /room/cleanup`
 - `POST /scene/composite`
 
 Rules:

@@ -97,7 +97,6 @@ const response = await client.models.generateImages({
 | Task | Model Used | Config Import | Notes |
 |------|-----------|---------------|-------|
 | Remove product background | `@imgly/background-removal-node` | N/A | Gemini doesn't support transparency! |
-| Clean up room (eraser) | `GEMINI_IMAGE_MODEL_PRO` | `ai-models.config` | Uses inpainting |
 | Composite product into room | `GEMINI_IMAGE_MODEL_PRO` | `ai-models.config` | AI polish step |
 
 ---

@@ -35,7 +35,7 @@ export const GEMINI_IMAGE_MODEL_FAST = "gemini-2.5-flash-image" as const;
 /**
  * Professional image model for complex edits.
  * - Max resolution: Up to 4K
- * - Use for: final composites, room cleanup, high-quality output
+ * - Use for: final composites and other high-quality outputs
  * 
  * @constant
  * @readonly
@@ -84,11 +84,6 @@ export const IMAGEN_MODEL_FAST = "imagen-4.0-fast-generate-001" as const;
  * Uses @imgly/background-removal-node, NOT Gemini (Gemini doesn't support transparency)
  */
 export const MODEL_FOR_PRODUCT_PREP = "imgly-background-removal" as const;
-
-/**
- * Default model for room cleanup (eraser/inpainting).
- */
-export const MODEL_FOR_ROOM_CLEANUP = GEMINI_IMAGE_MODEL_PRO;
 
 /**
  * Default model for scene compositing.

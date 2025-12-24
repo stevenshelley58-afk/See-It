@@ -37,7 +37,7 @@
 2. Endpoint looks up ProductAsset by shopId + productId
 3. If `status="ready"` and `preparedImageUrl` exists, return it
 4. If not ready, return appropriate status/error
-5. Prepared image used in render flows (room cleanup, composite)
+5. Prepared image used in render flows (composite)
 
 ## Flow F3: Re-prepare (Explicit)
 
@@ -92,17 +92,6 @@
 - `/app-proxy/product.prepared` returns appropriate error/status
 - UI shows message prompting admin to prepare product first
 - User cannot proceed with render
-
-## Flow F9: Room Image Erase and Render (Future)
-
-**Scenario:** User uploads room image, erases objects, renders composite
-
-**Steps:**
-1. User uploads room image → `/app-proxy/room.start`
-2. User draws mask → `/app-proxy/room.mask-start`
-3. User confirms → `/app-proxy/room.confirm` triggers cleanup
-4. User places product → `/app-proxy/render` creates composite
-5. All steps use structured logging with requestId
 
 ## Pipeline Stage Contracts
 

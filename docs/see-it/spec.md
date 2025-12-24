@@ -38,7 +38,6 @@ This spec defines the single source of truth for:
 
 The following are explicitly *out of scope* until this section is updated:
 
-- Room cleanup tooling (mask-based erase and re-inpainting) beyond a simple stub that can return the original image URL.
 - Advanced placement controls such as rotation, multi-point perspective, or complex drag semantics beyond basic position and scale.
 - Batch preparation automation, stale-asset detection/cleanup, billing integration, quota enforcement per plan, and rich analytics.
 - Any “temporary” architecture that bypasses the image service or object storage (e.g., storing binaries in the DB, direct Gemini calls from the frontend).
@@ -54,7 +53,7 @@ The following are explicitly *out of scope* until this section is updated:
   Renders the See It block on the PDP, manages the shopper modal flow, and talks to the app exclusively via JSON app proxy endpoints and presigned upload URLs.
 
 - **Image Service (AI backend)**  
-  Stateless HTTP service (e.g., Cloud Run) that wraps Gemini image models. Exposes stable endpoints for product asset preparation, room cleanup (future), and scene compositing, always returning image URLs (never raw binaries).
+  Stateless HTTP service (e.g., Cloud Run) that wraps Gemini image models. Exposes stable endpoints for product asset preparation and scene compositing, always returning image URLs (never raw binaries).
 
 - **Object Storage**  
   GCS/S3/R2 buckets with per-shop prefixes. All room captures, prepared assets, masks, and composites are stored here and referenced by URL from the database.
@@ -65,17 +64,14 @@ Object storage keys are logically organized as:
 
 ```text
 room-original/{shop_id}/{room_session_id}/{uuid}.jpg
-room-cleaned/{shop_id}/{room_session_id}/{uuid}.jpg
 product-prepared/{shop_id}/{product_id}/{asset_id}.png
 composites/{shop_id}/{render_job_id}.jpg
 saved-rooms/{shop_id}/{saved_room_id}/original.jpg
-saved-rooms/{shop_id}/{saved_room_id}/cleaned.jpg
 ```
 
 Retention expectations:
 
 - Room originals: ~24 hours
-- Room cleaned variants: ~24–72 hours
 - Composites: ~30 days
 - Prepared product assets: indefinite until uninstall/cleanup
 - Saved rooms: indefinite until explicitly deleted by shopper or shop cleanup
@@ -105,16 +101,8 @@ External Shopify proxy paths (what the theme extension calls):
   - `room_image_future_url` (expected final storage location)
   - Note: Internal route file may be named `room.start`, but the canonical external path is `/apps/see-it/room/upload`.
 
-- `POST /apps/see-it/room/mask-start`  
-  Creates a presigned upload for an optional room mask image tied to an existing `room_session_id`. Returns:
-  - `upload_url` (presigned storage URL)
-  - `mask_image_url` (public URL where the mask will be stored)
-
 - `POST /apps/see-it/room/confirm`  
   Confirms that the room image has been uploaded to storage, binding it to the `room_session_id`. Returns `{ "ok": true }` on success.
-
-- `POST /apps/see-it/room/cleanup` *(stub for now)*  
-  Reserved for future room cleanup tools. For MVP this may simply echo back the original room image URL or a no-op cleaned URL.
 
 - `GET /apps/see-it/product/prepared?product_id={gid}`  
   Returns the most recent prepared asset for the given product (if any):
@@ -190,10 +178,6 @@ Auth: internal only. All endpoints accept and return JSON, and always return URL
 - `POST /product/prepare`  
   - Input: `source_image_url`, `shop_id`, `product_id`, `asset_id`, and a `prompt` + `model` descriptor.  
   - Output: `{ "prepared_image_url": "https://bucket/product-prepared/{...}.png" }` (transparent PNG containing only the product).
-
-- `POST /room/cleanup` *(future)*  
-  - Input: `room_image_url`, `mask_url`, and prompt/model descriptors.  
-  - Output: `{ "cleaned_room_image_url": "https://bucket/room-cleaned/{...}.jpg" }`.
 
 - `POST /scene/composite`  
   - Input: `prepared_product_image_url`, `room_image_url` (original or cleaned), placement (`x`, `y`, `scale`), and prompt/model descriptors.  

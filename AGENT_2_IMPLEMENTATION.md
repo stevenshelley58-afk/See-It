@@ -125,28 +125,6 @@ await prisma.roomSession.update({
 - Legacy sessions (no key): Construct key from session ID, then store it
 - Always regenerates signed URL with 1-hour TTL (was 24 hours)
 
-#### 5. [app-proxy.room.cleanup.ts](app/app/routes/app-proxy.room.cleanup.ts)
-**Updated to generate URLs from keys:**
-
-```javascript
-let currentRoomUrl: string;
-
-if (roomSession.cleanedRoomImageKey) {
-  currentRoomUrl = await StorageService.getSignedReadUrl(roomSession.cleanedRoomImageKey, 60 * 60 * 1000);
-} else if (roomSession.originalRoomImageKey) {
-  currentRoomUrl = await StorageService.getSignedReadUrl(roomSession.originalRoomImageKey, 60 * 60 * 1000);
-} else {
-  // Legacy: fall back to stored URLs
-  currentRoomUrl = roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl;
-}
-```
-
-**Behavior:**
-- Prefers cleaned image key (if available)
-- Falls back to original image key
-- Legacy sessions use stored URL (no keys)
-- Generates fresh URLs on every request
-
 #### 6. [app-proxy.render.ts](app/app/routes/app-proxy.render.ts)
 **Updated render endpoint to use key-based URL generation:**
 
@@ -164,8 +142,7 @@ if (roomSession.cleanedRoomImageKey) {
 ```
 
 **Behavior:**
-- Prioritizes cleaned room image (better quality)
-- Falls back to original room image
+- Uses the stored original room image key when available
 - Legacy sessions continue to work with stored URLs
 - No changes to external API
 
@@ -194,9 +171,8 @@ if (roomSession.cleanedRoomImageKey) {
 1. [app/prisma/schema.prisma](app/prisma/schema.prisma) - Added key fields to RoomSession
 2. [app/app/routes/app-proxy.room.upload.ts](app/app/routes/app-proxy.room.upload.ts) - Store key on upload
 3. [app/app/routes/app-proxy.room.confirm.ts](app/app/routes/app-proxy.room.confirm.ts) - Use key for URL generation
-4. [app/app/routes/app-proxy.room.cleanup.ts](app/app/routes/app-proxy.room.cleanup.ts) - Generate URLs from keys
-5. [app/app/routes/app-proxy.render.ts](app/app/routes/app-proxy.render.ts) - Generate URLs from keys (also uses StorageService)
-6. [app/prisma/migrations/20251207000000_add_room_image_keys/migration.sql](app/prisma/migrations/20251207000000_add_room_image_keys/migration.sql) - Database migration
+4. [app/app/routes/app-proxy.render.ts](app/app/routes/app-proxy.render.ts) - Generate URLs from keys (also uses StorageService)
+5. [app/prisma/migrations/20251207000000_add_room_image_keys/migration.sql](app/prisma/migrations/20251207000000_add_room_image_keys/migration.sql) - Database migration
 
 ---
 

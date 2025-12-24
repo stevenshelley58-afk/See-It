@@ -347,26 +347,6 @@ Map grows unbounded. No TTL cleanup or size limits.
 
 ---
 
-### CODE-006: Missing Input Validation
-
-**Issue ID:** CODE-006
-**Area:** `app-proxy.room.cleanup.ts:14-15`
-**Severity:** Medium
-**Impact:** DoS via large payloads
-
-**Problem:**
-```typescript
-const { room_session_id, mask_data_url } = body;
-```
-
-No size validation on `mask_data_url` (can be megabytes of base64).
-
-**Proposed Fix:** Add payload size limit (e.g., 5MB max)
-
-**Estimate:** 2 hours
-
----
-
 ### CODE-007: Quota Race Condition
 
 **Issue ID:** CODE-007
