@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>See It Widget - Test</title>
+  <link rel="stylesheet" href="assets/see-it-modal.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #111;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* Simple mock harness (not production) */
+    .mock-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(17, 17, 17, 0.92);
+      backdrop-filter: blur(10px);
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .mock-toolbar label {
+      color: rgba(255,255,255,0.85);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .mock-toolbar select,
+    .mock-toolbar input[type="file"] {
+      color: rgba(255,255,255,0.9);
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .mock-hint {
+      color: rgba(255,255,255,0.65);
+      font-size: 12px;
+      font-weight: 500;
+      margin-left: auto;
+    }
+
+    /* Mock Prepare Room screen (independent of modal JS) */
+    .mock-prepare {
+      height: 100dvh;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+    }
+
+    .mock-prepare-header {
+      padding: 14px 16px 8px 16px;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
+
+    .mock-prepare-header .back {
+      border: none;
+      background: none;
+      color: #525252;
+      font-size: 14px;
+      padding: 8px 0;
+      cursor: pointer;
+    }
+
+    .mock-prepare-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0;
+      padding: 10px 16px;
+      flex: 0 0 auto;
+      letter-spacing: -0.02em;
+      color: #1a1a1a;
+    }
+
+    .mock-prepare-photo {
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
+      background: #fff;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .mock-prepare-photo img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain; /* edge_contain default */
+      display: block;
+    }
+
+    .mock-prepare-bottom {
+      flex: 0 0 auto;
+      padding: 24px 24px calc(env(safe-area-inset-bottom, 0px) + 32px) 24px;
+      background: #fff;
+    }
+
+    .mock-prepare-instruction {
+      margin: 0 0 24px 0;
+      text-align: center;
+      font-size: 16px;
+      color: #737373;
+    }
+
+    .mock-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    /* Variant toggles */
+    body[data-variant="edge_cover"] .mock-prepare-photo img { object-fit: cover; }
+    body[data-variant="card_contain"] .mock-prepare-photo,
+    body[data-variant="card_cover"] .mock-prepare-photo {
+      margin: 12px 14px;
+      border-radius: 16px;
+      background: #111;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+    body[data-variant="card_cover"] .mock-prepare-photo img { object-fit: cover; }
+  </style>
+</head>
+<body>
+  <div class="mock-toolbar">
+    <label>
+      Variant
+      <select id="variant">
+        <option value="edge_contain">edge_contain (no crop)</option>
+        <option value="edge_cover">edge_cover (crop)</option>
+        <option value="card_contain">card_contain (no crop)</option>
+        <option value="card_cover">card_cover (crop)</option>
+      </select>
+    </label>
+
+    <label>
+      Photo
+      <input id="photo" type="file" accept="image/*" />
+    </label>
+
+    <div class="mock-hint">Tip: open devtools device toolbar for mobile view</div>
+  </div>
+
+  <div class="mock-prepare">
+    <div class="mock-prepare-header">
+      <button class="back" type="button">Back</button>
+    </div>
+    <h1 class="mock-prepare-title">Prepare Room</h1>
+
+    <div class="mock-prepare-photo">
+      <img id="preview" alt="Room Preview" />
+    </div>
+
+    <div class="mock-prepare-bottom">
+      <p class="mock-prepare-instruction">Draw over anything you want gone</p>
+      <div class="mock-row" style="margin-bottom: 16px;">
+        <button class="see-it-btn-pill-secondary" type="button" disabled>Undo</button>
+        <button class="see-it-btn-pill-secondary" type="button" disabled>Clear</button>
+      </div>
+      <div class="mock-row">
+        <button class="see-it-btn-pill-erase" type="button">Erase</button>
+        <button class="see-it-btn-pill-primary" type="button">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Default to the requested variant
+    const variantSelect = document.getElementById('variant');
+    const photoInput = document.getElementById('photo');
+    const preview = document.getElementById('preview');
+
+    function setVariant(v) {
+      document.body.dataset.variant = v;
+      if (variantSelect.value !== v) variantSelect.value = v;
+    }
+
+    // Load from query param if present
+    const params = new URLSearchParams(window.location.search);
+    setVariant(params.get('variant') || 'edge_contain');
+
+    variantSelect.addEventListener('change', () => {
+      setVariant(variantSelect.value);
+      const next = new URL(window.location.href);
+      next.searchParams.set('variant', variantSelect.value);
+      history.replaceState({}, '', next);
+    });
+
+    // Use a built-in sample if user hasn't uploaded yet
+    preview.src = 'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=1600&q=60';
+
+    photoInput.addEventListener('change', () => {
+      const file = photoInput.files && photoInput.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      preview.src = url;
+    });
+  </script>
+</body>
+</html>
+

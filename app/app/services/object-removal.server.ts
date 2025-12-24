@@ -307,7 +307,9 @@ export async function removeObjects(input: ObjectRemovalInput): Promise<ObjectRe
         );
 
         // PERFORMANCE: Build single pipeline for all image transformations
-        let imagePipeline = sharp(imageBuffer);
+        // IMPORTANT: .rotate() with no args auto-orients based on EXIF and removes the tag
+        // This fixes rotation issues with phone photos that have EXIF orientation metadata
+        let imagePipeline = sharp(imageBuffer).rotate();
         const needsResize = width > CONFIG.MAX_IMAGE_DIMENSION || height > CONFIG.MAX_IMAGE_DIMENSION;
 
         if (needsResize) {

@@ -75,7 +75,10 @@ export const action = async ({ request }) => {
         logger.info({ ...logContext, stage: "process" }, `Processing uploaded image: ${imageFile.size} bytes`);
 
         // Convert to PNG with alpha channel (ensure transparency is preserved)
+        // IMPORTANT: .rotate() with no args auto-orients based on EXIF and removes the tag
+        // This fixes rotation issues with phone photos that have EXIF orientation metadata
         const processedBuffer = await sharp(inputBuffer)
+            .rotate() // Auto-orient based on EXIF, then strip EXIF orientation tag
             .ensureAlpha()
             .png()
             .toBuffer();

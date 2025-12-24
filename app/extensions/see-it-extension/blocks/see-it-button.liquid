@@ -43,7 +43,12 @@
   {% endif %}
 
   <div class="see-it-widget-hook">
-    <h3 class="see-it-widget-title">What if you could see it at home first?</h3>
+    <div class="see-it-widget-content">
+      <div class="see-it-widget-text">
+        <h3 class="see-it-widget-title">Try it in Your Home</h3>
+        <p class="see-it-widget-description">Get a real view of this in your space. Use your camera or upload an image.</p>
+      </div>
+    </div>
     <button
       id="see-it-trigger"
       class="see-it-widget-btn"
@@ -55,10 +60,12 @@
       data-shop-domain="{{ shop.domain }}"
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-        <circle cx="12" cy="13" r="4"/>
+        <!-- 3D cube icon -->
+        <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" stroke="currentColor" stroke-width="2" fill="none"/>
+        <path d="M12 2 L12 22" stroke="currentColor" stroke-width="2"/>
+        <path d="M22 7 L12 12 L2 7" stroke="currentColor" stroke-width="2"/>
       </svg>
-      Try it now
+      Tap to see it now
     </button>
   </div>
 
@@ -171,60 +178,39 @@
         <!-- Mobile Layout -->
         <div class="see-it-prepare-mobile">
           <!-- Header -->
-          <div class="see-it-screen-header">
-            <button class="see-it-btn-back-light" id="see-it-back-prepare">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
-              </svg>
+          <div class="see-it-prepare-header-simple">
+            <button class="see-it-btn-back-text" id="see-it-back-prepare">
               <span>Back</span>
             </button>
-            <span class="see-it-screen-header-title">PREPARE</span>
-            <div class="see-it-header-spacer"></div>
           </div>
+
+          <!-- Title -->
+          <h1 class="see-it-prepare-title">Prepare Room</h1>
 
           <!-- Room photo container -->
           <div class="see-it-prepare-room-container">
             <div class="see-it-room-image-wrapper">
               <img id="see-it-room-preview" src="" alt="Room Preview" />
               <canvas id="see-it-mask-canvas"></canvas>
-              
-              <!-- Product preview in room -->
-              <div class="see-it-prepare-product-preview">
-                <img src="{{ product_image_url }}" alt="{{ product_title }}" />
-              </div>
-              
-              <!-- Paint stroke indicator -->
-              <div id="see-it-paint-indicator" class="see-it-paint-indicator hidden"></div>
             </div>
           </div>
 
-          <!-- Paint controls -->
-          <div class="see-it-prepare-controls">
-            <p class="see-it-prepare-hint">Paint over anything to remove, or skip.</p>
+          <!-- Bottom controls (pinned) -->
+          <div class="see-it-prepare-bottom">
+            <!-- Instruction text -->
+            <p class="see-it-prepare-instruction">Draw over anything you want gone</p>
 
-            <!-- Paint tools row -->
-            <div class="see-it-paint-tools">
-              <div class="see-it-brush-indicator">
-                <div class="see-it-brush-circle">
-                  <div class="see-it-brush-dot"></div>
-                </div>
-                <span>Paint to remove</span>
-              </div>
-              <button class="see-it-tool-btn-outline" id="see-it-undo-btn" disabled>Undo</button>
-              <button class="see-it-tool-btn-outline" id="see-it-clear-btn" disabled>Clear</button>
+            <!-- Secondary buttons: Undo and Clear -->
+            <div class="see-it-prepare-secondary-buttons">
+              <button class="see-it-btn-pill-secondary" id="see-it-undo-btn" disabled>Undo</button>
+              <button class="see-it-btn-pill-secondary" id="see-it-clear-btn" disabled>Clear</button>
             </div>
 
-            <!-- Action buttons -->
-            <div class="see-it-prepare-actions-new">
-              <button class="see-it-btn-outline-pill" id="see-it-remove-btn" disabled>Remove</button>
-              <button class="see-it-btn-primary-pill see-it-btn-primary-pill-sm" id="see-it-confirm-room">Continue</button>
+            <!-- Primary buttons: Erase and Skip/Continue -->
+            <div class="see-it-prepare-primary-buttons">
+              <button class="see-it-btn-pill-erase" id="see-it-remove-btn" disabled>Erase</button>
+              <button class="see-it-btn-pill-primary" id="see-it-confirm-room">Skip</button>
             </div>
-          </div>
-
-          <!-- Step indicator -->
-          <div class="see-it-step-indicator">
-            <p class="see-it-step-number">2. Prepare Room</p>
-            <p class="see-it-step-hint">Remove objects (optional)</p>
           </div>
         </div>
 
