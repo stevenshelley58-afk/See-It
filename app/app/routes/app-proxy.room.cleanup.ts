@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { removeObjectsFromUrl } from "../services/object-removal.server";
 import { StorageService } from "../services/storage.server";
 import { validateSessionId, validateMaskDataUrl } from "../utils/validation.server";
+import sharp from "sharp";
 
 /**
  * Extract the GCS key from a signed URL
@@ -138,10 +139,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     // Use Prodia SDXL inpainting for object removal
                     const result = await removeObjectsFromUrl(currentRoomUrl, sanitizedMaskUrl, requestId);
                     
+                    // Normalize and convert to JPEG for better web compatibility and smaller size
+                    const normalizedBuffer = await sharp(result.imageBuffer)
+                        .jpeg({ quality: 90 })
+                        .toBuffer();
+                    
                     // Upload result to GCS
-                    const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
-                    await StorageService.uploadBuffer(result.imageBuffer, key, 'image/png');
+                    const key = `cleaned/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+                    await StorageService.uploadBuffer(normalizedBuffer, key, 'image/jpeg');
                     cleanedRoomImageUrl = await StorageService.getSignedReadUrl(key, 60 * 60 * 1000);
+                    
+                    console.log(`[Cleanup] Normalized image: ${result.imageBuffer.length} -> ${normalizedBuffer.length} bytes`);
                     
                     console.log(`[Cleanup] Cleanup successful (Prodia)`, { 
                         requestId, 
