@@ -465,45 +465,61 @@ document.addEventListener('DOMContentLoaded', function () {
             activeCanvas = isMobile ? maskCanvas : (maskCanvasDesktop || maskCanvas);
         }
         if (!activeCanvas) return { x: 0, y: 0, valid: false };
-        
-        const rect = activeCanvas.getBoundingClientRect();
+
         const touch = e.touches?.[0] || e.changedTouches?.[0] || null;
         const clientX = touch ? touch.clientX : e.clientX;
         const clientY = touch ? touch.clientY : e.clientY;
 
-        // When the preview uses object-fit: contain, the image may be letterboxed.
-        // Map pointer coordinates into the actual rendered image area so strokes align with the natural image pixels.
+        // Prefer mapping relative to the *rendered image box* (object-fit: contain can letterbox inside the <img>).
+        // This avoids offsets when the canvas and image don't share an identical layout box under some themes.
         const preview = (activeCanvas === maskCanvasDesktop ? roomPreviewDesktop : roomPreview) || activePreviewEl;
         const natW = preview?.naturalWidth || activeCanvas.width;
         const natH = preview?.naturalHeight || activeCanvas.height;
-        if (!natW || !natH || !rect.width || !rect.height) return { x: 0, y: 0, valid: false };
+        if (!preview || !natW || !natH) return { x: 0, y: 0, valid: false };
 
-        const canvasAR = rect.width / rect.height;
-        const imgAR = natW / natH;
+        const getContainedImageBox = (imgEl) => {
+            const rect = imgEl.getBoundingClientRect();
+            const w = imgEl.naturalWidth;
+            const h = imgEl.naturalHeight;
+            if (!w || !h || !rect.width || !rect.height) return null;
 
-        let displayW, displayH, offsetX, offsetY;
-        if (imgAR > canvasAR) {
-            // Image fits width; letterbox top/bottom
-            displayW = rect.width;
-            displayH = rect.width / imgAR;
-            offsetX = 0;
-            offsetY = (rect.height - displayH) / 2;
-        } else {
-            // Image fits height; letterbox left/right
-            displayH = rect.height;
-            displayW = rect.height * imgAR;
-            offsetY = 0;
-            offsetX = (rect.width - displayW) / 2;
-        }
+            const boxAR = rect.width / rect.height;
+            const imgAR = w / h;
 
-        const xIn = (clientX - rect.left) - offsetX;
-        const yIn = (clientY - rect.top) - offsetY;
-        if (xIn < 0 || yIn < 0 || xIn > displayW || yIn > displayH) {
+            let displayW, displayH, offsetX, offsetY;
+            if (imgAR > boxAR) {
+                // Image fits width; letterbox top/bottom
+                displayW = rect.width;
+                displayH = rect.width / imgAR;
+                offsetX = 0;
+                offsetY = (rect.height - displayH) / 2;
+            } else {
+                // Image fits height; letterbox left/right
+                displayH = rect.height;
+                displayW = rect.height * imgAR;
+                offsetY = 0;
+                offsetX = (rect.width - displayW) / 2;
+            }
+
+            return {
+                left: rect.left + offsetX,
+                top: rect.top + offsetY,
+                width: displayW,
+                height: displayH
+            };
+        };
+
+        const box = getContainedImageBox(preview) || activeCanvas.getBoundingClientRect();
+        if (!box || !box.width || !box.height) return { x: 0, y: 0, valid: false };
+
+        const xIn = clientX - box.left;
+        const yIn = clientY - box.top;
+        if (xIn < 0 || yIn < 0 || xIn > box.width || yIn > box.height) {
             return { x: 0, y: 0, valid: false };
         }
 
-        const scaleX = natW / displayW;
-        const scaleY = natH / displayH;
+        const scaleX = natW / box.width;
+        const scaleY = natH / box.height;
 
         return {
             x: xIn * scaleX,
