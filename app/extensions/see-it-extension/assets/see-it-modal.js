@@ -1,6 +1,9 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.28';
+    const VERSION = '1.0.29';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
+    
+    // Helper: check if element is visible (has non-zero dimensions)
+    const isVisible = (el) => el && el.offsetWidth > 0 && el.offsetHeight > 0;
 
     // ============================================================================
     // ASPECT RATIO NORMALIZATION (Gemini-compatible)
@@ -638,9 +641,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Product Positioning (Position Screen) ---
     const initPosition = () => {
-        const activeRoomImage = roomImageDesktop || roomImage;
-        const activeProductImage = productImageDesktop || productImage;
-        const activeProductContainer = productContainerDesktop || productContainer;
+        // Use VISIBLE element, not just existence check (desktop elements exist but may be hidden)
+        const activeRoomImage = isVisible(roomImageDesktop) ? roomImageDesktop : roomImage;
+        const activeProductImage = isVisible(productImageDesktop) ? productImageDesktop : productImage;
+        const activeProductContainer = isVisible(productContainerDesktop) ? productContainerDesktop : productContainer;
         
         if (activeRoomImage) activeRoomImage.src = getActiveRoomUrl();
         if (roomImage && roomImage !== activeRoomImage) roomImage.src = getActiveRoomUrl();
@@ -657,7 +661,7 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const updateTransform = () => {
-        const activeContainer = productContainerDesktop || productContainer;
+        const activeContainer = isVisible(productContainerDesktop) ? productContainerDesktop : productContainer;
         if (activeContainer) {
             activeContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
         }
@@ -1121,8 +1125,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (resultImage) resultImage.src = '';
         btnShare?.parentElement?.classList.add('hidden');
 
-        const activeRoomImage = roomImageDesktop || roomImage;
-        const activeProductImage = productImageDesktop || productImage;
+        // Use VISIBLE element, not just existence check (desktop elements exist but may be hidden on mobile)
+        const activeRoomImage = isVisible(roomImageDesktop) ? roomImageDesktop : roomImage;
+        const activeProductImage = isVisible(productImageDesktop) ? productImageDesktop : productImage;
         if (!activeRoomImage || !activeProductImage) return showError('Images not loaded');
 
         // object-fit: contain means the <img> element can be letterboxed inside its own box.
