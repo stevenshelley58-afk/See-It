@@ -1,7 +1,7 @@
 # GCS Setup Script for See It
 # Run this script to configure your GCS bucket
 
-$BUCKET_NAME = "see-it-uploads"
+$BUCKET_NAME = "see-it-room"
 $PROJECT_ID = "see-it-production"
 $CORS_FILE = Join-Path $PSScriptRoot "..\gcs-cors.json"
 
