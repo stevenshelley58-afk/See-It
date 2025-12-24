@@ -1000,8 +1000,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (state.sessionId && getActiveRoomUrl()) {
             const activeUrl = getActiveRoomUrl();
-            if (roomPreview) roomPreview.src = activeUrl;
-            if (roomPreviewDesktop) roomPreviewDesktop.src = activeUrl;
+            console.log('[See It] Loading existing room image:', activeUrl?.substring(0, 100) + '...');
+            if (roomPreview) {
+                roomPreview.onerror = (e) => console.error('[See It] roomPreview FAILED to load existing:', e);
+                roomPreview.onload = () => console.log('[See It] roomPreview loaded existing image');
+                roomPreview.src = activeUrl;
+            }
+            if (roomPreviewDesktop) {
+                roomPreviewDesktop.onerror = (e) => console.error('[See It] roomPreviewDesktop FAILED to load existing:', e);
+                roomPreviewDesktop.onload = () => console.log('[See It] roomPreviewDesktop loaded existing image');
+                roomPreviewDesktop.src = activeUrl;
+            }
             if (roomImage) roomImage.src = activeUrl;
             if (roomImageDesktop) roomImageDesktop.src = activeUrl;
             showScreen('prepare');
