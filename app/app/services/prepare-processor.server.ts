@@ -396,7 +396,7 @@ async function processPendingRenderJobs(batchRequestId: string) {
                     // 3. Render with retry logic
                     let lastError: unknown = null;
                     let success = false;
-                    let finalImageUrl: string | null = null;
+                    let compositeResult: { imageUrl: string; imageKey: string } | null = null;
 
                     for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !success; attempt++) {
                         try {
@@ -422,7 +422,8 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                 // Ignore malformed configJson; fall back to legacy placementScale behavior
                             }
 
-                            finalImageUrl = await compositeScene(
+                            // compositeScene now returns { imageUrl, imageKey }
+                            compositeResult = await compositeScene(
                                 productImageUrl,
                                 roomImageUrl,
                                 {
@@ -460,16 +461,14 @@ async function processPendingRenderJobs(batchRequestId: string) {
                         }
                     }
 
-                    if (success && finalImageUrl) {
-                        // Extract GCS key for on-demand URL generation
-                        const imageKey = extractGcsKeyFromUrl(finalImageUrl);
-
+                    if (success && compositeResult) {
+                        // compositeScene now returns both imageUrl and imageKey directly
                         await prisma.renderJob.update({
                             where: { id: job.id },
                             data: {
                                 status: "completed",
-                                imageUrl: finalImageUrl,
-                                imageKey: imageKey,
+                                imageUrl: compositeResult.imageUrl,
+                                imageKey: compositeResult.imageKey,
                                 retryCount: 0,
                                 completedAt: new Date()
                             }
