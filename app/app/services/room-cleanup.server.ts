@@ -574,38 +574,66 @@ export async function cleanupRoom(
         logger.info(logContext, `Mask analysis: ${maskAnalysis.description}`);
 
 
-        // Step 6: Build prompt - Explain the two-image approach to Gemini
-        // Image 1: The room photo, Image 2: The mask (white = areas to remove)
-        const locationDescription = maskAnalysis.description || "the marked area";
 
-        // Build a clear prompt explaining the mask image
+        // Step 6: Create Visual Prompt Image
+        // Instead of sending two images, we burn the mask into the image as a specific color (Green)
+        // This is much more reliable for Vision models to understand "remove the green thing"
+
+        // 1. Create pure green image
+        const greenBase = await sharp({
+            create: {
+                width: roomWidth,
+                height: roomHeight,
+                channels: 3,
+                background: { r: 0, g: 255, b: 0 }
+            }
+        }).png().toBuffer();
+
+        // 2. Create alpha channel from mask (White=Opaque, Black=Transparent)
+        const alphaChannel = await sharp(maskBuffer)
+            .resize(roomWidth, roomHeight)
+            .grayscale()
+            .toBuffer();
+
+        // 3. Create green overlay (Green pixels with Mask alpha)
+        const greenOverlay = await sharp(greenBase)
+            .joinChannel(alphaChannel)
+            .png()
+            .toBuffer();
+
+        // 4. Composite green overlay onto room image
+        const visualPromptBuffer = await sharp(roomBuffer)
+            .composite([{ input: greenOverlay }])
+            .png()
+            .toBuffer();
+
+        logger.info(logContext, "Created visual prompt image with Green overlay");
+
+        // Step 7: Build Prompt
+        const baseDescription = maskAnalysis.description || "the marked area";
         const prompt = `OBJECT REMOVAL TASK:
 
-I have provided TWO images:
-1. FIRST IMAGE: A room photo
-2. SECOND IMAGE: A mask showing exactly what to remove (WHITE areas = objects to erase, BLACK = keep)
+I have provided an image of a room where an object has been covered in BRIGHT GREEN.
 
 YOUR TASK:
-Remove EVERYTHING covered by the WHITE areas in the mask from the room photo.
-The white painted area covers ${locationDescription}.
+1. Identify the area covered by the GREEN color.
+2. REMOVE the object/furniture that is under the green paint.
+3. FILL the space with the natural background (wall, floor, carpet).
+4. The green color MUST be completely removed.
 
-INSTRUCTIONS:
-1. Look at the SECOND image (mask) to see exactly what the user painted over
-2. REMOVE all objects/furniture visible in the WHITE areas of the mask
-3. FILL the removed areas with natural background (wall, floor, etc.)
-4. Make it look like nothing was ever there - seamless and natural
+CONTEXT:
+The green area is located at ${baseDescription}.
 
 CRITICAL REQUIREMENTS:
 - Output MUST be exactly ${roomWidth}x${roomHeight} pixels
 - Keep the SAME camera angle, lighting, and perspective
 - Do NOT crop, resize, or change the framing
-- Only remove what is painted in WHITE in the mask
+- Only remove the object covered in GREEN
 - Everything else should remain EXACTLY the same
 
-Return only the cleaned room image.`;
+Return only the cleaned room image (without the green overlay).`;
 
-
-        // Step 6: Call Gemini (fast model first, pro retry on failure)
+        // Step 8: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
         const maxAttempts = 2;
         let lastError: Error | null = null;
@@ -613,17 +641,16 @@ Return only the cleaned room image.`;
         while (attempt < maxAttempts) {
             const model = attempt === 0 ? GEMINI_IMAGE_MODEL_FAST : GEMINI_IMAGE_MODEL_PRO;
 
-
             try {
                 logger.info(
                     { ...logContext, stage: "gemini-call", attempt: attempt + 1 },
-                    `Attempting cleanup with ${model}`
+                    `Attempting cleanup with ${model} (Visual Prompting)`
                 );
 
                 const base64Data = await callGeminiForCleanup(
                     prompt,
-                    roomBuffer,
-                    maskBuffer,  // CRITICAL FIX: Send ORIGINAL mask with clear white strokes, not blurred editRegionMask
+                    visualPromptBuffer, // Send the image with green overlay
+                    null,               // visualPromptBuffer is self-contained, no separate mask needed
                     closestRatio.label,
                     model,
                     logContext,
