@@ -427,6 +427,56 @@ document.addEventListener('DOMContentLoaded', function () {
             maskCanvasDesktop.height = natH;
         }
 
+        // CRITICAL FIX: Position canvas CSS to match the letterboxed image content area
+        // The image uses object-fit: contain (letterboxed), but canvas stretches by default
+        // We must make the canvas visually align with the actual image content
+        const positionCanvasOverImage = (canvas, preview) => {
+            if (!canvas || !preview) return;
+            
+            const rect = preview.getBoundingClientRect();
+            const containerRect = preview.parentElement?.getBoundingClientRect();
+            if (!containerRect || !rect.width || !rect.height) return;
+            
+            // Calculate letterbox offset (where image content actually displays)
+            const imgW = preview.naturalWidth || natW;
+            const imgH = preview.naturalHeight || natH;
+            const boxAR = rect.width / rect.height;
+            const imgAR = imgW / imgH;
+            
+            let displayW, displayH, offsetX, offsetY;
+            if (imgAR > boxAR) {
+                // Image fits width; letterbox top/bottom
+                displayW = rect.width;
+                displayH = rect.width / imgAR;
+                offsetX = 0;
+                offsetY = (rect.height - displayH) / 2;
+            } else {
+                // Image fits height; letterbox left/right
+                displayH = rect.height;
+                displayW = rect.height * imgAR;
+                offsetY = 0;
+                offsetX = (rect.width - displayW) / 2;
+            }
+            
+            // Position canvas to exactly match image content (not stretched)
+            canvas.style.position = 'absolute';
+            canvas.style.left = offsetX + 'px';
+            canvas.style.top = offsetY + 'px';
+            canvas.style.width = displayW + 'px';
+            canvas.style.height = displayH + 'px';
+            canvas.style.inset = 'auto'; // Clear inset: 0 from CSS
+            
+            console.log('[See It] Canvas positioned to match image:', {
+                container: `${containerRect.width.toFixed(0)}x${containerRect.height.toFixed(0)}`,
+                imageDisplay: `${displayW.toFixed(0)}x${displayH.toFixed(0)}`,
+                offset: `${offsetX.toFixed(0)},${offsetY.toFixed(0)}`
+            });
+        };
+
+        // Position canvases over their respective images
+        positionCanvasOverImage(maskCanvas, roomPreview);
+        positionCanvasOverImage(maskCanvasDesktop, roomPreviewDesktop);
+
         // Use mobile canvas as primary (always exists), desktop as fallback
         const primaryCanvas = maskCanvas || maskCanvasDesktop;
         if (!primaryCanvas) {
@@ -459,6 +509,52 @@ document.addEventListener('DOMContentLoaded', function () {
 
         console.log('[See It] Canvas init SUCCESS:', natW, 'x', natH, 'brush:', brushSize, 'lineWidth:', lineWidth);
     };
+
+    // Reposition canvases on resize (maintains alignment with letterboxed image)
+    const repositionCanvases = () => {
+        if (!canvasInitialized) return;
+        
+        const natW = state.normalizedWidth;
+        const natH = state.normalizedHeight;
+        if (!natW || !natH) return;
+        
+        const positionCanvas = (canvas, preview) => {
+            if (!canvas || !preview) return;
+            
+            const rect = preview.getBoundingClientRect();
+            if (!rect.width || !rect.height) return;
+            
+            const imgAR = natW / natH;
+            const boxAR = rect.width / rect.height;
+            
+            let displayW, displayH, offsetX, offsetY;
+            if (imgAR > boxAR) {
+                displayW = rect.width;
+                displayH = rect.width / imgAR;
+                offsetX = 0;
+                offsetY = (rect.height - displayH) / 2;
+            } else {
+                displayH = rect.height;
+                displayW = rect.height * imgAR;
+                offsetY = 0;
+                offsetX = (rect.width - displayW) / 2;
+            }
+            
+            canvas.style.left = offsetX + 'px';
+            canvas.style.top = offsetY + 'px';
+            canvas.style.width = displayW + 'px';
+            canvas.style.height = displayH + 'px';
+        };
+        
+        positionCanvas(maskCanvas, roomPreview);
+        positionCanvas(maskCanvasDesktop, roomPreviewDesktop);
+    };
+
+    // Handle resize/orientation changes
+    window.addEventListener('resize', repositionCanvases);
+    window.addEventListener('orientationchange', () => {
+        setTimeout(repositionCanvases, 100); // Delay for orientation animation
+    });
 
     // Update brush size and canvas line width
     const updateBrushSize = (size) => {
@@ -520,58 +616,28 @@ document.addEventListener('DOMContentLoaded', function () {
         const clientX = touch ? touch.clientX : e.clientX;
         const clientY = touch ? touch.clientY : e.clientY;
 
-        // Prefer mapping relative to the *rendered image box* (object-fit: contain can letterbox inside the <img>).
-        // This avoids offsets when the canvas and image don't share an identical layout box under some themes.
-        const preview = (activeCanvas === maskCanvasDesktop ? roomPreviewDesktop : roomPreview) || activePreviewEl;
-        // CRITICAL: Use stored normalized dimensions for coordinate mapping (bulletproof alignment)
-        // This ensures coordinates match the exact dimensions used for canvas initialization
-        const natW = state.normalizedWidth || preview?.naturalWidth || activeCanvas.width;
-        const natH = state.normalizedHeight || preview?.naturalHeight || activeCanvas.height;
-        if (!natW || !natH) return { x: 0, y: 0, valid: false };
+        // SIMPLIFIED: Canvas is now positioned to match image content exactly
+        // Just use the canvas's own bounding rect and internal dimensions
+        const canvasRect = activeCanvas.getBoundingClientRect();
+        if (!canvasRect.width || !canvasRect.height) return { x: 0, y: 0, valid: false };
 
-        const getContainedImageBox = (imgEl) => {
-            const rect = imgEl.getBoundingClientRect();
-            const w = imgEl.naturalWidth;
-            const h = imgEl.naturalHeight;
-            if (!w || !h || !rect.width || !rect.height) return null;
+        // Canvas internal dimensions (set to normalized image size)
+        const canvasW = activeCanvas.width;
+        const canvasH = activeCanvas.height;
+        if (!canvasW || !canvasH) return { x: 0, y: 0, valid: false };
 
-            const boxAR = rect.width / rect.height;
-            const imgAR = w / h;
-
-            let displayW, displayH, offsetX, offsetY;
-            if (imgAR > boxAR) {
-                // Image fits width; letterbox top/bottom
-                displayW = rect.width;
-                displayH = rect.width / imgAR;
-                offsetX = 0;
-                offsetY = (rect.height - displayH) / 2;
-            } else {
-                // Image fits height; letterbox left/right
-                displayH = rect.height;
-                displayW = rect.height * imgAR;
-                offsetY = 0;
-                offsetX = (rect.width - displayW) / 2;
-            }
-
-            return {
-                left: rect.left + offsetX,
-                top: rect.top + offsetY,
-                width: displayW,
-                height: displayH
-            };
-        };
-
-        const box = getContainedImageBox(preview) || activeCanvas.getBoundingClientRect();
-        if (!box || !box.width || !box.height) return { x: 0, y: 0, valid: false };
-
-        const xIn = clientX - box.left;
-        const yIn = clientY - box.top;
-        if (xIn < 0 || yIn < 0 || xIn > box.width || yIn > box.height) {
+        // Position relative to canvas element
+        const xIn = clientX - canvasRect.left;
+        const yIn = clientY - canvasRect.top;
+        
+        // Check bounds
+        if (xIn < 0 || yIn < 0 || xIn > canvasRect.width || yIn > canvasRect.height) {
             return { x: 0, y: 0, valid: false };
         }
 
-        const scaleX = natW / box.width;
-        const scaleY = natH / box.height;
+        // Scale from CSS size to internal canvas coordinates
+        const scaleX = canvasW / canvasRect.width;
+        const scaleY = canvasH / canvasRect.height;
 
         return {
             x: xIn * scaleX,
