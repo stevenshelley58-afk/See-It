@@ -613,6 +613,7 @@ Return only the cleaned room image.`;
         while (attempt < maxAttempts) {
             const model = attempt === 0 ? GEMINI_IMAGE_MODEL_FAST : GEMINI_IMAGE_MODEL_PRO;
 
+
             try {
                 logger.info(
                     { ...logContext, stage: "gemini-call", attempt: attempt + 1 },
@@ -622,7 +623,7 @@ Return only the cleaned room image.`;
                 const base64Data = await callGeminiForCleanup(
                     prompt,
                     roomBuffer,
-                    editRegionMask,
+                    maskBuffer,  // CRITICAL FIX: Send ORIGINAL mask with clear white strokes, not blurred editRegionMask
                     closestRatio.label,
                     model,
                     logContext,
