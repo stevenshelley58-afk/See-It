@@ -253,12 +253,12 @@ async function createMaskedVisualization(
 
 /**
  * Analyze mask to determine which part of the image to remove
- * Returns a description like "lower-left", "center", "upper-right", etc.
+ * Returns a detailed description with approximate pixel/percentage coordinates
  */
 async function analyzeMaskPosition(
     maskBuffer: Buffer,
     logContext: ReturnType<typeof createLogContext>
-): Promise<{ description: string; hasContent: boolean }> {
+): Promise<{ description: string; hasContent: boolean; centerX: number; centerY: number; boundingBox: { minX: number; minY: number; maxX: number; maxY: number } }> {
     const maskMeta = await sharp(maskBuffer).metadata();
     const width = maskMeta.width!;
     const height = maskMeta.height!;
@@ -287,26 +287,30 @@ async function analyzeMaskPosition(
     }
     
     if (whitePixelCount === 0) {
-        return { description: "", hasContent: false };
+        return { description: "", hasContent: false, centerX: 0, centerY: 0, boundingBox: { minX: 0, minY: 0, maxX: 0, maxY: 0 } };
     }
     
     // Calculate center of mask
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
+    const centerX = Math.round((minX + maxX) / 2);
+    const centerY = Math.round((minY + maxY) / 2);
     
-    // Determine position description
+    // Calculate percentages for more precise description
+    const centerXPercent = Math.round((centerX / width) * 100);
+    const centerYPercent = Math.round((centerY / height) * 100);
+    
+    // Determine position description with specific percentages
     const xPos = centerX < width / 3 ? "left" : centerX > width * 2/3 ? "right" : "center";
-    const yPos = centerY < height / 3 ? "upper" : centerY > height * 2/3 ? "lower" : "middle";
+    const yPos = centerY < height / 3 ? "top" : centerY > height * 2/3 ? "bottom" : "middle";
     
     let description: string;
     if (xPos === "center" && yPos === "middle") {
-        description = "in the center of the image";
+        description = `the center of the image (approximately ${centerXPercent}% from left, ${centerYPercent}% from top)`;
     } else if (xPos === "center") {
-        description = `in the ${yPos} part of the image`;
+        description = `the ${yPos}-center area (approximately ${centerXPercent}% from left, ${centerYPercent}% from top)`;
     } else if (yPos === "middle") {
-        description = `on the ${xPos} side of the image`;
+        description = `the ${xPos} side (approximately ${centerXPercent}% from left, ${centerYPercent}% from top)`;
     } else {
-        description = `in the ${yPos}-${xPos} area of the image`;
+        description = `the ${yPos}-${xPos} area (approximately ${centerXPercent}% from left, ${centerYPercent}% from top)`;
     }
     
     // Calculate approximate size
@@ -321,14 +325,62 @@ async function analyzeMaskPosition(
     logger.info(logContext, `Mask analysis: ${description}, ${sizeDesc} object (${Math.round(sizeRatio*100)}% of image)`);
     
     return { 
-        description: `the ${sizeDesc} object ${description}`,
-        hasContent: true 
+        description: `the ${sizeDesc} object in ${description}`,
+        hasContent: true,
+        centerX,
+        centerY,
+        boundingBox: { minX, minY, maxX, maxY }
     };
 }
 
 /**
+ * Create an image with a bright CYAN circle drawn around the masked area
+ * This visual marker helps Gemini "see" what to remove
+ */
+async function createMarkedImage(
+    roomBuffer: Buffer,
+    maskAnalysis: { centerX: number; centerY: number; boundingBox: { minX: number; minY: number; maxX: number; maxY: number } },
+    logContext: ReturnType<typeof createLogContext>
+): Promise<Buffer> {
+    const roomMeta = await sharp(roomBuffer).metadata();
+    const width = roomMeta.width!;
+    const height = roomMeta.height!;
+    
+    // Calculate circle dimensions from bounding box
+    const { minX, minY, maxX, maxY } = maskAnalysis.boundingBox;
+    const circleWidth = maxX - minX + 40; // Add padding
+    const circleHeight = maxY - minY + 40;
+    const circleX = Math.max(0, minX - 20);
+    const circleY = Math.max(0, minY - 20);
+    
+    // Create an SVG overlay with a bright cyan dashed circle
+    const svg = `<svg width="${width}" height="${height}">
+        <rect x="${circleX}" y="${circleY}" width="${circleWidth}" height="${circleHeight}" 
+              fill="none" stroke="#00FFFF" stroke-width="6" stroke-dasharray="15,10" rx="20" ry="20"/>
+        <line x1="${circleX}" y1="${circleY}" x2="${circleX + circleWidth}" y2="${circleY + circleHeight}" 
+              stroke="#00FFFF" stroke-width="4"/>
+        <line x1="${circleX + circleWidth}" y1="${circleY}" x2="${circleX}" y2="${circleY + circleHeight}" 
+              stroke="#00FFFF" stroke-width="4"/>
+    </svg>`;
+    
+    // Composite the SVG marker over the room image
+    const markedImage = await sharp(roomBuffer)
+        .composite([{
+            input: Buffer.from(svg),
+            top: 0,
+            left: 0
+        }])
+        .png()
+        .toBuffer();
+    
+    logger.info(logContext, `Created marked image with cyan box at (${circleX},${circleY}) size ${circleWidth}x${circleHeight}`);
+    
+    return markedImage;
+}
+
+/**
  * Call Gemini API for object removal
- * Uses TWO-IMAGE approach per Google docs: room image + mask with clear "first/second image" labeling
+ * Sends image with VISUAL MARKER (cyan box with X) so Gemini can SEE what to remove
  */
 async function callGeminiForCleanup(
     prompt: string,
@@ -336,30 +388,26 @@ async function callGeminiForCleanup(
     maskBuffer: Buffer,
     aspectRatio: string,
     model: string,
-    logContext: ReturnType<typeof createLogContext>
+    logContext: ReturnType<typeof createLogContext>,
+    maskAnalysis?: { centerX: number; centerY: number; boundingBox: { minX: number; minY: number; maxX: number; maxY: number } }
 ): Promise<string> {
     const startTime = Date.now();
     logger.info(logContext, `Calling Gemini model: ${model} (timeout: ${GEMINI_TIMEOUT_MS}ms)`);
 
-    // Per Google's documentation, Gemini understands multi-image references:
-    // "Take the first image... The second image shows..."
-    // We send: 1) Original room image  2) Mask image (white = remove)
+    // Create image with visual marker if analysis is available
+    let imageToSend = roomBuffer;
+    if (maskAnalysis && maskAnalysis.boundingBox) {
+        imageToSend = await createMarkedImage(roomBuffer, maskAnalysis, logContext);
+    }
+
+    // Send the marked image so Gemini can SEE what to remove
     const parts: any[] = [
-        // First: Room image
         {
             inlineData: {
                 mimeType: 'image/png',
-                data: roomBuffer.toString('base64')
+                data: imageToSend.toString('base64')
             }
         },
-        // Second: Mask image  
-        {
-            inlineData: {
-                mimeType: 'image/png',
-                data: maskBuffer.toString('base64')
-            }
-        },
-        // Prompt with clear first/second image references
         { text: prompt }
     ];
 
@@ -520,29 +568,29 @@ export async function cleanupRoom(
             `Room: ${roomWidth}x${roomHeight}, closest Gemini ratio: ${closestRatio.label}`
         );
 
-        // Step 5: Analyze mask to log what area is being removed
+        // Step 5: Analyze mask to get detailed location and bounding box
         const maskAnalysis = await analyzeMaskPosition(maskBuffer, logContext);
         logger.info(logContext, `Mask analysis: ${maskAnalysis.description}`);
 
-        // Step 6: Build prompt - use TWO-IMAGE approach per Google's documentation
-        // Google Gemini understands multi-image editing with "first image" / "second image" labeling
-        // Reference: https://ai.google.dev/gemini-api/docs/image-generation
-        const prompt = `I am providing you with TWO images for an object removal task:
-
-FIRST IMAGE: A photograph of a room (${roomWidth}x${roomHeight} pixels)
-SECOND IMAGE: A black and white mask where WHITE areas indicate what to REMOVE from the room
+        // Step 6: Build prompt - Use VISUAL MARKER approach
+        // We draw a bright cyan box with an X over the object, then tell Gemini to remove it
+        const prompt = `This image shows a room with a CYAN/TURQUOISE DASHED BOX and X marking an object that needs to be REMOVED.
 
 YOUR TASK:
-Using the FIRST image (the room photo), remove any objects that correspond to the WHITE areas shown in the SECOND image (the mask). Fill the removed areas naturally with the background (floor, wall, or surface texture) that would be behind the removed object.
+1. Look at the area marked with the cyan/turquoise dashed rectangle and X
+2. REMOVE the object inside that marked area completely
+3. FILL that space with the natural background (floor, wall, or surface) that would be behind it
+4. Remove the cyan marking itself - the output should have NO cyan lines
 
-CRITICAL REQUIREMENTS:
-- Output MUST be exactly ${roomWidth}x${roomHeight} pixels (same as the first image)
-- Keep everything else in the image EXACTLY the same - same camera angle, same lighting, same composition
-- Only remove what the WHITE areas in the mask indicate
-- Make the result look like a natural, clean room photograph
-- Do NOT crop, resize, or change the framing
+CRITICAL RULES:
+- Output image MUST be exactly ${roomWidth}x${roomHeight} pixels
+- Keep EVERYTHING ELSE in the image EXACTLY the same
+- Same camera angle, same lighting, same composition
+- The result should look like a clean, natural room photograph
+- The marked object should simply be GONE, with natural background in its place
+- NO cyan/turquoise markings should remain in the output
 
-Return ONLY the cleaned room image with the masked objects removed.`;
+Return ONLY the cleaned room image.`;
 
         // Step 6: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
@@ -564,7 +612,8 @@ Return ONLY the cleaned room image with the masked objects removed.`;
                     editRegionMask,
                     closestRatio.label,
                     model,
-                    logContext
+                    logContext,
+                    maskAnalysis  // Pass analysis for visual marker creation
                 );
 
                 geminiOutputBuffer = Buffer.from(base64Data, 'base64');
