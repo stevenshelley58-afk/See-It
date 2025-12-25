@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.31';
+    const VERSION = '1.0.32';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
     
     // Helper: check if element is visible (has non-zero dimensions)
@@ -874,59 +874,50 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             hasErased = true;
             
-            // CRITICAL: Load the new image with verification
-            const loadImageWithVerification = (imgEl, url, name) => {
-                return new Promise((resolve, reject) => {
-                    if (!imgEl) {
-                        console.warn(`[See It] ${name} element not found`);
-                        resolve(false);
-                        return;
-                    }
-                    
-                    const oldSrc = imgEl.src;
-                    console.log(`[See It] ${name} - old src:`, oldSrc ? oldSrc.substring(0, 60) + '...' : 'none');
-                    
-                    // Add cache-busting parameter
-                    const cacheBustedUrl = url + (url.includes('?') ? '&' : '?') + '_cb=' + Date.now();
-                    
-                    imgEl.onload = () => {
-                        console.log(`[See It] ✅ ${name} LOADED successfully!`);
-                        console.log(`[See It] ${name} naturalWidth:`, imgEl.naturalWidth);
-                        console.log(`[See It] ${name} naturalHeight:`, imgEl.naturalHeight);
-                        resolve(true);
-                    };
-                    
-                    imgEl.onerror = (e) => {
-                        console.error(`[See It] ❌ ${name} FAILED to load!`, e);
-                        console.error(`[See It] ${name} attempted URL:`, cacheBustedUrl.substring(0, 100));
-                        reject(new Error(`${name} failed to load`));
-                    };
-                    
-                    console.log(`[See It] ${name} - setting src to cleaned URL...`);
-                    imgEl.src = cacheBustedUrl;
-                });
-            };
+            // CRITICAL FIX: GCS signed URLs don't work directly in <img> elements
+            // We must fetch the image first, then create a blob URL
+            console.log('[See It] Fetching cleaned image via blob URL method...');
             
-            // Load both images
-            const loadPromises = [];
-            if (roomPreview) {
-                loadPromises.push(loadImageWithVerification(roomPreview, newUrl, 'roomPreview'));
-            }
-            if (roomImage) {
-                loadPromises.push(loadImageWithVerification(roomImage, newUrl, 'roomImage'));
-            }
-            
-            if (loadPromises.length === 0) {
-                throw new Error('No image elements found to update');
-            }
-            
-            // Wait for at least one image to load
             try {
-                await Promise.race(loadPromises);
-                console.log('[See It] ✅ Cleanup complete - image updated!');
-            } catch (loadErr) {
-                console.error('[See It] Image load error:', loadErr);
-                // Don't throw - the URL might still work, just logging failed
+                const imageResponse = await fetch(newUrl);
+                if (!imageResponse.ok) {
+                    throw new Error(`Failed to fetch cleaned image: ${imageResponse.status}`);
+                }
+                
+                const blob = await imageResponse.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                
+                console.log('[See It] Created blob URL:', blobUrl);
+                console.log('[See It] Blob size:', blob.size);
+                
+                // Set the blob URL on the image elements
+                if (roomPreview) {
+                    roomPreview.src = blobUrl;
+                    console.log('[See It] ✅ roomPreview src set to blob URL');
+                }
+                if (roomImage) {
+                    roomImage.src = blobUrl;
+                    console.log('[See It] ✅ roomImage src set to blob URL');
+                }
+                
+                // Wait a moment for the images to render
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Verify the images loaded
+                if (roomPreview) {
+                    console.log('[See It] roomPreview dimensions:', {
+                        naturalWidth: roomPreview.naturalWidth,
+                        naturalHeight: roomPreview.naturalHeight,
+                        complete: roomPreview.complete
+                    });
+                }
+                
+                console.log('[See It] ✅ Cleanup complete - image updated via blob URL!');
+            } catch (fetchErr) {
+                console.error('[See It] Failed to fetch cleaned image:', fetchErr);
+                // Fallback: try setting the URL directly (might work in some browsers)
+                if (roomPreview) roomPreview.src = newUrl;
+                if (roomImage) roomImage.src = newUrl;
             }
             
         } catch (err) {
