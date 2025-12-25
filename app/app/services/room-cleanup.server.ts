@@ -708,7 +708,18 @@ Return only the cleaned room image (without the green overlay).`;
             );
         }
 
-        // Step 8: Hard-lock pixels outside edit region (I5 - compositing lock)
+
+        // Step 8: Bypass Compositing (Debugging "Nothing Removed" issue)
+        // We suspect the editRegionMask is failing, causing the original image to overwrite the result.
+        // For now, return the raw Gemini output directly. The visual prompt ensures Gemini knows what to remove.
+        logger.info(logContext, "Bypassing manual compositing - returning raw Gemini output");
+
+        compositeResult = await sharp(geminiOutputBuffer)
+            .resize(roomWidth, roomHeight) // Ensure exact dimensions
+            .toBuffer();
+
+        /*
+        // Hard-lock pixels outside edit region (I5 - compositing lock)
         // Composite: outside edit region = original, inside = Gemini output
         // Use the edit region mask as alpha for blending
         const compositeMask = await sharp(editRegionMask)
@@ -755,6 +766,7 @@ Return only the cleaned room image (without the green overlay).`;
         })
             .jpeg({ quality: 90 })
             .toBuffer();
+        */
 
         logger.info(
             { ...logContext, stage: "composite-complete" },
