@@ -185,7 +185,75 @@ async function uploadCleanedImage(
 }
 
 /**
+ * Create a visualization of the mask overlaid on the room image
+ * This helps Gemini "see" what to remove by showing a red highlight
+ */
+async function createMaskedVisualization(
+    roomBuffer: Buffer,
+    maskBuffer: Buffer,
+    logContext: ReturnType<typeof createLogContext>
+): Promise<Buffer> {
+    const roomMeta = await sharp(roomBuffer).metadata();
+    const width = roomMeta.width!;
+    const height = roomMeta.height!;
+
+    // Get room as raw RGBA
+    const roomRaw = await sharp(roomBuffer)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+    // Get mask as grayscale (white = remove)
+    const maskRaw = await sharp(maskBuffer)
+        .resize(width, height, { fit: 'fill', kernel: 'nearest' })
+        .grayscale()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+    const roomData = roomRaw.data;
+    const maskData = maskRaw.data;
+    const resultData = Buffer.alloc(roomData.length);
+
+    // Overlay bright red/pink on masked areas
+    const pixelCount = width * height;
+    for (let i = 0; i < pixelCount; i++) {
+        const rgbaIdx = i * 4;
+        const maskIdx = i;
+        const maskValue = maskData[maskIdx];
+
+        if (maskValue > 128) {
+            // White in mask = blend with bright red/pink (70% red overlay)
+            const alpha = 0.7;
+            resultData[rgbaIdx] = Math.round(roomData[rgbaIdx] * (1 - alpha) + 255 * alpha);     // R - more red
+            resultData[rgbaIdx + 1] = Math.round(roomData[rgbaIdx + 1] * (1 - alpha) + 50 * alpha);  // G - less
+            resultData[rgbaIdx + 2] = Math.round(roomData[rgbaIdx + 2] * (1 - alpha) + 80 * alpha);  // B - slightly pink
+            resultData[rgbaIdx + 3] = 255;
+        } else {
+            // Black in mask = keep original
+            resultData[rgbaIdx] = roomData[rgbaIdx];
+            resultData[rgbaIdx + 1] = roomData[rgbaIdx + 1];
+            resultData[rgbaIdx + 2] = roomData[rgbaIdx + 2];
+            resultData[rgbaIdx + 3] = 255;
+        }
+    }
+
+    const visualizedImage = await sharp(resultData, {
+        raw: { width, height, channels: 4 }
+    })
+    .png()
+    .toBuffer();
+
+    logger.info(
+        { ...logContext, stage: "mask-visualization" },
+        `Created mask visualization: ${visualizedImage.length} bytes, ${width}x${height}`
+    );
+
+    return visualizedImage;
+}
+
+/**
  * Call Gemini API for object removal
+ * Uses a SINGLE image with mask visualization - Gemini doesn't support mask inputs natively
  */
 async function callGeminiForCleanup(
     prompt: string,
@@ -198,20 +266,19 @@ async function callGeminiForCleanup(
     const startTime = Date.now();
     logger.info(logContext, `Calling Gemini model: ${model} (timeout: ${GEMINI_TIMEOUT_MS}ms)`);
 
+    // Create mask visualization - overlay red highlight on areas to remove
+    const visualizedImage = await createMaskedVisualization(roomBuffer, maskBuffer, logContext);
+
+    // CRITICAL FIX: Send SINGLE image with clear instruction
+    // Gemini doesn't understand separate mask images - we must visualize the mask
     const parts: any[] = [
-        { text: prompt },
         {
             inlineData: {
                 mimeType: 'image/png',
-                data: roomBuffer.toString('base64')
+                data: visualizedImage.toString('base64')
             }
         },
-        {
-            inlineData: {
-                mimeType: 'image/png',
-                data: maskBuffer.toString('base64')
-            }
-        }
+        { text: prompt }
     ];
 
     const config: any = {
@@ -371,26 +438,27 @@ export async function cleanupRoom(
             `Room: ${roomWidth}x${roomHeight}, closest Gemini ratio: ${closestRatio.label}`
         );
 
-        // Step 5: Build prompt (tight + strict, smart intent recognition)
+        // Step 5: Build prompt (clear instruction for visual mask)
+        // CRITICAL: Gemini doesn't understand separate mask images!
+        // We send ONE image with red highlight showing what to remove
         const prompt = `OBJECT REMOVAL TASK
 
-You are given two images:
-1. sourceRoomImage: A photograph of a room (${roomWidth}x${roomHeight} pixels)
-2. inpaintMaskImage: A mask showing the user's intent (white regions indicate the object to remove)
+This image shows a room with RED HIGHLIGHTED AREAS marking objects to remove.
 
-INSTRUCTIONS:
-- Identify the object that overlaps the WHITE regions in the mask
-- The user's paint strokes are approximate - remove the ENTIRE object that intersects the white area, even if parts extend slightly beyond
-- Fill the removed area naturally with background that matches the surrounding floor, wall, or surface
-- The mask is a HINT for what to remove - use your understanding of the scene to identify and remove the complete intended object
+YOUR TASK:
+1. REMOVE all objects/areas that are highlighted in red/pink
+2. FILL the removed areas naturally with the surrounding background (floor, wall, or surface)
+3. Return a CLEAN room image WITHOUT any red highlighting
 
-STRICT CONSTRAINTS:
-- Output image MUST maintain the EXACT same dimensions as the input (${roomWidth}x${roomHeight})
+CRITICAL RULES:
+- Output image MUST be EXACTLY ${roomWidth}x${roomHeight} pixels (same as input)
 - DO NOT change the camera angle, zoom, or framing
-- DO NOT extend, crop, or resize the image
+- DO NOT crop, extend, or resize the image
 - DO NOT add any new objects, people, or furniture
-- DO NOT modify lighting, colors, or textures outside the removal area
-- Keep everything outside the object removal area UNCHANGED`;
+- REMOVE the red highlighted objects completely
+- The output should look like a natural room photo with NO red marks
+
+Output: A clean room image with the highlighted objects removed and areas filled naturally.`;
 
         // Step 6: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
