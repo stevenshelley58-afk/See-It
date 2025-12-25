@@ -328,7 +328,7 @@ async function analyzeMaskPosition(
 
 /**
  * Call Gemini API for object removal
- * Uses VISUAL OVERLAY - Gemini can see red highlighting showing what to remove
+ * Uses TWO-IMAGE approach per Google docs: room image + mask with clear "first/second image" labeling
  */
 async function callGeminiForCleanup(
     prompt: string,
@@ -341,23 +341,25 @@ async function callGeminiForCleanup(
     const startTime = Date.now();
     logger.info(logContext, `Calling Gemini model: ${model} (timeout: ${GEMINI_TIMEOUT_MS}ms)`);
 
-    // Create a visual overlay showing what to remove with a bright red highlight
-    const visualizedImage = await createMaskedVisualization(roomBuffer, maskBuffer, logContext);
-    
-    logger.info(
-        { ...logContext, stage: "visual-overlay" },
-        `Created visual overlay: ${visualizedImage.length} bytes (red highlight on areas to remove)`
-    );
-
-    // CRITICAL: Send the image WITH visual overlay so Gemini can SEE what to remove
-    // This is more reliable than text descriptions of locations
+    // Per Google's documentation, Gemini understands multi-image references:
+    // "Take the first image... The second image shows..."
+    // We send: 1) Original room image  2) Mask image (white = remove)
     const parts: any[] = [
+        // First: Room image
         {
             inlineData: {
                 mimeType: 'image/png',
-                data: visualizedImage.toString('base64')
+                data: roomBuffer.toString('base64')
             }
         },
+        // Second: Mask image  
+        {
+            inlineData: {
+                mimeType: 'image/png',
+                data: maskBuffer.toString('base64')
+            }
+        },
+        // Prompt with clear first/second image references
         { text: prompt }
     ];
 
@@ -522,23 +524,25 @@ export async function cleanupRoom(
         const maskAnalysis = await analyzeMaskPosition(maskBuffer, logContext);
         logger.info(logContext, `Mask analysis: ${maskAnalysis.description}`);
 
-        // Step 6: Build prompt - tell Gemini to remove the RED HIGHLIGHTED area
-        // We're sending an image with red overlay so Gemini can SEE exactly what to remove
-        const prompt = `This image shows a room with a BRIGHT RED/PINK OVERLAY highlighting an object or area that needs to be removed.
+        // Step 6: Build prompt - use TWO-IMAGE approach per Google's documentation
+        // Google Gemini understands multi-image editing with "first image" / "second image" labeling
+        // Reference: https://ai.google.dev/gemini-api/docs/image-generation
+        const prompt = `I am providing you with TWO images for an object removal task:
+
+FIRST IMAGE: A photograph of a room (${roomWidth}x${roomHeight} pixels)
+SECOND IMAGE: A black and white mask where WHITE areas indicate what to REMOVE from the room
 
 YOUR TASK:
-1. ERASE and REMOVE the object/area that is covered by the red/pink highlighting
-2. FILL that space with the background that would naturally be behind it (floor, wall, surface)
-3. The result should look like a clean room photo with the highlighted object completely gone
-4. REMOVE any text labels like "REMOVE THIS" as well
+Using the FIRST image (the room photo), remove any objects that correspond to the WHITE areas shown in the SECOND image (the mask). Fill the removed areas naturally with the background (floor, wall, or surface texture) that would be behind the removed object.
 
-IMPORTANT:
-- Output image must be ${roomWidth}x${roomHeight} pixels (same as input)
-- Keep the same camera angle and perspective
-- Don't add new objects, just remove what's highlighted
-- Make the filled area blend naturally with surroundings
+CRITICAL REQUIREMENTS:
+- Output MUST be exactly ${roomWidth}x${roomHeight} pixels (same as the first image)
+- Keep everything else in the image EXACTLY the same - same camera angle, same lighting, same composition
+- Only remove what the WHITE areas in the mask indicate
+- Make the result look like a natural, clean room photograph
+- Do NOT crop, resize, or change the framing
 
-Return ONLY the cleaned image with the red-highlighted object removed.`;
+Return ONLY the cleaned room image with the masked objects removed.`;
 
         // Step 6: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
