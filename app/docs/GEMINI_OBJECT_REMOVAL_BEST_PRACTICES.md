@@ -1,13 +1,25 @@
 # Gemini 2.5 Object Removal - Best Practices Guide
 
-**Last Updated:** December 2024  
-**Source:** Google Gemini API Documentation + See It App Implementation
+**Last Updated:** December 2024
+**Source:** Google Gemini API Documentation + Community Tips + See It App Implementation
 
 ---
 
 ## Overview
 
 This guide covers best practices for using Gemini 2.5 Flash Image (`gemini-2.5-flash-image`) and Gemini 3 Pro Image Preview (`gemini-3-pro-image-preview`) for object removal tasks.
+
+---
+
+## TL;DR - Quick Tips
+
+1. **One edit at a time** - Break complex edits into sequential steps
+2. **Describe scenes, not keywords** - Use natural language (73% better results)
+3. **Be hyper-specific** - Include what to remove AND what to preserve
+4. **Start under 2MB** - Large images get compressed, losing quality
+5. **Mask dilation: 1-2%** - Smooth borders for convincing edits
+6. **Iterate, don't restart** - Use multi-turn conversation for refinement
+7. **Composite results** - Lock pixels outside edit region to prevent drift
 
 ---
 
@@ -302,11 +314,130 @@ const response = await withTimeout(
 
 ---
 
+## Community Tips & Tricks (from Reddit, Forums, Guides)
+
+### Prompt Engineering Secrets
+
+#### Describe Scenes, Not Keywords
+```
+❌ Bad:  "room, no sofa, clean, modern"
+✅ Good: "This is a modern living room. Remove the sofa and fill the area
+         to match the hardwood floor and white wall texture behind it."
+```
+> Official data shows descriptive paragraphs achieve 73% better results than keyword stuffing.
+
+#### Use Photographic/Cinematic Language
+Control composition with terms like:
+- "wide-angle shot" / "macro shot"
+- "low-angle perspective" / "85mm portrait lens"
+- "soft studio light from camera left"
+- "preserve original depth and bokeh"
+
+#### Explicit Constraints Template
+```
+"Remove [object]. Fill the area to match the [floor/wall] texture.
+Do not alter the subject's face, pose, or clothing.
+Keep the same camera angle, zoom, and framing.
+Preserve the original lighting, shadows, and color grading."
+```
+
+#### Object Removal Best Prompts (from Skylum)
+```
+"Remove distracting background elements while preserving original depth
+and bokeh. Patch gaps with matching texture and avoid changes to subject edges."
+```
+
+### Quality Preservation Tips
+
+1. **Start under 2MB** - Large images are automatically compressed by Google, leading to quality loss
+2. **Save after each edit** - Keep a copy after each successful edit to preserve quality
+3. **Limit iterations** - Don't over-edit; each pass can degrade quality
+4. **Use negative constraints** - "No blur, no artifact, no watermark, no unrealistic skin smoothing"
+5. **Specify preservation** - "preserve identity", "do not alter composition", "maintain pose"
+
+### Iterative Refinement Strategy
+Gemini has excellent memory in multi-turn conversations:
+```
+Turn 1: "Remove the lamp from the corner"
+Turn 2: "Keep the composition, just darken the tones a bit"
+Turn 3: "Perfect. Now remove the power cord visible on the floor"
+```
+> Stepwise edits work better than overloading instructions per Google's 2025 guidance.
+
+### Fixing Common Problems
+
+#### "Content Is Not Permitted" Error
+- Remove triggering words (body parts, weapons, political names, copyrighted characters)
+- Use neutral, descriptive language avoiding slang
+- Crop images to target areas only—smaller crops reduce false positives
+- Retry later - the filter can be inconsistent
+
+#### Poor Edit Quality
+- Make single edits sequentially rather than bulk changes
+- Include strict constraints: "Do not alter the subject's face, pose, or clothing"
+- Try upscaling the result if output appears degraded
+
+#### Aspect Ratio Changes
+If Gemini changes your aspect ratio, be explicit:
+```
+"Update the input image... Do not change the input aspect ratio."
+```
+
+#### Background Looks Flat After Removal
+- Consider depth and bokeh in your prompt
+- Mention "preserve original depth" or "maintain background blur"
+- Describe what should fill the area: "fill with matching hardwood floor texture"
+
+---
+
+## Imagen 3 vs Gemini 2.5 Flash
+
+| Feature | Gemini 2.5 Flash | Imagen 3 |
+|---------|------------------|----------|
+| Mask Input | Natural language (describe area) | Explicit mask image |
+| Best For | Context-aware edits, complex reasoning | Precise pixel-level control |
+| Edit Steps | N/A | Start at 12, max 75 |
+| Mask Dilation | Handled in prompt | 1-2% recommended (0.01-0.02) |
+| Speed | ~2.3 seconds average | Slower |
+| Quality Focus | Contextual coherence | Visual fidelity |
+
+**When to use Imagen 3 instead:**
+- You need precise pixel-level mask control
+- Object removal requires surgical precision
+- Quality is more important than speed
+- You have a pre-made mask image
+
+---
+
+## Advanced: Semantic Mask Approach (Imagen 3)
+
+For Imagen 3 on Vertex AI, you can use semantic segmentation:
+
+```javascript
+// Auto-detect and mask by object class
+{
+    "editMode": "EDIT_MODE_INPAINT_REMOVAL",
+    "maskMode": "MASK_MODE_SEMANTIC",
+    "maskClasses": [67]  // e.g., 67 = tables
+}
+```
+
+Mask modes available:
+- `MASK_MODE_BACKGROUND` - Auto-detect and mask background
+- `MASK_MODE_FOREGROUND` - Auto-detect and mask foreground objects
+- `MASK_MODE_SEMANTIC` - Use semantic segmentation with class IDs
+
+---
+
 ## References
 
 - **Official Docs:** https://ai.google.dev/gemini-api/docs/image-generation
 - **Image Understanding:** https://ai.google.dev/gemini-api/docs/image-understanding
 - **Prompting Best Practices:** https://ai.google.dev/gemini-api/docs/prompting_with_media
+- **Google Developers Blog:** https://developers.googleblog.com/en/how-to-prompt-gemini-2-5-flash-image-generation-for-the-best-results/
+- **Vertex AI Inpainting:** https://docs.cloud.google.com/vertex-ai/generative-ai/docs/image/edit-remove-objects
+- **Firebase Imagen:** https://firebase.google.com/docs/ai-logic/edit-images-imagen-remove-objects
+- **Troubleshooting Guide:** https://www.ywian.com/blog/gemini-image-editing-guide-troubleshooting
 - **Current Implementation:** `app/app/services/room-cleanup.server.ts`
 
 ---
@@ -315,12 +446,17 @@ const response = await withTimeout(
 
 - [ ] Label images clearly (FIRST IMAGE, SECOND IMAGE)
 - [ ] Use explicit prompts with dual instructions (what to remove + what to keep)
+- [ ] Describe scenes naturally, not just keywords
+- [ ] Include explicit preservation constraints
 - [ ] Validate mask and room dimensions match exactly
-- [ ] Pre-process mask (expand + feather edges)
+- [ ] Pre-process mask (expand 16px + feather sigma 6)
+- [ ] Use mask dilation of 1-2% for Imagen
+- [ ] Start with images under 2MB to avoid compression
 - [ ] Use correct aspect ratio in config
 - [ ] Implement model fallback (fast → pro)
+- [ ] Use iterative refinement for complex edits
 - [ ] Post-process with compositing to lock pixels outside edit region
-- [ ] Handle timeouts gracefully
+- [ ] Handle timeouts gracefully (60 seconds recommended)
 - [ ] Extract image from response correctly
 - [ ] Log all stages for debugging
 
