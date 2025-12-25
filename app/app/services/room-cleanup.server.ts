@@ -253,7 +253,7 @@ async function createMaskedVisualization(
 
 /**
  * Call Gemini API for object removal
- * Uses a SINGLE image with mask visualization - Gemini doesn't support mask inputs natively
+ * Sends TWO images: room image and mask image, with clear labeling
  */
 async function callGeminiForCleanup(
     prompt: string,
@@ -266,16 +266,23 @@ async function callGeminiForCleanup(
     const startTime = Date.now();
     logger.info(logContext, `Calling Gemini model: ${model} (timeout: ${GEMINI_TIMEOUT_MS}ms)`);
 
-    // Create mask visualization - overlay red highlight on areas to remove
-    const visualizedImage = await createMaskedVisualization(roomBuffer, maskBuffer, logContext);
-
-    // CRITICAL FIX: Send SINGLE image with clear instruction
-    // Gemini doesn't understand separate mask images - we must visualize the mask
+    // APPROACH: Send both room image and mask as separate images
+    // Label them clearly as "first image" (room) and "second image" (mask)
+    // This follows Google's recommended pattern for multi-image editing
     const parts: any[] = [
+        { text: "I have two images for you:" },
+        { text: "FIRST IMAGE - This is a photograph of a room:" },
         {
             inlineData: {
                 mimeType: 'image/png',
-                data: visualizedImage.toString('base64')
+                data: roomBuffer.toString('base64')
+            }
+        },
+        { text: "SECOND IMAGE - This is a mask where WHITE areas indicate objects to REMOVE:" },
+        {
+            inlineData: {
+                mimeType: 'image/png',
+                data: maskBuffer.toString('base64')
             }
         },
         { text: prompt }
@@ -438,27 +445,24 @@ export async function cleanupRoom(
             `Room: ${roomWidth}x${roomHeight}, closest Gemini ratio: ${closestRatio.label}`
         );
 
-        // Step 5: Build prompt (clear instruction for visual mask)
-        // CRITICAL: Gemini doesn't understand separate mask images!
-        // We send ONE image with red highlight showing what to remove
+        // Step 5: Build prompt (references both images clearly)
         const prompt = `OBJECT REMOVAL TASK
 
-This image shows a room with RED HIGHLIGHTED AREAS marking objects to remove.
+Using the FIRST IMAGE (the room photograph) and the SECOND IMAGE (the mask):
 
 YOUR TASK:
-1. REMOVE all objects/areas that are highlighted in red/pink
-2. FILL the removed areas naturally with the surrounding background (floor, wall, or surface)
-3. Return a CLEAN room image WITHOUT any red highlighting
+1. Look at the SECOND IMAGE (mask) - the WHITE areas show what objects to REMOVE from the room
+2. In the FIRST IMAGE, identify and COMPLETELY REMOVE all objects that correspond to the WHITE areas in the mask
+3. Fill the removed areas with the surrounding background (wall, floor, or surface) so it looks natural
 
 CRITICAL RULES:
-- Output image MUST be EXACTLY ${roomWidth}x${roomHeight} pixels (same as input)
-- DO NOT change the camera angle, zoom, or framing
-- DO NOT crop, extend, or resize the image
+- Output MUST be EXACTLY ${roomWidth}x${roomHeight} pixels
+- Keep the SAME camera angle, zoom, and framing as the first image
+- DO NOT crop, extend, or resize
 - DO NOT add any new objects, people, or furniture
-- REMOVE the red highlighted objects completely
-- The output should look like a natural room photo with NO red marks
+- The final image should look like the original room but with the masked objects completely gone
 
-Output: A clean room image with the highlighted objects removed and areas filled naturally.`;
+Output: Return ONLY the cleaned room image with objects removed.`;
 
         // Step 6: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
