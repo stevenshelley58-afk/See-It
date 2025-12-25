@@ -32,6 +32,10 @@ const PROCESSING_MESSAGES = [
   "Almost there...",
 ];
 
+// Enable debug mode via URL param or prop
+const DEBUG_MODE = typeof window !== 'undefined' &&
+  (window.location?.search?.includes('debug=true') || window.location?.search?.includes('debug=mask'));
+
 /**
  * Calculate display size to fit image in container without stretching
  * Returns display dimensions and scale factor for coordinate conversion
@@ -58,6 +62,50 @@ function calculateDisplaySize(origW, origH, containerW, containerH) {
   };
 }
 
+/**
+ * Validate mask has actual content (white pixels)
+ */
+function validateMask(canvas) {
+  if (!canvas) return { valid: false, error: "No canvas" };
+
+  const ctx = canvas.getContext("2d");
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+
+  let whitePixels = 0;
+  const totalPixels = canvas.width * canvas.height;
+
+  // Check R channel (for white pixels, R should be > 200)
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] > 200) {
+      whitePixels++;
+    }
+  }
+
+  const coverage = whitePixels / totalPixels;
+
+  console.log(`[PrepareRoom] Mask validation:`, {
+    dimensions: `${canvas.width}x${canvas.height}`,
+    whitePixels,
+    totalPixels,
+    coverage: `${(coverage * 100).toFixed(2)}%`,
+  });
+
+  if (whitePixels === 0) {
+    return { valid: false, error: "Mask is empty (no white pixels)", coverage: 0 };
+  }
+
+  if (coverage > 0.7) {
+    return { valid: false, error: "Too much painted (>70% of image)", coverage };
+  }
+
+  if (coverage < 0.001) {
+    return { valid: false, error: "Mask too small (<0.1% of image)", coverage };
+  }
+
+  return { valid: true, coverage };
+}
+
 export function PrepareRoom({
   imageFile,        // File object or Blob of the room image
   imageUrl,         // Alternative: URL to the room image
@@ -66,6 +114,7 @@ export function PrepareRoom({
   onSkip,           // Called when user skips without painting
   onBack,           // Called when user wants to go back
   apiEndpoint = "/apps/see-it/room/cleanup", // Cleanup API endpoint
+  debug = DEBUG_MODE, // Enable debug mode
 }) {
   // === STATE ===
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -77,6 +126,7 @@ export function PrepareRoom({
   const [isProcessing, setIsProcessing] = useState(false);
   const [messageIndex, setMessageIndex] = useState(0);
   const [error, setError] = useState(null);
+  const [showDebugMask, setShowDebugMask] = useState(false);
 
   // === REFS ===
   const containerRef = useRef(null);
@@ -88,6 +138,24 @@ export function PrepareRoom({
   // === DERIVED STATE ===
   const hasDrawn = strokes.length > 0;
 
+  // === INITIALIZE MASK CANVAS (separate effect for reliability) ===
+  useEffect(() => {
+    if (!originalDims || !maskCanvasRef.current) return;
+
+    const canvas = maskCanvasRef.current;
+
+    // Only initialize if dimensions changed
+    if (canvas.width !== originalDims.width || canvas.height !== originalDims.height) {
+      console.log(`[PrepareRoom] Initializing mask canvas: ${originalDims.width}x${originalDims.height}`);
+      canvas.width = originalDims.width;
+      canvas.height = originalDims.height;
+
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, originalDims.width, originalDims.height);
+    }
+  }, [originalDims]);
+
   // === IMAGE LOADING ===
   useEffect(() => {
     if (!imageFile && !imageUrl) return;
@@ -95,12 +163,15 @@ export function PrepareRoom({
     // Create preview URL for immediate display
     const previewUrl = imageFile ? URL.createObjectURL(imageFile) : imageUrl;
 
+    console.log(`[PrepareRoom] Loading image from:`, imageFile ? 'File' : imageUrl?.substring(0, 50) + '...');
+
     // Load image to get dimensions
     const img = new Image();
     img.crossOrigin = "anonymous";
 
     img.onload = () => {
       const dims = { width: img.naturalWidth, height: img.naturalHeight };
+      console.log(`[PrepareRoom] Image loaded: ${dims.width}x${dims.height}`);
       setOriginalDims(dims);
       imageRef.current = img;
 
@@ -115,22 +186,15 @@ export function PrepareRoom({
           containerRect.width - 32, // Padding
           Math.max(200, availableHeight)
         );
+        console.log(`[PrepareRoom] Display size: ${display.width}x${display.height}, scale: ${display.scale}`);
         setDisplayState(display);
-
-        // Initialize mask canvas at ORIGINAL dimensions (critical!)
-        if (maskCanvasRef.current) {
-          maskCanvasRef.current.width = dims.width;
-          maskCanvasRef.current.height = dims.height;
-          const ctx = maskCanvasRef.current.getContext("2d");
-          ctx.fillStyle = "black"; // Black = preserve
-          ctx.fillRect(0, 0, dims.width, dims.height);
-        }
       }
 
       setImageLoaded(true);
     };
 
-    img.onerror = () => {
+    img.onerror = (e) => {
+      console.error(`[PrepareRoom] Failed to load image:`, e);
       setError("Failed to load image. Please try again.");
     };
 
@@ -196,15 +260,6 @@ export function PrepareRoom({
     [displayState, originalDims]
   );
 
-  // Convert screen brush size to original image brush size
-  const screenBrushToOriginal = useCallback(
-    (screenBrushSize) => {
-      if (!displayState || !originalDims) return screenBrushSize;
-      return screenBrushSize * (originalDims.width / displayState.width);
-    },
-    [displayState, originalDims]
-  );
-
   // === DRAWING HANDLERS ===
   const startDrawing = useCallback(
     (e) => {
@@ -254,9 +309,19 @@ export function PrepareRoom({
   useEffect(() => {
     if (!displayState || !originalDims) return;
 
-    const displayCtx = displayCanvasRef.current?.getContext("2d");
-    const maskCtx = maskCanvasRef.current?.getContext("2d");
-    if (!displayCtx || !maskCtx) return;
+    const displayCanvas = displayCanvasRef.current;
+    const maskCanvas = maskCanvasRef.current;
+    if (!displayCanvas || !maskCanvas) return;
+
+    // Ensure mask canvas has correct dimensions
+    if (maskCanvas.width !== originalDims.width || maskCanvas.height !== originalDims.height) {
+      console.log(`[PrepareRoom] Re-initializing mask canvas: ${originalDims.width}x${originalDims.height}`);
+      maskCanvas.width = originalDims.width;
+      maskCanvas.height = originalDims.height;
+    }
+
+    const displayCtx = displayCanvas.getContext("2d");
+    const maskCtx = maskCanvas.getContext("2d");
 
     // Clear display canvas
     displayCtx.clearRect(0, 0, displayState.width, displayState.height);
@@ -266,11 +331,12 @@ export function PrepareRoom({
     maskCtx.fillRect(0, 0, originalDims.width, originalDims.height);
 
     // Draw all strokes
-    strokes.forEach((stroke) => {
+    strokes.forEach((stroke, strokeIndex) => {
       if (stroke.points.length < 1) return;
 
       // === DISPLAY CANVAS (screen coordinates) ===
       displayCtx.strokeStyle = PAINT_COLOR;
+      displayCtx.fillStyle = PAINT_COLOR;
       displayCtx.lineWidth = stroke.brushSize;
       displayCtx.lineCap = "round";
       displayCtx.lineJoin = "round";
@@ -285,7 +351,6 @@ export function PrepareRoom({
           0,
           Math.PI * 2
         );
-        displayCtx.fillStyle = PAINT_COLOR;
         displayCtx.fill();
       } else {
         // Multiple points - draw a path
@@ -300,6 +365,7 @@ export function PrepareRoom({
       const originalBrushSize = stroke.brushSize * scale;
 
       maskCtx.strokeStyle = "white"; // White = remove
+      maskCtx.fillStyle = "white";
       maskCtx.lineWidth = originalBrushSize;
       maskCtx.lineCap = "round";
       maskCtx.lineJoin = "round";
@@ -315,7 +381,6 @@ export function PrepareRoom({
           0,
           Math.PI * 2
         );
-        maskCtx.fillStyle = "white";
         maskCtx.fill();
       } else {
         // Multiple points
@@ -329,7 +394,17 @@ export function PrepareRoom({
         maskCtx.stroke();
       }
     });
-  }, [strokes, displayState, originalDims, screenToOriginal]);
+
+    // Debug: log stroke info
+    if (debug && strokes.length > 0) {
+      console.log(`[PrepareRoom] Rendered ${strokes.length} strokes to mask`);
+    }
+  }, [strokes, displayState, originalDims, screenToOriginal, debug]);
+
+  // === DEBUG: Show Mask Overlay ===
+  const toggleDebugMask = useCallback(() => {
+    setShowDebugMask((prev) => !prev);
+  }, []);
 
   // === ACTIONS ===
   const handleUndo = useCallback(() => {
@@ -346,8 +421,27 @@ export function PrepareRoom({
       return;
     }
 
-    if (!maskCanvasRef.current || !originalDims) {
+    const maskCanvas = maskCanvasRef.current;
+    if (!maskCanvas || !originalDims) {
       setError("Canvas not ready. Please try again.");
+      return;
+    }
+
+    // Validate mask has content
+    const validation = validateMask(maskCanvas);
+    if (!validation.valid) {
+      console.error(`[PrepareRoom] Mask validation failed:`, validation.error);
+      setError(validation.error || "Please paint over the item you want to remove.");
+      return;
+    }
+
+    // Validate mask dimensions match original
+    if (maskCanvas.width !== originalDims.width || maskCanvas.height !== originalDims.height) {
+      console.error(`[PrepareRoom] Mask dimension mismatch:`, {
+        mask: `${maskCanvas.width}x${maskCanvas.height}`,
+        original: `${originalDims.width}x${originalDims.height}`,
+      });
+      setError("Mask dimension error. Please try again.");
       return;
     }
 
@@ -355,18 +449,15 @@ export function PrepareRoom({
     setError(null);
 
     try {
-      // Get mask as data URL (PNG format, includes dimensions)
-      const maskDataUrl = maskCanvasRef.current.toDataURL("image/png");
+      // Get mask as data URL (PNG format)
+      const maskDataUrl = maskCanvas.toDataURL("image/png");
 
-      // Validate mask dimensions match original
-      if (
-        maskCanvasRef.current.width !== originalDims.width ||
-        maskCanvasRef.current.height !== originalDims.height
-      ) {
-        throw new Error(
-          `Mask dimension mismatch: ${maskCanvasRef.current.width}x${maskCanvasRef.current.height} vs ${originalDims.width}x${originalDims.height}`
-        );
-      }
+      console.log(`[PrepareRoom] Sending cleanup request:`, {
+        roomSessionId,
+        maskDimensions: `${maskCanvas.width}x${maskCanvas.height}`,
+        maskDataUrlLength: maskDataUrl.length,
+        coverage: `${(validation.coverage * 100).toFixed(2)}%`,
+      });
 
       // Call cleanup API
       const response = await fetch(apiEndpoint, {
@@ -382,6 +473,12 @@ export function PrepareRoom({
 
       const data = await response.json();
 
+      console.log(`[PrepareRoom] API response:`, {
+        ok: response.ok,
+        status: data.status,
+        hasCleanedUrl: !!(data.cleaned_room_image_url || data.cleanedRoomImageUrl),
+      });
+
       if (!response.ok || data.status === "failed") {
         throw new Error(data.message || data.error || "Failed to remove object");
       }
@@ -394,7 +491,7 @@ export function PrepareRoom({
 
       onComplete?.(cleanedImageUrl);
     } catch (err) {
-      console.error("Cleanup failed:", err);
+      console.error("[PrepareRoom] Cleanup failed:", err);
       setError(
         err.message || "Couldn't remove the item. Try painting more of it."
       );
@@ -428,7 +525,17 @@ export function PrepareRoom({
         <span className="text-sm font-medium text-gray-500 tracking-wide">
           PREPARE ROOM
         </span>
-        <div className="w-10" /> {/* Spacer for centering */}
+        {/* Debug toggle */}
+        {debug ? (
+          <button
+            onClick={toggleDebugMask}
+            className="text-xs text-blue-600 underline"
+          >
+            {showDebugMask ? "Hide Mask" : "Show Mask"}
+          </button>
+        ) : (
+          <div className="w-10" />
+        )}
       </div>
 
       {/* Image Container */}
@@ -474,16 +581,41 @@ export function PrepareRoom({
           )}
 
           {/* Hidden Mask Canvas (original dimensions) */}
-          <canvas ref={maskCanvasRef} className="hidden" />
+          <canvas ref={maskCanvasRef} style={{ display: "none" }} />
+
+          {/* Debug: Mask Visualization Overlay */}
+          {debug && showDebugMask && maskCanvasRef.current && displayState && (
+            <div
+              className="absolute inset-0 pointer-events-none rounded-lg overflow-hidden"
+              style={{ opacity: 0.5 }}
+            >
+              <img
+                src={maskCanvasRef.current.toDataURL()}
+                alt="Mask debug"
+                className="w-full h-full object-contain"
+                style={{ filter: "invert(1)" }} // Invert so white shows as visible
+              />
+            </div>
+          )}
 
           {/* Loading placeholder */}
           {!imageLoaded && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg">
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg min-h-[200px] min-w-[200px]">
               <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
             </div>
           )}
         </div>
       </div>
+
+      {/* Debug Info */}
+      {debug && originalDims && displayState && (
+        <div className="text-xs text-gray-500 text-center py-1 bg-yellow-50">
+          Original: {originalDims.width}x{originalDims.height} |
+          Display: {displayState.width}x{displayState.height} |
+          Scale: {displayState.scale.toFixed(3)} |
+          Strokes: {strokes.length}
+        </div>
+      )}
 
       {/* Instructions */}
       <p className="text-center text-gray-500 text-sm py-2 px-4">
