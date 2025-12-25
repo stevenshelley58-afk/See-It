@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.27';
+    const VERSION = '1.0.31';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
     
     // Helper: check if element is visible (has non-zero dimensions)
@@ -46,11 +46,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 // Compute crop dimensions (center crop)
                 let cropW, cropH;
                 if (w / h > closest.value) {
-                    // Image is wider than target — crop sides
                     cropH = h;
                     cropW = Math.round(h * closest.value);
                 } else {
-                    // Image is taller than target — crop top/bottom
                     cropW = w;
                     cropH = Math.round(w / closest.value);
                 }
@@ -105,14 +103,13 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
     }
 
-    // --- Modal placement & scroll lock (prevents Shopify theme containers from breaking position:fixed) ---
+    // --- Modal placement & scroll lock ---
     let savedScrollY = 0;
     
     const ensureModalPortaled = () => {
         if (modal.parentElement !== document.body) {
             document.body.appendChild(modal);
         }
-        // Ensure modal has inline styles to override any theme interference
         modal.style.position = 'fixed';
         modal.style.top = '0';
         modal.style.left = '0';
@@ -147,127 +144,40 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Entry screen elements
     const btnCloseEntry = $('see-it-close-entry');
-    const btnCloseEntryDesktop = $('see-it-close-entry-desktop');
     const btnTakePhoto = $('see-it-btn-take-photo');
     const btnUpload = $('see-it-btn-upload');
     const btnSaved = $('see-it-btn-saved');
-    // Desktop entry elements
-    const btnTakePhotoDesktop = $('see-it-btn-take-photo-desktop');
-    const btnUploadDesktop = $('see-it-btn-upload-desktop');
-    const btnSavedDesktop = $('see-it-btn-saved-desktop');
     const uploadInput = $('see-it-upload-input');
     const cameraInput = $('see-it-camera-input');
 
     // Prepare screen elements
     const btnBackPrepare = $('see-it-back-prepare');
-    const btnBackPrepareDesktop = $('see-it-back-prepare-desktop');
-    const btnClosePrepareDesktop = $('see-it-close-prepare-desktop');
     const roomPreview = $('see-it-room-preview');
-    const roomPreviewDesktop = $('see-it-room-preview-desktop');
     const maskCanvas = $('see-it-mask-canvas');
-    const maskCanvasDesktop = $('see-it-mask-canvas-desktop');
     const btnUndo = $('see-it-undo-btn');
-    const btnClear = $('see-it-clear-btn');
     const btnRemove = $('see-it-remove-btn');
     const btnConfirmRoom = $('see-it-confirm-room');
-    // Desktop prepare elements
-    const btnUndoDesktop = $('see-it-undo-btn-desktop');
-    const btnClearDesktop = $('see-it-clear-btn-desktop');
-    const btnRemoveDesktop = $('see-it-remove-btn-desktop');
-    const btnConfirmRoomDesktop = $('see-it-confirm-room-desktop');
-    const btnBrushSmallDesktop = $('see-it-brush-small-desktop');
-    const btnBrushMediumDesktop = $('see-it-brush-medium-desktop');
-    const btnBrushLargeDesktop = $('see-it-brush-large-desktop');
-    const btnBrushSmallMobile = $('see-it-brush-small-mobile');
-    const btnBrushMediumMobile = $('see-it-brush-medium-mobile');
-    const btnBrushLargeMobile = $('see-it-brush-large-mobile');
-    const cleanupLoading = $('see-it-cleanup-loading');
-    const uploadIndicator = $('see-it-upload-indicator');
 
     // Position screen elements
     const btnBackPosition = $('see-it-back-position');
-    const btnClosePositionDesktop = $('see-it-close-position-desktop');
     const roomImage = $('see-it-room-image');
-    const roomImageDesktop = $('see-it-room-image-desktop');
-    const productContainer = $('see-it-product-container');
-    const productContainerDesktop = $('see-it-product-container-desktop');
-    const productImage = $('see-it-product-image');
-    const productImageDesktop = $('see-it-product-image-desktop');
     const btnGenerate = $('see-it-generate');
-    const btnGenerateDesktop = $('see-it-generate-desktop');
     const saveRoomToggle = $('see-it-save-room-toggle');
-    const saveRoomToggleDesktop = $('see-it-save-room-toggle-desktop');
-    const toggleSwitch = saveRoomToggle?.closest('.see-it-toggle-switch');
-    const toggleSwitchDesktop = saveRoomToggleDesktop?.closest('.see-it-toggle-switch');
-
-    // Toggle switch handler
-    const handleToggleChange = (e, toggleSwitchEl) => {
-        if (toggleSwitchEl) {
-            if (e.target.checked) {
-                toggleSwitchEl.classList.add('checked');
-            } else {
-                toggleSwitchEl.classList.remove('checked');
-            }
-        }
-    };
-    saveRoomToggle?.addEventListener('change', (e) => handleToggleChange(e, toggleSwitch));
-    saveRoomToggleDesktop?.addEventListener('change', (e) => handleToggleChange(e, toggleSwitchDesktop));
 
     // Result screen elements
     const btnCloseResult = $('see-it-close-result');
-    const btnCloseResultDesktop = $('see-it-close-result-desktop');
-    const btnBackResult = $('see-it-back-result');
     const resultImage = $('see-it-result-image');
-    const resultImageDesktop = $('see-it-result-image-desktop');
-    const statusText = $('see-it-status');
-    const statusTextContainer = $('see-it-status-text');
     const btnShare = $('see-it-share');
-    const btnShareDesktop = $('see-it-share-desktop');
-    const btnAdjust = $('see-it-adjust');
     const btnNewRoom = $('see-it-new-room');
-    const btnNewRoomDesktop = $('see-it-new-room-desktop');
-    const errorDiv = $('see-it-global-error') || $('see-it-error');
+    const errorDiv = $('see-it-global-error');
 
-    // Add load/error tracking for result images (debugging)
-    if (resultImage) {
-        resultImage.addEventListener('load', () => {
-            console.log('[See It] Result image loaded successfully (mobile):', { 
-                src: resultImage.src?.substring(0, 80),
-                naturalWidth: resultImage.naturalWidth,
-                naturalHeight: resultImage.naturalHeight
-            });
-        });
-        resultImage.addEventListener('error', (e) => {
-            console.error('[See It] Result image FAILED to load (mobile):', { 
-                src: resultImage.src?.substring(0, 80),
-                error: e 
-            });
-        });
-    }
-    if (resultImageDesktop) {
-        resultImageDesktop.addEventListener('load', () => {
-            console.log('[See It] Result image loaded successfully (desktop):', { 
-                src: resultImageDesktop.src?.substring(0, 80),
-                naturalWidth: resultImageDesktop.naturalWidth,
-                naturalHeight: resultImageDesktop.naturalHeight
-            });
-        });
-        resultImageDesktop.addEventListener('error', (e) => {
-            console.error('[See It] Result image FAILED to load (desktop):', { 
-                src: resultImageDesktop.src?.substring(0, 80),
-                error: e 
-            });
-        });
-    }
-
-    // Email/Saved Rooms modals
-    const emailModal = $('see-it-email-modal');
-    const emailInput = $('see-it-email-input');
-    const btnEmailSubmit = $('see-it-email-submit');
-    const btnEmailCancel = $('see-it-email-cancel');
-    const savedRoomsModal = $('see-it-saved-rooms-modal');
-    const savedRoomsList = $('see-it-saved-rooms-list');
-    const btnSavedRoomsClose = $('see-it-saved-rooms-close');
+    // DEBUG: Log which critical elements exist
+    console.log('[See It] Element check:', {
+        btnRemove: !!btnRemove,
+        maskCanvas: !!maskCanvas,
+        roomPreview: !!roomPreview,
+        errorDiv: !!errorDiv
+    });
 
     // --- State ---
     let state = {
@@ -286,21 +196,23 @@ document.addEventListener('DOMContentLoaded', function () {
         isCleaningUp: false,
         uploadComplete: false,
         shopperToken: localStorage.getItem('see_it_shopper_token'),
-        currentScreen: 'entry'
+        currentScreen: 'entry',
+        normalizedWidth: 0,
+        normalizedHeight: 0
     };
 
     // Canvas state
     let ctx = null;
-    let activePreviewEl = null;
     let isDrawing = false;
     let strokes = [];
-    let brushSize = 'medium'; // 'small', 'medium', 'large'
-    let hasErased = false; // Track if object removal has been performed
+    let currentStroke = [];
+    let hasErased = false;
+    let canvasListenersAttached = false; // PREVENT DUPLICATE LISTENERS
     const BRUSH_COLOR = 'rgba(139, 92, 246, 0.9)';
 
     const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
 
-    // --- Screen Navigation with Smooth Transitions ---
+    // --- Screen Navigation ---
     const showScreen = (screenName) => {
         const screens = {
             entry: screenEntry,
@@ -312,332 +224,149 @@ document.addEventListener('DOMContentLoaded', function () {
         const targetScreen = screens[screenName];
         if (!targetScreen) return;
 
-        // Get current active screen
         const currentScreenEl = screens[state.currentScreen];
         if (currentScreenEl && currentScreenEl !== targetScreen) {
-            // Mark current as prev for exit animation
             currentScreenEl.classList.add('prev');
             currentScreenEl.classList.remove('active');
-            
-            // Wait for transition, then remove prev class
             setTimeout(() => {
                 currentScreenEl.classList.remove('prev');
             }, 300);
         }
 
-        // Show new screen
         targetScreen.classList.add('active');
         state.currentScreen = screenName;
 
-        // Initialize screen-specific functionality
         if (screenName === 'prepare') {
             initCanvas();
-            setupCanvasOnPrepare();
-            // Initialize brush size selector
-            updateBrushSize(brushSize);
-            // Ensure button states are correct even if canvas isn't ready yet
+            setupCanvasListenersOnce(); // Only attach once!
             updatePaintButtons();
         } else if (screenName === 'position') {
             initPosition();
         }
     };
 
+    // FIX: Show error by removing BOTH possible hidden classes
     const showError = (msg) => {
+        console.error('[See It] ERROR:', msg);
         if (errorDiv) {
             errorDiv.textContent = msg;
             errorDiv.classList.remove('hidden');
+            errorDiv.classList.remove('see-it-hidden');
+            errorDiv.style.display = 'block'; // Force show
+            errorDiv.style.color = '#ef4444';
+            errorDiv.style.padding = '12px';
+            errorDiv.style.marginBottom = '12px';
+            errorDiv.style.backgroundColor = '#fef2f2';
+            errorDiv.style.borderRadius = '8px';
         }
-        console.error('[See It]', msg);
+        // Also show alert for debugging
+        // alert('[See It Error] ' + msg);
     };
 
-    const resetError = () => errorDiv?.classList.add('hidden');
+    const resetError = () => {
+        if (errorDiv) {
+            errorDiv.classList.add('hidden');
+            errorDiv.style.display = 'none';
+        }
+    };
 
-    // --- Canvas Drawing (Prepare Screen) ---
-    // Track canvas initialization state
-    let canvasInitialized = false;
-
+    // --- Canvas Drawing ---
     const initCanvas = () => {
-        // CRITICAL: Use stored normalized dimensions (bulletproof matching)
-        // Don't rely on preview image naturalWidth/Height which may have rounding/EXIF issues
-        if (!state.normalizedWidth || !state.normalizedHeight) {
-            console.error('[See It] Canvas init: normalized dimensions not stored, falling back to preview');
-            // Fallback: Get the preview that has a loaded image (check BOTH, not just visible one)
-            let sourcePreview = null;
-            if (roomPreview && roomPreview.complete && roomPreview.naturalWidth > 0) {
-                sourcePreview = roomPreview;
-            } else if (roomPreviewDesktop && roomPreviewDesktop.complete && roomPreviewDesktop.naturalWidth > 0) {
-                sourcePreview = roomPreviewDesktop;
-            }
+        console.log('[See It] initCanvas called', {
+            normalizedWidth: state.normalizedWidth,
+            normalizedHeight: state.normalizedHeight,
+            maskCanvasExists: !!maskCanvas
+        });
 
-            // If no image loaded yet, set onload on BOTH previews and wait
-            if (!sourcePreview) {
-                console.log('[See It] Canvas init: waiting for image to load...');
-                if (roomPreview) roomPreview.onload = initCanvas;
-                if (roomPreviewDesktop) roomPreviewDesktop.onload = initCanvas;
-                return;
-            }
-
-            const natW = sourcePreview.naturalWidth;
-            const natH = sourcePreview.naturalHeight;
-
-            if (natW === 0 || natH === 0) {
-                console.error('[See It] Canvas init: image has zero dimensions');
-                return;
-            }
-
-            // Store fallback dimensions for future use
-            state.normalizedWidth = natW;
-            state.normalizedHeight = natH;
-            activePreviewEl = sourcePreview;
-        }
-
-        // Use stored normalized dimensions (bulletproof)
-        const natW = state.normalizedWidth;
-        const natH = state.normalizedHeight;
-
-        console.log('[See It] Canvas init using stored dimensions:', natW, 'x', natH);
-
-        // Validate preview matches stored dimensions (sanity check)
-        let sourcePreview = null;
-        if (roomPreview && roomPreview.complete && roomPreview.naturalWidth > 0) {
-            sourcePreview = roomPreview;
-        } else if (roomPreviewDesktop && roomPreviewDesktop.complete && roomPreviewDesktop.naturalWidth > 0) {
-            sourcePreview = roomPreviewDesktop;
-        }
-        
-        if (sourcePreview) {
-            const previewW = sourcePreview.naturalWidth;
-            const previewH = sourcePreview.naturalHeight;
-            if (Math.abs(previewW - natW) > 1 || Math.abs(previewH - natH) > 1) {
-                console.warn('[See It] Canvas init: preview dimensions mismatch!', {
-                    stored: `${natW}x${natH}`,
-                    preview: `${previewW}x${previewH}`
-                });
-            }
-            activePreviewEl = sourcePreview;
-        }
-
-        // Initialize BOTH canvases to stored normalized dimensions (bulletproof matching)
-        if (maskCanvas) {
-            maskCanvas.width = natW;
-            maskCanvas.height = natH;
-        }
-        if (maskCanvasDesktop) {
-            maskCanvasDesktop.width = natW;
-            maskCanvasDesktop.height = natH;
-        }
-
-        // CRITICAL FIX: Position canvas CSS to match the letterboxed image content area
-        // The image uses object-fit: contain (letterboxed), but canvas stretches by default
-        // We must make the canvas visually align with the actual image content
-        const positionCanvasOverImage = (canvas, preview) => {
-            if (!canvas || !preview) return;
-            
-            const rect = preview.getBoundingClientRect();
-            const containerRect = preview.parentElement?.getBoundingClientRect();
-            if (!containerRect || !rect.width || !rect.height) return;
-            
-            // Calculate letterbox offset (where image content actually displays)
-            const imgW = preview.naturalWidth || natW;
-            const imgH = preview.naturalHeight || natH;
-            const boxAR = rect.width / rect.height;
-            const imgAR = imgW / imgH;
-            
-            let displayW, displayH, offsetX, offsetY;
-            if (imgAR > boxAR) {
-                // Image fits width; letterbox top/bottom
-                displayW = rect.width;
-                displayH = rect.width / imgAR;
-                offsetX = 0;
-                offsetY = (rect.height - displayH) / 2;
-            } else {
-                // Image fits height; letterbox left/right
-                displayH = rect.height;
-                displayW = rect.height * imgAR;
-                offsetY = 0;
-                offsetX = (rect.width - displayW) / 2;
-            }
-            
-            // Position canvas to exactly match image content (not stretched)
-            canvas.style.position = 'absolute';
-            canvas.style.left = offsetX + 'px';
-            canvas.style.top = offsetY + 'px';
-            canvas.style.width = displayW + 'px';
-            canvas.style.height = displayH + 'px';
-            canvas.style.inset = 'auto'; // Clear inset: 0 from CSS
-            
-            console.log('[See It] Canvas positioned to match image:', {
-                container: `${containerRect.width.toFixed(0)}x${containerRect.height.toFixed(0)}`,
-                imageDisplay: `${displayW.toFixed(0)}x${displayH.toFixed(0)}`,
-                offset: `${offsetX.toFixed(0)},${offsetY.toFixed(0)}`
-            });
-        };
-
-        // Position canvases over their respective images
-        positionCanvasOverImage(maskCanvas, roomPreview);
-        positionCanvasOverImage(maskCanvasDesktop, roomPreviewDesktop);
-
-        // Use mobile canvas as primary (always exists), desktop as fallback
-        const primaryCanvas = maskCanvas || maskCanvasDesktop;
-        if (!primaryCanvas) {
-            console.error('[See It] Canvas init: no canvas element found');
+        if (!maskCanvas) {
+            console.error('[See It] initCanvas: maskCanvas element not found!');
             return;
         }
 
-        ctx = primaryCanvas.getContext('2d');
+        // Use stored normalized dimensions
+        let natW = state.normalizedWidth;
+        let natH = state.normalizedHeight;
+
+        // Fallback to preview image dimensions
+        if (!natW || !natH) {
+            if (roomPreview && roomPreview.complete && roomPreview.naturalWidth > 0) {
+                natW = roomPreview.naturalWidth;
+                natH = roomPreview.naturalHeight;
+                state.normalizedWidth = natW;
+                state.normalizedHeight = natH;
+                console.log('[See It] initCanvas: using preview dimensions', natW, 'x', natH);
+            } else {
+                console.log('[See It] initCanvas: waiting for image to load...');
+                if (roomPreview) {
+                    roomPreview.onload = () => {
+                        console.log('[See It] roomPreview loaded, reinitializing canvas');
+                        initCanvas();
+                    };
+                }
+                return;
+            }
+        }
+
+        // Set canvas internal dimensions
+        maskCanvas.width = natW;
+        maskCanvas.height = natH;
+
+        // Get drawing context
+        ctx = maskCanvas.getContext('2d');
+        if (!ctx) {
+            console.error('[See It] initCanvas: failed to get 2d context!');
+            return;
+        }
+
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.strokeStyle = BRUSH_COLOR;
-
-        // Set line width based on brush size
-        const baseWidth = natW / 15;
-        let lineWidth;
-        if (brushSize === 'small') {
-            lineWidth = Math.max(15, Math.min(25, baseWidth * 0.5));
-        } else if (brushSize === 'large') {
-            lineWidth = Math.max(50, Math.min(80, baseWidth * 1.5));
-        } else { // medium (default)
-            lineWidth = Math.max(30, Math.min(50, baseWidth));
-        }
-        ctx.lineWidth = lineWidth;
+        ctx.lineWidth = Math.max(20, Math.min(50, natW / 20));
         ctx.globalCompositeOperation = 'source-over';
 
+        // Clear canvas
         ctx.clearRect(0, 0, natW, natH);
-        strokes = [];
-        canvasInitialized = true;
-        updatePaintButtons();
-
-        console.log('[See It] Canvas init SUCCESS:', natW, 'x', natH, 'brush:', brushSize, 'lineWidth:', lineWidth);
-    };
-
-    // Reposition canvases on resize (maintains alignment with letterboxed image)
-    const repositionCanvases = () => {
-        if (!canvasInitialized) return;
         
-        const natW = state.normalizedWidth;
-        const natH = state.normalizedHeight;
-        if (!natW || !natH) return;
-        
-        const positionCanvas = (canvas, preview) => {
-            if (!canvas || !preview) return;
-            
-            const rect = preview.getBoundingClientRect();
-            if (!rect.width || !rect.height) return;
-            
-            const imgAR = natW / natH;
-            const boxAR = rect.width / rect.height;
-            
-            let displayW, displayH, offsetX, offsetY;
-            if (imgAR > boxAR) {
-                displayW = rect.width;
-                displayH = rect.width / imgAR;
-                offsetX = 0;
-                offsetY = (rect.height - displayH) / 2;
-            } else {
-                displayH = rect.height;
-                displayW = rect.height * imgAR;
-                offsetY = 0;
-                offsetX = (rect.width - displayW) / 2;
-            }
-            
-            canvas.style.left = offsetX + 'px';
-            canvas.style.top = offsetY + 'px';
-            canvas.style.width = displayW + 'px';
-            canvas.style.height = displayH + 'px';
-        };
-        
-        positionCanvas(maskCanvas, roomPreview);
-        positionCanvas(maskCanvasDesktop, roomPreviewDesktop);
-    };
-
-    // Handle resize/orientation changes
-    window.addEventListener('resize', repositionCanvases);
-    window.addEventListener('orientationchange', () => {
-        setTimeout(repositionCanvases, 100); // Delay for orientation animation
-    });
-
-    // Update brush size and canvas line width
-    const updateBrushSize = (size) => {
-        brushSize = size;
-        if (!ctx) return;
-        
-        const activeCanvas = ctx.canvas || (maskCanvasDesktop || maskCanvas);
-        if (!activeCanvas) return;
-        
-        const natW = activeCanvas.width;
-        const baseWidth = natW / 15;
-        let lineWidth;
-        if (brushSize === 'small') {
-            lineWidth = Math.max(15, Math.min(25, baseWidth * 0.5));
-        } else if (brushSize === 'large') {
-            lineWidth = Math.max(50, Math.min(80, baseWidth * 1.5));
-        } else { // medium (default)
-            lineWidth = Math.max(30, Math.min(50, baseWidth));
-        }
-        ctx.lineWidth = lineWidth;
-        
-        // Update button active states (desktop)
-        if (btnBrushSmallDesktop) {
-            btnBrushSmallDesktop.classList.toggle('see-it-brush-size-btn-active', size === 'small');
-        }
-        if (btnBrushMediumDesktop) {
-            btnBrushMediumDesktop.classList.toggle('see-it-brush-size-btn-active', size === 'medium');
-        }
-        if (btnBrushLargeDesktop) {
-            btnBrushLargeDesktop.classList.toggle('see-it-brush-size-btn-active', size === 'large');
-        }
-        
-        // Update button active states (mobile)
-        if (btnBrushSmallMobile) {
-            btnBrushSmallMobile.classList.toggle('see-it-brush-size-btn-active', size === 'small');
-        }
-        if (btnBrushMediumMobile) {
-            btnBrushMediumMobile.classList.toggle('see-it-brush-size-btn-active', size === 'medium');
-        }
-        if (btnBrushLargeMobile) {
-            btnBrushLargeMobile.classList.toggle('see-it-brush-size-btn-active', size === 'large');
-        }
+        console.log('[See It] Canvas initialized:', {
+            width: maskCanvas.width,
+            height: maskCanvas.height,
+            lineWidth: ctx.lineWidth,
+            ctxExists: !!ctx
+        });
     };
 
     const getCanvasPos = (e) => {
-        // Determine which canvas was actually clicked/touched
-        const target = e.target;
-        let activeCanvas = null;
-        if (target === maskCanvas || target === maskCanvasDesktop) {
-            activeCanvas = target;
-        } else {
-            // Fallback: use mobile on mobile, desktop on desktop
-            const isMobile = window.innerWidth < 768;
-            activeCanvas = isMobile ? maskCanvas : (maskCanvasDesktop || maskCanvas);
-        }
-        if (!activeCanvas) return { x: 0, y: 0, valid: false };
+        if (!maskCanvas) return { x: 0, y: 0, valid: false };
 
         const touch = e.touches?.[0] || e.changedTouches?.[0] || null;
         const clientX = touch ? touch.clientX : e.clientX;
         const clientY = touch ? touch.clientY : e.clientY;
 
-        // SIMPLIFIED: Canvas is now positioned to match image content exactly
-        // Just use the canvas's own bounding rect and internal dimensions
-        const canvasRect = activeCanvas.getBoundingClientRect();
-        if (!canvasRect.width || !canvasRect.height) return { x: 0, y: 0, valid: false };
+        const rect = maskCanvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+            console.warn('[See It] getCanvasPos: canvas has no dimensions');
+            return { x: 0, y: 0, valid: false };
+        }
 
-        // Canvas internal dimensions (set to normalized image size)
-        const canvasW = activeCanvas.width;
-        const canvasH = activeCanvas.height;
-        if (!canvasW || !canvasH) return { x: 0, y: 0, valid: false };
+        const canvasW = maskCanvas.width;
+        const canvasH = maskCanvas.height;
+        if (!canvasW || !canvasH) {
+            console.warn('[See It] getCanvasPos: canvas internal dimensions are 0');
+            return { x: 0, y: 0, valid: false };
+        }
 
         // Position relative to canvas element
-        const xIn = clientX - canvasRect.left;
-        const yIn = clientY - canvasRect.top;
+        const xIn = clientX - rect.left;
+        const yIn = clientY - rect.top;
         
         // Check bounds
-        if (xIn < 0 || yIn < 0 || xIn > canvasRect.width || yIn > canvasRect.height) {
+        if (xIn < 0 || yIn < 0 || xIn > rect.width || yIn > rect.height) {
             return { x: 0, y: 0, valid: false };
         }
 
         // Scale from CSS size to internal canvas coordinates
-        const scaleX = canvasW / canvasRect.width;
-        const scaleY = canvasH / canvasRect.height;
+        const scaleX = canvasW / rect.width;
+        const scaleY = canvasH / rect.height;
 
         return {
             x: xIn * scaleX,
@@ -646,96 +375,77 @@ document.addEventListener('DOMContentLoaded', function () {
         };
     };
 
-    let currentStroke = [];
-    let justFinishedDrawing = false;
-
     const startDraw = (e) => {
+        console.log('[See It] startDraw', { ctxExists: !!ctx, canvasExists: !!maskCanvas });
+        
         if (!ctx) {
             console.warn('[See It] startDraw: ctx not initialized, attempting init...');
             initCanvas();
-            if (!ctx) return;
+            if (!ctx) {
+                console.error('[See It] startDraw: ctx still null after init!');
+                showError('Canvas not ready. Please try again.');
+                return;
+            }
         }
+        
         e.preventDefault();
+        e.stopPropagation();
+        
         isDrawing = true;
         currentStroke = [];
+        
         const pos = getCanvasPos(e);
+        console.log('[See It] startDraw pos:', pos);
+        
         if (!pos.valid) {
+            console.warn('[See It] startDraw: invalid position');
             isDrawing = false;
             return;
         }
+        
         currentStroke.push(pos);
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
         ctx.lineTo(pos.x + 0.1, pos.y + 0.1);
         ctx.stroke();
-        // Mirror to both canvases for consistent display
-        syncStrokeToBothCanvases();
     };
 
     const draw = (e) => {
         if (!isDrawing || !ctx) return;
         e.preventDefault();
+        e.stopPropagation();
+        
         const pos = getCanvasPos(e);
         if (!pos.valid) return;
+        
         currentStroke.push(pos);
         ctx.lineTo(pos.x, pos.y);
         ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
-        // Mirror to both canvases for consistent display
-        syncStrokeToBothCanvases();
     };
 
     const stopDraw = (e) => {
         if (!isDrawing) return;
         isDrawing = false;
+        
         if (currentStroke.length > 0) {
             strokes.push([...currentStroke]);
-            currentStroke = [];
-            justFinishedDrawing = true;
-            Promise.resolve().then(() => { justFinishedDrawing = false; });
+            console.log('[See It] Stroke recorded:', {
+                points: currentStroke.length,
+                totalStrokes: strokes.length
+            });
         }
+        currentStroke = [];
         ctx?.beginPath();
         updatePaintButtons();
-        console.log('[See It] Stroke recorded, total strokes:', strokes.length);
-    };
-
-    // Sync strokes to both canvases so mobile/desktop show the same thing
-    const syncStrokeToBothCanvases = () => {
-        if (!maskCanvas || !maskCanvasDesktop) return;
-        // Redraw all strokes on both canvases
-        [maskCanvas, maskCanvasDesktop].forEach(canvas => {
-            const c = canvas.getContext('2d');
-            c.clearRect(0, 0, canvas.width, canvas.height);
-            c.lineCap = 'round';
-            c.lineJoin = 'round';
-            c.strokeStyle = BRUSH_COLOR;
-            c.lineWidth = ctx?.lineWidth || 30;
-            // Draw completed strokes
-            strokes.forEach(stroke => {
-                if (stroke.length === 0) return;
-                c.beginPath();
-                c.moveTo(stroke[0].x, stroke[0].y);
-                stroke.forEach(p => c.lineTo(p.x, p.y));
-                c.stroke();
-            });
-            // Draw current in-progress stroke
-            if (currentStroke.length > 0) {
-                c.beginPath();
-                c.moveTo(currentStroke[0].x, currentStroke[0].y);
-                currentStroke.forEach(p => c.lineTo(p.x, p.y));
-                c.stroke();
-            }
-        });
     };
 
     const redrawStrokes = () => {
-        if (!ctx) return;
-        // Use the canvas that has the context
-        const activeCanvas = ctx.canvas || (maskCanvasDesktop || maskCanvas);
-        if (!activeCanvas) return;
+        if (!ctx || !maskCanvas) return;
         
-        ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+        ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        
         strokes.forEach(stroke => {
             if (stroke.length === 0) return;
             ctx.beginPath();
@@ -743,149 +453,101 @@ document.addEventListener('DOMContentLoaded', function () {
             stroke.forEach(p => ctx.lineTo(p.x, p.y));
             ctx.stroke();
         });
-        
-        // Sync to other canvas if both exist
-        if (maskCanvas && maskCanvasDesktop && activeCanvas !== maskCanvas) {
-            const otherCanvas = activeCanvas === maskCanvas ? maskCanvasDesktop : maskCanvas;
-            const otherCtx = otherCanvas.getContext('2d');
-            otherCtx.clearRect(0, 0, otherCanvas.width, otherCanvas.height);
-            otherCtx.lineCap = 'round';
-            otherCtx.lineJoin = 'round';
-            otherCtx.strokeStyle = BRUSH_COLOR;
-            otherCtx.lineWidth = ctx.lineWidth;
-            otherCtx.globalCompositeOperation = 'source-over';
-            strokes.forEach(stroke => {
-                if (stroke.length === 0) return;
-                otherCtx.beginPath();
-                otherCtx.moveTo(stroke[0].x, stroke[0].y);
-                stroke.forEach(p => otherCtx.lineTo(p.x, p.y));
-                otherCtx.stroke();
-            });
-        }
     };
 
     const updatePaintButtons = () => {
         const hasStrokes = strokes.length > 0;
+        const canErase = hasStrokes && !state.isCleaningUp && state.uploadComplete;
         
-        // Mobile buttons
-        if (btnUndo) btnUndo.disabled = !hasStrokes;
-        if (btnClear) btnClear.disabled = !hasStrokes;
+        console.log('[See It] updatePaintButtons:', {
+            hasStrokes,
+            isCleaningUp: state.isCleaningUp,
+            uploadComplete: state.uploadComplete,
+            canErase
+        });
+
+        if (btnUndo) {
+            btnUndo.disabled = !hasStrokes;
+            btnUndo.style.opacity = hasStrokes ? '1' : '0.5';
+        }
+        
         if (btnRemove) {
-            // Erase button requires strokes AND upload complete (same logic as desktop)
-            const canRemoveMobile = hasStrokes && !state.isCleaningUp && state.uploadComplete;
-            btnRemove.disabled = !canRemoveMobile;
+            btnRemove.disabled = !canErase;
+            btnRemove.style.opacity = canErase ? '1' : '0.5';
+            
+            // Update button text to show status
+            if (!state.uploadComplete && !state.isCleaningUp) {
+                btnRemove.textContent = 'Uploading...';
+            } else if (state.isCleaningUp) {
+                btnRemove.textContent = 'Erasing...';
+            } else if (!hasStrokes) {
+                btnRemove.textContent = 'Draw First';
+            } else {
+                btnRemove.textContent = 'Erase';
+            }
         }
         
-        // Update Skip/Continue button text (mobile)
         if (btnConfirmRoom) {
-            if (hasErased) {
-                btnConfirmRoom.textContent = 'Continue';
-            } else {
-                btnConfirmRoom.textContent = 'Skip';
-            }
+            btnConfirmRoom.textContent = hasErased ? 'Continue' : 'Skip';
+        }
+    };
+
+    // FIX: Only attach listeners ONCE
+    const setupCanvasListenersOnce = () => {
+        if (canvasListenersAttached) {
+            console.log('[See It] Canvas listeners already attached, skipping');
+            return;
         }
         
-        // Desktop buttons
-        if (btnUndoDesktop) btnUndoDesktop.disabled = !hasStrokes;
-        if (btnClearDesktop) btnClearDesktop.disabled = !hasStrokes;
-        if (btnRemoveDesktop) {
-            const canRemove = hasStrokes && !state.isCleaningUp && state.uploadComplete;
-            btnRemoveDesktop.disabled = !canRemove;
+        if (!maskCanvas) {
+            console.error('[See It] setupCanvasListenersOnce: maskCanvas not found!');
+            return;
         }
         
-        // Update Skip/Continue button text (desktop)
-        if (btnConfirmRoomDesktop) {
-            if (hasErased) {
-                btnConfirmRoomDesktop.textContent = 'Continue';
-            } else {
-                btnConfirmRoomDesktop.textContent = 'Skip';
+        console.log('[See It] Attaching canvas event listeners');
+        
+        maskCanvas.style.touchAction = 'none';
+        maskCanvas.addEventListener('pointerdown', startDraw);
+        maskCanvas.addEventListener('pointermove', draw);
+        maskCanvas.addEventListener('pointerup', stopDraw);
+        maskCanvas.addEventListener('pointerleave', stopDraw);
+        maskCanvas.addEventListener('pointercancel', stopDraw);
+        
+        canvasListenersAttached = true;
+    };
+
+    // Undo button
+    if (btnUndo) {
+        btnUndo.addEventListener('click', () => {
+            console.log('[See It] Undo clicked, strokes:', strokes.length);
+            if (strokes.length > 0) {
+                strokes.pop();
+                redrawStrokes();
+                updatePaintButtons();
             }
-        }
-    };
-
-    // Canvas event listeners
-    const setupCanvasListeners = (canvas) => {
-        if (!canvas) return;
-        canvas.style.touchAction = 'none';
-        canvas.addEventListener('pointerdown', (e) => { e.stopPropagation(); startDraw(e); });
-        canvas.addEventListener('pointermove', (e) => { e.stopPropagation(); draw(e); });
-        canvas.addEventListener('pointerup', (e) => { e.stopPropagation(); stopDraw(e); });
-        canvas.addEventListener('pointerleave', (e) => { e.stopPropagation(); stopDraw(e); });
-        canvas.addEventListener('pointercancel', (e) => { e.stopPropagation(); stopDraw(e); });
-    };
-    
-    // Setup canvas listeners when screens are shown
-    const setupCanvasOnPrepare = () => {
-        if (maskCanvas) setupCanvasListeners(maskCanvas);
-        if (maskCanvasDesktop) setupCanvasListeners(maskCanvasDesktop);
-    };
-
-    btnUndo?.addEventListener('click', () => {
-        if (strokes.length > 0) {
-            strokes.pop();
-            redrawStrokes();
-            updatePaintButtons();
-        }
-    });
-
-    btnClear?.addEventListener('click', () => {
-        strokes = [];
-        const activeCanvas = maskCanvasDesktop || maskCanvas;
-        if (ctx && activeCanvas) ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
-        redrawStrokes();
-        updatePaintButtons();
-    });
-    
-    // Desktop undo/clear buttons
-    btnUndoDesktop?.addEventListener('click', () => {
-        if (strokes.length > 0) {
-            strokes.pop();
-            redrawStrokes();
-            updatePaintButtons();
-        }
-    });
-    
-    btnClearDesktop?.addEventListener('click', () => {
-        strokes = [];
-        const activeCanvas = maskCanvasDesktop || maskCanvas;
-        if (ctx && activeCanvas) ctx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
-        redrawStrokes();
-        updatePaintButtons();
-    });
-
-    // Brush size button handlers
-    btnBrushSmallDesktop?.addEventListener('click', () => updateBrushSize('small'));
-    btnBrushMediumDesktop?.addEventListener('click', () => updateBrushSize('medium'));
-    btnBrushLargeDesktop?.addEventListener('click', () => updateBrushSize('large'));
-
-    // Mobile brush size button handlers
-    btnBrushSmallMobile?.addEventListener('click', () => updateBrushSize('small'));
-    btnBrushMediumMobile?.addEventListener('click', () => updateBrushSize('medium'));
-    btnBrushLargeMobile?.addEventListener('click', () => updateBrushSize('large'));
+        });
+    }
 
     const generateMask = () => {
-        // Get canvas dimensions from whichever canvas has them
-        const sourceCanvas = maskCanvas || maskCanvasDesktop;
-        if (!sourceCanvas) {
-            console.error('[See It] generateMask: no canvas element found');
+        if (!maskCanvas) {
+            console.error('[See It] generateMask: no canvas');
             return null;
         }
 
-        const w = sourceCanvas.width;
-        const h = sourceCanvas.height;
+        const w = maskCanvas.width;
+        const h = maskCanvas.height;
 
         if (w === 0 || h === 0) {
-            console.error('[See It] generateMask: canvas has zero dimensions', { w, h });
+            console.error('[See It] generateMask: canvas has zero dimensions');
             return null;
         }
 
         if (strokes.length === 0) {
-            console.error('[See It] generateMask: no strokes recorded');
+            console.error('[See It] generateMask: no strokes');
             return null;
         }
 
-        // Use stored lineWidth or calculate from canvas width
-        const lineWidth = ctx?.lineWidth || Math.max(30, Math.min(50, w / 15));
+        const lineWidth = ctx?.lineWidth || Math.max(20, Math.min(50, w / 20));
 
         const out = document.createElement('canvas');
         out.width = w;
@@ -910,178 +572,23 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         const dataUrl = out.toDataURL('image/png');
-        console.log('[See It] generateMask SUCCESS:', {
+        console.log('[See It] Mask generated:', {
             dimensions: `${w}x${h}`,
-            strokeCount: strokes.length,
-            lineWidth,
+            strokes: strokes.length,
             dataUrlLength: dataUrl.length
         });
         return dataUrl;
     };
 
-    // --- Product Positioning (Position Screen) ---
+    // --- Product Positioning ---
     const initPosition = () => {
-        // Use VISIBLE element, not just existence check (desktop elements exist but may be hidden)
-        const activeRoomImage = isVisible(roomImageDesktop) ? roomImageDesktop : roomImage;
-        const activeProductImage = isVisible(productImageDesktop) ? productImageDesktop : productImage;
-        const activeProductContainer = isVisible(productContainerDesktop) ? productContainerDesktop : productContainer;
-        
-        if (activeRoomImage) activeRoomImage.src = getActiveRoomUrl();
-        if (roomImage && roomImage !== activeRoomImage) roomImage.src = getActiveRoomUrl();
-        if (roomImageDesktop && roomImageDesktop !== activeRoomImage) roomImageDesktop.src = getActiveRoomUrl();
-        
-        if (activeProductImage) activeProductImage.src = state.productImageUrl;
-        if (productImage && productImage !== activeProductImage) productImage.src = state.productImageUrl;
-        if (productImageDesktop && productImageDesktop !== activeProductImage) productImageDesktop.src = state.productImageUrl;
+        const url = getActiveRoomUrl();
+        if (roomImage) roomImage.src = url;
         
         state.x = 0;
         state.y = 0;
         state.scale = 1.0;
-        updateTransform();
     };
-
-    const updateTransform = () => {
-        const activeContainer = isVisible(productContainerDesktop) ? productContainerDesktop : productContainer;
-        if (activeContainer) {
-            activeContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
-        }
-        // Sync to other container if both exist
-        if (productContainer && productContainerDesktop && activeContainer !== productContainer) {
-            const otherContainer = activeContainer === productContainer ? productContainerDesktop : productContainer;
-            otherContainer.style.transform = `translate(-50%, -50%) translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
-        }
-    };
-
-    let isDragging = false, startX, startY, initX, initY;
-    let isPinching = false, initialDistance = 0, initialScale = 1;
-
-    // Drag handlers - setup for both mobile and desktop containers
-    const setupDragHandlers = (container) => {
-        if (!container) return;
-        
-        container.addEventListener('mousedown', (e) => {
-            if (e.target.classList.contains('resize-handle')) return;
-            e.preventDefault();
-            isDragging = true;
-            container.classList.add('is-dragging');
-            startX = e.clientX;
-            startY = e.clientY;
-            initX = state.x;
-            initY = state.y;
-        });
-
-        // Touch handlers with pinch-to-resize
-        container.addEventListener('touchstart', (e) => {
-            if (e.touches.length === 2) {
-                // Pinch gesture
-                e.preventDefault();
-                isPinching = true;
-                isDragging = false;
-                const touch1 = e.touches[0];
-                const touch2 = e.touches[1];
-                initialDistance = Math.hypot(
-                    touch2.clientX - touch1.clientX,
-                    touch2.clientY - touch1.clientY
-                );
-                initialScale = state.scale;
-            } else if (e.touches.length === 1 && !e.target.classList.contains('resize-handle')) {
-                // Single touch drag
-                isDragging = true;
-                container.classList.add('is-dragging');
-                startX = e.touches[0].clientX;
-                startY = e.touches[0].clientY;
-                initX = state.x;
-                initY = state.y;
-            }
-        }, { passive: false });
-    };
-    
-    // Setup drag handlers for both containers
-    if (productContainer) setupDragHandlers(productContainer);
-    if (productContainerDesktop) setupDragHandlers(productContainerDesktop);
-
-    window.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
-        state.x = initX + (e.clientX - startX);
-        state.y = initY + (e.clientY - startY);
-        updateTransform();
-    });
-
-    window.addEventListener('mouseup', () => {
-        isDragging = false;
-        productContainer?.classList.remove('is-dragging');
-        productContainerDesktop?.classList.remove('is-dragging');
-    });
-
-    window.addEventListener('touchmove', (e) => {
-        if (isPinching && e.touches.length === 2) {
-            e.preventDefault();
-            const touch1 = e.touches[0];
-            const touch2 = e.touches[1];
-            const currentDistance = Math.hypot(
-                touch2.clientX - touch1.clientX,
-                touch2.clientY - touch1.clientY
-            );
-            const scaleFactor = currentDistance / initialDistance;
-            state.scale = Math.max(0.2, Math.min(5, initialScale * scaleFactor));
-            updateTransform();
-        } else if (isDragging && e.touches.length === 1) {
-            state.x = initX + (e.touches[0].clientX - startX);
-            state.y = initY + (e.touches[0].clientY - startY);
-            updateTransform();
-        }
-    }, { passive: true });
-
-    window.addEventListener('touchend', () => {
-        isDragging = false;
-        isPinching = false;
-        productContainer?.classList.remove('is-dragging');
-        productContainerDesktop?.classList.remove('is-dragging');
-    });
-
-    // Resize handles (desktop) - work with both containers
-    const setupResizeHandles = (container) => {
-        if (!container) return;
-        container.querySelectorAll('.resize-handle').forEach(handle => {
-            let resizing = false, startDist = 0, startScale = 1;
-
-            const getDist = (x, y) => {
-                const rect = container.getBoundingClientRect();
-                return Math.hypot(x - (rect.left + rect.width/2), y - (rect.top + rect.height/2));
-            };
-
-        const onDown = (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            resizing = true;
-            const cx = e.clientX || e.touches[0].clientX;
-            const cy = e.clientY || e.touches[0].clientY;
-            startDist = getDist(cx, cy);
-            startScale = state.scale;
-        };
-
-        const onMove = (e) => {
-            if (!resizing) return;
-            const cx = e.clientX || e.touches?.[0]?.clientX;
-            const cy = e.clientY || e.touches?.[0]?.clientY;
-            if (cx == null) return;
-            state.scale = Math.max(0.2, Math.min(5, startScale * (getDist(cx, cy) / startDist)));
-            updateTransform();
-        };
-
-        const onUp = () => { resizing = false; };
-
-            handle.addEventListener('mousedown', onDown);
-            handle.addEventListener('touchstart', onDown, { passive: false });
-            window.addEventListener('mousemove', onMove);
-            window.addEventListener('touchmove', onMove, { passive: true });
-            window.addEventListener('mouseup', onUp);
-            window.addEventListener('touchend', onUp);
-        });
-    };
-    
-    if (productContainer) setupResizeHandles(productContainer);
-    if (productContainerDesktop) setupResizeHandles(productContainerDesktop);
 
     // --- API Calls ---
     const startSession = async () => {
@@ -1110,33 +617,24 @@ document.addEventListener('DOMContentLoaded', function () {
         return res.json();
     };
 
-    /**
-     * Poll for job status (reuses existing render/:jobId endpoint)
-     */
     const pollJobStatus = async (jobId, maxAttempts = 60) => {
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             const res = await fetch(`/apps/see-it/render/${jobId}`);
-            if (!res.ok) {
-                throw new Error(`Failed to poll job status: ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`Failed to poll: ${res.status}`);
             const data = await res.json();
             const status = data.status || data.job_status;
             
-            if (status === 'completed') {
-                return data;
-            } else if (status === 'failed') {
-                const errorMsg = data.error_message || data.errorMessage || 'Cleanup failed';
-                throw new Error(errorMsg);
-            }
+            if (status === 'completed') return data;
+            if (status === 'failed') throw new Error(data.error_message || 'Failed');
             
-            // Wait 1 second before next poll (exponential backoff could be added if needed)
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        throw new Error('Cleanup timed out - job did not complete in time');
+        throw new Error('Timeout');
     };
 
     const cleanupWithMask = async (maskDataUrl) => {
-        console.log('[See It] Calling cleanup endpoint with sessionId:', state.sessionId);
+        console.log('[See It] Cleanup request:', { sessionId: state.sessionId });
+        
         const res = await fetch('/apps/see-it/room/cleanup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1145,114 +643,48 @@ document.addEventListener('DOMContentLoaded', function () {
                 mask_data_url: maskDataUrl
             })
         });
-        console.log('[See It] Cleanup response status:', res.status, res.statusText);
+        
+        console.log('[See It] Cleanup response:', res.status);
+        
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            console.error('[See It] Cleanup error response:', err);
             throw new Error(err.message || err.error || 'Cleanup failed');
         }
-        const data = await res.json();
-        const jobId = data.job_id || data.jobId;
-        const status = data.status;
         
-        // If already completed, return immediately
-        if (status === 'completed') {
-            console.log('[See It] Cleanup completed immediately');
+        const data = await res.json();
+        
+        if (data.status === 'completed') {
             return {
-                cleaned_room_image_url: data.cleaned_room_image_url || data.cleanedRoomImageUrl,
                 cleanedRoomImageUrl: data.cleaned_room_image_url || data.cleanedRoomImageUrl
             };
         }
         
-        // Otherwise poll for completion
-        if (!jobId) {
-            throw new Error('No job_id in cleanup response');
-        }
+        const jobId = data.job_id || data.jobId;
+        if (!jobId) throw new Error('No job_id');
         
-        console.log('[See It] Cleanup queued, polling job:', jobId);
-        const jobResult = await pollJobStatus(jobId);
+        console.log('[See It] Polling cleanup job:', jobId);
+        const result = await pollJobStatus(jobId);
         
         return {
-            cleaned_room_image_url: jobResult.image_url || jobResult.imageUrl,
-            cleanedRoomImageUrl: jobResult.image_url || jobResult.imageUrl
+            cleanedRoomImageUrl: result.image_url || result.imageUrl
         };
     };
 
-    const fetchPreparedProduct = async (productId) => {
-        try {
-            const res = await fetch(`/apps/see-it/product/prepared?product_id=${encodeURIComponent(productId)}`);
-            if (!res.ok) return null;
-            const data = await res.json();
-            return data.prepared_image_url || null;
-        } catch { return null; }
-    };
-
-    // --- Saved Rooms API ---
-    const identifyShopper = async (email) => {
-        const res = await fetch('/apps/see-it/shopper/identify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email })
-        });
-        if (!res.ok) throw new Error('Failed to identify');
-        return res.json();
-    };
-
-    const getSavedRooms = async () => {
-        if (!state.shopperToken) return [];
-        const res = await fetch('/apps/see-it/rooms', {
-            headers: { 'X-Shopper-Token': state.shopperToken }
-        });
-        if (!res.ok) return [];
-        const data = await res.json();
-        return data.rooms || [];
-    };
-
-    const saveRoom = async (roomSessionId, title) => {
-        if (!state.shopperToken) throw new Error('Not identified');
-        const res = await fetch('/apps/see-it/rooms/save', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Shopper-Token': state.shopperToken
-            },
-            body: JSON.stringify({ room_session_id: roomSessionId, title })
-        });
-        if (!res.ok) throw new Error('Failed to save room');
-        return res.json();
-    };
-
     // --- Modal Open/Close ---
-    trigger?.addEventListener('click', async () => {
+    trigger.addEventListener('click', async () => {
+        console.log('[See It] Modal opened');
         ensureModalPortaled();
         lockScroll();
         modal.classList.remove('hidden');
         if (triggerWidget) triggerWidget.style.display = 'none';
         resetError();
+        
         state.productId = trigger.dataset.productId || state.productId;
         state.productTitle = trigger.dataset.productTitle || state.productTitle;
         state.productPrice = trigger.dataset.productPrice || state.productPrice;
-
-        const preparedUrl = await fetchPreparedProduct(state.productId);
-        state.productImageUrl = preparedUrl || trigger.dataset.productImage;
-        if (productImage) productImage.src = state.productImageUrl;
-        if (productImageDesktop) productImageDesktop.src = state.productImageUrl;
+        state.productImageUrl = trigger.dataset.productImage || state.productImageUrl;
 
         if (state.sessionId && getActiveRoomUrl()) {
-            const activeUrl = getActiveRoomUrl();
-            console.log('[See It] Loading existing room image:', activeUrl?.substring(0, 100) + '...');
-            if (roomPreview) {
-                roomPreview.onerror = (e) => console.error('[See It] roomPreview FAILED to load existing:', e);
-                roomPreview.onload = () => console.log('[See It] roomPreview loaded existing image');
-                roomPreview.src = activeUrl;
-            }
-            if (roomPreviewDesktop) {
-                roomPreviewDesktop.onerror = (e) => console.error('[See It] roomPreviewDesktop FAILED to load existing:', e);
-                roomPreviewDesktop.onload = () => console.log('[See It] roomPreviewDesktop loaded existing image');
-                roomPreviewDesktop.src = activeUrl;
-            }
-            if (roomImage) roomImage.src = activeUrl;
-            if (roomImageDesktop) roomImageDesktop.src = activeUrl;
             showScreen('prepare');
         } else {
             state.originalRoomImageUrl = null;
@@ -1271,576 +703,344 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     btnCloseEntry?.addEventListener('click', closeModal);
-    btnCloseEntryDesktop?.addEventListener('click', closeModal);
     btnCloseResult?.addEventListener('click', closeModal);
-    btnClosePrepareDesktop?.addEventListener('click', closeModal);
-    btnClosePositionDesktop?.addEventListener('click', closeModal);
-    btnCloseResultDesktop?.addEventListener('click', closeModal);
-    btnBackResult?.addEventListener('click', () => showScreen('position'));
 
     // --- File Upload Handler ---
     const handleFile = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
 
-        // Reset ALL state for new upload
+        console.log('[See It] File selected:', file.name, file.size);
+
+        // Reset state
         state.cleanedRoomImageUrl = null;
         state.originalRoomImageUrl = null;
         state.sessionId = null;
         state.uploadComplete = false;
         hasErased = false;
-        brushSize = 'medium';
-
-        // Reset canvas state - critical for object removal to work
         strokes = [];
         currentStroke = [];
         ctx = null;
-        canvasInitialized = false;
 
         state.isUploading = true;
-        if (uploadIndicator) uploadIndicator.classList.remove('hidden');
         updatePaintButtons();
 
         try {
-            // Normalize aspect ratio to Gemini-compatible ratio
+            // Normalize image
             const normalized = await normalizeRoomImage(file);
-            state.chosenRatio = normalized.ratio; // Store for debugging
-            
-            // CRITICAL: Store exact normalized dimensions for bulletproof mask matching
             state.normalizedWidth = normalized.width;
             state.normalizedHeight = normalized.height;
-            console.log('[See It] Stored normalized dimensions:', normalized.width, 'x', normalized.height);
+            console.log('[See It] Normalized:', normalized.width, 'x', normalized.height);
 
-            // Use normalized blob for preview
-            const normalizedDataUrl = URL.createObjectURL(normalized.blob);
-            state.localImageDataUrl = normalizedDataUrl;
+            // Set preview
+            const dataUrl = URL.createObjectURL(normalized.blob);
+            state.localImageDataUrl = dataUrl;
 
-            // Set image sources and wait for at least one to load before initializing canvas
-            const loadPromise = new Promise((resolve) => {
-                let loaded = false;
-                const onLoad = () => {
-                    if (!loaded) {
-                        loaded = true;
-                        resolve();
-                    }
-                };
-                if (roomPreview) {
-                    roomPreview.onload = onLoad;
-                    roomPreview.src = normalizedDataUrl;
-                }
-                if (roomPreviewDesktop) {
-                    roomPreviewDesktop.onload = onLoad;
-                    roomPreviewDesktop.src = normalizedDataUrl;
-                }
-                if (roomImage) roomImage.src = normalizedDataUrl;
-                if (roomImageDesktop) roomImageDesktop.src = normalizedDataUrl;
-                // Fallback timeout in case onload doesn't fire (shouldn't happen with blob URLs)
-                setTimeout(resolve, 100);
-            });
+            if (roomPreview) {
+                roomPreview.src = dataUrl;
+            }
+            if (roomImage) {
+                roomImage.src = dataUrl;
+            }
 
             showScreen('prepare');
-            await loadPromise;
-            console.log('[See It] Image loaded, initializing canvas with stored dimensions:', state.normalizedWidth, 'x', state.normalizedHeight);
+
+            // Wait for image to load
+            await new Promise(resolve => {
+                if (roomPreview) {
+                    roomPreview.onload = resolve;
+                    setTimeout(resolve, 200); // Fallback
+                } else {
+                    resolve();
+                }
+            });
+
             initCanvas();
 
-            // Upload normalized image
+            // Upload to backend
+            console.log('[See It] Starting upload...');
             const session = await startSession();
             state.sessionId = session.sessionId || session.room_session_id;
+            console.log('[See It] Session:', state.sessionId);
             
-            // Create a File object from the normalized blob for upload
-            const normalizedFile = new File([normalized.blob], file.name || 'room.jpg', { type: 'image/jpeg' });
+            const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
             await uploadImage(normalizedFile, session.uploadUrl || session.upload_url);
+            console.log('[See It] Upload complete, confirming...');
             
             const confirm = await confirmRoom(state.sessionId);
             state.originalRoomImageUrl = confirm.roomImageUrl || confirm.room_image_url;
             state.uploadComplete = true;
+            
+            console.log('[See It] Upload confirmed!', {
+                sessionId: state.sessionId,
+                uploadComplete: state.uploadComplete
+            });
+            
         } catch (err) {
             console.error('[See It] Upload error:', err);
             showError('Upload failed: ' + err.message);
             state.sessionId = null;
         } finally {
             state.isUploading = false;
-            if (uploadIndicator) uploadIndicator.classList.add('hidden');
             updatePaintButtons();
         }
     };
 
     btnTakePhoto?.addEventListener('click', () => cameraInput?.click());
     btnUpload?.addEventListener('click', () => uploadInput?.click());
-    btnTakePhotoDesktop?.addEventListener('click', () => cameraInput?.click());
-    btnUploadDesktop?.addEventListener('click', () => uploadInput?.click());
-    btnSavedDesktop?.addEventListener('click', async () => {
-        if (state.shopperToken) {
-            await showSavedRoomsList();
-        } else {
-            emailModal?.classList.remove('hidden');
-        }
-    });
     uploadInput?.addEventListener('change', handleFile);
     cameraInput?.addEventListener('change', handleFile);
 
     // --- Navigation ---
     btnBackPrepare?.addEventListener('click', () => showScreen('entry'));
-    btnBackPrepareDesktop?.addEventListener('click', () => showScreen('entry'));
     btnBackPosition?.addEventListener('click', () => showScreen('prepare'));
 
-    const handleConfirmRoom = () => {
+    btnConfirmRoom?.addEventListener('click', () => {
         if (state.isCleaningUp) return;
         const url = getActiveRoomUrl();
-        if (!url) return showError('Please upload an image first');
+        if (!url) {
+            showError('Please upload an image first');
+            return;
+        }
 
         if (state.isUploading) {
-            // Wait for upload
-            const check = setInterval(() => {
-                if (!state.isUploading && state.uploadComplete) {
-                    clearInterval(check);
-                    showScreen('position');
-                }
-            }, 100);
+            showError('Please wait for upload to complete');
             return;
         }
         showScreen('position');
-    };
-    
-    btnConfirmRoom?.addEventListener('click', handleConfirmRoom);
-    btnConfirmRoomDesktop?.addEventListener('click', handleConfirmRoom);
+    });
 
-    // --- Remove Button (Erase) ---
+    // --- ERASE BUTTON ---
     const handleRemove = async () => {
-        // Guard conditions - check state, not button disabled state (could be either mobile or desktop)
-        if (state.isCleaningUp || justFinishedDrawing) return;
+        console.log('[See It] ========== ERASE CLICKED ==========');
+        console.log('[See It] State:', {
+            isCleaningUp: state.isCleaningUp,
+            sessionId: state.sessionId,
+            uploadComplete: state.uploadComplete,
+            strokeCount: strokes.length,
+            ctxExists: !!ctx
+        });
+        
+        // Validation
+        if (state.isCleaningUp) {
+            console.log('[See It] Blocked: already cleaning');
+            return;
+        }
         if (!state.sessionId) {
-            showError('Session expired, please re-upload your room image.');
+            showError('Session expired. Please re-upload your image.');
             return;
         }
         if (!state.uploadComplete) {
-            showError('Upload still finishing. Please wait a moment.');
+            showError('Please wait for upload to complete.');
             return;
         }
         if (strokes.length === 0) {
-            showError('Draw over the object you want to remove.');
+            showError('Draw over the object you want to remove first.');
             return;
         }
 
         resetError();
         state.isCleaningUp = true;
-        if (cleanupLoading) cleanupLoading.classList.remove('hidden');
-        // Disable both mobile and desktop buttons
-        if (btnRemove) btnRemove.disabled = true;
-        if (btnRemoveDesktop) btnRemoveDesktop.disabled = true;
-        if (btnUndo) btnUndo.disabled = true;
-        if (btnUndoDesktop) btnUndoDesktop.disabled = true;
-        if (btnClear) btnClear.disabled = true;
-        if (btnClearDesktop) btnClearDesktop.disabled = true;
+        updatePaintButtons();
 
         const strokesBackup = JSON.parse(JSON.stringify(strokes));
 
         try {
-            // Debug state before generating mask
-            console.log('[See It] handleRemove state:', {
-                sessionId: state.sessionId,
-                uploadComplete: state.uploadComplete,
-                strokeCount: strokes.length,
-                canvasInitialized,
-                ctxExists: !!ctx,
-                normalizedDimensions: state.normalizedWidth && state.normalizedHeight ? `${state.normalizedWidth}x${state.normalizedHeight}` : 'not stored',
-                maskCanvasSize: maskCanvas ? `${maskCanvas.width}x${maskCanvas.height}` : 'none',
-                maskCanvasDesktopSize: maskCanvasDesktop ? `${maskCanvasDesktop.width}x${maskCanvasDesktop.height}` : 'none'
-            });
-
             const mask = generateMask();
             if (!mask) {
-                throw new Error('Failed to generate mask - canvas may not be initialized');
+                throw new Error('Failed to generate mask');
             }
 
             console.log('[See It] Sending cleanup request...');
             const result = await cleanupWithMask(mask);
-            console.log('[See It] Cleanup response:', result);
             
-            const newImageUrl = result.cleaned_room_image_url || result.cleanedRoomImageUrl;
-            if (!newImageUrl) {
-                throw new Error('No cleaned image URL in response');
+            console.log('[See It] Cleanup API response:', result);
+            
+            const newUrl = result.cleanedRoomImageUrl;
+            if (!newUrl) {
+                console.error('[See It] No URL in result:', result);
+                throw new Error('No cleaned image URL returned');
             }
             
-            state.cleanedRoomImageUrl = newImageUrl;
-            console.log('[See It] Setting new image URL:', newImageUrl.substring(0, 80) + '...');
-
-            // IMPORTANT: Don't append extra query params to signed URLs or the signature will be invalid.
-            // Each cleanup result already returns a unique signed URL, so setting it directly busts caches.
-            const urlWithCacheBuster = newImageUrl;
-
-            console.log('[See It] Setting image sources to:', urlWithCacheBuster.substring(0, 100) + '...');
+            console.log('[See It] Got cleaned URL:', newUrl.substring(0, 100) + '...');
+            console.log('[See It] Full URL length:', newUrl.length);
             
+            state.cleanedRoomImageUrl = newUrl;
+
+            // Clear strokes and canvas FIRST before loading new image
+            strokes = [];
+            if (ctx && maskCanvas) {
+                ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+            }
+            hasErased = true;
+            
+            // CRITICAL: Load the new image with verification
+            const loadImageWithVerification = (imgEl, url, name) => {
+                return new Promise((resolve, reject) => {
+                    if (!imgEl) {
+                        console.warn(`[See It] ${name} element not found`);
+                        resolve(false);
+                        return;
+                    }
+                    
+                    const oldSrc = imgEl.src;
+                    console.log(`[See It] ${name} - old src:`, oldSrc ? oldSrc.substring(0, 60) + '...' : 'none');
+                    
+                    // Add cache-busting parameter
+                    const cacheBustedUrl = url + (url.includes('?') ? '&' : '?') + '_cb=' + Date.now();
+                    
+                    imgEl.onload = () => {
+                        console.log(`[See It] ✅ ${name} LOADED successfully!`);
+                        console.log(`[See It] ${name} naturalWidth:`, imgEl.naturalWidth);
+                        console.log(`[See It] ${name} naturalHeight:`, imgEl.naturalHeight);
+                        resolve(true);
+                    };
+                    
+                    imgEl.onerror = (e) => {
+                        console.error(`[See It] ❌ ${name} FAILED to load!`, e);
+                        console.error(`[See It] ${name} attempted URL:`, cacheBustedUrl.substring(0, 100));
+                        reject(new Error(`${name} failed to load`));
+                    };
+                    
+                    console.log(`[See It] ${name} - setting src to cleaned URL...`);
+                    imgEl.src = cacheBustedUrl;
+                });
+            };
+            
+            // Load both images
+            const loadPromises = [];
             if (roomPreview) {
-                roomPreview.onerror = (e) => console.error('[See It] roomPreview FAILED to load:', e);
-                roomPreview.onload = () => {
-                    console.log('[See It] roomPreview loaded new image successfully');
-                    initCanvas();
-                };
-                roomPreview.src = urlWithCacheBuster;
-            }
-            if (roomPreviewDesktop) {
-                roomPreviewDesktop.onerror = (e) => console.error('[See It] roomPreviewDesktop FAILED to load:', e);
-                roomPreviewDesktop.onload = () => {
-                    console.log('[See It] roomPreviewDesktop loaded new image successfully');
-                    initCanvas();
-                };
-                roomPreviewDesktop.src = urlWithCacheBuster;
+                loadPromises.push(loadImageWithVerification(roomPreview, newUrl, 'roomPreview'));
             }
             if (roomImage) {
-                roomImage.onerror = (e) => console.error('[See It] roomImage FAILED to load:', e);
-                roomImage.src = urlWithCacheBuster;
+                loadPromises.push(loadImageWithVerification(roomImage, newUrl, 'roomImage'));
             }
-            if (roomImageDesktop) {
-                roomImageDesktop.onerror = (e) => console.error('[See It] roomImageDesktop FAILED to load:', e);
-                roomImageDesktop.src = urlWithCacheBuster;
+            
+            if (loadPromises.length === 0) {
+                throw new Error('No image elements found to update');
             }
-
-            strokes = [];
-            if (maskCanvas) ctx?.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-            if (maskCanvasDesktop) {
-                const desktopCtx = maskCanvasDesktop.getContext('2d');
-                desktopCtx?.clearRect(0, 0, maskCanvasDesktop.width, maskCanvasDesktop.height);
+            
+            // Wait for at least one image to load
+            try {
+                await Promise.race(loadPromises);
+                console.log('[See It] ✅ Cleanup complete - image updated!');
+            } catch (loadErr) {
+                console.error('[See It] Image load error:', loadErr);
+                // Don't throw - the URL might still work, just logging failed
             }
-            hasErased = true; // Mark that object removal has been performed
-            console.log('[See It] Cleanup complete, strokes cleared');
+            
         } catch (err) {
             console.error('[See It] Cleanup error:', err);
             strokes = strokesBackup;
             redrawStrokes();
-            showError('Remove failed: ' + err.message);
+            showError('Erase failed: ' + err.message);
         } finally {
             state.isCleaningUp = false;
-            if (cleanupLoading) cleanupLoading.classList.add('hidden');
             updatePaintButtons();
         }
     };
     
-    btnRemove?.addEventListener('click', handleRemove);
-    btnRemoveDesktop?.addEventListener('click', handleRemove);
+    // ERASE BUTTON EVENT LISTENER
+    if (btnRemove) {
+        console.log('[See It] Attaching Erase button listener');
+        btnRemove.addEventListener('click', (e) => {
+            console.log('[See It] Erase button click event fired!');
+            e.preventDefault();
+            e.stopPropagation();
+            handleRemove();
+        });
+    } else {
+        console.error('[See It] CRITICAL: btnRemove element not found!');
+    }
 
-    // --- Generate Render ---
+    // --- Generate ---
     const handleGenerate = async () => {
-        if (!state.sessionId || !state.productId) return showError('Missing session or product');
-
-        // Save room if toggle is on (check both mobile and desktop toggles)
-        const shouldSaveRoom = (saveRoomToggle?.checked || saveRoomToggleDesktop?.checked) && state.shopperToken && state.sessionId;
-        if (shouldSaveRoom) {
-            try {
-                await saveRoom(state.sessionId);
-            } catch (err) {
-                console.error('[See It] Failed to save room:', err);
-                // Continue anyway
-            }
+        if (!state.sessionId || !state.productId) {
+            showError('Missing session or product');
+            return;
         }
 
         showScreen('result');
         resetError();
-        if (statusText) statusText.textContent = 'Generating...';
-        if (statusTextContainer) statusTextContainer.classList.remove('hidden');
-        if (resultImage) resultImage.src = '';
-        btnShare?.parentElement?.classList.add('hidden');
 
-        // Use VISIBLE element, not just existence check (desktop elements exist but may be hidden on mobile)
-        const activeRoomImage = isVisible(roomImageDesktop) ? roomImageDesktop : roomImage;
-        const activeProductImage = isVisible(productImageDesktop) ? productImageDesktop : productImage;
-        if (!activeRoomImage || !activeProductImage) return showError('Images not loaded');
-
-        // object-fit: contain means the <img> element can be letterboxed inside its own box.
-        // Compute the actual rendered image area so placement maps correctly to real pixels server-side.
-        const getContainedImageBox = (imgEl) => {
-            const rect = imgEl.getBoundingClientRect();
-            const natW = imgEl.naturalWidth;
-            const natH = imgEl.naturalHeight;
-            if (!natW || !natH || !rect.width || !rect.height) return null;
-
-            const boxAR = rect.width / rect.height;
-            const imgAR = natW / natH;
-
-            let displayW, displayH, offsetX, offsetY;
-            if (imgAR > boxAR) {
-                // Image fits width; letterbox top/bottom
-                displayW = rect.width;
-                displayH = rect.width / imgAR;
-                offsetX = 0;
-                offsetY = (rect.height - displayH) / 2;
-            } else {
-                // Image fits height; letterbox left/right
-                displayH = rect.height;
-                displayW = rect.height * imgAR;
-                offsetY = 0;
-                offsetX = (rect.width - displayW) / 2;
-            }
-
-            return {
-                left: rect.left + offsetX,
-                top: rect.top + offsetY,
-                width: displayW,
-                height: displayH
+        try {
+            const payload = {
+                room_session_id: state.sessionId,
+                product_id: state.productId,
+                placement: { x: 0.5, y: 0.5, scale: state.scale || 1 },
+                config: {
+                    style_preset: 'neutral',
+                    quality: 'standard',
+                    product_image_url: state.productImageUrl
+                }
             };
-        };
 
-        const roomBox = getContainedImageBox(activeRoomImage);
-        if (!roomBox) return showError('Room image not ready');
-
-        const prodRect = activeProductImage.getBoundingClientRect();
-        const prodCenterX = prodRect.left + prodRect.width / 2;
-        const prodCenterY = prodRect.top + prodRect.height / 2;
-
-        const cx = prodCenterX - roomBox.left;
-        const cy = prodCenterY - roomBox.top;
-
-        const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-        const xNorm = clamp(cx / roomBox.width, 0, 1);
-        const yNorm = clamp(cy / roomBox.height, 0, 1);
-
-        // Extra placement hint: product width as fraction of the rendered room image width.
-        // This makes server-side sizing match what the user saw, regardless of device DPI or layout.
-        const productWidthFraction = clamp(prodRect.width / roomBox.width, 0.01, 1.5);
-
-        const payload = {
-            room_session_id: state.sessionId,
-            product_id: state.productId,
-            placement: {
-                x: xNorm,
-                y: yNorm,
-                scale: state.scale || 1,
-                product_width_fraction: productWidthFraction
-            },
-            config: {
-                style_preset: 'neutral',
-                quality: 'standard',
-                product_image_url: state.productImageUrl
-            }
-        };
-
-        console.log('[See It] Sending render request:', { 
-            sessionId: state.sessionId, 
-            productId: state.productId,
-            placement: payload.placement 
-        });
-        
-        fetch('/apps/see-it/render', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        })
-        .then(r => {
-            console.log('[See It] Render response status:', r.status);
-            return r.json();
-        })
-        .then(data => {
-            console.log('[See It] Render response data:', { status: data.status, job_id: data.job_id, hasUrl: !!data.imageUrl });
+            console.log('[See It] Generate request:', payload);
+            
+            const res = await fetch('/apps/see-it/render', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            const data = await res.json();
+            console.log('[See It] Generate response:', data);
             
             if (data.status === 'failed') {
-                console.error('[See It] Render failed:', { error: data.error, message: data.message });
-                showError(data.error === 'room_not_found' ? 'Session expired, please re-upload' : 'Render failed');
-                if (statusTextContainer) statusTextContainer.classList.add('hidden');
-                btnShare?.parentElement?.classList.remove('hidden');
-                return;
+                throw new Error(data.error || 'Render failed');
             }
-            // Handle immediate completion (no polling needed)
+            
             if (data.status === 'completed' && data.imageUrl) {
-                console.log('[See It] Immediate completion - no polling needed');
-                if (statusText) statusText.textContent = 'Done!';
-                if (statusTextContainer) statusTextContainer.classList.add('hidden');
-                // Add cache-buster to ensure fresh image
-                const cacheBuster = data.imageUrl.includes('?') ? `&_cb=${Date.now()}` : `?_cb=${Date.now()}`;
-                const imageUrlWithCacheBuster = data.imageUrl + cacheBuster;
-                console.log('[See It] Setting result image (immediate):', imageUrlWithCacheBuster.substring(0, 80) + '...');
-                if (resultImage) resultImage.src = imageUrlWithCacheBuster;
-                if (resultImageDesktop) resultImageDesktop.src = imageUrlWithCacheBuster;
-                btnShare?.parentElement?.classList.remove('hidden');
-                btnShareDesktop?.parentElement?.classList.remove('hidden');
+                if (resultImage) resultImage.src = data.imageUrl;
                 return;
             }
+            
             if (data.job_id) {
-                console.log('[See It] Starting poll for job:', data.job_id);
-                pollStatus(data.job_id);
-            } else {
-                throw new Error('No job ID');
+                const result = await pollJobStatus(data.job_id);
+                if (resultImage && result.imageUrl) {
+                    resultImage.src = result.imageUrl;
+                }
             }
-        })
-        .catch(err => {
-            console.error('[See It] Render request error:', err);
-            showError('Error: ' + err.message);
-            if (statusTextContainer) statusTextContainer.classList.add('hidden');
-            btnShare?.parentElement?.classList.remove('hidden');
-        });
+        } catch (err) {
+            console.error('[See It] Generate error:', err);
+            showError('Generate failed: ' + err.message);
+        }
     };
     
     btnGenerate?.addEventListener('click', handleGenerate);
-    btnGenerateDesktop?.addEventListener('click', handleGenerate);
-
-    const pollStatus = (jobId) => {
-        let attempts = 0;
-        const interval = setInterval(() => {
-            if (++attempts > 30) {
-                clearInterval(interval);
-                showError('Timeout - please try again');
-                if (statusTextContainer) statusTextContainer.classList.add('hidden');
-                btnShare?.parentElement?.classList.remove('hidden');
-                return;
-            }
-
-            fetch(`/apps/see-it/render/${jobId}`)
-            .then(r => r.json())
-            .then(data => {
-                console.log('[See It] Poll response:', { attempt: attempts, status: data.status, hasUrl: !!data.imageUrl, jobId });
-                if (data.status === 'completed') {
-                    clearInterval(interval);
-                    if (statusText) statusText.textContent = 'Done!';
-                    if (statusTextContainer) statusTextContainer.classList.add('hidden');
-                    // CRITICAL: Add cache-buster to ensure browser loads fresh image
-                    // Without this, browser may show cached image from previous render
-                    if (data.imageUrl) {
-                        const cacheBuster = data.imageUrl.includes('?') ? `&_cb=${Date.now()}` : `?_cb=${Date.now()}`;
-                        const imageUrlWithCacheBuster = data.imageUrl + cacheBuster;
-                        console.log('[See It] Setting result image:', { 
-                            url: imageUrlWithCacheBuster.substring(0, 80) + '...',
-                            hasResultImage: !!resultImage,
-                            hasResultImageDesktop: !!resultImageDesktop
-                        });
-                        if (resultImage) resultImage.src = imageUrlWithCacheBuster;
-                        if (resultImageDesktop) resultImageDesktop.src = imageUrlWithCacheBuster;
-                    } else {
-                        console.error('[See It] No imageUrl in completed response:', data);
-                    }
-                    btnShare?.parentElement?.classList.remove('hidden');
-                    btnShareDesktop?.parentElement?.classList.remove('hidden');
-                } else if (data.status === 'failed') {
-                    clearInterval(interval);
-                    console.error('[See It] Render failed:', { errorMessage: data.errorMessage, errorCode: data.errorCode });
-                    showError(data.errorMessage || 'Failed');
-                    if (statusTextContainer) statusTextContainer.classList.add('hidden');
-                    btnShare?.parentElement?.classList.remove('hidden');
-                }
-            })
-            .catch((err) => {
-                clearInterval(interval);
-                console.error('[See It] Poll network error:', err);
-                showError('Network error');
-                if (statusTextContainer) statusTextContainer.classList.add('hidden');
-                btnShare?.parentElement?.classList.remove('hidden');
-            });
-        }, 2000);
-    };
 
     // --- Result Actions ---
-    btnAdjust?.addEventListener('click', () => showScreen('position'));
-    const handleNewRoom = () => {
+    btnNewRoom?.addEventListener('click', () => {
         state.sessionId = null;
         state.originalRoomImageUrl = null;
         state.cleanedRoomImageUrl = null;
         state.localImageDataUrl = null;
         state.uploadComplete = false;
-        hasErased = false; // Reset erase state for new room
-        brushSize = 'medium'; // Reset brush size to default
+        hasErased = false;
+        strokes = [];
         showScreen('entry');
-    };
-    
-    btnNewRoom?.addEventListener('click', handleNewRoom);
-    btnNewRoomDesktop?.addEventListener('click', handleNewRoom);
-
-    // --- Share Functionality ---
-    const handleShare = async () => {
-        const activeResultImage = resultImageDesktop || resultImage;
-        if (!activeResultImage || !activeResultImage.src) return;
-
-        if (navigator.share) {
-            try {
-                const response = await fetch(activeResultImage.src);
-                const blob = await response.blob();
-                const file = new File([blob], 'see-it-result.jpg', { type: 'image/jpeg' });
-                await navigator.share({ files: [file], title: 'See It Result' });
-            } catch (err) {
-                if (err.name !== 'AbortError') {
-                    // Fallback to download
-                    downloadImage(activeResultImage.src);
-                }
-            }
-        } else {
-            downloadImage(activeResultImage.src);
-        }
-    };
-    
-    btnShare?.addEventListener('click', handleShare);
-    btnShareDesktop?.addEventListener('click', handleShare);
-
-    const downloadImage = (url) => {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'see-it-result.jpg';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-    };
-
-    // --- Saved Rooms ---
-    btnSaved?.addEventListener('click', async () => {
-        if (state.shopperToken) {
-            // Show saved rooms list
-            await showSavedRoomsList();
-        } else {
-            // Show email capture
-            emailModal?.classList.remove('hidden');
-        }
     });
 
-    const showSavedRoomsList = async () => {
-        const rooms = await getSavedRooms();
-        if (!savedRoomsList) return;
-
-        savedRoomsList.innerHTML = '';
-        if (rooms.length === 0) {
-            savedRoomsList.innerHTML = '<p style="text-align: center; color: #737373; padding: 2rem;">No saved rooms yet</p>';
-        } else {
-            rooms.forEach(room => {
-                const item = document.createElement('div');
-                item.className = 'see-it-saved-room-item';
-                item.innerHTML = `
-                    <img src="${room.preview_url}" alt="${room.title || 'Room'}" />
-                    <div class="see-it-saved-room-item-info">
-                        <p class="see-it-saved-room-item-title">${room.title || 'Untitled Room'}</p>
-                        <p class="see-it-saved-room-item-date">${new Date(room.created_at).toLocaleDateString()}</p>
-                    </div>
-                `;
-                item.addEventListener('click', () => {
-                    // Load this room (would need backend endpoint to convert saved room to session)
-                    // For now, just close
-                    savedRoomsModal?.classList.add('hidden');
-                });
-                savedRoomsList.appendChild(item);
-            });
-        }
-        savedRoomsModal?.classList.remove('hidden');
-    };
-
-    btnSavedRoomsClose?.addEventListener('click', () => {
-        savedRoomsModal?.classList.add('hidden');
-    });
-
-    // --- Email Capture ---
-    btnEmailSubmit?.addEventListener('click', async () => {
-        const email = emailInput?.value?.trim();
-        if (!email || !email.includes('@')) {
-            showError('Please enter a valid email');
-            return;
-        }
-
+    btnShare?.addEventListener('click', async () => {
+        if (!resultImage?.src) return;
+        
         try {
-            const result = await identifyShopper(email);
-            state.shopperToken = result.shopper_token;
-            localStorage.setItem('see_it_shopper_token', state.shopperToken);
-            emailModal?.classList.add('hidden');
-            // Now show saved rooms
-            await showSavedRoomsList();
+            const response = await fetch(resultImage.src);
+            const blob = await response.blob();
+            const file = new File([blob], 'see-it-result.jpg', { type: 'image/jpeg' });
+            
+            if (navigator.share) {
+                await navigator.share({ files: [file], title: 'See It Result' });
+            } else {
+                const a = document.createElement('a');
+                a.href = resultImage.src;
+                a.download = 'see-it-result.jpg';
+                a.click();
+            }
         } catch (err) {
-            showError('Failed to save email: ' + err.message);
+            console.error('[See It] Share error:', err);
         }
     });
 
-    btnEmailCancel?.addEventListener('click', () => {
-        emailModal?.classList.add('hidden');
-    });
+    console.log('[See It] Initialization complete');
 });
