@@ -25,23 +25,23 @@ const GEMINI_TIMEOUT_MS = 60000; // 60 seconds
 
 // Aspect ratio helper (same as gemini.server.ts)
 const GEMINI_SUPPORTED_RATIOS = [
-    { label: '1:1',   value: 1.0 },
-    { label: '4:5',   value: 0.8 },
-    { label: '5:4',   value: 1.25 },
-    { label: '3:4',   value: 0.75 },
-    { label: '4:3',   value: 4/3 },
-    { label: '2:3',   value: 2/3 },
-    { label: '3:2',   value: 1.5 },
-    { label: '9:16',  value: 9/16 },
-    { label: '16:9', value: 16/9 },
-    { label: '21:9', value: 21/9 },
+    { label: '1:1', value: 1.0 },
+    { label: '4:5', value: 0.8 },
+    { label: '5:4', value: 1.25 },
+    { label: '3:4', value: 0.75 },
+    { label: '4:3', value: 4 / 3 },
+    { label: '2:3', value: 2 / 3 },
+    { label: '3:2', value: 1.5 },
+    { label: '9:16', value: 9 / 16 },
+    { label: '16:9', value: 16 / 9 },
+    { label: '21:9', value: 21 / 9 },
 ];
 
 function findClosestGeminiRatio(width: number, height: number): { label: string; value: number } {
     const inputRatio = width / height;
     let closest = GEMINI_SUPPORTED_RATIOS[0];
     let minDiff = Math.abs(inputRatio - closest.value);
-    
+
     for (const r of GEMINI_SUPPORTED_RATIOS) {
         const diff = Math.abs(inputRatio - r.value);
         if (diff < minDiff) {
@@ -240,8 +240,8 @@ async function createMaskedVisualization(
     const visualizedImage = await sharp(resultData, {
         raw: { width, height, channels: 4 }
     })
-    .png()
-    .toBuffer();
+        .png()
+        .toBuffer();
 
     logger.info(
         { ...logContext, stage: "mask-visualization" },
@@ -262,17 +262,17 @@ async function analyzeMaskPosition(
     const maskMeta = await sharp(maskBuffer).metadata();
     const width = maskMeta.width!;
     const height = maskMeta.height!;
-    
+
     // Get raw grayscale data
     const rawData = await sharp(maskBuffer)
         .grayscale()
         .raw()
         .toBuffer();
-    
+
     // Find bounding box of white pixels
     let minX = width, minY = height, maxX = 0, maxY = 0;
     let whitePixelCount = 0;
-    
+
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
             const idx = y * width + x;
@@ -285,23 +285,23 @@ async function analyzeMaskPosition(
             }
         }
     }
-    
+
     if (whitePixelCount === 0) {
         return { description: "", hasContent: false, centerX: 0, centerY: 0, boundingBox: { minX: 0, minY: 0, maxX: 0, maxY: 0 } };
     }
-    
+
     // Calculate center of mask
     const centerX = Math.round((minX + maxX) / 2);
     const centerY = Math.round((minY + maxY) / 2);
-    
+
     // Calculate percentages for more precise description
     const centerXPercent = Math.round((centerX / width) * 100);
     const centerYPercent = Math.round((centerY / height) * 100);
-    
+
     // Determine position description with specific percentages
-    const xPos = centerX < width / 3 ? "left" : centerX > width * 2/3 ? "right" : "center";
-    const yPos = centerY < height / 3 ? "top" : centerY > height * 2/3 ? "bottom" : "middle";
-    
+    const xPos = centerX < width / 3 ? "left" : centerX > width * 2 / 3 ? "right" : "center";
+    const yPos = centerY < height / 3 ? "top" : centerY > height * 2 / 3 ? "bottom" : "middle";
+
     let description: string;
     if (xPos === "center" && yPos === "middle") {
         description = `the center of the image (approximately ${centerXPercent}% from left, ${centerYPercent}% from top)`;
@@ -312,19 +312,19 @@ async function analyzeMaskPosition(
     } else {
         description = `the ${yPos}-${xPos} area (approximately ${centerXPercent}% from left, ${centerYPercent}% from top)`;
     }
-    
+
     // Calculate approximate size
     const maskWidth = maxX - minX;
     const maskHeight = maxY - minY;
     const sizeRatio = (maskWidth * maskHeight) / (width * height);
-    
+
     let sizeDesc = "small";
     if (sizeRatio > 0.25) sizeDesc = "large";
     else if (sizeRatio > 0.1) sizeDesc = "medium-sized";
-    
-    logger.info(logContext, `Mask analysis: ${description}, ${sizeDesc} object (${Math.round(sizeRatio*100)}% of image)`);
-    
-    return { 
+
+    logger.info(logContext, `Mask analysis: ${description}, ${sizeDesc} object (${Math.round(sizeRatio * 100)}% of image)`);
+
+    return {
         description: `the ${sizeDesc} object in ${description}`,
         hasContent: true,
         centerX,
@@ -345,14 +345,14 @@ async function createMarkedImage(
     const roomMeta = await sharp(roomBuffer).metadata();
     const width = roomMeta.width!;
     const height = roomMeta.height!;
-    
+
     // Calculate circle dimensions from bounding box
     const { minX, minY, maxX, maxY } = maskAnalysis.boundingBox;
     const circleWidth = maxX - minX + 40; // Add padding
     const circleHeight = maxY - minY + 40;
     const circleX = Math.max(0, minX - 20);
     const circleY = Math.max(0, minY - 20);
-    
+
     // Create an SVG overlay with a bright cyan dashed circle
     const svg = `<svg width="${width}" height="${height}">
         <rect x="${circleX}" y="${circleY}" width="${circleWidth}" height="${circleHeight}" 
@@ -362,7 +362,7 @@ async function createMarkedImage(
         <line x1="${circleX + circleWidth}" y1="${circleY}" x2="${circleX}" y2="${circleY + circleHeight}" 
               stroke="#00FFFF" stroke-width="4"/>
     </svg>`;
-    
+
     // Composite the SVG marker over the room image
     const markedImage = await sharp(roomBuffer)
         .composite([{
@@ -372,9 +372,9 @@ async function createMarkedImage(
         }])
         .png()
         .toBuffer();
-    
+
     logger.info(logContext, `Created marked image with cyan box at (${circleX},${circleY}) size ${circleWidth}x${circleHeight}`);
-    
+
     return markedImage;
 }
 
@@ -394,13 +394,19 @@ async function callGeminiForCleanup(
     const startTime = Date.now();
     logger.info(logContext, `Calling Gemini model: ${model} (timeout: ${GEMINI_TIMEOUT_MS}ms)`);
 
-    // CRITICAL: Send the ORIGINAL image - no visual markers
-    // Gemini works better with pure semantic descriptions of what to remove
+    // CRITICAL FIX: Send BOTH the room image AND the mask image
+    // The mask shows exactly where the user painted (white areas = objects to remove)
     const parts: any[] = [
         {
             inlineData: {
                 mimeType: 'image/png',
                 data: roomBuffer.toString('base64')
+            }
+        },
+        {
+            inlineData: {
+                mimeType: 'image/png',
+                data: maskBuffer.toString('base64')
             }
         },
         { text: prompt }
@@ -567,28 +573,37 @@ export async function cleanupRoom(
         const maskAnalysis = await analyzeMaskPosition(maskBuffer, logContext);
         logger.info(logContext, `Mask analysis: ${maskAnalysis.description}`);
 
-        // Step 6: Build prompt - Pure semantic description (no visual markers)
-        // Gemini understands spatial references like "bottom-left" combined with object descriptions
-        const locationDescription = maskAnalysis.description || "the marked area";
-        
-        // Build a very direct prompt focused on object removal with spatial reference
-        const prompt = `OBJECT REMOVAL: Remove ${locationDescription} from this image.
 
-The area to remove is located at approximately ${Math.round((maskAnalysis.centerX / roomWidth) * 100)}% from the left and ${Math.round((maskAnalysis.centerY / roomHeight) * 100)}% from the top.
+        // Step 6: Build prompt - Explain the two-image approach to Gemini
+        // Image 1: The room photo, Image 2: The mask (white = areas to remove)
+        const locationDescription = maskAnalysis.description || "the marked area";
+
+        // Build a clear prompt explaining the mask image
+        const prompt = `OBJECT REMOVAL TASK:
+
+I have provided TWO images:
+1. FIRST IMAGE: A room photo
+2. SECOND IMAGE: A mask showing exactly what to remove (WHITE areas = objects to erase, BLACK = keep)
+
+YOUR TASK:
+Remove EVERYTHING covered by the WHITE areas in the mask from the room photo.
+The white painted area covers ${locationDescription}.
 
 INSTRUCTIONS:
-1. REMOVE any visible object, furniture, or item in that specific location
-2. FILL the empty space with the natural continuation of the background (wall, floor, carpet, etc.)
-3. Make it look like nothing was ever there - clean and seamless
+1. Look at the SECOND image (mask) to see exactly what the user painted over
+2. REMOVE all objects/furniture visible in the WHITE areas of the mask
+3. FILL the removed areas with natural background (wall, floor, etc.)
+4. Make it look like nothing was ever there - seamless and natural
 
 CRITICAL REQUIREMENTS:
 - Output MUST be exactly ${roomWidth}x${roomHeight} pixels
 - Keep the SAME camera angle, lighting, and perspective
 - Do NOT crop, resize, or change the framing
-- Only remove the object in the specified location
+- Only remove what is painted in WHITE in the mask
 - Everything else should remain EXACTLY the same
 
-Return only the cleaned image.`;
+Return only the cleaned room image.`;
+
 
         // Step 6: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
@@ -597,7 +612,7 @@ Return only the cleaned image.`;
 
         while (attempt < maxAttempts) {
             const model = attempt === 0 ? GEMINI_IMAGE_MODEL_FAST : GEMINI_IMAGE_MODEL_PRO;
-            
+
             try {
                 logger.info(
                     { ...logContext, stage: "gemini-call", attempt: attempt + 1 },
@@ -692,7 +707,7 @@ Return only the cleaned image.`;
         for (let i = 0; i < pixelCount; i++) {
             const idx = i * 4;  // RGBA
             const maskIdx = i;     // Grayscale mask
-            
+
             const alpha = maskData[maskIdx] / 255;  // 0-1 range
             const invAlpha = 1 - alpha;
 
@@ -710,8 +725,8 @@ Return only the cleaned image.`;
                 channels: 4
             }
         })
-        .jpeg({ quality: 90 })
-        .toBuffer();
+            .jpeg({ quality: 90 })
+            .toBuffer();
 
         logger.info(
             { ...logContext, stage: "composite-complete" },

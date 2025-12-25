@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.32';
+    const VERSION = '1.0.27';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
     
     // Helper: check if element is visible (has non-zero dimensions)
