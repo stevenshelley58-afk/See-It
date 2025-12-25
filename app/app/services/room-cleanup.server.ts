@@ -380,7 +380,7 @@ async function createMarkedImage(
 
 /**
  * Call Gemini API for object removal
- * Sends image with VISUAL MARKER (cyan box with X) so Gemini can SEE what to remove
+ * Uses PURE SEMANTIC DESCRIPTION - Gemini understands location references better than visual markers
  */
 async function callGeminiForCleanup(
     prompt: string,
@@ -389,23 +389,18 @@ async function callGeminiForCleanup(
     aspectRatio: string,
     model: string,
     logContext: ReturnType<typeof createLogContext>,
-    maskAnalysis?: { centerX: number; centerY: number; boundingBox: { minX: number; minY: number; maxX: number; maxY: number } }
+    maskAnalysis?: { centerX: number; centerY: number; boundingBox: { minX: number; minY: number; maxX: number; maxY: number }; description?: string }
 ): Promise<string> {
     const startTime = Date.now();
     logger.info(logContext, `Calling Gemini model: ${model} (timeout: ${GEMINI_TIMEOUT_MS}ms)`);
 
-    // Create image with visual marker if analysis is available
-    let imageToSend = roomBuffer;
-    if (maskAnalysis && maskAnalysis.boundingBox) {
-        imageToSend = await createMarkedImage(roomBuffer, maskAnalysis, logContext);
-    }
-
-    // Send the marked image so Gemini can SEE what to remove
+    // CRITICAL: Send the ORIGINAL image - no visual markers
+    // Gemini works better with pure semantic descriptions of what to remove
     const parts: any[] = [
         {
             inlineData: {
                 mimeType: 'image/png',
-                data: imageToSend.toString('base64')
+                data: roomBuffer.toString('base64')
             }
         },
         { text: prompt }
@@ -572,25 +567,28 @@ export async function cleanupRoom(
         const maskAnalysis = await analyzeMaskPosition(maskBuffer, logContext);
         logger.info(logContext, `Mask analysis: ${maskAnalysis.description}`);
 
-        // Step 6: Build prompt - Use VISUAL MARKER approach
-        // We draw a bright cyan box with an X over the object, then tell Gemini to remove it
-        const prompt = `This image shows a room with a CYAN/TURQUOISE DASHED BOX and X marking an object that needs to be REMOVED.
+        // Step 6: Build prompt - Pure semantic description (no visual markers)
+        // Gemini understands spatial references like "bottom-left" combined with object descriptions
+        const locationDescription = maskAnalysis.description || "the marked area";
+        
+        // Build a very direct prompt focused on object removal with spatial reference
+        const prompt = `OBJECT REMOVAL: Remove ${locationDescription} from this image.
 
-YOUR TASK:
-1. Look at the area marked with the cyan/turquoise dashed rectangle and X
-2. REMOVE the object inside that marked area completely
-3. FILL that space with the natural background (floor, wall, or surface) that would be behind it
-4. Remove the cyan marking itself - the output should have NO cyan lines
+The area to remove is located at approximately ${Math.round((maskAnalysis.centerX / roomWidth) * 100)}% from the left and ${Math.round((maskAnalysis.centerY / roomHeight) * 100)}% from the top.
 
-CRITICAL RULES:
-- Output image MUST be exactly ${roomWidth}x${roomHeight} pixels
-- Keep EVERYTHING ELSE in the image EXACTLY the same
-- Same camera angle, same lighting, same composition
-- The result should look like a clean, natural room photograph
-- The marked object should simply be GONE, with natural background in its place
-- NO cyan/turquoise markings should remain in the output
+INSTRUCTIONS:
+1. REMOVE any visible object, furniture, or item in that specific location
+2. FILL the empty space with the natural continuation of the background (wall, floor, carpet, etc.)
+3. Make it look like nothing was ever there - clean and seamless
 
-Return ONLY the cleaned room image.`;
+CRITICAL REQUIREMENTS:
+- Output MUST be exactly ${roomWidth}x${roomHeight} pixels
+- Keep the SAME camera angle, lighting, and perspective
+- Do NOT crop, resize, or change the framing
+- Only remove the object in the specified location
+- Everything else should remain EXACTLY the same
+
+Return only the cleaned image.`;
 
         // Step 6: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
