@@ -328,7 +328,7 @@ async function analyzeMaskPosition(
 
 /**
  * Call Gemini API for object removal
- * Uses SEMANTIC DESCRIPTION instead of mask - Gemini works best with natural language
+ * Uses VISUAL OVERLAY - Gemini can see red highlighting showing what to remove
  */
 async function callGeminiForCleanup(
     prompt: string,
@@ -341,20 +341,21 @@ async function callGeminiForCleanup(
     const startTime = Date.now();
     logger.info(logContext, `Calling Gemini model: ${model} (timeout: ${GEMINI_TIMEOUT_MS}ms)`);
 
-    // Analyze mask to get position description
-    const maskAnalysis = await analyzeMaskPosition(maskBuffer, logContext);
-    if (!maskAnalysis.hasContent) {
-        logger.warn(logContext, "Mask has no content - returning original image");
-        // This shouldn't happen but handle gracefully
-    }
+    // Create a visual overlay showing what to remove with a bright red highlight
+    const visualizedImage = await createMaskedVisualization(roomBuffer, maskBuffer, logContext);
+    
+    logger.info(
+        { ...logContext, stage: "visual-overlay" },
+        `Created visual overlay: ${visualizedImage.length} bytes (red highlight on areas to remove)`
+    );
 
-    // CRITICAL: Gemini works with NATURAL LANGUAGE, not masks
-    // Send only the room image with a text description of what to remove
+    // CRITICAL: Send the image WITH visual overlay so Gemini can SEE what to remove
+    // This is more reliable than text descriptions of locations
     const parts: any[] = [
         {
             inlineData: {
                 mimeType: 'image/png',
-                data: roomBuffer.toString('base64')
+                data: visualizedImage.toString('base64')
             }
         },
         { text: prompt }
@@ -517,29 +518,27 @@ export async function cleanupRoom(
             `Room: ${roomWidth}x${roomHeight}, closest Gemini ratio: ${closestRatio.label}`
         );
 
-        // Step 5: Analyze mask to get position description for semantic prompting
+        // Step 5: Analyze mask to log what area is being removed
         const maskAnalysis = await analyzeMaskPosition(maskBuffer, logContext);
-        const objectLocation = maskAnalysis.description || "the object that was marked";
+        logger.info(logContext, `Mask analysis: ${maskAnalysis.description}`);
 
-        // Step 6: Build prompt using NATURAL LANGUAGE (Gemini's strength)
-        // Gemini doesn't understand masks - it needs semantic descriptions
-        const prompt = `OBJECT REMOVAL TASK
-
-Look at this room image and REMOVE ${objectLocation}.
+        // Step 6: Build prompt - tell Gemini to remove the RED HIGHLIGHTED area
+        // We're sending an image with red overlay so Gemini can SEE exactly what to remove
+        const prompt = `This image shows a room with a BRIGHT RED/PINK OVERLAY highlighting an object or area that needs to be removed.
 
 YOUR TASK:
-1. Identify and COMPLETELY REMOVE ${objectLocation}
-2. Fill the removed area naturally with the surrounding background (wall, floor, or surface)
-3. Make the result look like a natural photograph with nothing missing
+1. ERASE and REMOVE the object/area that is covered by the red/pink highlighting
+2. FILL that space with the background that would naturally be behind it (floor, wall, surface)
+3. The result should look like a clean room photo with the highlighted object completely gone
+4. REMOVE any text labels like "REMOVE THIS" as well
 
-CRITICAL RULES:
-- Output MUST be EXACTLY ${roomWidth}x${roomHeight} pixels (same dimensions as input)
-- Keep the SAME camera angle, zoom, and framing
-- DO NOT crop, extend, or resize the image
-- DO NOT add any new objects, people, or furniture
-- If there's any text labels like "REMOVE THIS", also remove those
+IMPORTANT:
+- Output image must be ${roomWidth}x${roomHeight} pixels (same as input)
+- Keep the same camera angle and perspective
+- Don't add new objects, just remove what's highlighted
+- Make the filled area blend naturally with surroundings
 
-Return ONLY the cleaned room image.`;
+Return ONLY the cleaned image with the red-highlighted object removed.`;
 
         // Step 6: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
