@@ -523,9 +523,11 @@ document.addEventListener('DOMContentLoaded', function () {
         // Prefer mapping relative to the *rendered image box* (object-fit: contain can letterbox inside the <img>).
         // This avoids offsets when the canvas and image don't share an identical layout box under some themes.
         const preview = (activeCanvas === maskCanvasDesktop ? roomPreviewDesktop : roomPreview) || activePreviewEl;
-        const natW = preview?.naturalWidth || activeCanvas.width;
-        const natH = preview?.naturalHeight || activeCanvas.height;
-        if (!preview || !natW || !natH) return { x: 0, y: 0, valid: false };
+        // CRITICAL: Use stored normalized dimensions for coordinate mapping (bulletproof alignment)
+        // This ensures coordinates match the exact dimensions used for canvas initialization
+        const natW = state.normalizedWidth || preview?.naturalWidth || activeCanvas.width;
+        const natH = state.normalizedHeight || preview?.naturalHeight || activeCanvas.height;
+        if (!natW || !natH) return { x: 0, y: 0, valid: false };
 
         const getContainedImageBox = (imgEl) => {
             const rect = imgEl.getBoundingClientRect();
