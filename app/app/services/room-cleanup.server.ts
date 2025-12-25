@@ -252,8 +252,83 @@ async function createMaskedVisualization(
 }
 
 /**
+ * Analyze mask to determine which part of the image to remove
+ * Returns a description like "lower-left", "center", "upper-right", etc.
+ */
+async function analyzeMaskPosition(
+    maskBuffer: Buffer,
+    logContext: ReturnType<typeof createLogContext>
+): Promise<{ description: string; hasContent: boolean }> {
+    const maskMeta = await sharp(maskBuffer).metadata();
+    const width = maskMeta.width!;
+    const height = maskMeta.height!;
+    
+    // Get raw grayscale data
+    const rawData = await sharp(maskBuffer)
+        .grayscale()
+        .raw()
+        .toBuffer();
+    
+    // Find bounding box of white pixels
+    let minX = width, minY = height, maxX = 0, maxY = 0;
+    let whitePixelCount = 0;
+    
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const idx = y * width + x;
+            if (rawData[idx] > 128) {  // White pixel
+                whitePixelCount++;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+    
+    if (whitePixelCount === 0) {
+        return { description: "", hasContent: false };
+    }
+    
+    // Calculate center of mask
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    
+    // Determine position description
+    const xPos = centerX < width / 3 ? "left" : centerX > width * 2/3 ? "right" : "center";
+    const yPos = centerY < height / 3 ? "upper" : centerY > height * 2/3 ? "lower" : "middle";
+    
+    let description: string;
+    if (xPos === "center" && yPos === "middle") {
+        description = "in the center of the image";
+    } else if (xPos === "center") {
+        description = `in the ${yPos} part of the image`;
+    } else if (yPos === "middle") {
+        description = `on the ${xPos} side of the image`;
+    } else {
+        description = `in the ${yPos}-${xPos} area of the image`;
+    }
+    
+    // Calculate approximate size
+    const maskWidth = maxX - minX;
+    const maskHeight = maxY - minY;
+    const sizeRatio = (maskWidth * maskHeight) / (width * height);
+    
+    let sizeDesc = "small";
+    if (sizeRatio > 0.25) sizeDesc = "large";
+    else if (sizeRatio > 0.1) sizeDesc = "medium-sized";
+    
+    logger.info(logContext, `Mask analysis: ${description}, ${sizeDesc} object (${Math.round(sizeRatio*100)}% of image)`);
+    
+    return { 
+        description: `the ${sizeDesc} object ${description}`,
+        hasContent: true 
+    };
+}
+
+/**
  * Call Gemini API for object removal
- * Sends TWO images: room image and mask image, with clear labeling
+ * Uses SEMANTIC DESCRIPTION instead of mask - Gemini works best with natural language
  */
 async function callGeminiForCleanup(
     prompt: string,
@@ -266,23 +341,20 @@ async function callGeminiForCleanup(
     const startTime = Date.now();
     logger.info(logContext, `Calling Gemini model: ${model} (timeout: ${GEMINI_TIMEOUT_MS}ms)`);
 
-    // APPROACH: Send both room image and mask as separate images
-    // Label them clearly as "first image" (room) and "second image" (mask)
-    // This follows Google's recommended pattern for multi-image editing
+    // Analyze mask to get position description
+    const maskAnalysis = await analyzeMaskPosition(maskBuffer, logContext);
+    if (!maskAnalysis.hasContent) {
+        logger.warn(logContext, "Mask has no content - returning original image");
+        // This shouldn't happen but handle gracefully
+    }
+
+    // CRITICAL: Gemini works with NATURAL LANGUAGE, not masks
+    // Send only the room image with a text description of what to remove
     const parts: any[] = [
-        { text: "I have two images for you:" },
-        { text: "FIRST IMAGE - This is a photograph of a room:" },
         {
             inlineData: {
                 mimeType: 'image/png',
                 data: roomBuffer.toString('base64')
-            }
-        },
-        { text: "SECOND IMAGE - This is a mask where WHITE areas indicate objects to REMOVE:" },
-        {
-            inlineData: {
-                mimeType: 'image/png',
-                data: maskBuffer.toString('base64')
             }
         },
         { text: prompt }
@@ -445,24 +517,29 @@ export async function cleanupRoom(
             `Room: ${roomWidth}x${roomHeight}, closest Gemini ratio: ${closestRatio.label}`
         );
 
-        // Step 5: Build prompt (references both images clearly)
+        // Step 5: Analyze mask to get position description for semantic prompting
+        const maskAnalysis = await analyzeMaskPosition(maskBuffer, logContext);
+        const objectLocation = maskAnalysis.description || "the object that was marked";
+
+        // Step 6: Build prompt using NATURAL LANGUAGE (Gemini's strength)
+        // Gemini doesn't understand masks - it needs semantic descriptions
         const prompt = `OBJECT REMOVAL TASK
 
-Using the FIRST IMAGE (the room photograph) and the SECOND IMAGE (the mask):
+Look at this room image and REMOVE ${objectLocation}.
 
 YOUR TASK:
-1. Look at the SECOND IMAGE (mask) - the WHITE areas show what objects to REMOVE from the room
-2. In the FIRST IMAGE, identify and COMPLETELY REMOVE all objects that correspond to the WHITE areas in the mask
-3. Fill the removed areas with the surrounding background (wall, floor, or surface) so it looks natural
+1. Identify and COMPLETELY REMOVE ${objectLocation}
+2. Fill the removed area naturally with the surrounding background (wall, floor, or surface)
+3. Make the result look like a natural photograph with nothing missing
 
 CRITICAL RULES:
-- Output MUST be EXACTLY ${roomWidth}x${roomHeight} pixels
-- Keep the SAME camera angle, zoom, and framing as the first image
-- DO NOT crop, extend, or resize
+- Output MUST be EXACTLY ${roomWidth}x${roomHeight} pixels (same dimensions as input)
+- Keep the SAME camera angle, zoom, and framing
+- DO NOT crop, extend, or resize the image
 - DO NOT add any new objects, people, or furniture
-- The final image should look like the original room but with the masked objects completely gone
+- If there's any text labels like "REMOVE THIS", also remove those
 
-Output: Return ONLY the cleaned room image with objects removed.`;
+Return ONLY the cleaned room image.`;
 
         // Step 6: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
