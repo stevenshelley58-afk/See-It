@@ -95,17 +95,19 @@ export async function removeObject(
     // 2. API Endpoint
     const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${LOCATION}/publishers/google/models/${MODEL_ID}:predict`;
 
-    // 3. Payload
+    // 3. Payload - Imagen 3 requires referenceId for each reference image
     const payload = {
         instances: [
             {
                 prompt: "", // CRITICAL: Empty string triggers pure removal logic
                 referenceImages: [
                     {
+                        referenceId: 1, // Required unique ID for the source image
                         referenceType: "REFERENCE_TYPE_RAW",
                         referenceImage: { bytesBase64Encoded: imageBase64 }
                     },
                     {
+                        referenceId: 2, // Required unique ID for the mask
                         referenceType: "REFERENCE_TYPE_MASK",
                         referenceImage: { bytesBase64Encoded: maskBase64 },
                         maskImageConfig: {
