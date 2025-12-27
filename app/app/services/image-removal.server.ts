@@ -99,7 +99,8 @@ export async function removeObject(
     const payload = {
         instances: [
             {
-                prompt: "", // CRITICAL: Empty string triggers pure removal logic
+                // Prompt guides model to fill with plain background, not add new objects
+                prompt: "empty room background, plain wall and floor, no objects, no furniture, clean empty space",
                 referenceImages: [
                     {
                         referenceId: 1, // Required unique ID for the source image
