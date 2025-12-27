@@ -1,43 +1,25 @@
+/**
+ * Room Cleanup Endpoint - Vertex AI Imagen 3 Object Removal
+ * 
+ * POST /apps/see-it/room/cleanup
+ * 
+ * Removes objects from a room image using a user-provided mask.
+ * Uses Vertex AI Imagen 3 with EDIT_MODE_INPAINT_REMOVAL.
+ */
+
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { incrementQuota } from "../quota.server";
+import { incrementQuota, checkQuota } from "../quota.server";
 import { checkRateLimit } from "../rate-limit.server";
+import { removeObject } from "../services/image-removal.server";
 import { StorageService } from "../services/storage.server";
-import { cleanupRoom } from "../services/room-cleanup.server";
 import { logger, createLogContext } from "../utils/logger.server";
-import { validateSessionId, validateMaskDataUrl } from "../utils/validation.server";
 import { getRequestId } from "../utils/request-context.server";
-import { appendFile, mkdir } from "fs/promises";
-import { join, dirname } from "path";
+import sharp from "sharp";
 
-// Maximum inline mask size (10MB - protects payload + memory)
+// Maximum inline mask size (10MB)
 const MAX_INLINE_MASK_SIZE_BYTES = 10 * 1024 * 1024;
-
-// Debug logging helper
-const debugLog = async (data: any) => {
-    // Always log to console first (this will show in server logs)
-    console.error('[DEBUG]', JSON.stringify(data));
-    
-    // Also try to write to file - try multiple locations
-    const logPaths = [
-        join(process.cwd(), '..', '.cursor', 'debug.log'), // Workspace root
-        join(process.cwd(), '.cursor', 'debug.log'), // If cwd is workspace root
-        join(process.cwd(), 'debug.log'), // App directory as fallback
-    ];
-    
-    for (const logPath of logPaths) {
-        try {
-            const logDir = dirname(logPath);
-            await mkdir(logDir, { recursive: true }).catch(() => {});
-            await appendFile(logPath, JSON.stringify(data) + '\n', 'utf8');
-            break; // Success, stop trying other paths
-        } catch (err) {
-            // Try next path
-            continue;
-        }
-    }
-};
 
 function getCorsHeaders(shopDomain: string | null): Record<string, string> {
     const headers: Record<string, string> = {
@@ -47,133 +29,66 @@ function getCorsHeaders(shopDomain: string | null): Record<string, string> {
         "Pragma": "no-cache",
         "Expires": "0",
     };
-    
+
     if (shopDomain) {
         headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
     }
-    
+
     return headers;
 }
 
-/**
- * POST /apps/see-it/room/cleanup
- * 
- * Removes objects from a room image using a mask.
- * Returns a job_id for polling via GET /apps/see-it/render/:jobId
- */
 export const action = async ({ request }: ActionFunctionArgs) => {
-    // #region agent log
-    await debugLog({location:'app-proxy.room.cleanup.ts:37',message:'ROUTE HANDLER ENTRY',data:{method:request.method,url:request.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ALL'});
-    // #endregion
     const requestId = getRequestId(request);
     const logContext = createLogContext("cleanup", requestId, "start", {});
 
     const { session } = await authenticate.public.appProxy(request);
-    // #region agent log
-    await debugLog({location:'app-proxy.room.cleanup.ts:42',message:'After authentication',data:{hasSession:!!session,shop:session?.shop},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ALL'});
-    // #endregion
     const corsHeaders = getCorsHeaders(session?.shop ?? null);
 
     // Handle preflight
     if (request.method === "OPTIONS") {
-        // #region agent log
-        await debugLog({location:'app-proxy.room.cleanup.ts:45',message:'OPTIONS preflight',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ALL'});
-        // #endregion
         return new Response(null, { status: 204, headers: corsHeaders });
     }
 
     if (!session) {
         logger.warn(
             { ...logContext, stage: "auth" },
-            `App proxy auth failed: no session. URL: ${request.url}`
+            `App proxy auth failed: no session`
         );
         return json({ status: "forbidden" }, { status: 403, headers: corsHeaders });
     }
 
-    let body: any;
-    try {
-        body = await request.json();
-    } catch (error) {
-        return json(
-            { error: "invalid_json", message: "Invalid JSON in request body" },
-            { status: 400, headers: corsHeaders }
-        );
-    }
-
-    const { room_session_id, mask_data_url, mask_image_key, quality } = body;
+    const body = await request.json();
+    const { room_session_id, mask_base64 } = body;
 
     // Validate room_session_id
-    const sessionResult = validateSessionId(room_session_id);
-    if (!sessionResult.valid) {
+    if (!room_session_id) {
         return json(
-            { error: sessionResult.error },
-            { status: 400, headers: corsHeaders }
-        );
-    }
-    const sanitizedSessionId = sessionResult.sanitized!;
-
-    // Validate mask source (must provide one)
-    if (!mask_data_url && !mask_image_key) {
-        return json(
-            { error: "missing_mask", message: "Either mask_data_url or mask_image_key is required" },
+            { error: "missing_session", message: "room_session_id is required" },
             { status: 400, headers: corsHeaders }
         );
     }
 
-    // Validate inline mask if provided
-    let maskBuffer: Buffer | null = null;
-    if (mask_data_url) {
-        // #region agent log
-        await debugLog({location:'app-proxy.room.cleanup.ts:89',message:'mask_data_url received',data:{hasMaskDataUrl:!!mask_data_url,maskDataUrlLength:mask_data_url?.length,maskDataUrlPrefix:mask_data_url?.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
-        // #endregion
-        const maskValidation = validateMaskDataUrl(mask_data_url, MAX_INLINE_MASK_SIZE_BYTES);
-        // #region agent log
-        await debugLog({location:'app-proxy.room.cleanup.ts:91',message:'mask validation result',data:{valid:maskValidation.valid,error:maskValidation.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
-        // #endregion
-        if (!maskValidation.valid) {
-            return json(
-                { 
-                    error: "invalid_mask", 
-                    message: maskValidation.error,
-                    suggestion: "If mask is too large, use /apps/see-it/room/mask-start to upload first"
-                },
-                { status: 400, headers: corsHeaders }
-            );
-        }
-
-        // Decode base64 mask
-        try {
-            const maskBase64 = mask_data_url.split(',')[1];
-            // #region agent log
-            await debugLog({location:'app-proxy.room.cleanup.ts:104',message:'mask base64 extraction',data:{hasBase64:!!maskBase64,base64Length:maskBase64?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
-            // #endregion
-            if (!maskBase64) {
-                throw new Error("Invalid data URL format");
-            }
-            maskBuffer = Buffer.from(maskBase64, 'base64');
-            // #region agent log
-            await debugLog({location:'app-proxy.room.cleanup.ts:108',message:'mask buffer created',data:{bufferLength:maskBuffer.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
-            // #endregion
-        } catch (error) {
-            // #region agent log
-            await debugLog({location:'app-proxy.room.cleanup.ts:110',message:'mask decode error',data:{error:error instanceof Error?error.message:String(error)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
-            // #endregion
-            logger.error(
-                { ...logContext, stage: "mask-decode" },
-                "Failed to decode mask data URL",
-                error
-            );
-            return json(
-                { error: "invalid_mask", message: "Failed to decode mask data URL" },
-                { status: 400, headers: corsHeaders }
-            );
-        }
+    // Validate mask
+    if (!mask_base64) {
+        return json(
+            { error: "missing_mask", message: "mask_base64 is required" },
+            { status: 400, headers: corsHeaders }
+        );
     }
 
-    // Rate limiting check
-    if (!checkRateLimit(sanitizedSessionId)) {
+    // Check mask size
+    const maskSize = Buffer.byteLength(mask_base64, 'utf8');
+    if (maskSize > MAX_INLINE_MASK_SIZE_BYTES) {
         return json(
-            { error: "rate_limit_exceeded", message: "Too many requests. Please wait a moment." },
+            { error: "mask_too_large", message: `Mask exceeds ${MAX_INLINE_MASK_SIZE_BYTES / 1024 / 1024}MB limit` },
+            { status: 400, headers: corsHeaders }
+        );
+    }
+
+    // Rate limiting
+    if (!checkRateLimit(room_session_id)) {
+        return json(
+            { error: "rate_limit_exceeded", message: "Too many requests. Please wait." },
             { status: 429, headers: corsHeaders }
         );
     }
@@ -182,179 +97,138 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!shop) {
         logger.error(
             { ...logContext, stage: "shop-lookup" },
-            `Shop not found in database: ${session.shop}`
+            `Shop not found: ${session.shop}`
         );
-        return json({ error: "Shop not found" }, { status: 404, headers: corsHeaders });
+        return json({ error: "shop_not_found" }, { status: 404, headers: corsHeaders });
     }
 
-    // Update log context with shop info
-    const shopLogContext = { ...logContext, shopId: shop.id };
+    // Quota check
+    try {
+        await checkQuota(shop.id, "cleanup", 1);
+    } catch (error) {
+        if (error instanceof Response) {
+            const headers = { ...corsHeaders, "Content-Type": "application/json" };
+            return new Response(error.body, { status: error.status, headers });
+        }
+        throw error;
+    }
 
-    // Note: Cleanup quota is logged but not blocked (similar to prep)
-    // We increment quota after successful cleanup, but don't check/block upfront
-
-    // Find room session
+    // Get room session
     const roomSession = await prisma.roomSession.findUnique({
-        where: { id: sanitizedSessionId },
-        include: { shop: true }
+        where: { id: room_session_id }
     });
 
-    if (!roomSession || roomSession.shop.shopDomain !== session.shop) {
-        return json({ error: "Room session not found" }, { status: 404, headers: corsHeaders });
+    if (!roomSession) {
+        return json(
+            { error: "room_not_found", message: "Room session not found" },
+            { status: 404, headers: corsHeaders }
+        );
     }
 
-    // Get room image URL (prefer key-based signed URL)
+    // Get original room image
     let roomImageUrl: string;
     if (roomSession.originalRoomImageKey) {
-        try {
-            roomImageUrl = await StorageService.getSignedReadUrl(roomSession.originalRoomImageKey, 60 * 60 * 1000);
-        } catch (error) {
-            logger.warn(
-                { ...shopLogContext, stage: "room-url-fallback" },
-                "Failed to generate signed URL from key, falling back to stored URL",
-                error
-            );
-            roomImageUrl = roomSession.originalRoomImageUrl || "";
-        }
+        roomImageUrl = await StorageService.getSignedReadUrl(
+            roomSession.originalRoomImageKey,
+            60 * 60 * 1000
+        );
     } else if (roomSession.originalRoomImageUrl) {
         roomImageUrl = roomSession.originalRoomImageUrl;
     } else {
         return json(
-            { error: "no_room_image", message: "Room image not found" },
+            { error: "no_room_image", message: "No room image available" },
             { status: 400, headers: corsHeaders }
         );
     }
-
-    // If mask is provided via key, fetch it from GCS
-    if (mask_image_key && !maskBuffer) {
-        try {
-            const maskUrl = await StorageService.getSignedReadUrl(mask_image_key, 60 * 60 * 1000);
-            const maskResponse = await fetch(maskUrl);
-            if (!maskResponse.ok) {
-                throw new Error(`Failed to fetch mask: ${maskResponse.status}`);
-            }
-            const maskArrayBuffer = await maskResponse.arrayBuffer();
-            maskBuffer = Buffer.from(maskArrayBuffer);
-        } catch (error) {
-            logger.error(
-                { ...shopLogContext, stage: "mask-fetch" },
-                "Failed to fetch mask from GCS",
-                error
-            );
-            return json(
-                { error: "mask_fetch_failed", message: "Failed to load mask image" },
-                { status: 400, headers: corsHeaders }
-            );
-        }
-    }
-
-    if (!maskBuffer) {
-        return json(
-            { error: "no_mask", message: "Mask buffer is required" },
-            { status: 400, headers: corsHeaders }
-        );
-    }
-
-    // Create job record (reuse render_jobs table with job_type in configJson)
-    const job = await prisma.renderJob.create({
-        data: {
-            shop: { connect: { id: shop.id } },
-            productId: "cleanup", // Dummy product ID for cleanup jobs
-            roomSession: { connect: { id: sanitizedSessionId } },
-            placementX: 0, // Dummy placement
-            placementY: 0,
-            placementScale: 1.0,
-            configJson: JSON.stringify({
-                job_type: "room_cleanup",
-                room_session_id: sanitizedSessionId,
-                mask_source: mask_data_url ? "inline" : "gcs",
-                mask_image_key: mask_image_key || null,
-                quality: quality || "fast"
-            }),
-            status: "queued",
-            createdAt: new Date(),
-        }
-    });
 
     logger.info(
-        { ...shopLogContext, stage: "cleanup-start" },
-        `Processing cleanup: roomImageUrl=${roomImageUrl.substring(0, 80)}, jobId=${job.id}, maskSize=${maskBuffer.length}`
+        { ...logContext, stage: "processing", roomSessionId: room_session_id },
+        `Starting object removal for room session`
     );
 
     try {
-        // #region agent log
-        await debugLog({location:'app-proxy.room.cleanup.ts:248',message:'starting cleanupRoom',data:{roomImageUrl:roomImageUrl.substring(0,80),maskBufferLength:maskBuffer.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
-        // #endregion
-        // Process cleanup
-        const result = await cleanupRoom(roomImageUrl, maskBuffer, requestId);
-        // #region agent log
-        await debugLog({location:'app-proxy.room.cleanup.ts:250',message:'cleanupRoom completed',data:{imageUrl:result.imageUrl.substring(0,80),imageKey:result.imageKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'});
-        // #endregion
+        // Download room image and convert to base64
+        const roomResponse = await fetch(roomImageUrl);
+        if (!roomResponse.ok) {
+            throw new Error(`Failed to fetch room image: ${roomResponse.status}`);
+        }
+        const roomBuffer = Buffer.from(await roomResponse.arrayBuffer());
 
-        // Store cleaned image key on room session
+        // Get room image dimensions
+        const roomMetadata = await sharp(roomBuffer).metadata();
+        const roomWidth = roomMetadata.width!;
+        const roomHeight = roomMetadata.height!;
+
+        // Process mask - ensure it matches room dimensions
+        const maskBuffer = Buffer.from(mask_base64, 'base64');
+        const maskMetadata = await sharp(maskBuffer).metadata();
+
+        let processedMaskBuffer: Buffer;
+        if (maskMetadata.width !== roomWidth || maskMetadata.height !== roomHeight) {
+            logger.info(
+                { ...logContext, stage: "resize-mask" },
+                `Resizing mask from ${maskMetadata.width}x${maskMetadata.height} to ${roomWidth}x${roomHeight}`
+            );
+            processedMaskBuffer = await sharp(maskBuffer)
+                .resize(roomWidth, roomHeight, { fit: 'fill' })
+                .png()
+                .toBuffer();
+        } else {
+            processedMaskBuffer = maskBuffer;
+        }
+
+        // Convert to base64 (without data URI prefix)
+        const roomBase64 = roomBuffer.toString('base64');
+        const maskBase64Clean = processedMaskBuffer.toString('base64');
+
+        // Call Vertex AI Imagen 3
+        const result = await removeObject(roomBase64, maskBase64Clean, requestId);
+
+        // Upload cleaned image to GCS
+        const cleanedImageBuffer = Buffer.from(result.imageBase64, 'base64');
+        const cleanedImageKey = `rooms/${shop.id}/${room_session_id}/cleaned_${Date.now()}.png`;
+
+        const cleanedImageUrl = await StorageService.uploadBuffer(
+            cleanedImageBuffer,
+            cleanedImageKey,
+            'image/png'
+        );
+
+        // Update room session with cleaned image
         await prisma.roomSession.update({
-            where: { id: sanitizedSessionId },
+            where: { id: room_session_id },
             data: {
-                cleanedRoomImageKey: result.imageKey,
-                cleanedRoomImageUrl: result.imageUrl, // Legacy compatibility
-                lastUsedAt: new Date()
+                cleanedRoomImageUrl: cleanedImageUrl,
+                cleanedRoomImageKey: cleanedImageKey,
             }
         });
 
-        // Update job status
-        await prisma.renderJob.update({
-            where: { id: job.id },
-            data: {
-                status: "completed",
-                imageUrl: result.imageUrl,
-                imageKey: result.imageKey,
-                completedAt: new Date()
-            }
-        });
-
-        // Increment quota only after successful cleanup
+        // Increment quota
         await incrementQuota(shop.id, "cleanup", 1);
 
         logger.info(
-            { ...shopLogContext, stage: "complete" },
-            `Cleanup completed successfully: jobId=${job.id}, imageKey=${result.imageKey}`
+            { ...logContext, stage: "complete" },
+            `Object removal completed successfully`
         );
 
-        // Return job_id with status so client can skip polling if already complete
         return json({
-            job_id: job.id,
             status: "completed",
-            cleaned_room_image_url: result.imageUrl,
-            cleanedRoomImageUrl: result.imageUrl
+            cleaned_image_url: cleanedImageUrl,
+            rai_reasoning: result.raiReasoning
         }, { headers: corsHeaders });
+
     } catch (error) {
-        // #region agent log
-        await debugLog({location:'app-proxy.room.cleanup.ts:327',message:'cleanup error caught',data:{error:error instanceof Error?error.message:String(error),errorStack:error instanceof Error?error.stack:undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
-        // #endregion
         logger.error(
-            { ...shopLogContext, stage: "cleanup-error" },
-            "Cleanup failed",
+            { ...logContext, stage: "error" },
+            `Object removal failed`,
             error
         );
 
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        const errorCode = errorMessage.includes("dimension") ? "dimension_mismatch" : "cleanup_failed";
 
-        await prisma.renderJob.update({
-            where: { id: job.id },
-            data: {
-                status: "failed",
-                errorCode,
-                errorMessage,
-                completedAt: new Date()
-            }
-        });
-        
-        // Return error immediately so client doesn't need to poll
-        return json({ 
-            job_id: job.id, 
+        return json({
             status: "failed",
-            error: errorCode,
+            error: "cleanup_failed",
             message: errorMessage
         }, { status: 500, headers: corsHeaders });
     }
