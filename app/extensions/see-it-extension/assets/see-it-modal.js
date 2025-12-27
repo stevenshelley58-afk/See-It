@@ -336,41 +336,68 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const getCanvasPos = (e) => {
-        if (!maskCanvas) return { x: 0, y: 0, valid: false };
+        if (!maskCanvas || !roomPreview) return { x: 0, y: 0, valid: false };
 
         const touch = e.touches?.[0] || e.changedTouches?.[0] || null;
         const clientX = touch ? touch.clientX : e.clientX;
         const clientY = touch ? touch.clientY : e.clientY;
 
-        const rect = maskCanvas.getBoundingClientRect();
-        if (!rect.width || !rect.height) {
+        // Get the container rect (where canvas is positioned)
+        const containerRect = maskCanvas.getBoundingClientRect();
+        if (!containerRect.width || !containerRect.height) {
             console.warn('[See It] getCanvasPos: canvas has no dimensions');
             return { x: 0, y: 0, valid: false };
         }
 
+        // Get the actual image natural dimensions
+        const imgNatW = roomPreview.naturalWidth || state.normalizedWidth;
+        const imgNatH = roomPreview.naturalHeight || state.normalizedHeight;
+        if (!imgNatW || !imgNatH) {
+            console.warn('[See It] getCanvasPos: image has no natural dimensions');
+            return { x: 0, y: 0, valid: false };
+        }
+
+        // Calculate where the image actually renders within the container (object-fit: contain)
+        const containerAspect = containerRect.width / containerRect.height;
+        const imageAspect = imgNatW / imgNatH;
+
+        let imgRenderW, imgRenderH, imgOffsetX, imgOffsetY;
+
+        if (imageAspect > containerAspect) {
+            // Image is wider than container - letterboxed top/bottom
+            imgRenderW = containerRect.width;
+            imgRenderH = containerRect.width / imageAspect;
+            imgOffsetX = 0;
+            imgOffsetY = (containerRect.height - imgRenderH) / 2;
+        } else {
+            // Image is taller than container - pillarboxed left/right
+            imgRenderH = containerRect.height;
+            imgRenderW = containerRect.height * imageAspect;
+            imgOffsetX = (containerRect.width - imgRenderW) / 2;
+            imgOffsetY = 0;
+        }
+
+        // Position relative to container
+        const xInContainer = clientX - containerRect.left;
+        const yInContainer = clientY - containerRect.top;
+
+        // Check if click is within the actual image render area
+        if (xInContainer < imgOffsetX || xInContainer > imgOffsetX + imgRenderW ||
+            yInContainer < imgOffsetY || yInContainer > imgOffsetY + imgRenderH) {
+            return { x: 0, y: 0, valid: false }; // Click is in letterbox/pillarbox area
+        }
+
+        // Calculate position within the actual image content
+        const xInImage = xInContainer - imgOffsetX;
+        const yInImage = yInContainer - imgOffsetY;
+
+        // Scale to canvas internal coordinates (which match image natural dimensions)
         const canvasW = maskCanvas.width;
         const canvasH = maskCanvas.height;
-        if (!canvasW || !canvasH) {
-            console.warn('[See It] getCanvasPos: canvas internal dimensions are 0');
-            return { x: 0, y: 0, valid: false };
-        }
-
-        // Position relative to canvas element
-        const xIn = clientX - rect.left;
-        const yIn = clientY - rect.top;
-
-        // Check bounds
-        if (xIn < 0 || yIn < 0 || xIn > rect.width || yIn > rect.height) {
-            return { x: 0, y: 0, valid: false };
-        }
-
-        // Scale from CSS size to internal canvas coordinates
-        const scaleX = canvasW / rect.width;
-        const scaleY = canvasH / rect.height;
 
         return {
-            x: xIn * scaleX,
-            y: yIn * scaleY,
+            x: (xInImage / imgRenderW) * canvasW,
+            y: (yInImage / imgRenderH) * canvasH,
             valid: true
         };
     };
