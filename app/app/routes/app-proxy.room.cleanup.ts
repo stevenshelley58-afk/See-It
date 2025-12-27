@@ -58,7 +58,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const body = await request.json();
-    const { room_session_id, mask_base64 } = body;
+    const { room_session_id, mask_data_url, mask_base64: rawMaskBase64 } = body;
 
     // Validate room_session_id
     if (!room_session_id) {
@@ -68,10 +68,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
     }
 
-    // Validate mask
-    if (!mask_base64) {
+    // Extract base64 from data URL or use raw base64
+    // Frontend sends mask_data_url as "data:image/png;base64,..."
+    let mask_base64: string;
+    if (mask_data_url) {
+        const match = mask_data_url.match(/^data:image\/\w+;base64,(.+)$/);
+        if (match) {
+            mask_base64 = match[1];
+        } else {
+            // Assume it's already raw base64
+            mask_base64 = mask_data_url;
+        }
+    } else if (rawMaskBase64) {
+        mask_base64 = rawMaskBase64;
+    } else {
         return json(
-            { error: "missing_mask", message: "mask_base64 is required" },
+            { error: "missing_mask", message: "mask_data_url or mask_base64 is required" },
             { status: 400, headers: corsHeaders }
         );
     }
@@ -214,6 +226,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({
             status: "completed",
             cleaned_image_url: cleanedImageUrl,
+            cleanedRoomImageUrl: cleanedImageUrl, // For frontend compatibility
+            cleaned_room_image_url: cleanedImageUrl, // Alternative format
             rai_reasoning: result.raiReasoning
         }, { headers: corsHeaders });
 
