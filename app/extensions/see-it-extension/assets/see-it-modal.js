@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', function () {
     const VERSION = '1.0.27';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
-    
+
     // Helper: check if element is visible (has non-zero dimensions)
     const isVisible = (el) => el && el.offsetWidth > 0 && el.offsetHeight > 0;
 
@@ -9,23 +9,23 @@ document.addEventListener('DOMContentLoaded', function () {
     // ASPECT RATIO NORMALIZATION (Gemini-compatible)
     // ============================================================================
     const GEMINI_SUPPORTED_RATIOS = [
-        { label: '1:1',   value: 1.0 },
-        { label: '4:5',   value: 0.8 },
-        { label: '5:4',   value: 1.25 },
-        { label: '3:4',   value: 0.75 },
-        { label: '4:3',   value: 4/3 },
-        { label: '2:3',   value: 2/3 },
-        { label: '3:2',   value: 1.5 },
-        { label: '9:16',  value: 9/16 },
-        { label: '16:9', value: 16/9 },
-        { label: '21:9', value: 21/9 },
+        { label: '1:1', value: 1.0 },
+        { label: '4:5', value: 0.8 },
+        { label: '5:4', value: 1.25 },
+        { label: '3:4', value: 0.75 },
+        { label: '4:3', value: 4 / 3 },
+        { label: '2:3', value: 2 / 3 },
+        { label: '3:2', value: 1.5 },
+        { label: '9:16', value: 9 / 16 },
+        { label: '16:9', value: 16 / 9 },
+        { label: '21:9', value: 21 / 9 },
     ];
 
     function findClosestGeminiRatio(width, height) {
         const inputRatio = width / height;
         let closest = GEMINI_SUPPORTED_RATIOS[0];
         let minDiff = Math.abs(inputRatio - closest.value);
-        
+
         for (const r of GEMINI_SUPPORTED_RATIOS) {
             const diff = Math.abs(inputRatio - r.value);
             if (diff < minDiff) {
@@ -42,7 +42,7 @@ document.addEventListener('DOMContentLoaded', function () {
             img.onload = () => {
                 const { naturalWidth: w, naturalHeight: h } = img;
                 const closest = findClosestGeminiRatio(w, h);
-                
+
                 // Compute crop dimensions (center crop)
                 let cropW, cropH;
                 if (w / h > closest.value) {
@@ -52,10 +52,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     cropW = w;
                     cropH = Math.round(w / closest.value);
                 }
-                
+
                 const offsetX = Math.round((w - cropW) / 2);
                 const offsetY = Math.round((h - cropH) / 2);
-                
+
                 // Scale down if needed
                 let outW = cropW, outH = cropH;
                 if (Math.max(outW, outH) > maxDimension) {
@@ -63,13 +63,13 @@ document.addEventListener('DOMContentLoaded', function () {
                     outW = Math.round(outW * scale);
                     outH = Math.round(outH * scale);
                 }
-                
+
                 const canvas = document.createElement('canvas');
                 canvas.width = outW;
                 canvas.height = outH;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, offsetX, offsetY, cropW, cropH, 0, 0, outW, outH);
-                
+
                 canvas.toBlob(blob => {
                     if (!blob) return reject(new Error('Canvas toBlob failed'));
                     console.log('[See It] Room normalized:', {
@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Modal placement & scroll lock ---
     let savedScrollY = 0;
-    
+
     const ensureModalPortaled = () => {
         if (modal.parentElement !== document.body) {
             document.body.appendChild(modal);
@@ -326,7 +326,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Clear canvas
         ctx.clearRect(0, 0, natW, natH);
-        
+
         console.log('[See It] Canvas initialized:', {
             width: maskCanvas.width,
             height: maskCanvas.height,
@@ -358,7 +358,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Position relative to canvas element
         const xIn = clientX - rect.left;
         const yIn = clientY - rect.top;
-        
+
         // Check bounds
         if (xIn < 0 || yIn < 0 || xIn > rect.width || yIn > rect.height) {
             return { x: 0, y: 0, valid: false };
@@ -377,7 +377,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const startDraw = (e) => {
         console.log('[See It] startDraw', { ctxExists: !!ctx, canvasExists: !!maskCanvas });
-        
+
         if (!ctx) {
             console.warn('[See It] startDraw: ctx not initialized, attempting init...');
             initCanvas();
@@ -387,22 +387,22 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
         }
-        
+
         e.preventDefault();
         e.stopPropagation();
-        
+
         isDrawing = true;
         currentStroke = [];
-        
+
         const pos = getCanvasPos(e);
         console.log('[See It] startDraw pos:', pos);
-        
+
         if (!pos.valid) {
             console.warn('[See It] startDraw: invalid position');
             isDrawing = false;
             return;
         }
-        
+
         currentStroke.push(pos);
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
@@ -414,10 +414,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!isDrawing || !ctx) return;
         e.preventDefault();
         e.stopPropagation();
-        
+
         const pos = getCanvasPos(e);
         if (!pos.valid) return;
-        
+
         currentStroke.push(pos);
         ctx.lineTo(pos.x, pos.y);
         ctx.stroke();
@@ -428,7 +428,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const stopDraw = (e) => {
         if (!isDrawing) return;
         isDrawing = false;
-        
+
         if (currentStroke.length > 0) {
             strokes.push([...currentStroke]);
             console.log('[See It] Stroke recorded:', {
@@ -443,9 +443,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const redrawStrokes = () => {
         if (!ctx || !maskCanvas) return;
-        
+
         ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-        
+
         strokes.forEach(stroke => {
             if (stroke.length === 0) return;
             ctx.beginPath();
@@ -458,23 +458,34 @@ document.addEventListener('DOMContentLoaded', function () {
     const updatePaintButtons = () => {
         const hasStrokes = strokes.length > 0;
         const canErase = hasStrokes && !state.isCleaningUp && state.uploadComplete;
-        
+
         console.log('[See It] updatePaintButtons:', {
             hasStrokes,
             isCleaningUp: state.isCleaningUp,
             uploadComplete: state.uploadComplete,
-            canErase
+            canErase,
+            sessionId: state.sessionId
         });
 
         if (btnUndo) {
             btnUndo.disabled = !hasStrokes;
             btnUndo.style.opacity = hasStrokes ? '1' : '0.5';
         }
-        
+
         if (btnRemove) {
+            const wasDisabled = btnRemove.disabled;
             btnRemove.disabled = !canErase;
             btnRemove.style.opacity = canErase ? '1' : '0.5';
-            
+
+            // Log when button state changes
+            if (wasDisabled !== btnRemove.disabled) {
+                console.log('[See It] Erase button state changed:', {
+                    wasDisabled,
+                    nowDisabled: btnRemove.disabled,
+                    reason: !hasStrokes ? 'no strokes' : !state.uploadComplete ? 'upload not complete' : state.isCleaningUp ? 'cleaning in progress' : 'unknown'
+                });
+            }
+
             // Update button text to show status
             if (!state.uploadComplete && !state.isCleaningUp) {
                 btnRemove.textContent = 'Uploading...';
@@ -485,8 +496,10 @@ document.addEventListener('DOMContentLoaded', function () {
             } else {
                 btnRemove.textContent = 'Erase';
             }
+
+            console.log('[See It] Erase button now:', btnRemove.textContent, 'disabled:', btnRemove.disabled);
         }
-        
+
         if (btnConfirmRoom) {
             btnConfirmRoom.textContent = hasErased ? 'Continue' : 'Skip';
         }
@@ -498,21 +511,21 @@ document.addEventListener('DOMContentLoaded', function () {
             console.log('[See It] Canvas listeners already attached, skipping');
             return;
         }
-        
+
         if (!maskCanvas) {
             console.error('[See It] setupCanvasListenersOnce: maskCanvas not found!');
             return;
         }
-        
+
         console.log('[See It] Attaching canvas event listeners');
-        
+
         maskCanvas.style.touchAction = 'none';
         maskCanvas.addEventListener('pointerdown', startDraw);
         maskCanvas.addEventListener('pointermove', draw);
         maskCanvas.addEventListener('pointerup', stopDraw);
         maskCanvas.addEventListener('pointerleave', stopDraw);
         maskCanvas.addEventListener('pointercancel', stopDraw);
-        
+
         canvasListenersAttached = true;
     };
 
@@ -529,21 +542,37 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     const generateMask = () => {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:531', message: 'generateMask entry', data: { maskCanvasExists: !!maskCanvas, strokesCount: strokes.length, normalizedWidth: state.normalizedWidth, normalizedHeight: state.normalizedHeight }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
+        // #endregion
         if (!maskCanvas) {
             console.error('[See It] generateMask: no canvas');
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:534', message: 'generateMask failed: no canvas', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
+            // #endregion
             return null;
         }
 
         const w = maskCanvas.width;
         const h = maskCanvas.height;
 
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:538', message: 'generateMask canvas dimensions', data: { width: w, height: h, normalizedWidth: state.normalizedWidth, normalizedHeight: state.normalizedHeight }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
+        // #endregion
+
         if (w === 0 || h === 0) {
             console.error('[See It] generateMask: canvas has zero dimensions');
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:541', message: 'generateMask failed: zero dimensions', data: { width: w, height: h }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
+            // #endregion
             return null;
         }
 
         if (strokes.length === 0) {
             console.error('[See It] generateMask: no strokes');
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:546', message: 'generateMask failed: no strokes', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
+            // #endregion
             return null;
         }
 
@@ -572,11 +601,22 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         const dataUrl = out.toDataURL('image/png');
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:574', message: 'generateMask success', data: { dimensions: `${w}x${h}`, strokes: strokes.length, dataUrlLength: dataUrl.length, dataUrlPrefix: dataUrl.substring(0, 50), normalizedWidth: state.normalizedWidth, normalizedHeight: state.normalizedHeight, roomImageUrl: state.originalRoomImageUrl?.substring(0, 80) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
+        // #endregion
         console.log('[See It] Mask generated:', {
             dimensions: `${w}x${h}`,
+            normalizedDimensions: `${state.normalizedWidth}x${state.normalizedHeight}`,
             strokes: strokes.length,
-            dataUrlLength: dataUrl.length
+            dataUrlLength: dataUrl.length,
+            match: w === state.normalizedWidth && h === state.normalizedHeight
         });
+        if (w !== state.normalizedWidth || h !== state.normalizedHeight) {
+            console.error('[See It] DIMENSION MISMATCH!', {
+                mask: `${w}x${h}`,
+                normalized: `${state.normalizedWidth}x${state.normalizedHeight}`
+            });
+        }
         return dataUrl;
     };
 
@@ -584,7 +624,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const initPosition = () => {
         const url = getActiveRoomUrl();
         if (roomImage) roomImage.src = url;
-        
+
         state.x = 0;
         state.y = 0;
         state.scale = 1.0;
@@ -618,23 +658,39 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const pollJobStatus = async (jobId, maxAttempts = 60) => {
+        if (!jobId || jobId === null || jobId === undefined) {
+            throw new Error('pollJobStatus: jobId is null or undefined');
+        }
+        
+        // Ensure jobId is a string
+        const jobIdStr = String(jobId);
+        if (!jobIdStr || jobIdStr === 'null' || jobIdStr === 'undefined') {
+            throw new Error(`pollJobStatus: Invalid jobId: ${jobId}`);
+        }
+        
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            const res = await fetch(`/apps/see-it/render/${jobId}`);
+            const res = await fetch(`/apps/see-it/render/${jobIdStr}`);
             if (!res.ok) throw new Error(`Failed to poll: ${res.status}`);
             const data = await res.json();
             const status = data.status || data.job_status;
-            
+
             if (status === 'completed') return data;
-            if (status === 'failed') throw new Error(data.error_message || 'Failed');
-            
+            if (status === 'failed') {
+                const errorMsg = data.error_message || data.message || data.error || 'Job failed';
+                throw new Error(errorMsg);
+            }
+
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        throw new Error('Timeout');
+        throw new Error('Timeout waiting for job to complete');
     };
 
     const cleanupWithMask = async (maskDataUrl) => {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:635', message: 'cleanupWithMask entry', data: { sessionId: state.sessionId, maskDataUrlLength: maskDataUrl?.length, maskDataUrlPrefix: maskDataUrl?.substring(0, 50) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
+        // #endregion
         console.log('[See It] Cleanup request:', { sessionId: state.sessionId });
-        
+
         const res = await fetch('/apps/see-it/room/cleanup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -643,28 +699,56 @@ document.addEventListener('DOMContentLoaded', function () {
                 mask_data_url: maskDataUrl
             })
         });
-        
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:648', message: 'cleanupWithMask response received', data: { status: res.status, ok: res.ok }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
+        // #endregion
         console.log('[See It] Cleanup response:', res.status);
-        
+
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:650', message: 'cleanupWithMask error response', data: { status: res.status, error: err.error, message: err.message }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
+            // #endregion
             throw new Error(err.message || err.error || 'Cleanup failed');
         }
-        
+
         const data = await res.json();
-        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:654', message: 'cleanupWithMask response data', data: { status: data.status, jobId: data.job_id || data.jobId, hasCleanedUrl: !!(data.cleaned_room_image_url || data.cleanedRoomImageUrl), error: data.error, message: data.message }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
+        // #endregion
+
+        // Check for failed status first (backend now returns errors immediately)
+        if (data.status === 'failed') {
+            const errorMsg = data.message || data.error || 'Cleanup failed';
+            console.error('[See It] Cleanup failed:', errorMsg);
+            throw new Error(errorMsg);
+        }
+
         if (data.status === 'completed') {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:656', message: 'cleanupWithMask completed immediately', data: { cleanedUrl: data.cleaned_room_image_url || data.cleanedRoomImageUrl }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
+            // #endregion
             return {
                 cleanedRoomImageUrl: data.cleaned_room_image_url || data.cleanedRoomImageUrl
             };
         }
-        
+
         const jobId = data.job_id || data.jobId;
-        if (!jobId) throw new Error('No job_id');
-        
+        if (!jobId) {
+            console.error('[See It] No job_id in response:', data);
+            throw new Error('No job_id in response. Response: ' + JSON.stringify(data));
+        }
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:665', message: 'cleanupWithMask polling job', data: { jobId }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
+        // #endregion
         console.log('[See It] Polling cleanup job:', jobId);
         const result = await pollJobStatus(jobId);
-        
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:667', message: 'cleanupWithMask poll complete', data: { imageUrl: result.image_url || result.imageUrl }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
+        // #endregion
+
         return {
             cleanedRoomImageUrl: result.image_url || result.imageUrl
         };
@@ -678,7 +762,7 @@ document.addEventListener('DOMContentLoaded', function () {
         modal.classList.remove('hidden');
         if (triggerWidget) triggerWidget.style.display = 'none';
         resetError();
-        
+
         state.productId = trigger.dataset.productId || state.productId;
         state.productTitle = trigger.dataset.productTitle || state.productTitle;
         state.productPrice = trigger.dataset.productPrice || state.productPrice;
@@ -762,20 +846,20 @@ document.addEventListener('DOMContentLoaded', function () {
             const session = await startSession();
             state.sessionId = session.sessionId || session.room_session_id;
             console.log('[See It] Session:', state.sessionId);
-            
+
             const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
             await uploadImage(normalizedFile, session.uploadUrl || session.upload_url);
             console.log('[See It] Upload complete, confirming...');
-            
+
             const confirm = await confirmRoom(state.sessionId);
             state.originalRoomImageUrl = confirm.roomImageUrl || confirm.room_image_url;
             state.uploadComplete = true;
-            
+
             console.log('[See It] Upload confirmed!', {
                 sessionId: state.sessionId,
                 uploadComplete: state.uploadComplete
             });
-            
+
         } catch (err) {
             console.error('[See It] Upload error:', err);
             showError('Upload failed: ' + err.message);
@@ -820,7 +904,7 @@ document.addEventListener('DOMContentLoaded', function () {
             strokeCount: strokes.length,
             ctxExists: !!ctx
         });
-        
+
         // Validation
         if (state.isCleaningUp) {
             console.log('[See It] Blocked: already cleaning');
@@ -846,25 +930,55 @@ document.addEventListener('DOMContentLoaded', function () {
         const strokesBackup = JSON.parse(JSON.stringify(strokes));
 
         try {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:849', message: 'handleRemove before generateMask', data: { sessionId: state.sessionId, uploadComplete: state.uploadComplete, strokeCount: strokes.length, normalizedWidth: state.normalizedWidth, normalizedHeight: state.normalizedHeight }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
+            // #endregion
             const mask = generateMask();
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:850', message: 'handleRemove after generateMask', data: { maskGenerated: !!mask, maskLength: mask?.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
+            // #endregion
             if (!mask) {
                 throw new Error('Failed to generate mask');
             }
 
-            console.log('[See It] Sending cleanup request...');
+            // Validate dimensions before sending
+            if (!state.normalizedWidth || !state.normalizedHeight) {
+                const error = 'Normalized dimensions not set. Please re-upload the image.';
+                console.error('[See It]', error);
+                alert('[See It Error] ' + error);
+                throw new Error(error);
+            }
+            
+            const maskW = maskCanvas.width;
+            const maskH = maskCanvas.height;
+            if (maskW !== state.normalizedWidth || maskH !== state.normalizedHeight) {
+                const error = `Dimension mismatch! Mask: ${maskW}x${maskH}, Expected: ${state.normalizedWidth}x${state.normalizedHeight}. Please re-upload and try again.`;
+                console.error('[See It]', error);
+                alert('[See It Error] ' + error);
+                throw new Error(error);
+            }
+            
+            console.log('[See It] Sending cleanup request...', {
+                maskDimensions: `${maskW}x${maskH}`,
+                normalizedDimensions: `${state.normalizedWidth}x${state.normalizedHeight}`,
+                match: maskW === state.normalizedWidth && maskH === state.normalizedHeight
+            });
             const result = await cleanupWithMask(mask);
-            
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:856', message: 'handleRemove after cleanupWithMask', data: { hasResult: !!result, hasCleanedUrl: !!result?.cleanedRoomImageUrl, cleanedUrlPrefix: result?.cleanedRoomImageUrl?.substring(0, 100) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
+            // #endregion
+
             console.log('[See It] Cleanup API response:', result);
-            
+
             const newUrl = result.cleanedRoomImageUrl;
             if (!newUrl) {
                 console.error('[See It] No URL in result:', result);
                 throw new Error('No cleaned image URL returned');
             }
-            
+
             console.log('[See It] Got cleaned URL:', newUrl.substring(0, 100) + '...');
             console.log('[See It] Full URL length:', newUrl.length);
-            
+
             state.cleanedRoomImageUrl = newUrl;
 
             // Clear strokes and canvas FIRST before loading new image
@@ -873,23 +987,23 @@ document.addEventListener('DOMContentLoaded', function () {
                 ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
             }
             hasErased = true;
-            
+
             // CRITICAL FIX: GCS signed URLs don't work directly in <img> elements
             // We must fetch the image first, then create a blob URL
             console.log('[See It] Fetching cleaned image via blob URL method...');
-            
+
             try {
                 const imageResponse = await fetch(newUrl);
                 if (!imageResponse.ok) {
                     throw new Error(`Failed to fetch cleaned image: ${imageResponse.status}`);
                 }
-                
+
                 const blob = await imageResponse.blob();
                 const blobUrl = URL.createObjectURL(blob);
-                
+
                 console.log('[See It] Created blob URL:', blobUrl);
                 console.log('[See It] Blob size:', blob.size);
-                
+
                 // Set the blob URL on the image elements
                 if (roomPreview) {
                     roomPreview.src = blobUrl;
@@ -899,10 +1013,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     roomImage.src = blobUrl;
                     console.log('[See It] ✅ roomImage src set to blob URL');
                 }
-                
+
                 // Wait a moment for the images to render
                 await new Promise(resolve => setTimeout(resolve, 100));
-                
+
                 // Verify the images loaded
                 if (roomPreview) {
                     console.log('[See It] roomPreview dimensions:', {
@@ -911,7 +1025,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         complete: roomPreview.complete
                     });
                 }
-                
+
                 console.log('[See It] ✅ Cleanup complete - image updated via blob URL!');
             } catch (fetchErr) {
                 console.error('[See It] Failed to fetch cleaned image:', fetchErr);
@@ -919,29 +1033,74 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (roomPreview) roomPreview.src = newUrl;
                 if (roomImage) roomImage.src = newUrl;
             }
-            
+
         } catch (err) {
             console.error('[See It] Cleanup error:', err);
+            console.error('[See It] Error details:', {
+                message: err.message,
+                stack: err.stack,
+                state: {
+                    sessionId: state.sessionId,
+                    uploadComplete: state.uploadComplete,
+                    normalizedWidth: state.normalizedWidth,
+                    normalizedHeight: state.normalizedHeight,
+                    maskCanvasWidth: maskCanvas?.width,
+                    maskCanvasHeight: maskCanvas?.height
+                }
+            });
             strokes = strokesBackup;
             redrawStrokes();
-            showError('Erase failed: ' + err.message);
+            const errorMsg = 'Erase failed: ' + (err.message || 'Unknown error');
+            showError(errorMsg);
+            // Also show alert for critical errors
+            if (err.message?.includes('dimension') || err.message?.includes('mismatch')) {
+                alert('[See It Critical Error] ' + errorMsg + '\n\nCheck console for details.');
+            }
         } finally {
             state.isCleaningUp = false;
             updatePaintButtons();
         }
     };
-    
+
     // ERASE BUTTON EVENT LISTENER
     if (btnRemove) {
-        console.log('[See It] Attaching Erase button listener');
+        console.log('[See It] Attaching Erase button listener to:', btnRemove);
+        console.log('[See It] btnRemove.id:', btnRemove.id);
+        console.log('[See It] btnRemove.disabled:', btnRemove.disabled);
+        console.log('[See It] btnRemove visible:', isVisible(btnRemove));
+
         btnRemove.addEventListener('click', (e) => {
-            console.log('[See It] Erase button click event fired!');
+            console.log('[See It] ======================================');
+            console.log('[See It] ERASE BUTTON CLICK EVENT FIRED!');
+            console.log('[See It] Button disabled?:', btnRemove.disabled);
+            console.log('[See It] Button text:', btnRemove.textContent);
+            console.log('[See It] State snapshot:', JSON.stringify({
+                isCleaningUp: state.isCleaningUp,
+                sessionId: state.sessionId,
+                uploadComplete: state.uploadComplete,
+                strokeCount: strokes.length,
+                normalizedWidth: state.normalizedWidth,
+                normalizedHeight: state.normalizedHeight
+            }, null, 2));
+            console.log('[See It] ======================================');
+
+            // TEMPORARY: Show alert to confirm click is working
+            alert('[DEBUG] Erase clicked! uploadComplete=' + state.uploadComplete + ', strokes=' + strokes.length + ', sessionId=' + state.sessionId);
+
             e.preventDefault();
             e.stopPropagation();
             handleRemove();
         });
+
+        // Also add a direct onclick as backup
+        btnRemove.onclick = function (e) {
+            console.log('[See It] ONCLICK BACKUP FIRED!');
+        };
     } else {
         console.error('[See It] CRITICAL: btnRemove element not found!');
+        console.error('[See It] Searched for id: see-it-remove-btn');
+        console.error('[See It] Available elements with IDs:',
+            Array.from(document.querySelectorAll('[id]')).map(el => el.id).filter(id => id.includes('see-it')));
     }
 
     // --- Generate ---
@@ -967,25 +1126,25 @@ document.addEventListener('DOMContentLoaded', function () {
             };
 
             console.log('[See It] Generate request:', payload);
-            
+
             const res = await fetch('/apps/see-it/render', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            
+
             const data = await res.json();
             console.log('[See It] Generate response:', data);
-            
+
             if (data.status === 'failed') {
                 throw new Error(data.error || 'Render failed');
             }
-            
+
             if (data.status === 'completed' && data.imageUrl) {
                 if (resultImage) resultImage.src = data.imageUrl;
                 return;
             }
-            
+
             if (data.job_id) {
                 const result = await pollJobStatus(data.job_id);
                 if (resultImage && result.imageUrl) {
@@ -997,7 +1156,7 @@ document.addEventListener('DOMContentLoaded', function () {
             showError('Generate failed: ' + err.message);
         }
     };
-    
+
     btnGenerate?.addEventListener('click', handleGenerate);
 
     // --- Result Actions ---
@@ -1014,12 +1173,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     btnShare?.addEventListener('click', async () => {
         if (!resultImage?.src) return;
-        
+
         try {
             const response = await fetch(resultImage.src);
             const blob = await response.blob();
             const file = new File([blob], 'see-it-result.jpg', { type: 'image/jpeg' });
-            
+
             if (navigator.share) {
                 await navigator.share({ files: [file], title: 'See It Result' });
             } else {

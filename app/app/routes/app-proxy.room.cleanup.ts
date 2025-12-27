@@ -8,9 +8,36 @@ import { cleanupRoom } from "../services/room-cleanup.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { validateSessionId, validateMaskDataUrl } from "../utils/validation.server";
 import { getRequestId } from "../utils/request-context.server";
+import { appendFile, mkdir } from "fs/promises";
+import { join, dirname } from "path";
 
 // Maximum inline mask size (10MB - protects payload + memory)
 const MAX_INLINE_MASK_SIZE_BYTES = 10 * 1024 * 1024;
+
+// Debug logging helper
+const debugLog = async (data: any) => {
+    // Always log to console first (this will show in server logs)
+    console.error('[DEBUG]', JSON.stringify(data));
+    
+    // Also try to write to file - try multiple locations
+    const logPaths = [
+        join(process.cwd(), '..', '.cursor', 'debug.log'), // Workspace root
+        join(process.cwd(), '.cursor', 'debug.log'), // If cwd is workspace root
+        join(process.cwd(), 'debug.log'), // App directory as fallback
+    ];
+    
+    for (const logPath of logPaths) {
+        try {
+            const logDir = dirname(logPath);
+            await mkdir(logDir, { recursive: true }).catch(() => {});
+            await appendFile(logPath, JSON.stringify(data) + '\n', 'utf8');
+            break; // Success, stop trying other paths
+        } catch (err) {
+            // Try next path
+            continue;
+        }
+    }
+};
 
 function getCorsHeaders(shopDomain: string | null): Record<string, string> {
     const headers: Record<string, string> = {
@@ -35,14 +62,23 @@ function getCorsHeaders(shopDomain: string | null): Record<string, string> {
  * Returns a job_id for polling via GET /apps/see-it/render/:jobId
  */
 export const action = async ({ request }: ActionFunctionArgs) => {
+    // #region agent log
+    await debugLog({location:'app-proxy.room.cleanup.ts:37',message:'ROUTE HANDLER ENTRY',data:{method:request.method,url:request.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ALL'});
+    // #endregion
     const requestId = getRequestId(request);
     const logContext = createLogContext("cleanup", requestId, "start", {});
 
     const { session } = await authenticate.public.appProxy(request);
+    // #region agent log
+    await debugLog({location:'app-proxy.room.cleanup.ts:42',message:'After authentication',data:{hasSession:!!session,shop:session?.shop},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ALL'});
+    // #endregion
     const corsHeaders = getCorsHeaders(session?.shop ?? null);
 
     // Handle preflight
     if (request.method === "OPTIONS") {
+        // #region agent log
+        await debugLog({location:'app-proxy.room.cleanup.ts:45',message:'OPTIONS preflight',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'ALL'});
+        // #endregion
         return new Response(null, { status: 204, headers: corsHeaders });
     }
 
@@ -87,7 +123,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Validate inline mask if provided
     let maskBuffer: Buffer | null = null;
     if (mask_data_url) {
+        // #region agent log
+        await debugLog({location:'app-proxy.room.cleanup.ts:89',message:'mask_data_url received',data:{hasMaskDataUrl:!!mask_data_url,maskDataUrlLength:mask_data_url?.length,maskDataUrlPrefix:mask_data_url?.substring(0,50)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
+        // #endregion
         const maskValidation = validateMaskDataUrl(mask_data_url, MAX_INLINE_MASK_SIZE_BYTES);
+        // #region agent log
+        await debugLog({location:'app-proxy.room.cleanup.ts:91',message:'mask validation result',data:{valid:maskValidation.valid,error:maskValidation.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
+        // #endregion
         if (!maskValidation.valid) {
             return json(
                 { 
@@ -102,11 +144,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Decode base64 mask
         try {
             const maskBase64 = mask_data_url.split(',')[1];
+            // #region agent log
+            await debugLog({location:'app-proxy.room.cleanup.ts:104',message:'mask base64 extraction',data:{hasBase64:!!maskBase64,base64Length:maskBase64?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
+            // #endregion
             if (!maskBase64) {
                 throw new Error("Invalid data URL format");
             }
             maskBuffer = Buffer.from(maskBase64, 'base64');
+            // #region agent log
+            await debugLog({location:'app-proxy.room.cleanup.ts:108',message:'mask buffer created',data:{bufferLength:maskBuffer.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
+            // #endregion
         } catch (error) {
+            // #region agent log
+            await debugLog({location:'app-proxy.room.cleanup.ts:110',message:'mask decode error',data:{error:error instanceof Error?error.message:String(error)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'});
+            // #endregion
             logger.error(
                 { ...logContext, stage: "mask-decode" },
                 "Failed to decode mask data URL",
@@ -231,8 +282,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
 
     try {
+        // #region agent log
+        await debugLog({location:'app-proxy.room.cleanup.ts:248',message:'starting cleanupRoom',data:{roomImageUrl:roomImageUrl.substring(0,80),maskBufferLength:maskBuffer.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
+        // #endregion
         // Process cleanup
         const result = await cleanupRoom(roomImageUrl, maskBuffer, requestId);
+        // #region agent log
+        await debugLog({location:'app-proxy.room.cleanup.ts:250',message:'cleanupRoom completed',data:{imageUrl:result.imageUrl.substring(0,80),imageKey:result.imageKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'});
+        // #endregion
 
         // Store cleaned image key on room session
         await prisma.roomSession.update({
@@ -271,6 +328,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             cleanedRoomImageUrl: result.imageUrl
         }, { headers: corsHeaders });
     } catch (error) {
+        // #region agent log
+        await debugLog({location:'app-proxy.room.cleanup.ts:327',message:'cleanup error caught',data:{error:error instanceof Error?error.message:String(error),errorStack:error instanceof Error?error.stack:undefined},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
+        // #endregion
         logger.error(
             { ...shopLogContext, stage: "cleanup-error" },
             "Cleanup failed",
@@ -289,8 +349,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 completedAt: new Date()
             }
         });
+        
+        // Return error immediately so client doesn't need to poll
+        return json({ 
+            job_id: job.id, 
+            status: "failed",
+            error: errorCode,
+            message: errorMessage
+        }, { status: 500, headers: corsHeaders });
     }
-
-    // If we get here, the job failed - still return job_id so client can poll for error details
-    return json({ job_id: job.id, status: "failed" }, { headers: corsHeaders });
 };

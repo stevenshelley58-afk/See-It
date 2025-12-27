@@ -16,12 +16,39 @@ import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { GEMINI_IMAGE_MODEL_PRO, GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
+import { appendFile, mkdir } from "fs/promises";
+import { join, dirname } from "path";
 
 // Import helper functions from gemini.server.ts (reuse existing utilities)
 // Note: We don't import callGemini directly to avoid circular dependencies.
 // Instead, we'll reimplement the minimal Gemini calling logic here.
 
 const GEMINI_TIMEOUT_MS = 60000; // 60 seconds
+
+// Debug logging helper
+const debugLog = async (data: any) => {
+    // Always log to console first (this will show in server logs)
+    console.error('[DEBUG]', JSON.stringify(data));
+    
+    // Also try to write to file - try multiple locations
+    const logPaths = [
+        join(process.cwd(), '..', '.cursor', 'debug.log'), // Workspace root
+        join(process.cwd(), '.cursor', 'debug.log'), // If cwd is workspace root
+        join(process.cwd(), 'debug.log'), // App directory as fallback
+    ];
+    
+    for (const logPath of logPaths) {
+        try {
+            const logDir = dirname(logPath);
+            await mkdir(logDir, { recursive: true }).catch(() => {});
+            await appendFile(logPath, JSON.stringify(data) + '\n', 'utf8');
+            break; // Success, stop trying other paths
+        } catch (err) {
+            // Try next path
+            continue;
+        }
+    }
+};
 
 // Aspect ratio helper (same as gemini.server.ts)
 const GEMINI_SUPPORTED_RATIOS = [
@@ -394,64 +421,101 @@ async function callGeminiForCleanup(
     const startTime = Date.now();
     logger.info(logContext, `Calling Gemini model: ${model} (timeout: ${GEMINI_TIMEOUT_MS}ms)`);
 
-    // CRITICAL FIX: Send BOTH the room image AND the mask image
-    // The mask shows exactly where the user painted (white areas = objects to remove)
-    const parts: any[] = [
-        {
-            inlineData: {
-                mimeType: 'image/png',
-                data: roomBuffer.toString('base64')
-            }
-        },
-        {
+    // Validate buffers
+    if (!roomBuffer || !Buffer.isBuffer(roomBuffer)) {
+        const error = new Error(`Invalid roomBuffer: ${roomBuffer ? 'not a Buffer' : 'null or undefined'}`);
+        logger.error(logContext, "Room buffer validation failed", error);
+        throw error;
+    }
+
+    if (roomBuffer.length === 0) {
+        const error = new Error("Room buffer is empty");
+        logger.error(logContext, "Room buffer is empty", error);
+        throw error;
+    }
+
+    const parts: any[] = [];
+
+    // Add Room Image
+    parts.push({
+        inlineData: {
+            mimeType: 'image/png',
+            data: roomBuffer.toString('base64')
+        }
+    });
+
+    // Add Mask Image if provided
+    if (maskBuffer && Buffer.isBuffer(maskBuffer) && maskBuffer.length > 0) {
+        parts.push({
             inlineData: {
                 mimeType: 'image/png',
                 data: maskBuffer.toString('base64')
             }
-        },
-        { text: prompt }
-    ];
+        });
+    }
+
+    // Add Text Prompt
+    parts.push({ text: prompt });
 
     const config: any = {
         responseModalities: ['TEXT', 'IMAGE'],
         imageConfig: { aspectRatio }
     };
 
-    try {
-        const client = getGeminiClient();
+        try {
+            const client = getGeminiClient();
 
-        const response = await withTimeout(
-            client.models.generateContent({
-                model,
-                contents: parts,
-                config,
-            }),
-            GEMINI_TIMEOUT_MS,
-            `Gemini ${model} cleanup API call`
-        );
+            // #region agent log
+            await debugLog({location:'room-cleanup.server.ts:426',message:'calling Gemini API',data:{model,aspectRatio,partsCount:parts.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
+            // #endregion
 
-        const duration = Date.now() - startTime;
-        logger.info(
-            { ...logContext, stage: "api-complete" },
-            `Gemini API call completed in ${duration}ms`
-        );
+            const response = await withTimeout(
+                client.models.generateContent({
+                    model,
+                    contents: parts,
+                    config,
+                }),
+                GEMINI_TIMEOUT_MS,
+                `Gemini ${model} cleanup API call`
+            );
 
-        // Extract image from response
-        const candidates = response.candidates;
-        if (candidates?.[0]?.content?.parts) {
-            for (const part of candidates[0].content.parts) {
-                if (part.inlineData?.data) {
-                    return part.inlineData.data;
+            const duration = Date.now() - startTime;
+            // #region agent log
+            await debugLog({location:'room-cleanup.server.ts:438',message:'Gemini API response received',data:{duration,hasCandidates:!!response.candidates,candidatesCount:response.candidates?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
+            // #endregion
+            logger.info(
+                { ...logContext, stage: "api-complete" },
+                `Gemini API call completed in ${duration}ms`
+            );
+
+            // Extract image from response
+            const candidates = response.candidates;
+            if (candidates?.[0]?.content?.parts) {
+                // #region agent log
+                await debugLog({location:'room-cleanup.server.ts:446',message:'parsing Gemini response',data:{partsCount:candidates[0].content.parts.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
+                // #endregion
+                for (const part of candidates[0].content.parts) {
+                    if (part.inlineData?.data) {
+                        // #region agent log
+                        await debugLog({location:'room-cleanup.server.ts:449',message:'Gemini image found in response',data:{dataLength:part.inlineData.data.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
+                        // #endregion
+                        return part.inlineData.data;
+                    }
                 }
             }
-        }
 
-        logger.error(
-            { ...logContext, stage: "response-parse-failed" },
-            `No image in Gemini response`
-        );
-        throw new Error("No image in response - Gemini may have returned text only or blocked the request");
-    } catch (error: any) {
+            // #region agent log
+            await debugLog({location:'room-cleanup.server.ts:454',message:'Gemini response parse failed: no image',data:{hasCandidates:!!candidates,hasParts:!!candidates?.[0]?.content?.parts},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
+            // #endregion
+            logger.error(
+                { ...logContext, stage: "response-parse-failed" },
+                `No image in Gemini response`
+            );
+            throw new Error("No image in response - Gemini may have returned text only or blocked the request");
+        } catch (error: any) {
+            // #region agent log
+            await debugLog({location:'room-cleanup.server.ts:459',message:'Gemini API error',data:{error:error instanceof Error?error.message:String(error),isTimeout:error instanceof GeminiTimeoutError},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'});
+            // #endregion
         const duration = Date.now() - startTime;
 
         if (error instanceof GeminiTimeoutError) {
@@ -509,6 +573,10 @@ export async function cleanupRoom(
         roomMetadata = await sharp(roomBuffer).metadata();
         maskMetadata = await sharp(maskBuffer).metadata();
 
+        // #region agent log
+        await debugLog({location:'room-cleanup.server.ts:514',message:'dimension validation start',data:{roomWidth:roomMetadata.width,roomHeight:roomMetadata.height,maskWidth:maskMetadata.width,maskHeight:maskMetadata.height},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'});
+        // #endregion
+
         if (!roomMetadata.width || !roomMetadata.height) {
             throw new Error("Room image is missing dimensions");
         }
@@ -523,6 +591,9 @@ export async function cleanupRoom(
 
         // CRITICAL: Exact dimension match requirement (Invariant I2)
         if (maskWidth !== roomWidth || maskHeight !== roomHeight) {
+            // #region agent log
+            await debugLog({location:'room-cleanup.server.ts:530',message:'dimension mismatch error',data:{maskWidth,maskHeight,roomWidth,roomHeight},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'});
+            // #endregion
             const error = new Error(
                 `Mask dimension mismatch: mask is ${maskWidth}x${maskHeight}, room is ${roomWidth}x${roomHeight}. ` +
                 `Mask must exactly match room dimensions.`
@@ -534,6 +605,10 @@ export async function cleanupRoom(
             );
             throw error;
         }
+
+        // #region agent log
+        await debugLog({location:'room-cleanup.server.ts:543',message:'dimension validation passed',data:{roomWidth,roomHeight,maskWidth,maskHeight},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'});
+        // #endregion
 
         logger.info(
             { ...logContext, stage: "validation" },
@@ -575,65 +650,31 @@ export async function cleanupRoom(
 
 
 
-        // Step 6: Create Visual Prompt Image
-        // Instead of sending two images, we burn the mask into the image as a specific color (Green)
-        // This is much more reliable for Vision models to understand "remove the green thing"
-
-        // 1. Create pure green image
-        const greenBase = await sharp({
-            create: {
-                width: roomWidth,
-                height: roomHeight,
-                channels: 3,
-                background: { r: 0, g: 255, b: 0 }
-            }
-        }).png().toBuffer();
-
-        // 2. Create alpha channel from mask (White=Opaque, Black=Transparent)
-        const alphaChannel = await sharp(maskBuffer)
-            .resize(roomWidth, roomHeight)
-            .grayscale()
-            .toBuffer();
-
-        // 3. Create green overlay (Green pixels with Mask alpha)
-        const greenOverlay = await sharp(greenBase)
-            .joinChannel(alphaChannel)
-            .png()
-            .toBuffer();
-
-        // 4. Composite green overlay onto room image
-        const visualPromptBuffer = await sharp(roomBuffer)
-            .composite([{ input: greenOverlay }])
-            .png()
-            .toBuffer();
-
-        logger.info(logContext, "Created visual prompt image with Green overlay");
-
-        // Step 7: Build Prompt
-        const baseDescription = maskAnalysis.description || "the marked area";
+        // Step 6: Build Prompt for Side-by-Side Masking
+        const baseDescription = maskAnalysis.description || "the masked area";
         const prompt = `OBJECT REMOVAL TASK:
-
-I have provided an image of a room where an object has been covered in BRIGHT GREEN.
+I have provided two images:
+1. The ORIGINAL Room Image.
+2. A MASK Image (Black and White).
 
 YOUR TASK:
-1. Identify the area covered by the GREEN color.
-2. REMOVE the object/furniture that is under the green paint.
-3. FILL the space with the natural background (wall, floor, carpet).
-4. The green color MUST be completely removed.
+Use the MASK (Image 2) to identify exactly what to remove from the ROOM (Image 1).
+- White pixels in the Mask = OBJECT TO REMOVE.
+- Black pixels in the Mask = KEEP.
+
+ACTION:
+1. Remove the object defined by the White Mask area.
+2. Inpaint the empty space to match the surrounding natural background (floor, wall, etc.).
+3. The lighting and perspective MUST match perfectly.
+4. Do NOT change anything else in the image outside the mask.
 
 CONTEXT:
-The green area is located at ${baseDescription}.
+ The object to remove is located at ${baseDescription}.
 
-CRITICAL REQUIREMENTS:
-- Output MUST be exactly ${roomWidth}x${roomHeight} pixels
-- Keep the SAME camera angle, lighting, and perspective
-- Do NOT crop, resize, or change the framing
-- Only remove the object covered in GREEN
-- Everything else should remain EXACTLY the same
+OUTPUT:
+Return ONLY the cleaned room image.`;
 
-Return only the cleaned room image (without the green overlay).`;
-
-        // Step 8: Call Gemini (fast model first, pro retry on failure)
+        // Step 7: Call Gemini (fast model first, pro retry on failure)
         let attempt = 0;
         const maxAttempts = 2;
         let lastError: Error | null = null;
@@ -644,17 +685,30 @@ Return only the cleaned room image (without the green overlay).`;
             try {
                 logger.info(
                     { ...logContext, stage: "gemini-call", attempt: attempt + 1 },
-                    `Attempting cleanup with ${model} (Visual Prompting)`
+                    `Attempting cleanup with ${model} (Side-by-Side Masking)`
                 );
+
+                // Ensure both room and mask are PNG for Gemini
+                if (!roomBuffer) {
+                    throw new Error("Room buffer is null - cannot proceed with cleanup");
+                }
+
+                const roomPng = await sharp(roomBuffer)
+                    .png()
+                    .toBuffer();
+
+                const maskPng = await sharp(editRegionMask || maskBuffer)
+                    .png()
+                    .toBuffer();
 
                 const base64Data = await callGeminiForCleanup(
                     prompt,
-                    visualPromptBuffer, // Send the image with green overlay
-                    null,               // visualPromptBuffer is self-contained, no separate mask needed
+                    roomPng,            // Original Room (PNG format)
+                    maskPng,            // Separate Mask (PNG format)
                     closestRatio.label,
                     model,
                     logContext,
-                    maskAnalysis  // Pass analysis for visual marker creation
+                    maskAnalysis
                 );
 
                 geminiOutputBuffer = Buffer.from(base64Data, 'base64');
@@ -684,7 +738,7 @@ Return only the cleaned room image (without the green overlay).`;
             throw lastError || new Error("Failed to get Gemini output");
         }
 
-        // Step 7: Resize Gemini output to match input dimensions (Gemini may return different sizes)
+        // Step 8: Resize Gemini output to match input dimensions (Gemini may return different sizes)
         const outputMeta = await sharp(geminiOutputBuffer).metadata();
         const outputWidth = outputMeta.width!;
         const outputHeight = outputMeta.height!;

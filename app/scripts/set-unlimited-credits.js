@@ -72,3 +72,4 @@ async function setUnlimitedCredits(shopDomain) {
 const shopDomain = process.argv[2];
 setUnlimitedCredits(shopDomain);
 
+
