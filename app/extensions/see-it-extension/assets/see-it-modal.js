@@ -542,37 +542,21 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     const generateMask = () => {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:531', message: 'generateMask entry', data: { maskCanvasExists: !!maskCanvas, strokesCount: strokes.length, normalizedWidth: state.normalizedWidth, normalizedHeight: state.normalizedHeight }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
-        // #endregion
         if (!maskCanvas) {
             console.error('[See It] generateMask: no canvas');
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:534', message: 'generateMask failed: no canvas', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
-            // #endregion
             return null;
         }
 
         const w = maskCanvas.width;
         const h = maskCanvas.height;
 
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:538', message: 'generateMask canvas dimensions', data: { width: w, height: h, normalizedWidth: state.normalizedWidth, normalizedHeight: state.normalizedHeight }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
-        // #endregion
-
         if (w === 0 || h === 0) {
             console.error('[See It] generateMask: canvas has zero dimensions');
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:541', message: 'generateMask failed: zero dimensions', data: { width: w, height: h }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
-            // #endregion
             return null;
         }
 
         if (strokes.length === 0) {
             console.error('[See It] generateMask: no strokes');
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:546', message: 'generateMask failed: no strokes', data: {}, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
-            // #endregion
             return null;
         }
 
@@ -601,9 +585,6 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         const dataUrl = out.toDataURL('image/png');
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:574', message: 'generateMask success', data: { dimensions: `${w}x${h}`, strokes: strokes.length, dataUrlLength: dataUrl.length, dataUrlPrefix: dataUrl.substring(0, 50), normalizedWidth: state.normalizedWidth, normalizedHeight: state.normalizedHeight, roomImageUrl: state.originalRoomImageUrl?.substring(0, 80) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
-        // #endregion
         console.log('[See It] Mask generated:', {
             dimensions: `${w}x${h}`,
             normalizedDimensions: `${state.normalizedWidth}x${state.normalizedHeight}`,
@@ -661,13 +642,13 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!jobId || jobId === null || jobId === undefined) {
             throw new Error('pollJobStatus: jobId is null or undefined');
         }
-        
+
         // Ensure jobId is a string
         const jobIdStr = String(jobId);
         if (!jobIdStr || jobIdStr === 'null' || jobIdStr === 'undefined') {
             throw new Error(`pollJobStatus: Invalid jobId: ${jobId}`);
         }
-        
+
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             const res = await fetch(`/apps/see-it/render/${jobIdStr}`);
             if (!res.ok) throw new Error(`Failed to poll: ${res.status}`);
@@ -686,9 +667,6 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const cleanupWithMask = async (maskDataUrl) => {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:635', message: 'cleanupWithMask entry', data: { sessionId: state.sessionId, maskDataUrlLength: maskDataUrl?.length, maskDataUrlPrefix: maskDataUrl?.substring(0, 50) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
-        // #endregion
         console.log('[See It] Cleanup request:', { sessionId: state.sessionId });
 
         const res = await fetch('/apps/see-it/room/cleanup', {
@@ -699,24 +677,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 mask_data_url: maskDataUrl
             })
         });
-
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:648', message: 'cleanupWithMask response received', data: { status: res.status, ok: res.ok }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
-        // #endregion
         console.log('[See It] Cleanup response:', res.status);
 
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:650', message: 'cleanupWithMask error response', data: { status: res.status, error: err.error, message: err.message }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
-            // #endregion
             throw new Error(err.message || err.error || 'Cleanup failed');
         }
 
         const data = await res.json();
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:654', message: 'cleanupWithMask response data', data: { status: data.status, jobId: data.job_id || data.jobId, hasCleanedUrl: !!(data.cleaned_room_image_url || data.cleanedRoomImageUrl), error: data.error, message: data.message }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
-        // #endregion
 
         // Check for failed status first (backend now returns errors immediately)
         if (data.status === 'failed') {
@@ -726,9 +694,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (data.status === 'completed') {
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:656', message: 'cleanupWithMask completed immediately', data: { cleanedUrl: data.cleaned_room_image_url || data.cleanedRoomImageUrl }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
-            // #endregion
             return {
                 cleanedRoomImageUrl: data.cleaned_room_image_url || data.cleanedRoomImageUrl
             };
@@ -739,15 +704,8 @@ document.addEventListener('DOMContentLoaded', function () {
             console.error('[See It] No job_id in response:', data);
             throw new Error('No job_id in response. Response: ' + JSON.stringify(data));
         }
-
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:665', message: 'cleanupWithMask polling job', data: { jobId }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
-        // #endregion
         console.log('[See It] Polling cleanup job:', jobId);
         const result = await pollJobStatus(jobId);
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:667', message: 'cleanupWithMask poll complete', data: { imageUrl: result.image_url || result.imageUrl }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
-        // #endregion
 
         return {
             cleanedRoomImageUrl: result.image_url || result.imageUrl
@@ -930,43 +888,31 @@ document.addEventListener('DOMContentLoaded', function () {
         const strokesBackup = JSON.parse(JSON.stringify(strokes));
 
         try {
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:849', message: 'handleRemove before generateMask', data: { sessionId: state.sessionId, uploadComplete: state.uploadComplete, strokeCount: strokes.length, normalizedWidth: state.normalizedWidth, normalizedHeight: state.normalizedHeight }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
-            // #endregion
             const mask = generateMask();
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:850', message: 'handleRemove after generateMask', data: { maskGenerated: !!mask, maskLength: mask?.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
-            // #endregion
             if (!mask) {
                 throw new Error('Failed to generate mask');
             }
 
-            // Validate dimensions before sending
             if (!state.normalizedWidth || !state.normalizedHeight) {
                 const error = 'Normalized dimensions not set. Please re-upload the image.';
                 console.error('[See It]', error);
-                alert('[See It Error] ' + error);
                 throw new Error(error);
             }
-            
+
             const maskW = maskCanvas.width;
             const maskH = maskCanvas.height;
             if (maskW !== state.normalizedWidth || maskH !== state.normalizedHeight) {
                 const error = `Dimension mismatch! Mask: ${maskW}x${maskH}, Expected: ${state.normalizedWidth}x${state.normalizedHeight}. Please re-upload and try again.`;
                 console.error('[See It]', error);
-                alert('[See It Error] ' + error);
                 throw new Error(error);
             }
-            
+
             console.log('[See It] Sending cleanup request...', {
                 maskDimensions: `${maskW}x${maskH}`,
                 normalizedDimensions: `${state.normalizedWidth}x${state.normalizedHeight}`,
                 match: maskW === state.normalizedWidth && maskH === state.normalizedHeight
             });
             const result = await cleanupWithMask(mask);
-            // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'see-it-modal.js:856', message: 'handleRemove after cleanupWithMask', data: { hasResult: !!result, hasCleanedUrl: !!result?.cleanedRoomImageUrl, cleanedUrlPrefix: result?.cleanedRoomImageUrl?.substring(0, 100) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
-            // #endregion
 
             console.log('[See It] Cleanup API response:', result);
 
@@ -1084,8 +1030,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }, null, 2));
             console.log('[See It] ======================================');
 
-            // TEMPORARY: Show alert to confirm click is working
-            alert('[DEBUG] Erase clicked! uploadComplete=' + state.uploadComplete + ', strokes=' + strokes.length + ', sessionId=' + state.sessionId);
+
 
             e.preventDefault();
             e.stopPropagation();
