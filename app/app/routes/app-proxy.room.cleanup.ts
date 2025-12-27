@@ -175,23 +175,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const maskBuffer = Buffer.from(mask_base64, 'base64');
         const maskMetadata = await sharp(maskBuffer).metadata();
 
+        logger.info(
+            { ...logContext, stage: "mask-debug" },
+            `Room: ${roomWidth}x${roomHeight}, Mask: ${maskMetadata.width}x${maskMetadata.height}, Mask channels: ${maskMetadata.channels}`
+        );
+
         let processedMaskBuffer: Buffer;
         if (maskMetadata.width !== roomWidth || maskMetadata.height !== roomHeight) {
             logger.info(
                 { ...logContext, stage: "resize-mask" },
                 `Resizing mask from ${maskMetadata.width}x${maskMetadata.height} to ${roomWidth}x${roomHeight}`
             );
+            // Resize and convert to grayscale to ensure binary mask
             processedMaskBuffer = await sharp(maskBuffer)
                 .resize(roomWidth, roomHeight, { fit: 'fill' })
+                .grayscale()
                 .png()
                 .toBuffer();
         } else {
-            processedMaskBuffer = maskBuffer;
+            // Ensure grayscale even if no resize needed
+            processedMaskBuffer = await sharp(maskBuffer)
+                .grayscale()
+                .png()
+                .toBuffer();
         }
 
         // Convert to base64 (without data URI prefix)
         const roomBase64 = roomBuffer.toString('base64');
         const maskBase64Clean = processedMaskBuffer.toString('base64');
+
 
         // Call Vertex AI Imagen 3
         const result = await removeObject(roomBase64, maskBase64Clean, requestId);
