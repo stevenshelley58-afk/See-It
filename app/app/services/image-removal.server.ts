@@ -99,8 +99,7 @@ export async function removeObject(
     const payload = {
         instances: [
             {
-                // Prompt guides model to fill with plain background, not add new objects
-                prompt: "empty room background, plain wall and floor, no objects, no furniture, clean empty space",
+                prompt: "",
                 referenceImages: [
                     {
                         referenceId: 1, // Required unique ID for the source image
@@ -113,7 +112,7 @@ export async function removeObject(
                         referenceImage: { bytesBase64Encoded: maskBase64 },
                         maskImageConfig: {
                             maskMode: "MASK_MODE_USER_PROVIDED",
-                            dilation: 0.03 // Expands mask slightly to catch edges
+                            dilation: 0.01
                         }
                     }
                 ]
@@ -121,8 +120,10 @@ export async function removeObject(
         ],
         parameters: {
             editMode: "EDIT_MODE_INPAINT_REMOVAL",
-            sampleCount: 1,
-            includeRaiReasoning: true
+            editConfig: {
+                baseSteps: 12
+            },
+            sampleCount: 1
         }
     };
 
