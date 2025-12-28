@@ -99,7 +99,7 @@ export async function removeObject(
     const payload = {
         instances: [
             {
-                prompt: "",
+                prompt: "wall and floor, empty space",
                 referenceImages: [
                     {
                         referenceId: 1, // Required unique ID for the source image
@@ -120,6 +120,7 @@ export async function removeObject(
         ],
         parameters: {
             editMode: "EDIT_MODE_INPAINT_REMOVAL",
+            negativePrompt: "furniture, object, table, chair, lamp, decor",
             editConfig: {
                 baseSteps: 12
             },
