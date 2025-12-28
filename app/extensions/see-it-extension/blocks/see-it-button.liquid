@@ -149,9 +149,17 @@
          </div>
 
          <!-- Room & Product Canvas Area -->
-         <div class="see-it-prepare-room-container">
+         <div class="see-it-prepare-room-container" id="see-it-position-container">
              <img id="see-it-room-image" src="" alt="Room" style="width: 100%; height: 100%; object-fit: contain;">
-             <!-- Product Overlay div would go here via JS -->
+             <!-- Product Overlay (draggable & resizable) -->
+             <div id="see-it-product-overlay" class="see-it-product-overlay">
+                 <img id="see-it-product-image" src="" alt="Product" draggable="false">
+                 <!-- Resize handles -->
+                 <div class="see-it-resize-handle see-it-resize-nw"></div>
+                 <div class="see-it-resize-handle see-it-resize-ne"></div>
+                 <div class="see-it-resize-handle see-it-resize-sw"></div>
+                 <div class="see-it-resize-handle see-it-resize-se"></div>
+             </div>
          </div>
 
          <div class="see-it-position-controls">
