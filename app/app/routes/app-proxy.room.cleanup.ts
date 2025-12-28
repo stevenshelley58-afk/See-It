@@ -240,7 +240,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             cleaned_image_url: cleanedImageUrl,
             cleanedRoomImageUrl: cleanedImageUrl, // For frontend compatibility
             cleaned_room_image_url: cleanedImageUrl, // Alternative format
-            rai_reasoning: result.raiReasoning
         }, { headers: corsHeaders });
 
     } catch (error) {
