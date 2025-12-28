@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.27';
+    const VERSION = '1.0.28';
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)
@@ -163,6 +163,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const roomImage = $('see-it-room-image');
     const btnGenerate = $('see-it-generate');
     const saveRoomToggle = $('see-it-save-room-toggle');
+    const positionContainer = $('see-it-position-container');
+    const productOverlay = $('see-it-product-overlay');
+    const productImage = $('see-it-product-image');
 
     // Result screen elements
     const btnCloseResult = $('see-it-close-result');
@@ -190,8 +193,12 @@ document.addEventListener('DOMContentLoaded', function () {
         productTitle: trigger?.dataset.productTitle || '',
         productPrice: trigger?.dataset.productPrice || '',
         scale: 1.0,
-        x: 0,
-        y: 0,
+        x: 0.5, // Normalized position (0-1, center of product)
+        y: 0.5,
+        productWidth: 150, // Pixels
+        productHeight: 150,
+        productNaturalWidth: 0,
+        productNaturalHeight: 0,
         isUploading: false,
         isCleaningUp: false,
         uploadComplete: false,
@@ -652,13 +659,274 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     // --- Product Positioning ---
+    let positionListenersAttached = false;
+    let isDragging = false;
+    let isResizing = false;
+    let resizeHandle = null;
+    let dragStart = { x: 0, y: 0 };
+    let productStart = { x: 0, y: 0, width: 0, height: 0 };
+    let pinchStartDistance = 0;
+    let pinchStartScale = 1;
+
     const initPosition = () => {
+        console.log('[See It] initPosition called');
+
         const url = getActiveRoomUrl();
         if (roomImage) roomImage.src = url;
 
-        state.x = 0;
-        state.y = 0;
+        // Set product image
+        if (productImage && state.productImageUrl) {
+            productImage.src = state.productImageUrl;
+            console.log('[See It] Product image set:', state.productImageUrl);
+
+            // Wait for product image to load to get dimensions
+            productImage.onload = () => {
+                state.productNaturalWidth = productImage.naturalWidth;
+                state.productNaturalHeight = productImage.naturalHeight;
+                console.log('[See It] Product natural size:', state.productNaturalWidth, 'x', state.productNaturalHeight);
+
+                // Set initial size (25% of container width, maintain aspect ratio)
+                if (positionContainer) {
+                    const containerRect = positionContainer.getBoundingClientRect();
+                    const targetWidth = Math.min(containerRect.width * 0.25, 200);
+                    const aspectRatio = state.productNaturalHeight / state.productNaturalWidth;
+                    state.productWidth = targetWidth;
+                    state.productHeight = targetWidth * aspectRatio;
+                    state.scale = 1.0;
+
+                    updateProductOverlay();
+                }
+            };
+        }
+
+        // Reset position to center
+        state.x = 0.5;
+        state.y = 0.5;
         state.scale = 1.0;
+
+        // Show the overlay
+        if (productOverlay) {
+            productOverlay.style.display = 'block';
+        }
+
+        // Attach interaction listeners (only once)
+        setupPositionListeners();
+
+        // Initial update
+        updateProductOverlay();
+    };
+
+    const updateProductOverlay = () => {
+        if (!productOverlay || !positionContainer) return;
+
+        const containerRect = positionContainer.getBoundingClientRect();
+        const scaledWidth = state.productWidth * state.scale;
+        const scaledHeight = state.productHeight * state.scale;
+
+        // Calculate pixel position from normalized coordinates
+        const pixelX = state.x * containerRect.width - (scaledWidth / 2);
+        const pixelY = state.y * containerRect.height - (scaledHeight / 2);
+
+        productOverlay.style.width = scaledWidth + 'px';
+        productOverlay.style.height = scaledHeight + 'px';
+        productOverlay.style.left = pixelX + 'px';
+        productOverlay.style.top = pixelY + 'px';
+        productOverlay.style.transform = 'none'; // Remove the CSS centering transform
+    };
+
+    const getEventPos = (e) => {
+        if (e.touches && e.touches.length > 0) {
+            return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
+        return { x: e.clientX, y: e.clientY };
+    };
+
+    const getPinchDistance = (e) => {
+        if (e.touches && e.touches.length >= 2) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+        return 0;
+    };
+
+    const handleDragStart = (e) => {
+        if (isResizing) return;
+
+        // Check if clicking on a resize handle
+        if (e.target.classList.contains('see-it-resize-handle')) {
+            return handleResizeStart(e);
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        isDragging = true;
+        productOverlay?.classList.add('dragging');
+
+        const pos = getEventPos(e);
+        dragStart = { x: pos.x, y: pos.y };
+
+        const containerRect = positionContainer?.getBoundingClientRect();
+        if (containerRect) {
+            productStart = {
+                x: state.x * containerRect.width,
+                y: state.y * containerRect.height
+            };
+        }
+
+        // Check for pinch gesture start
+        if (e.touches && e.touches.length >= 2) {
+            pinchStartDistance = getPinchDistance(e);
+            pinchStartScale = state.scale;
+        }
+    };
+
+    const handleDragMove = (e) => {
+        if (!isDragging && !isResizing) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Handle pinch-to-zoom
+        if (e.touches && e.touches.length >= 2 && isDragging) {
+            const currentDistance = getPinchDistance(e);
+            if (pinchStartDistance > 0) {
+                const scaleFactor = currentDistance / pinchStartDistance;
+                state.scale = Math.max(0.2, Math.min(3, pinchStartScale * scaleFactor));
+                updateProductOverlay();
+            }
+            return;
+        }
+
+        if (isDragging) {
+            const pos = getEventPos(e);
+            const containerRect = positionContainer?.getBoundingClientRect();
+            if (!containerRect) return;
+
+            const deltaX = pos.x - dragStart.x;
+            const deltaY = pos.y - dragStart.y;
+
+            const newPixelX = productStart.x + deltaX;
+            const newPixelY = productStart.y + deltaY;
+
+            // Convert back to normalized coordinates
+            state.x = Math.max(0, Math.min(1, newPixelX / containerRect.width));
+            state.y = Math.max(0, Math.min(1, newPixelY / containerRect.height));
+
+            updateProductOverlay();
+        }
+
+        if (isResizing) {
+            handleResizeMove(e);
+        }
+    };
+
+    const handleDragEnd = (e) => {
+        if (isDragging) {
+            isDragging = false;
+            productOverlay?.classList.remove('dragging');
+            pinchStartDistance = 0;
+            console.log('[See It] Product position:', { x: state.x.toFixed(3), y: state.y.toFixed(3), scale: state.scale.toFixed(2) });
+        }
+        if (isResizing) {
+            handleResizeEnd(e);
+        }
+    };
+
+    const handleResizeStart = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        isResizing = true;
+        resizeHandle = e.target.className;
+        productOverlay?.classList.add('resizing');
+
+        const pos = getEventPos(e);
+        dragStart = { x: pos.x, y: pos.y };
+        productStart = {
+            width: state.productWidth * state.scale,
+            height: state.productHeight * state.scale,
+            x: state.x,
+            y: state.y
+        };
+    };
+
+    const handleResizeMove = (e) => {
+        if (!isResizing || !positionContainer) return;
+
+        const pos = getEventPos(e);
+        const containerRect = positionContainer.getBoundingClientRect();
+
+        let deltaX = pos.x - dragStart.x;
+        let deltaY = pos.y - dragStart.y;
+
+        // Maintain aspect ratio
+        const aspectRatio = state.productNaturalHeight / state.productNaturalWidth;
+
+        let newWidth = productStart.width;
+        let newHeight = productStart.height;
+
+        if (resizeHandle.includes('se')) {
+            // Bottom-right: grow with mouse
+            newWidth = Math.max(50, productStart.width + deltaX);
+            newHeight = newWidth * aspectRatio;
+        } else if (resizeHandle.includes('sw')) {
+            // Bottom-left: opposite x
+            newWidth = Math.max(50, productStart.width - deltaX);
+            newHeight = newWidth * aspectRatio;
+        } else if (resizeHandle.includes('ne')) {
+            // Top-right: grow with x, opposite y for position
+            newWidth = Math.max(50, productStart.width + deltaX);
+            newHeight = newWidth * aspectRatio;
+        } else if (resizeHandle.includes('nw')) {
+            // Top-left: opposite both
+            newWidth = Math.max(50, productStart.width - deltaX);
+            newHeight = newWidth * aspectRatio;
+        }
+
+        // Calculate new scale
+        state.scale = newWidth / state.productWidth;
+        state.scale = Math.max(0.2, Math.min(3, state.scale));
+
+        updateProductOverlay();
+    };
+
+    const handleResizeEnd = (e) => {
+        isResizing = false;
+        resizeHandle = null;
+        productOverlay?.classList.remove('resizing');
+        console.log('[See It] Product resized, scale:', state.scale.toFixed(2));
+    };
+
+    const setupPositionListeners = () => {
+        if (positionListenersAttached) return;
+        if (!productOverlay) {
+            console.error('[See It] productOverlay not found');
+            return;
+        }
+
+        console.log('[See It] Attaching position listeners');
+
+        // Drag listeners on the overlay
+        productOverlay.addEventListener('pointerdown', handleDragStart);
+        productOverlay.addEventListener('touchstart', handleDragStart, { passive: false });
+
+        // Move and end listeners on document for smoother interaction
+        document.addEventListener('pointermove', handleDragMove);
+        document.addEventListener('touchmove', handleDragMove, { passive: false });
+        document.addEventListener('pointerup', handleDragEnd);
+        document.addEventListener('touchend', handleDragEnd);
+        document.addEventListener('pointercancel', handleDragEnd);
+        document.addEventListener('touchcancel', handleDragEnd);
+
+        // Resize handle listeners
+        const handles = productOverlay.querySelectorAll('.see-it-resize-handle');
+        handles.forEach(handle => {
+            handle.addEventListener('pointerdown', handleResizeStart);
+            handle.addEventListener('touchstart', handleResizeStart, { passive: false });
+        });
+
+        positionListenersAttached = true;
     };
 
     // --- API Calls ---

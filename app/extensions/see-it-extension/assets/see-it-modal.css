@@ -535,6 +535,109 @@
   margin-bottom: 16px;
 }
 
+/* =========================================
+   8. Product Overlay (Position Screen)
+   ========================================= */
+
+.see-it-product-overlay {
+  position: absolute;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 10;
+  /* Initial size - will be updated by JS */
+  width: 150px;
+  height: auto;
+  /* Center by default */
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  /* Visual feedback */
+  border: 2px solid transparent;
+  border-radius: 4px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.see-it-product-overlay:hover,
+.see-it-product-overlay.dragging {
+  border-color: var(--si-cta);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.see-it-product-overlay img {
+  width: 100%;
+  height: auto;
+  display: block;
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+/* Resize Handles */
+.see-it-resize-handle {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background: var(--si-surface);
+  border: 2px solid var(--si-cta);
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 11;
+  touch-action: none;
+}
+
+.see-it-product-overlay:hover .see-it-resize-handle,
+.see-it-product-overlay.dragging .see-it-resize-handle,
+.see-it-product-overlay.resizing .see-it-resize-handle {
+  opacity: 1;
+}
+
+.see-it-resize-nw {
+  top: -10px;
+  left: -10px;
+  cursor: nw-resize;
+}
+
+.see-it-resize-ne {
+  top: -10px;
+  right: -10px;
+  cursor: ne-resize;
+}
+
+.see-it-resize-sw {
+  bottom: -10px;
+  left: -10px;
+  cursor: sw-resize;
+}
+
+.see-it-resize-se {
+  bottom: -10px;
+  right: -10px;
+  cursor: se-resize;
+}
+
+/* Scale indicator */
+.see-it-scale-indicator {
+  position: absolute;
+  bottom: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--si-cta);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: var(--si-radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.see-it-product-overlay.resizing .see-it-scale-indicator {
+  opacity: 1;
+}
+
 /* Utils */
 .see-it-hidden {
   display: none !important;
