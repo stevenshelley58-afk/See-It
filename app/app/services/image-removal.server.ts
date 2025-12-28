@@ -122,7 +122,7 @@ export async function removeObject(
             editMode: "EDIT_MODE_INPAINT_REMOVAL",
             negativePrompt: "furniture, object, table, chair, lamp, decor",
             editConfig: {
-                baseSteps: 12
+                baseSteps: 50
             },
             sampleCount: 1
         }
