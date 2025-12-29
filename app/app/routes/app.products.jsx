@@ -189,13 +189,17 @@ export default function Products() {
     }, [singleFetcher.state, singleFetcher.data, showToast, revalidator]);
 
     // Prepare product (auto background removal)
-    const handlePrepare = useCallback((product, imageUrl = null) => {
+    const handlePrepare = useCallback((product, imageUrl = null, file = null) => {
         const numId = product.id.split('/').pop();
         setProcessingId(product.id);
         const fd = new FormData();
         fd.append("productId", numId);
-        if (imageUrl) fd.append("imageUrl", imageUrl);
-        singleFetcher.submit(fd, { method: "post", action: "/api/products/remove-background" });
+        if (file) {
+            fd.append("file", file);
+        } else if (imageUrl) {
+            fd.append("imageUrl", imageUrl);
+        }
+        singleFetcher.submit(fd, { method: "post", action: "/api/products/remove-background", encType: "multipart/form-data" });
     }, [singleFetcher]);
 
     // Open image selection modal
@@ -210,6 +214,11 @@ export default function Products() {
         setAdjustStartInDraw(startInDraw);
         setAdjustProduct(product);
     }, []);
+
+    // --- Upload State ---
+    const [uploadTab, setUploadTab] = useState('select'); // 'select' | 'upload'
+    const [uploadFile, setUploadFile] = useState(null);
+    const fileInputRef = useRef(null);
 
     return (
         <>
@@ -275,14 +284,27 @@ export default function Products() {
                                         }
 
                                         const status = asset?.status || 'pending';
+
+                                        // Display main image: prefer prepared (bg removed), then source, then featured
+                                        const displayImage = asset?.preparedImageUrlFresh
+                                            || asset?.preparedImageUrl
+                                            || asset?.sourceImageUrl
+                                            || product.featuredImage?.url;
+
                                         const hasPrepared = !!asset?.preparedImageUrlFresh || !!asset?.preparedImageUrl;
 
                                         return (
                                             <tr key={product.id} className="hover:bg-neutral-50/50 transition-colors">
                                                 <td className="px-4 py-3">
-                                                    <div className="w-10 h-10 rounded-lg border border-neutral-200 overflow-hidden bg-white flex items-center justify-center">
-                                                        {product.featuredImage ? (
-                                                            <img src={product.featuredImage.url} alt="" className="w-full h-full object-cover" />
+                                                    <div className="w-10 h-10 rounded-lg border border-neutral-200 overflow-hidden bg-white flex items-center justify-center relative group">
+                                                        {displayImage ? (
+                                                            <>
+                                                                <img src={displayImage} alt="" className="w-full h-full object-contain p-0.5" />
+                                                                {/* Hover tooltip for full view could be added here */}
+                                                                {hasPrepared && (
+                                                                    <div className="absolute inset-0 bg-emerald-500/10 pointer-events-none ring-1 ring-inset ring-emerald-500/20"></div>
+                                                                )}
+                                                            </>
                                                         ) : (
                                                             <div className="w-4 h-4 rounded-full bg-neutral-200" />
                                                         )}
@@ -304,6 +326,7 @@ export default function Products() {
                                                             status === 'ready' ? 'Ready (Original)' :
                                                                 status.charAt(0).toUpperCase() + status.slice(1)}
                                                     </span>
+                                                    {hasPrepared && <span className="ml-2 text-xs text-neutral-400">✨</span>}
                                                 </td>
                                                 <td className="px-4 py-3 text-right">
                                                     <div className="flex justify-end gap-2">
@@ -323,7 +346,11 @@ export default function Products() {
                                                                 <Button
                                                                     variant="secondary"
                                                                     size="sm"
-                                                                    onClick={() => openImageModal(product)}
+                                                                    onClick={() => {
+                                                                        setUploadTab('select');
+                                                                        setUploadFile(null);
+                                                                        openImageModal(product);
+                                                                    }}
                                                                 >
                                                                     Auto-Remove
                                                                 </Button>
@@ -365,7 +392,7 @@ export default function Products() {
                 </div>
             )}
 
-            {/* Image Selection Modal - Keep Polaris Modal */}
+            {/* Image Selection Modal */}
             <Modal
                 open={modalOpen}
                 onClose={() => setModalOpen(false)}
@@ -374,40 +401,95 @@ export default function Products() {
                 <Modal.Section>
                     {modalProduct && (
                         <BlockStack gap="400">
-                            <div className="bg-neutral-50 rounded-xl p-4 flex justify-center min-h-[240px] items-center">
-                                {modalProduct.images?.edges?.[selectedImg] ? (
-                                    <img
-                                        src={modalProduct.images.edges[selectedImg].node.url}
-                                        alt=""
-                                        className="max-w-full max-h-[300px] object-contain"
-                                    />
-                                ) : modalProduct.featuredImage ? (
-                                    <img
-                                        src={modalProduct.featuredImage.url}
-                                        alt=""
-                                        className="max-w-full max-h-[300px] object-contain"
-                                    />
-                                ) : (
-                                    <Text tone="subdued">No image</Text>
-                                )}
+                            {/* Tabs for Selection Mode */}
+                            <div className="flex border-b border-neutral-200 space-x-4 mb-2">
+                                <button
+                                    className={`pb-2 text-sm font-medium border-b-2 transition-colors ${uploadTab === 'select' ? 'border-neutral-900 text-neutral-900' : 'border-transparent text-neutral-500 hover:text-neutral-700'}`}
+                                    onClick={() => setUploadTab('select')}
+                                >
+                                    Select Image
+                                </button>
+                                <button
+                                    className={`pb-2 text-sm font-medium border-b-2 transition-colors ${uploadTab === 'upload' ? 'border-neutral-900 text-neutral-900' : 'border-transparent text-neutral-500 hover:text-neutral-700'}`}
+                                    onClick={() => setUploadTab('upload')}
+                                >
+                                    Upload New
+                                </button>
                             </div>
 
-                            {modalProduct.images?.edges?.length > 1 && (
-                                <div className="flex gap-2 flex-wrap">
-                                    {modalProduct.images.edges.map((edge, idx) => (
-                                        <div
-                                            key={edge.node.id}
-                                            onClick={() => setSelectedImg(idx)}
-                                            className={`w-14 h-14 rounded-lg overflow-hidden cursor-pointer border-2 ${idx === selectedImg ? 'border-neutral-900' : 'border-neutral-200'
-                                                }`}
-                                        >
+                            {uploadTab === 'select' ? (
+                                <>
+                                    <div className="bg-neutral-50 rounded-xl p-4 flex justify-center min-h-[240px] items-center">
+                                        {modalProduct.images?.edges?.[selectedImg] ? (
                                             <img
-                                                src={edge.node.url}
+                                                src={modalProduct.images.edges[selectedImg].node.url}
                                                 alt=""
-                                                className="w-full h-full object-cover"
+                                                className="max-w-full max-h-[300px] object-contain"
                                             />
+                                        ) : modalProduct.featuredImage ? (
+                                            <img
+                                                src={modalProduct.featuredImage.url}
+                                                alt=""
+                                                className="max-w-full max-h-[300px] object-contain"
+                                            />
+                                        ) : (
+                                            <Text tone="subdued">No image</Text>
+                                        )}
+                                    </div>
+
+                                    {modalProduct.images?.edges?.length > 1 && (
+                                        <div className="flex gap-2 flex-wrap">
+                                            {modalProduct.images.edges.map((edge, idx) => (
+                                                <div
+                                                    key={edge.node.id}
+                                                    onClick={() => setSelectedImg(idx)}
+                                                    className={`w-14 h-14 rounded-lg overflow-hidden cursor-pointer border-2 ${idx === selectedImg ? 'border-neutral-900' : 'border-neutral-200'
+                                                        }`}
+                                                >
+                                                    <img
+                                                        src={edge.node.url}
+                                                        alt=""
+                                                        className="w-full h-full object-cover"
+                                                    />
+                                                </div>
+                                            ))}
                                         </div>
-                                    ))}
+                                    )}
+                                </>
+                            ) : (
+                                /* Upload Tab */
+                                <div className="bg-neutral-50 rounded-xl p-8 flex flex-col justify-center items-center gap-4 border-2 border-dashed border-neutral-300 min-h-[240px]">
+                                    <input
+                                        type="file"
+                                        ref={fileInputRef}
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => setUploadFile(e.target.files[0])}
+                                    />
+                                    {uploadFile ? (
+                                        <div className="text-center">
+                                            <div className="w-20 h-20 mx-auto bg-white rounded-lg shadow-sm border border-neutral-200 flex items-center justify-center mb-2 overflow-hidden">
+                                                <img src={URL.createObjectURL(uploadFile)} className="w-full h-full object-cover" alt="Preview" />
+                                            </div>
+                                            <p className="text-sm font-medium text-neutral-900">{uploadFile.name}</p>
+                                            <button
+                                                className="text-xs text-red-600 hover:underline mt-1"
+                                                onClick={() => setUploadFile(null)}
+                                            >
+                                                Remove
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center">
+                                            <div className="w-12 h-12 mx-auto bg-neutral-200 rounded-full flex items-center justify-center mb-3">
+                                                <svg className="w-6 h-6 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+                                            </div>
+                                            <p className="text-sm text-neutral-600 mb-2">Click to select an image from your device</p>
+                                            <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
+                                                Choose File
+                                            </Button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -415,15 +497,20 @@ export default function Products() {
                                 <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
                                 <Button
                                     variant="primary"
+                                    disabled={uploadTab === 'upload' && !uploadFile}
                                     onClick={() => {
-                                        handlePrepare(
-                                            modalProduct,
-                                            modalProduct.images?.edges?.[selectedImg]?.node?.url || modalProduct.featuredImage?.url
-                                        );
+                                        if (uploadTab === 'upload') {
+                                            handlePrepare(modalProduct, null, uploadFile);
+                                        } else {
+                                            handlePrepare(
+                                                modalProduct,
+                                                modalProduct.images?.edges?.[selectedImg]?.node?.url || modalProduct.featuredImage?.url
+                                            );
+                                        }
                                         setModalOpen(false);
                                     }}
                                 >
-                                    Remove background
+                                    {uploadTab === 'upload' ? 'Upload & Remove' : 'Remove background'}
                                 </Button>
                             </InlineStack>
                         </BlockStack>

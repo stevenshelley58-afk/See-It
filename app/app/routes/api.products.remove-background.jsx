@@ -41,15 +41,17 @@ export const action = async ({ request }) => {
         const { session } = await authenticate.admin(request);
         const shopId = session.shop;
 
+        // Clone request to handle potential stream reading issues if needed, though usually standard for formData
         const formData = await request.formData();
         const productId = formData.get("productId")?.toString();
-        const imageUrl = formData.get("imageUrl")?.toString(); // Optional: direct URL from modal
+        const imageUrl = formData.get("imageUrl")?.toString();
+        const file = formData.get("file");
 
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
         }
 
-        logger.info(logContext, `Background removal request: productId=${productId}`);
+        logger.info(logContext, `Background removal request: productId=${productId}, hasFile=${!!file}, hasUrl=${!!imageUrl}`);
 
         // Get shop record
         const shop = await prisma.shop.findUnique({
@@ -68,18 +70,31 @@ export const action = async ({ request }) => {
             },
         });
 
-        // Determine source image URL - prefer passed URL, fallback to asset
-        const sourceImageUrl = imageUrl || asset?.sourceImageUrl;
+        let sourceImageUrl = imageUrl || asset?.sourceImageUrl;
+
+        // HANDLE FILE UPLOAD
+        if (file && typeof file !== 'string') {
+            logger.info(logContext, `Processing file upload: ${file.name} (${file.size} bytes)`);
+            const buffer = Buffer.from(await file.arrayBuffer());
+            const filename = `shops/${shop.id}/products/${productId}/source-${Date.now()}-${file.name}`;
+
+            // Upload source file to storage
+            sourceImageUrl = await StorageService.uploadBuffer(
+                buffer,
+                filename,
+                file.type || 'image/png'
+            );
+            logger.info(logContext, `Uploaded source image to: ${sourceImageUrl}`);
+        }
 
         if (!sourceImageUrl) {
-            return json({ success: false, error: "No image URL provided" }, { status: 400 });
+            return json({ success: false, error: "No image provided (URL or File)" }, { status: 400 });
         }
 
         // Create asset if it doesn't exist
         if (!asset) {
-            // Extract image ID from URL or generate a unique one
             const sourceImageId = extractImageId(sourceImageUrl) || `img-${Date.now()}`;
-            
+
             asset = await prisma.productAsset.create({
                 data: {
                     shopId: shop.id,
@@ -93,11 +108,11 @@ export const action = async ({ request }) => {
                 },
             });
             logger.info(logContext, `Created new ProductAsset for product ${productId}`);
-        } else if (imageUrl && imageUrl !== asset.sourceImageUrl) {
-            // Update source if a different image was selected
+        } else if (sourceImageUrl !== asset.sourceImageUrl) {
+            // Update source if a different image was selected or uploaded
             await prisma.productAsset.update({
                 where: { id: asset.id },
-                data: { sourceImageUrl: imageUrl },
+                data: { sourceImageUrl: sourceImageUrl },
             });
         }
 
