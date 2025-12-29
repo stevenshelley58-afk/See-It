@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.1.0'; // Dual-canvas architecture for better mask quality
+    const VERSION = '1.1.1'; // Fixed transparent canvas overlay
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)
@@ -385,13 +385,8 @@ document.addEventListener('DOMContentLoaded', function () {
         const maskScale = natW / uiW;
         maskCtx.lineWidth = brushSize * maskScale;
 
-        // Clear visual canvas
+        // Clear visual canvas (keep it transparent - roomPreview img shows through)
         ctx.clearRect(0, 0, uiW, uiH);
-
-        // Draw room image on visual canvas for context
-        if (roomPreview && roomPreview.complete) {
-            ctx.drawImage(roomPreview, 0, 0, uiW, uiH);
-        }
 
         console.log('[See It] Dual canvas initialized:', {
             uiCanvas: `${uiW}x${uiH}`,
@@ -582,11 +577,8 @@ document.addEventListener('DOMContentLoaded', function () {
         const natH = hiddenMaskCanvas.height;
         const scale = natW / uiW;
 
-        // Clear visual canvas and redraw room image
+        // Clear visual canvas (keep transparent - roomPreview img shows through)
         ctx.clearRect(0, 0, uiW, uiH);
-        if (roomPreview && roomPreview.complete) {
-            ctx.drawImage(roomPreview, 0, 0, uiW, uiH);
-        }
 
         // Clear and reset hidden mask canvas
         maskCtx.fillStyle = 'black';
