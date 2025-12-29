@@ -433,7 +433,8 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                     productWidthFraction,
                                 },
                                 job.stylePreset ?? "neutral",
-                                itemRequestId
+                                itemRequestId,
+                                productAsset?.renderInstructions ?? undefined
                             );
                             success = true;
                         } catch (error) {

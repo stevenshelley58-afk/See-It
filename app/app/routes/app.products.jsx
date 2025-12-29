@@ -7,15 +7,16 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PLANS } from "../billing";
 import { StorageService } from "../services/storage.server";
-import { ManualSegmentModal } from "../components/ManualSegmentModal";
 import { PageShell, Button } from "../components/ui";
+import { ProductDetailPanel } from "../components/ProductDetailPanel";
 
 export const loader = async ({ request }) => {
     const { admin, session, billing } = await authenticate.admin(request);
     const url = new URL(request.url);
     const cursor = url.searchParams.get("cursor");
     const direction = url.searchParams.get("direction") || "next";
-    const filter = url.searchParams.get("filter") || "all";
+    const statusFilter = url.searchParams.get("status") || "all";
+    const searchQuery = url.searchParams.get("q") || "";
 
     const pageSize = 12;
     let queryArgs = { first: pageSize };
@@ -25,15 +26,25 @@ export const loader = async ({ request }) => {
             : { first: pageSize, after: cursor };
     }
 
+    const queryParts = [];
+    if (searchQuery) queryParts.push(`title:*${searchQuery}* OR tag:*${searchQuery}*`);
+    if (statusFilter !== "all") queryParts.push(`status:${statusFilter}`);
+    const finalQuery = queryParts.join(" AND ");
+
     const response = await admin.graphql(
         `#graphql
-        query getProducts($first: Int, $last: Int, $after: String, $before: String) {
-            products(first: $first, last: $last, after: $after, before: $before) {
+        query getProducts($first: Int, $last: Int, $after: String, $before: String, $query: String) {
+            products(first: $first, last: $last, after: $after, before: $before, query: $query) {
                 edges {
                     node {
                         id
                         title
                         handle
+                        status
+                        totalInventory
+                        priceRangeV2 {
+                            minVariantPrice { amount currencyCode }
+                        }
                         featuredImage { id url altText }
                         images(first: 10) { edges { node { id url altText } } }
                     }
@@ -42,12 +53,30 @@ export const loader = async ({ request }) => {
                 pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
             }
         }`,
-        { variables: queryArgs }
+        { variables: { ...queryArgs, query: finalQuery } }
     );
 
     const responseJson = await response.json();
     const { edges, pageInfo } = responseJson.data.products;
-    const products = edges.map((edge) => edge.node);
+    let products = edges.map((edge) => edge.node);
+
+    // Apply custom sort point 7: active -> in-stock -> price desc
+    products.sort((a, b) => {
+        // 1. Status (ACTIVE > others)
+        if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1;
+        if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1;
+
+        // 2. In stock
+        const aInStock = (a.totalInventory || 0) > 0;
+        const bInStock = (b.totalInventory || 0) > 0;
+        if (aInStock && !bInStock) return -1;
+        if (!aInStock && bInStock) return 1;
+
+        // 3. Price desc
+        const aPrice = parseFloat(a.priceRangeV2?.minVariantPrice?.amount || '0');
+        const bPrice = parseFloat(b.priceRangeV2?.minVariantPrice?.amount || '0');
+        return bPrice - aPrice;
+    });
 
     // Billing check
     let planId = PLANS.FREE.id;
@@ -145,7 +174,8 @@ export const loader = async ({ request }) => {
         usage: { monthly: monthlyUsage },
         quota: { monthly: shop.monthlyQuota },
         isPro: shop.plan === PLANS.PRO.id,
-        filter
+        statusFilter,
+        searchQuery
     });
 };
 
@@ -155,17 +185,14 @@ export default function Products() {
     const revalidator = useRevalidator();
 
     // UI state
-    const [processingId, setProcessingId] = useState(null);
     const [toast, setToast] = useState(null);
 
-    // Image selection modal
-    const [modalOpen, setModalOpen] = useState(false);
-    const [modalProduct, setModalProduct] = useState(null);
-    const [selectedImg, setSelectedImg] = useState(0);
+    // Detail Panel state
+    const [detailPanelOpen, setDetailPanelOpen] = useState(false);
+    const [detailPanelProduct, setDetailPanelProduct] = useState(null);
 
-    // Manual adjust modal
-    const [adjustProduct, setAdjustProduct] = useState(null);
-    const [adjustStartInDraw, setAdjustStartInDraw] = useState(false);
+    // Bulk selection state
+    const [selectedIds, setSelectedIds] = useState([]);
 
     const prevState = useRef(singleFetcher.state);
 
@@ -174,210 +201,243 @@ export default function Products() {
         setTimeout(() => setToast(null), 3500);
     }, []);
 
-    // Handle API responses
-    useEffect(() => {
-        if (prevState.current !== "idle" && singleFetcher.state === "idle" && singleFetcher.data) {
-            setProcessingId(null);
-            if (singleFetcher.data.success) {
-                showToast(singleFetcher.data.message || "Background removed!", "success");
-            } else if (singleFetcher.data.error) {
-                showToast(singleFetcher.data.error, "err");
-            }
-            setTimeout(() => revalidator.revalidate(), 1200);
-        }
-        prevState.current = singleFetcher.state;
-    }, [singleFetcher.state, singleFetcher.data, showToast, revalidator]);
 
-    // Prepare product (auto background removal)
-    const handlePrepare = useCallback((product, imageUrl = null, file = null) => {
-        const numId = product.id.split('/').pop();
-        setProcessingId(product.id);
-        const fd = new FormData();
-        fd.append("productId", numId);
-        if (file) {
-            fd.append("file", file);
-        } else if (imageUrl) {
-            fd.append("imageUrl", imageUrl);
-        }
-        singleFetcher.submit(fd, { method: "post", action: "/api/products/remove-background", encType: "multipart/form-data" });
-    }, [singleFetcher]);
-
-    // Open image selection modal
-    const openImageModal = useCallback((product) => {
-        setModalProduct(product);
-        setSelectedImg(0);
-        setModalOpen(true);
+    // Open detail panel
+    const openDetailPanel = useCallback((product) => {
+        setDetailPanelProduct(product);
+        setDetailPanelOpen(true);
     }, []);
-
-    // Open adjust modal (ManualSegmentModal)
-    const openAdjustModal = useCallback((product, startInDraw = true) => {
-        setAdjustStartInDraw(startInDraw);
-        setAdjustProduct(product);
-    }, []);
-
-    // --- Upload State ---
-    const [uploadTab, setUploadTab] = useState('select'); // 'select' | 'upload'
-    const [uploadFile, setUploadFile] = useState(null);
-    const fileInputRef = useRef(null);
 
     return (
         <>
             <TitleBar title="See It Products" />
             <PageShell>
-                {/* Header */}
-                <div className="flex items-start md:items-center justify-between gap-3">
-                    <div>
-                        <h1 className="text-xl md:text-2xl font-semibold text-neutral-900 tracking-tight">
-                            Products
-                        </h1>
-                        <p className="text-neutral-500 text-sm mt-0.5">
-                            Manage your product visualizations
-                        </p>
+                <div className="space-y-6">
+                    {/* Header with Search & Filter */}
+                    <div className="flex flex-col sm:flex-row gap-3">
+                        <div className="relative flex-1">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                </svg>
+                            </span>
+                            <input
+                                type="text"
+                                placeholder="Search products..."
+                                defaultValue={searchQuery}
+                                className="w-full pl-9 pr-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/5 focus:border-neutral-900 transition-all"
+                                onChange={(e) => {
+                                    const params = new URLSearchParams(window.location.search);
+                                    if (e.target.value) params.set('q', e.target.value);
+                                    else params.delete('q');
+                                    params.delete('cursor');
+                                    window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') revalidator.revalidate();
+                                }}
+                            />
+                        </div>
+                        <select
+                            defaultValue={statusFilter}
+                            className="bg-white border border-neutral-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/5 focus:border-neutral-900 transition-all cursor-pointer"
+                            onChange={(e) => {
+                                const params = new URLSearchParams(window.location.search);
+                                params.set('status', e.target.value);
+                                params.delete('cursor');
+                                window.location.href = `${window.location.pathname}?${params.toString()}`;
+                            }}
+                        >
+                            <option value="all">All Products</option>
+                            <option value="ACTIVE">Active</option>
+                            <option value="DRAFT">Draft</option>
+                            <option value="ARCHIVED">Archived</option>
+                        </select>
+                        <Button
+                            variant="primary"
+                            className="flex-shrink-0"
+                            onClick={() => revalidator.revalidate()}
+                        >
+                            Sync
+                        </Button>
                     </div>
-                    <Button
-                        variant="primary"
-                        className="flex-shrink-0"
-                        onClick={() => revalidator.revalidate()}
-                    >
-                        Sync Products
-                    </Button>
-                </div>
 
-                {/* Quota bar */}
-                <div className="bg-white rounded-xl border border-neutral-200 p-3 md:p-4 flex items-center justify-between text-sm">
-                    <span className="text-neutral-600">
-                        <strong className="text-neutral-900">{usage.monthly}</strong> / {quota.monthly} this month
-                    </span>
-                    {!isPro && (
-                        <Link to="/app/billing" className="text-neutral-900 font-medium hover:underline">
-                            Upgrade →
-                        </Link>
-                    )}
-                </div>
-
-                {/* Product Grid */}
-                <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
-                    {products.length === 0 ? (
-                        <div className="p-10 text-center">
-                            <Text tone="subdued" as="p">No products found</Text>
-                        </div>
-                    ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 font-medium">
-                                    <tr>
-                                        <th className="px-4 py-3 font-normal w-16">Image</th>
-                                        <th className="px-4 py-3 font-normal">Product</th>
-                                        <th className="px-4 py-3 font-normal">Status</th>
-                                        <th className="px-4 py-3 font-normal text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-neutral-100">
-                                    {products.map((product) => {
-                                        let asset = null;
-                                        try {
-                                            const pid = product.id.split('/').pop();
-                                            const key = `gid://shopify/Product/${pid}`;
-                                            asset = assetsMap ? assetsMap[key] : null;
-                                        } catch (e) {
-                                            console.error("Error accessing asset for product", product.id, e);
+                    {/* Bulk Actions Bar */}
+                    {selectedIds.length > 0 && (
+                        <div className="bg-neutral-900 text-white p-4 rounded-xl flex items-center justify-between shadow-2xl animate-in slide-in-from-bottom-4 duration-300">
+                            <div className="flex items-center gap-4">
+                                <span className="text-sm font-bold bg-white/20 px-3 py-1 rounded-full">
+                                    {selectedIds.length} items selected
+                                </span>
+                                <div className="h-4 w-[1px] bg-white/20"></div>
+                                <Button
+                                    variant="primary"
+                                    onClick={() => {
+                                        if (confirm(`Prepare background removal for ${selectedIds.length} selected products?`)) {
+                                            // Bulk prepare logic
+                                            showToast(`Preparing ${selectedIds.length} products...`, "info");
                                         }
-
-                                        const status = asset?.status || 'pending';
-
-                                        // Display main image: prefer prepared (bg removed), then source, then featured
-                                        const displayImage = asset?.preparedImageUrlFresh
-                                            || asset?.preparedImageUrl
-                                            || asset?.sourceImageUrl
-                                            || product.featuredImage?.url;
-
-                                        const hasPrepared = !!asset?.preparedImageUrlFresh || !!asset?.preparedImageUrl;
-
-                                        return (
-                                            <tr key={product.id} className="hover:bg-neutral-50/50 transition-colors">
-                                                <td className="px-4 py-3">
-                                                    <div className="w-10 h-10 rounded-lg border border-neutral-200 overflow-hidden bg-white flex items-center justify-center relative group">
-                                                        {displayImage ? (
-                                                            <>
-                                                                <img src={displayImage} alt="" className="w-full h-full object-contain p-0.5" />
-                                                                {/* Hover tooltip for full view could be added here */}
-                                                                {hasPrepared && (
-                                                                    <div className="absolute inset-0 bg-emerald-500/10 pointer-events-none ring-1 ring-inset ring-emerald-500/20"></div>
-                                                                )}
-                                                            </>
-                                                        ) : (
-                                                            <div className="w-4 h-4 rounded-full bg-neutral-200" />
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="font-medium text-neutral-900">{product.title}</div>
-                                                    <div className="text-neutral-500 text-xs truncate max-w-[200px]">
-                                                        {product.handle}
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                                        status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
-                                                            status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                                                'bg-neutral-100 text-neutral-600 border-neutral-200'
-                                                        }`}>
-                                                        {status === 'ready' && hasPrepared ? 'Ready' :
-                                                            status === 'ready' ? 'Ready (Original)' :
-                                                                status.charAt(0).toUpperCase() + status.slice(1)}
-                                                    </span>
-                                                    {hasPrepared && <span className="ml-2 text-xs text-neutral-400">✨</span>}
-                                                </td>
-                                                <td className="px-4 py-3 text-right">
-                                                    <div className="flex justify-end gap-2">
-                                                        {processingId === product.id ? (
-                                                            <div className="h-8 px-3 flex items-center text-neutral-400">
-                                                                <span className="animate-spin mr-2">⟳</span> Processing...
-                                                            </div>
-                                                        ) : (
-                                                            <>
-                                                                <Button
-                                                                    variant="secondary"
-                                                                    size="sm"
-                                                                    onClick={() => openAdjustModal(product, true)}
-                                                                >
-                                                                    Draw Mask
-                                                                </Button>
-                                                                <Button
-                                                                    variant="secondary"
-                                                                    size="sm"
-                                                                    onClick={() => {
-                                                                        setUploadTab('select');
-                                                                        setUploadFile(null);
-                                                                        openImageModal(product);
-                                                                    }}
-                                                                >
-                                                                    Auto-Remove
-                                                                </Button>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                                    }}
+                                    className="bg-white text-neutral-900 hover:bg-neutral-100 border-none"
+                                >
+                                    Prepare Selected
+                                </Button>
+                            </div>
+                            <button
+                                onClick={() => setSelectedIds([])}
+                                className="text-white/60 hover:text-white transition-colors"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
                         </div>
                     )}
 
-                    {/* Pagination */}
-                    <div className="border-t border-neutral-200 p-3 flex justify-center gap-2">
-                        {pageInfo?.hasPreviousPage && (
-                            <Link to={`?cursor=${pageInfo.startCursor}&direction=previous&filter=${filter}`}>
-                                <Button variant="secondary" size="sm">Previous</Button>
+                    {/* Quota bar */}
+                    <div className="bg-white rounded-xl border border-neutral-200 p-3 md:p-4 flex items-center justify-between text-sm">
+                        <span className="text-neutral-600">
+                            <strong className="text-neutral-900">{usage.monthly}</strong> / {quota.monthly} this month
+                        </span>
+                        {!isPro && (
+                            <Link to="/app/billing" className="text-neutral-900 font-medium hover:underline">
+                                Upgrade →
                             </Link>
                         )}
-                        {pageInfo?.hasNextPage && (
-                            <Link to={`?cursor=${pageInfo.endCursor}&direction=next&filter=${filter}`}>
-                                <Button variant="secondary" size="sm">Next</Button>
-                            </Link>
+                    </div>
+
+                    {/* Product Grid */}
+                    <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+                        {products.length === 0 ? (
+                            <div className="p-10 text-center">
+                                <Text tone="subdued" as="p">No products found</Text>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 font-medium">
+                                        <tr>
+                                            <th className="px-4 py-3 font-normal w-12">
+                                                <input
+                                                    type="checkbox"
+                                                    className="rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900/5 cursor-pointer"
+                                                    checked={selectedIds.length === products.length && products.length > 0}
+                                                    onChange={(e) => {
+                                                        if (e.target.checked) setSelectedIds(products.map(p => p.id));
+                                                        else setSelectedIds([]);
+                                                    }}
+                                                />
+                                            </th>
+                                            <th className="px-4 py-3 font-normal w-24">Images</th>
+                                            <th className="px-4 py-3 font-normal">Product</th>
+                                            <th className="px-4 py-3 font-normal">Price</th>
+                                            <th className="px-4 py-3 font-normal">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-neutral-100">
+                                        {products.map((product) => {
+                                            let asset = null;
+                                            try {
+                                                const pid = product.id.split('/').pop();
+                                                const key = `gid://shopify/Product/${pid}`;
+                                                asset = assetsMap ? assetsMap[key] : null;
+                                            } catch (e) {
+                                                console.error("Error accessing asset for product", product.id, e);
+                                            }
+
+                                            const status = asset?.status || 'pending';
+                                            const displayImage = asset?.preparedImageUrlFresh
+                                                || asset?.preparedImageUrl
+                                                || asset?.sourceImageUrl
+                                                || product.featuredImage?.url;
+                                            const hasPrepared = !!asset?.preparedImageUrlFresh || !!asset?.preparedImageUrl;
+                                            const price = product.priceRangeV2?.minVariantPrice;
+                                            const originalImage = product.featuredImage?.url;
+
+                                            return (
+                                                <tr
+                                                    key={product.id}
+                                                    onClick={() => openDetailPanel(product)}
+                                                    className={`hover:bg-neutral-50/50 transition-colors cursor-pointer ${selectedIds.includes(product.id) ? 'bg-neutral-50' : ''}`}
+                                                >
+                                                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                                        <input
+                                                            type="checkbox"
+                                                            className="rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900/5 cursor-pointer"
+                                                            checked={selectedIds.includes(product.id)}
+                                                            onChange={(e) => {
+                                                                if (e.target.checked) setSelectedIds([...selectedIds, product.id]);
+                                                                else setSelectedIds(selectedIds.filter(id => id !== product.id));
+                                                            }}
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <div className="flex items-center -space-x-2">
+                                                            <div className="w-10 h-10 rounded-lg border border-neutral-200 overflow-hidden bg-white flex items-center justify-center relative shadow-sm ring-2 ring-white z-10">
+                                                                {originalImage ? (
+                                                                    <img src={originalImage} alt="" className="w-full h-full object-contain p-0.5" />
+                                                                ) : (
+                                                                    <div className="w-4 h-4 rounded-full bg-neutral-200" />
+                                                                )}
+                                                            </div>
+                                                            {hasPrepared && (
+                                                                <div className="w-10 h-10 rounded-lg border border-emerald-200 overflow-hidden bg-white flex items-center justify-center relative shadow-md ring-2 ring-white z-20 animate-in slide-in-from-left-2 duration-500">
+                                                                    <img src={displayImage} alt="" className="w-full h-full object-contain p-0.5" />
+                                                                    <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none"></div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <div className="font-bold text-neutral-900">{product.title}</div>
+                                                        <div className="text-neutral-500 text-xs truncate max-w-[180px]">
+                                                            {product.handle}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <div className="text-neutral-900 font-medium whitespace-nowrap">
+                                                            {price ? `${parseFloat(price.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} ${price.currencyCode}` : '—'}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                                status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
+                                                                    status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                                                        'bg-neutral-100 text-neutral-600 border-neutral-200'
+                                                                }`}>
+                                                                {status === 'ready' && hasPrepared ? 'Ready' :
+                                                                    status === 'ready' ? 'Original' :
+                                                                        status}
+                                                            </span>
+                                                            {product.status !== 'ACTIVE' && (
+                                                                <span className="text-[10px] font-bold text-neutral-400 bg-neutral-50 px-1.5 py-0.5 rounded border border-neutral-200 uppercase">
+                                                                    {product.status}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
                         )}
+
+                        {/* Pagination */}
+                        <div className="border-t border-neutral-200 p-3 flex justify-center gap-2">
+                            {pageInfo?.hasPreviousPage && (
+                                <Link to={`?cursor=${pageInfo.startCursor}&direction=previous&q=${searchQuery}&status=${statusFilter}`}>
+                                    <Button variant="secondary" size="sm">Previous</Button>
+                                </Link>
+                            )}
+                            {pageInfo?.hasNextPage && (
+                                <Link to={`?cursor=${pageInfo.endCursor}&direction=next&q=${searchQuery}&status=${statusFilter}`}>
+                                    <Button variant="secondary" size="sm">Next</Button>
+                                </Link>
+                            )}
+                        </div>
                     </div>
                 </div>
             </PageShell>
@@ -392,151 +452,19 @@ export default function Products() {
                 </div>
             )}
 
-            {/* Image Selection Modal */}
-            <Modal
-                open={modalOpen}
-                onClose={() => setModalOpen(false)}
-                title={modalProduct?.title || "Select image"}
-            >
-                <Modal.Section>
-                    {modalProduct && (
-                        <BlockStack gap="400">
-                            {/* Tabs for Selection Mode */}
-                            <div className="flex border-b border-neutral-200 space-x-4 mb-2">
-                                <button
-                                    className={`pb-2 text-sm font-medium border-b-2 transition-colors ${uploadTab === 'select' ? 'border-neutral-900 text-neutral-900' : 'border-transparent text-neutral-500 hover:text-neutral-700'}`}
-                                    onClick={() => setUploadTab('select')}
-                                >
-                                    Select Image
-                                </button>
-                                <button
-                                    className={`pb-2 text-sm font-medium border-b-2 transition-colors ${uploadTab === 'upload' ? 'border-neutral-900 text-neutral-900' : 'border-transparent text-neutral-500 hover:text-neutral-700'}`}
-                                    onClick={() => setUploadTab('upload')}
-                                >
-                                    Upload New
-                                </button>
-                            </div>
-
-                            {uploadTab === 'select' ? (
-                                <>
-                                    <div className="bg-neutral-50 rounded-xl p-4 flex justify-center min-h-[240px] items-center">
-                                        {modalProduct.images?.edges?.[selectedImg] ? (
-                                            <img
-                                                src={modalProduct.images.edges[selectedImg].node.url}
-                                                alt=""
-                                                className="max-w-full max-h-[300px] object-contain"
-                                            />
-                                        ) : modalProduct.featuredImage ? (
-                                            <img
-                                                src={modalProduct.featuredImage.url}
-                                                alt=""
-                                                className="max-w-full max-h-[300px] object-contain"
-                                            />
-                                        ) : (
-                                            <Text tone="subdued">No image</Text>
-                                        )}
-                                    </div>
-
-                                    {modalProduct.images?.edges?.length > 1 && (
-                                        <div className="flex gap-2 flex-wrap">
-                                            {modalProduct.images.edges.map((edge, idx) => (
-                                                <div
-                                                    key={edge.node.id}
-                                                    onClick={() => setSelectedImg(idx)}
-                                                    className={`w-14 h-14 rounded-lg overflow-hidden cursor-pointer border-2 ${idx === selectedImg ? 'border-neutral-900' : 'border-neutral-200'
-                                                        }`}
-                                                >
-                                                    <img
-                                                        src={edge.node.url}
-                                                        alt=""
-                                                        className="w-full h-full object-cover"
-                                                    />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
-                                /* Upload Tab */
-                                <div className="bg-neutral-50 rounded-xl p-8 flex flex-col justify-center items-center gap-4 border-2 border-dashed border-neutral-300 min-h-[240px]">
-                                    <input
-                                        type="file"
-                                        ref={fileInputRef}
-                                        accept="image/*"
-                                        className="hidden"
-                                        onChange={(e) => setUploadFile(e.target.files[0])}
-                                    />
-                                    {uploadFile ? (
-                                        <div className="text-center">
-                                            <div className="w-20 h-20 mx-auto bg-white rounded-lg shadow-sm border border-neutral-200 flex items-center justify-center mb-2 overflow-hidden">
-                                                <img src={URL.createObjectURL(uploadFile)} className="w-full h-full object-cover" alt="Preview" />
-                                            </div>
-                                            <p className="text-sm font-medium text-neutral-900">{uploadFile.name}</p>
-                                            <button
-                                                className="text-xs text-red-600 hover:underline mt-1"
-                                                onClick={() => setUploadFile(null)}
-                                            >
-                                                Remove
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <div className="text-center">
-                                            <div className="w-12 h-12 mx-auto bg-neutral-200 rounded-full flex items-center justify-center mb-3">
-                                                <svg className="w-6 h-6 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
-                                            </div>
-                                            <p className="text-sm text-neutral-600 mb-2">Click to select an image from your device</p>
-                                            <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
-                                                Choose File
-                                            </Button>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            <InlineStack align="end" gap="200">
-                                <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
-                                <Button
-                                    variant="primary"
-                                    disabled={uploadTab === 'upload' && !uploadFile}
-                                    onClick={() => {
-                                        if (uploadTab === 'upload') {
-                                            handlePrepare(modalProduct, null, uploadFile);
-                                        } else {
-                                            handlePrepare(
-                                                modalProduct,
-                                                modalProduct.images?.edges?.[selectedImg]?.node?.url || modalProduct.featuredImage?.url
-                                            );
-                                        }
-                                        setModalOpen(false);
-                                    }}
-                                >
-                                    {uploadTab === 'upload' ? 'Upload & Remove' : 'Remove background'}
-                                </Button>
-                            </InlineStack>
-                        </BlockStack>
-                    )}
-                </Modal.Section>
-            </Modal>
-
-            {/* Manual Adjustment Modal */}
-            {adjustProduct && (
-                <ManualSegmentModal
-                    open={!!adjustProduct}
-                    onClose={() => setAdjustProduct(null)}
-                    productId={adjustProduct.id.split('/').pop()}
-                    productTitle={adjustProduct.title}
-                    sourceImageUrl={
-                        assetsMap[adjustProduct.id]?.sourceImageUrl ||
-                        adjustProduct.featuredImage?.url
-                    }
-                    productImages={adjustProduct.images?.edges?.map(e => ({
-                        url: e.node.url,
-                        altText: e.node.altText
-                    })) || []}
-                    startInDrawMode={adjustStartInDraw}
-                    onSuccess={() => {
-                        showToast("Background updated!", "success");
-                        setTimeout(() => revalidator.revalidate(), 500);
+            {/* Product Detail Panel (One-stop shop) */}
+            {detailPanelProduct && (
+                <ProductDetailPanel
+                    key={detailPanelProduct.id}
+                    isOpen={detailPanelOpen}
+                    onClose={() => {
+                        setDetailPanelOpen(false);
+                        revalidator.revalidate(); // Refresh when closed to ensure we have latest image/status
+                    }}
+                    product={detailPanelProduct}
+                    asset={assetsMap[detailPanelProduct.id]}
+                    onSave={(metadata) => {
+                        showToast("Settings saved!", "success");
                     }}
                 />
             )}

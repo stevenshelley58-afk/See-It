@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>See It - Product Preparation Demo v2</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .checkerboard {
+      background: repeating-conic-gradient(#f0f0f0 0% 25%, #fff 0% 50%) 50% / 20px 20px;
+    }
+    .fade-in { animation: fadeIn 0.2s ease-out; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .slide-up { animation: slideUp 0.3s ease-out; }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-neutral-100 min-h-screen">
+  <div id="app" class="p-4 md:p-6">
+    <!-- Header -->
+    <div class="max-w-6xl mx-auto mb-6">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 class="text-xl md:text-2xl font-semibold text-neutral-900">See It Products</h1>
+          <p class="text-neutral-500 text-sm mt-1">Prepare products for visualization</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-sm text-neutral-500 bg-white px-3 py-1.5 rounded-lg border border-neutral-200">
+            <strong>25</strong> / 300 this month
+          </span>
+          <button class="px-4 py-2 bg-neutral-900 text-white rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors">
+            Sync Products
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search & Bulk Actions Bar -->
+    <div class="max-w-6xl mx-auto mb-4">
+      <div class="bg-white rounded-xl border border-neutral-200 p-3 flex flex-col md:flex-row items-stretch md:items-center gap-3">
+        <!-- Search -->
+        <div class="flex-1 relative">
+          <svg class="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+          </svg>
+          <input 
+            type="text" 
+            id="searchInput"
+            placeholder="Search products..." 
+            class="w-full pl-10 pr-4 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-400"
+            oninput="filterProducts()"
+          >
+        </div>
+        
+        <!-- Bulk Actions (shown when items selected) -->
+        <div id="bulkActions" class="hidden items-center gap-3">
+          <span class="text-sm text-neutral-600"><strong id="selectedCount">0</strong> selected</span>
+          <button 
+            onclick="bulkPrepare()"
+            class="px-4 py-2 bg-neutral-900 text-white rounded-lg text-sm font-medium hover:bg-neutral-800 transition-colors"
+          >
+            Prepare Selected
+          </button>
+          <button 
+            onclick="clearSelection()"
+            class="px-3 py-2 text-neutral-500 text-sm hover:text-neutral-700 transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Products Table -->
+    <div class="max-w-6xl mx-auto">
+      <div class="bg-white rounded-xl border border-neutral-200 overflow-hidden shadow-sm">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-neutral-50 border-b border-neutral-200">
+            <tr>
+              <th class="px-4 py-3 font-medium text-neutral-500 w-10">
+                <input type="checkbox" id="selectAll" onchange="toggleSelectAll()" class="w-4 h-4 rounded border-neutral-300">
+              </th>
+              <th class="px-4 py-3 font-medium text-neutral-500 w-32">Images</th>
+              <th class="px-4 py-3 font-medium text-neutral-500">Product</th>
+              <th class="px-4 py-3 font-medium text-neutral-500 w-24">Price</th>
+              <th class="px-4 py-3 font-medium text-neutral-500 w-28">Status</th>
+            </tr>
+          </thead>
+          <tbody id="productsList" class="divide-y divide-neutral-100">
+            <!-- Products injected by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Prepare Warning Modal -->
+  <div id="bulkModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 hidden">
+    <div class="bg-white rounded-2xl w-full max-w-md overflow-hidden fade-in">
+      <div class="px-6 py-4 border-b border-neutral-200">
+        <h2 class="text-lg font-semibold">Prepare Multiple Products</h2>
+      </div>
+      <div class="p-6">
+        <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl mb-4">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            <div>
+              <p class="font-medium text-amber-800">Processing takes time</p>
+              <p class="text-sm text-amber-700 mt-1">
+                Each product takes ~10-30 seconds. <strong id="bulkCount">0</strong> products will be queued and processed in the background.
+              </p>
+            </div>
+          </div>
+        </div>
+        <p class="text-sm text-neutral-600 mb-4">
+          Products will use auto background removal. You can refine individual products later if needed.
+        </p>
+        <div class="flex justify-end gap-3">
+          <button onclick="closeBulkModal()" class="px-4 py-2.5 text-neutral-600 text-sm font-medium hover:text-neutral-900 transition-colors">
+            Cancel
+          </button>
+          <button onclick="confirmBulkPrepare()" class="px-4 py-2.5 bg-neutral-900 text-white rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors">
+            Queue All
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Product Detail Modal -->
+  <div id="modalContainer" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 hidden">
+    <!-- Modal content injected by JS -->
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-3 bg-neutral-900 text-white rounded-xl text-sm font-medium shadow-lg hidden slide-up">
+    Product saved successfully
+  </div>
+
+  <script>
+    // Mock product data - sorted by active, in stock, then price
+    const products = [
+      {
+        id: '1',
+        title: 'Antique Floor Mirror',
+        handle: 'antique-floor-mirror',
+        price: 899,
+        inventory: 12,
+        active: true,
+        status: 'ready',
+        hasCleanedImage: true,
+        images: [
+          'https://images.unsplash.com/photo-1618220179428-22790b461013?w=400&h=400&fit=crop',
+          'https://images.unsplash.com/photo-1582192730841-2a682d7375f9?w=400&h=400&fit=crop',
+        ],
+        preparedImage: 'https://images.unsplash.com/photo-1618220179428-22790b461013?w=400&h=400&fit=crop',
+        metadata: { surface: 'floor', orientation: 'leaning', material: 'reflective', shadow: 'soft', dimensions: { height: 180, width: 60 }, customInstructions: '' }
+      },
+      {
+        id: '2',
+        title: 'Modern Velvet Sofa',
+        handle: 'modern-velvet-sofa',
+        price: 2499,
+        inventory: 3,
+        active: true,
+        status: 'ready',
+        hasCleanedImage: true,
+        images: [
+          'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&h=400&fit=crop',
+          'https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?w=400&h=400&fit=crop',
+        ],
+        preparedImage: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&h=400&fit=crop',
+        metadata: { surface: 'floor', orientation: 'upright', material: 'fabric', shadow: 'contact', dimensions: { height: 85, width: 220 }, customInstructions: 'Deep teal velvet with brass legs' }
+      },
+      {
+        id: '3',
+        title: 'Handmade Ceramic Vase',
+        handle: 'ceramic-vase',
+        price: 149,
+        inventory: 24,
+        active: true,
+        status: 'ready',
+        hasCleanedImage: true,
+        images: [
+          'https://images.unsplash.com/photo-1612198188060-c7c2a3b66eae?w=400&h=400&fit=crop',
+        ],
+        preparedImage: 'https://images.unsplash.com/photo-1612198188060-c7c2a3b66eae?w=400&h=400&fit=crop',
+        metadata: { surface: 'table', orientation: 'upright', material: 'matte', shadow: 'contact', dimensions: { height: 35, width: 18 }, customInstructions: '' }
+      },
+      {
+        id: '4',
+        title: 'Yellow Snowboard',
+        handle: 'yellow-snowboard',
+        price: 599,
+        inventory: 8,
+        active: true,
+        status: 'pending',
+        hasCleanedImage: false,
+        images: [
+          'https://images.unsplash.com/photo-1522056615691-da7b8106c665?w=400&h=400&fit=crop',
+        ],
+        preparedImage: null,
+        metadata: null
+      },
+      {
+        id: '5',
+        title: 'Abstract Wall Art',
+        handle: 'abstract-wall-art',
+        price: 399,
+        inventory: 15,
+        active: true,
+        status: 'pending',
+        hasCleanedImage: false,
+        images: [
+          'https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=400&h=400&fit=crop',
+          'https://images.unsplash.com/photo-1541961017774-22349e4a1262?w=400&h=400&fit=crop',
+        ],
+        preparedImage: null,
+        metadata: null
+      },
+      {
+        id: '6',
+        title: 'Ceramic Table Lamp',
+        handle: 'ceramic-table-lamp',
+        price: 199,
+        inventory: 0,
+        active: true,
+        status: 'failed',
+        hasCleanedImage: false,
+        images: [
+          'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?w=400&h=400&fit=crop',
+        ],
+        preparedImage: null,
+        metadata: null
+      },
+    ];
+
+    // State
+    let selectedProduct = null;
+    let selectedImageIdx = 0;
+    let currentTab = 'images';
+    let isProcessing = false;
+    let editedMetadata = null;
+    let selectedIds = new Set();
+    let searchQuery = '';
+
+    // Sort products: active first, then in-stock, then by price
+    function sortProducts(list) {
+      return [...list].sort((a, b) => {
+        // Active first
+        if (a.active !== b.active) return b.active - a.active;
+        // In stock first
+        const aInStock = a.inventory > 0;
+        const bInStock = b.inventory > 0;
+        if (aInStock !== bInStock) return bInStock - aInStock;
+        // Then by price descending
+        return b.price - a.price;
+      });
+    }
+
+    // Filter products by search
+    function getFilteredProducts() {
+      let filtered = products;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        filtered = products.filter(p => 
+          p.title.toLowerCase().includes(q) || 
+          p.handle.toLowerCase().includes(q)
+        );
+      }
+      return sortProducts(filtered);
+    }
+
+    function filterProducts() {
+      searchQuery = document.getElementById('searchInput').value;
+      renderProductsList();
+    }
+
+    // Selection handlers
+    function toggleSelect(id, e) {
+      e.stopPropagation();
+      if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+      } else {
+        selectedIds.add(id);
+      }
+      updateBulkUI();
+      renderProductsList();
+    }
+
+    function toggleSelectAll() {
+      const allChecked = document.getElementById('selectAll').checked;
+      const filtered = getFilteredProducts();
+      if (allChecked) {
+        filtered.forEach(p => selectedIds.add(p.id));
+      } else {
+        selectedIds.clear();
+      }
+      updateBulkUI();
+      renderProductsList();
+    }
+
+    function clearSelection() {
+      selectedIds.clear();
+      document.getElementById('selectAll').checked = false;
+      updateBulkUI();
+      renderProductsList();
+    }
+
+    function updateBulkUI() {
+      const bulkActions = document.getElementById('bulkActions');
+      const selectedCount = document.getElementById('selectedCount');
+      if (selectedIds.size > 0) {
+        bulkActions.classList.remove('hidden');
+        bulkActions.classList.add('flex');
+        selectedCount.textContent = selectedIds.size;
+      } else {
+        bulkActions.classList.add('hidden');
+        bulkActions.classList.remove('flex');
+      }
+    }
+
+    // Bulk prepare
+    function bulkPrepare() {
+      document.getElementById('bulkCount').textContent = selectedIds.size;
+      document.getElementById('bulkModal').classList.remove('hidden');
+    }
+
+    function closeBulkModal() {
+      document.getElementById('bulkModal').classList.add('hidden');
+    }
+
+    function confirmBulkPrepare() {
+      closeBulkModal();
+      showToast(`${selectedIds.size} products queued for processing`);
+      // In real app: submit to queue API
+      clearSelection();
+    }
+
+    // Render products list
+    function renderProductsList() {
+      const tbody = document.getElementById('productsList');
+      const filtered = getFilteredProducts();
+      
+      tbody.innerHTML = filtered.map(p => `
+        <tr class="hover:bg-neutral-50 cursor-pointer transition-colors" onclick="openProduct('${p.id}')">
+          <td class="px-4 py-3" onclick="event.stopPropagation()">
+            <input 
+              type="checkbox" 
+              ${selectedIds.has(p.id) ? 'checked' : ''} 
+              onchange="toggleSelect('${p.id}', event)"
+              class="w-4 h-4 rounded border-neutral-300"
+            >
+          </td>
+          <td class="px-4 py-3">
+            <div class="flex items-center gap-2">
+              <!-- Original Image -->
+              <div class="w-12 h-12 rounded-lg border border-neutral-200 overflow-hidden bg-neutral-50 flex-shrink-0">
+                <img src="${p.images[0]}" alt="" class="w-full h-full object-cover">
+              </div>
+              <!-- Arrow + Prepared Image (if exists) -->
+              ${p.preparedImage ? `
+                <span class="text-neutral-300 text-xs">→</span>
+                <div class="w-12 h-12 rounded-lg border-2 border-emerald-400 overflow-hidden checkerboard flex-shrink-0">
+                  <img src="${p.preparedImage}" alt="" class="w-full h-full object-contain">
+                </div>
+              ` : ''}
+            </div>
+          </td>
+          <td class="px-4 py-3">
+            <div class="font-medium text-neutral-900">${p.title}</div>
+            <div class="text-neutral-500 text-xs">${p.handle}</div>
+          </td>
+          <td class="px-4 py-3">
+            <div class="font-medium text-neutral-900">$${p.price}</div>
+            <div class="text-xs ${p.inventory > 0 ? 'text-neutral-500' : 'text-red-500'}">
+              ${p.inventory > 0 ? `${p.inventory} in stock` : 'Out of stock'}
+            </div>
+          </td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${
+              p.status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+              p.status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
+              p.status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+              'bg-neutral-100 text-neutral-600 border-neutral-200'
+            }">
+              <span class="w-1.5 h-1.5 rounded-full ${
+                p.status === 'ready' ? 'bg-emerald-500' :
+                p.status === 'failed' ? 'bg-red-500' :
+                p.status === 'processing' ? 'bg-blue-500 animate-pulse' :
+                'bg-neutral-400'
+              }"></span>
+              ${p.status === 'ready' ? 'Ready' : p.status === 'failed' ? 'Failed' : p.status === 'processing' ? 'Processing' : 'Pending'}
+            </span>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // Open product modal
+    function openProduct(id) {
+      selectedProduct = products.find(p => p.id === id);
+      selectedImageIdx = 0;
+      currentTab = 'images';
+      editedMetadata = selectedProduct.metadata ? { ...selectedProduct.metadata } : {
+        surface: 'floor',
+        orientation: 'upright',
+        material: 'matte',
+        shadow: 'contact',
+        dimensions: { height: null, width: null },
+        customInstructions: ''
+      };
+      renderModal();
+      document.getElementById('modalContainer').classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('modalContainer').classList.add('hidden');
+      selectedProduct = null;
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      renderModal();
+    }
+
+    function selectImage(idx) {
+      selectedImageIdx = idx;
+      renderModal();
+    }
+
+    function autoRemoveBackground() {
+      isProcessing = true;
+      renderModal();
+      
+      setTimeout(() => {
+        isProcessing = false;
+        selectedProduct.hasCleanedImage = true;
+        selectedProduct.status = 'ready';
+        selectedProduct.preparedImage = selectedProduct.images[selectedImageIdx];
+        renderModal();
+        renderProductsList();
+      }, 2500);
+    }
+
+    function updateMetadata(key, value) {
+      if (key.includes('.')) {
+        const [parent, child] = key.split('.');
+        editedMetadata[parent][child] = value;
+      } else {
+        editedMetadata[key] = value;
+      }
+      renderModal();
+    }
+
+    function saveProduct() {
+      selectedProduct.metadata = { ...editedMetadata };
+      renderProductsList();
+      closeModal();
+      showToast('Product saved successfully');
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.remove('hidden');
+      setTimeout(() => toast.classList.add('hidden'), 3000);
+    }
+
+    function openRefine() {
+      currentTab = 'refine';
+      renderModal();
+    }
+
+    // Render modal
+    function renderModal() {
+      if (!selectedProduct) return;
+      
+      const p = selectedProduct;
+      const modal = document.getElementById('modalContainer');
+      
+      // Refine view
+      if (currentTab === 'refine') {
+        modal.innerHTML = `
+          <div class="bg-white rounded-2xl w-full max-w-xl overflow-hidden fade-in">
+            <div class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between">
+              <h2 class="text-lg font-semibold">Refine: ${p.title}</h2>
+              <button onclick="switchTab('images')" class="p-2 hover:bg-neutral-100 rounded-lg">
+                <svg class="w-5 h-5 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="p-6">
+              <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
+                <p class="text-sm text-blue-800">
+                  <strong>Paint over the product</strong> you want to keep. AI will refine the edges automatically.
+                </p>
+              </div>
+              
+              <div class="flex items-center gap-4 mb-4">
+                <label class="text-sm text-neutral-600">Brush Size:</label>
+                <input type="range" min="10" max="80" value="30" class="w-32">
+                <span class="text-sm text-neutral-500">30px</span>
+              </div>
+              
+              <div class="flex justify-center mb-4">
+                <div class="relative">
+                  <img src="${p.images[selectedImageIdx]}" class="w-96 h-96 object-contain border-2 border-blue-400 rounded-xl">
+                  <div class="absolute inset-0 flex items-center justify-center bg-black/10 rounded-xl">
+                    <span class="text-sm text-neutral-600 bg-white/90 px-3 py-1 rounded-lg">Draw on image to select product</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="flex items-center gap-3">
+                <button onclick="applyMask()" class="px-4 py-2.5 bg-neutral-900 text-white rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors">
+                  Apply
+                </button>
+                <button class="px-4 py-2.5 bg-white border border-neutral-200 text-neutral-700 rounded-xl text-sm font-medium hover:bg-neutral-50 transition-colors">
+                  Clear
+                </button>
+                <button onclick="switchTab('images')" class="px-4 py-2.5 text-neutral-500 text-sm font-medium hover:text-neutral-700 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+      
+      modal.innerHTML = `
+        <div class="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col fade-in">
+          <!-- Header -->
+          <div class="flex items-center justify-between px-6 py-4 border-b border-neutral-200">
+            <div class="flex items-center gap-3">
+              <h2 class="text-lg font-semibold text-neutral-900">${p.title}</h2>
+              <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${
+                p.hasCleanedImage ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-neutral-100 text-neutral-600 border-neutral-200'
+              }">
+                <span class="w-1.5 h-1.5 rounded-full ${p.hasCleanedImage ? 'bg-emerald-500' : 'bg-neutral-400'}"></span>
+                ${p.hasCleanedImage ? 'Ready' : 'Pending'}
+              </span>
+            </div>
+            <button onclick="closeModal()" class="p-2 hover:bg-neutral-100 rounded-lg transition-colors">
+              <svg class="w-5 h-5 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Tabs -->
+          <div class="flex border-b border-neutral-200 px-6">
+            <button onclick="switchTab('images')" class="px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              currentTab === 'images' ? 'border-neutral-900 text-neutral-900' : 'border-transparent text-neutral-500 hover:text-neutral-700'
+            }">
+              Prepare Image
+            </button>
+            <button onclick="switchTab('settings')" class="px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              currentTab === 'settings' ? 'border-neutral-900 text-neutral-900' : 'border-transparent text-neutral-500 hover:text-neutral-700'
+            }">
+              Placement Settings
+            </button>
+          </div>
+
+          <!-- Content -->
+          <div class="flex-1 overflow-y-auto p-6">
+            ${currentTab === 'images' ? renderImagesTab(p) : renderSettingsTab(p)}
+          </div>
+
+          <!-- Footer -->
+          <div class="flex items-center justify-between px-6 py-4 border-t border-neutral-200 bg-neutral-50">
+            <button onclick="closeModal()" class="px-4 py-2.5 text-neutral-600 text-sm font-medium hover:text-neutral-900 transition-colors">
+              Cancel
+            </button>
+            <button onclick="saveProduct()" class="px-6 py-2.5 bg-neutral-900 text-white rounded-xl font-medium text-sm hover:bg-neutral-800 transition-colors">
+              Save Changes
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // Render images tab
+    function renderImagesTab(p) {
+      return `
+        <div class="space-y-6">
+          <!-- Image Selection -->
+          ${p.images.length > 1 ? `
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-2">Select Source Image</label>
+              <div class="flex gap-2">
+                ${p.images.map((url, idx) => `
+                  <button onclick="selectImage(${idx})" class="w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
+                    selectedImageIdx === idx ? 'border-neutral-900 ring-2 ring-neutral-900/20' : 'border-neutral-200 hover:border-neutral-400'
+                  }">
+                    <img src="${url}" alt="" class="w-full h-full object-cover">
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Before/After -->
+          <div class="grid grid-cols-2 gap-6">
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-2">Original</label>
+              <div class="aspect-square rounded-xl border border-neutral-200 overflow-hidden bg-neutral-50">
+                <img src="${p.images[selectedImageIdx]}" alt="Original" class="w-full h-full object-contain">
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-2">
+                ${p.hasCleanedImage ? 'Prepared' : 'Will be used in app'}
+              </label>
+              <div class="aspect-square rounded-xl border overflow-hidden flex items-center justify-center ${
+                p.hasCleanedImage ? 'border-emerald-400 border-2 checkerboard' : 'border-neutral-200 border-dashed bg-neutral-50'
+              }">
+                ${isProcessing ? `
+                  <div class="flex flex-col items-center gap-3">
+                    <div class="w-8 h-8 border-2 border-neutral-300 border-t-neutral-900 rounded-full animate-spin"></div>
+                    <span class="text-sm text-neutral-500">Removing background...</span>
+                  </div>
+                ` : p.hasCleanedImage ? `
+                  <img src="${p.preparedImage || p.images[selectedImageIdx]}" alt="Prepared" class="w-full h-full object-contain">
+                ` : `
+                  <span class="text-sm text-neutral-400 px-4 text-center">Click "Auto Remove" to process</span>
+                `}
+              </div>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex items-center gap-3">
+            <button onclick="autoRemoveBackground()" ${isProcessing ? 'disabled' : ''} class="px-4 py-2.5 bg-neutral-900 text-white rounded-xl text-sm font-medium hover:bg-neutral-800 disabled:opacity-50 transition-colors">
+              ${isProcessing ? 'Processing...' : p.hasCleanedImage ? 'Re-process' : 'Auto Remove Background'}
+            </button>
+            ${p.hasCleanedImage ? `
+              <button onclick="openRefine()" class="px-4 py-2.5 bg-white border border-neutral-200 text-neutral-700 rounded-xl text-sm font-medium hover:bg-neutral-50 transition-colors">
+                Refine
+              </button>
+            ` : ''}
+            <button class="px-4 py-2.5 text-neutral-500 text-sm hover:text-neutral-700 transition-colors">
+              Upload Instead
+            </button>
+          </div>
+
+          ${p.hasCleanedImage ? `
+            <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
+              <svg class="w-5 h-5 text-emerald-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <div>
+                <p class="font-medium text-emerald-800">Image prepared</p>
+                <p class="text-sm text-emerald-700 mt-0.5">Now configure placement settings to help AI position this product correctly.</p>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    // Render settings tab
+    function renderSettingsTab(p) {
+      const surfaces = ['floor', 'wall', 'table', 'ceiling', 'shelf'];
+      const orientations = ['upright', 'flat', 'leaning', 'wall-mounted', 'hanging', 'draped'];
+      const materials = ['matte', 'semi-gloss', 'gloss', 'reflective', 'transparent', 'fabric'];
+      const shadows = ['contact', 'cast', 'soft', 'none'];
+
+      // Auto-detection hint
+      const detected = detectMetadata(p.title);
+
+      return `
+        <div class="space-y-5">
+          <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+            <div class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <p class="text-sm text-amber-800">
+                Auto-detected: <strong>${detected.surface}</strong>, <strong>${detected.orientation}</strong>, <strong>${detected.material}</strong>. Adjust if needed.
+              </p>
+            </div>
+          </div>
+
+          <!-- Surface -->
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-2">Where does this product go?</label>
+            <div class="flex flex-wrap gap-2">
+              ${surfaces.map(s => `
+                <button onclick="updateMetadata('surface', '${s}')" class="px-3 py-1.5 rounded-lg text-sm transition-all ${
+                  editedMetadata.surface === s ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                }">
+                  ${s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Orientation -->
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-2">How is it positioned?</label>
+            <div class="flex flex-wrap gap-2">
+              ${orientations.map(o => `
+                <button onclick="updateMetadata('orientation', '${o}')" class="px-3 py-1.5 rounded-lg text-sm transition-all ${
+                  editedMetadata.orientation === o ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                }">
+                  ${o.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Material -->
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-2">Primary material/finish?</label>
+            <div class="flex flex-wrap gap-2">
+              ${materials.map(m => `
+                <button onclick="updateMetadata('material', '${m}')" class="px-3 py-1.5 rounded-lg text-sm transition-all ${
+                  editedMetadata.material === m ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                }">
+                  ${m.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Shadow Type -->
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-2">Shadow type?</label>
+            <div class="flex flex-wrap gap-2">
+              ${shadows.map(s => `
+                <button onclick="updateMetadata('shadow', '${s}')" class="px-3 py-1.5 rounded-lg text-sm transition-all ${
+                  editedMetadata.shadow === s ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                }">
+                  ${s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Dimensions -->
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-2">Real-world dimensions (optional)</label>
+            <div class="flex gap-3">
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <input 
+                    type="number" 
+                    placeholder="Height"
+                    value="${editedMetadata.dimensions?.height || ''}"
+                    onchange="updateMetadata('dimensions.height', this.value ? parseInt(this.value) : null)"
+                    class="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                  >
+                  <span class="text-sm text-neutral-500">cm</span>
+                </div>
+              </div>
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <input 
+                    type="number" 
+                    placeholder="Width"
+                    value="${editedMetadata.dimensions?.width || ''}"
+                    onchange="updateMetadata('dimensions.width', this.value ? parseInt(this.value) : null)"
+                    class="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                  >
+                  <span class="text-sm text-neutral-500">cm</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Custom Instructions -->
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-2">Additional instructions (optional)</label>
+            <textarea 
+              onchange="updateMetadata('customInstructions', this.value)"
+              placeholder="e.g., This mirror has an antique gold frame. It should lean at a 10° angle against the wall."
+              class="w-full px-3 py-2.5 border border-neutral-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-400"
+              rows="3"
+            >${editedMetadata.customInstructions || ''}</textarea>
+          </div>
+
+          <!-- Generated Preview -->
+          <div class="p-4 bg-neutral-50 border border-neutral-200 rounded-xl">
+            <label class="block text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2">AI Will Receive:</label>
+            <p class="text-sm text-neutral-700 leading-relaxed">
+              ${generatePromptPreview(editedMetadata)}
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    // Auto-detect metadata from title
+    function detectMetadata(title) {
+      const t = title.toLowerCase();
+      
+      let surface = 'floor';
+      if (t.includes('wall') || t.includes('art') || t.includes('painting') || t.includes('poster')) {
+        surface = 'wall';
+      } else if (t.includes('lamp') || t.includes('vase') || t.includes('decor') || t.includes('candle')) {
+        surface = 'table';
+      } else if (t.includes('pendant') || t.includes('chandelier')) {
+        surface = 'ceiling';
+      }
+      
+      let orientation = 'upright';
+      if (t.includes('mirror') && surface === 'floor') {
+        orientation = 'leaning';
+      } else if (surface === 'wall') {
+        orientation = 'wall-mounted';
+      } else if (t.includes('rug') || t.includes('mat')) {
+        orientation = 'flat';
+      } else if (surface === 'ceiling') {
+        orientation = 'hanging';
+      }
+      
+      let material = 'matte';
+      if (t.includes('mirror') || t.includes('chrome') || t.includes('glass') || t.includes('metal')) {
+        material = 'reflective';
+      } else if (t.includes('velvet') || t.includes('fabric') || t.includes('upholstered') || t.includes('linen')) {
+        material = 'fabric';
+      } else if (t.includes('gloss') || t.includes('lacquer')) {
+        material = 'gloss';
+      }
+      
+      return { surface, orientation, material };
+    }
+
+    // Generate prompt preview
+    function generatePromptPreview(meta) {
+      let parts = [];
+      
+      parts.push(`This product belongs on the <strong>${meta.surface.toUpperCase()}</strong>.`);
+      parts.push(`Position: <strong>${meta.orientation.toUpperCase()}</strong>.`);
+      parts.push(`Material: <strong>${meta.material.toUpperCase()}</strong> finish.`);
+      parts.push(`Shadow: <strong>${meta.shadow.toUpperCase()}</strong>.`);
+      
+      if (meta.surface === 'floor') {
+        parts.push('The bottom edge must rest firmly on the floor plane.');
+      }
+      if (meta.orientation === 'leaning') {
+        parts.push('Position at a slight angle (5-15°) against the wall.');
+      }
+      if (meta.material === 'reflective') {
+        parts.push('Show subtle environment reflections.');
+      }
+      if (meta.dimensions?.height || meta.dimensions?.width) {
+        const dims = [];
+        if (meta.dimensions.height) dims.push(`${meta.dimensions.height}cm tall`);
+        if (meta.dimensions.width) dims.push(`${meta.dimensions.width}cm wide`);
+        parts.push(`Real-world size: ${dims.join(', ')}.`);
+      }
+      if (meta.customInstructions) {
+        parts.push(meta.customInstructions);
+      }
+      
+      return parts.join(' ');
+    }
+
+    // Apply mask (mock)
+    function applyMask() {
+      isProcessing = true;
+      currentTab = 'images';
+      renderModal();
+      
+      setTimeout(() => {
+        isProcessing = false;
+        selectedProduct.hasCleanedImage = true;
+        selectedProduct.status = 'ready';
+        selectedProduct.preparedImage = selectedProduct.images[selectedImageIdx];
+        renderModal();
+        renderProductsList();
+      }, 2000);
+    }
+
+    // Initialize
+    renderProductsList();
+  </script>
+</body>
+</html>
