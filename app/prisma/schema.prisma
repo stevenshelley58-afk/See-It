@@ -47,6 +47,7 @@ model Shop {
   usageDaily       UsageDaily[]
   savedRoomOwners  SavedRoomOwner[]
   savedRooms       SavedRoom[]
+  seeItCaptures    SeeItCapture[]
 
   @@map("shops")
 }
@@ -172,4 +173,21 @@ model SavedRoom {
 
   @@index([shopId, ownerId])
   @@map("saved_rooms")
+}
+
+model SeeItCapture {
+  id            String   @id @default(uuid())
+  shopId        String   @map("shop_id")
+  email         String
+  productId     String   @map("product_id")
+  productTitle  String?  @map("product_title")
+  renderJobId   String?  @map("render_job_id")
+  imageUrl      String?  @map("image_url")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, email])
+  @@index([shopId, createdAt])
+  @@map("see_it_captures")
 }

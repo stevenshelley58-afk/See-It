@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.1.1'; // Fixed transparent canvas overlay
+    const VERSION = '1.0.27'; // Fixed transparent canvas overlay
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)
@@ -141,6 +141,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const screenPrepare = $('see-it-screen-prepare');
     const screenPosition = $('see-it-screen-position');
     const screenResult = $('see-it-screen-result');
+    const screenLoading = $('see-it-screen-loading');
 
     // Entry screen elements
     const btnCloseEntry = $('see-it-close-entry');
@@ -157,22 +158,45 @@ document.addEventListener('DOMContentLoaded', function () {
     const btnUndo = $('see-it-undo-btn');
     const btnRemove = $('see-it-remove-btn');
     const btnConfirmRoom = $('see-it-confirm-room');
+    const brushSlider = $('see-it-brush-slider');
 
     // Position screen elements
     const btnBackPosition = $('see-it-back-position');
     const roomImage = $('see-it-room-image');
     const btnGenerate = $('see-it-generate');
-    const saveRoomToggle = $('see-it-save-room-toggle');
     const positionContainer = $('see-it-position-container');
     const productOverlay = $('see-it-product-overlay');
     const productImage = $('see-it-product-image');
+    const positionHint = $('see-it-position-hint');
 
     // Result screen elements
     const btnCloseResult = $('see-it-close-result');
+    const btnBackResult = $('see-it-back-result');
     const resultImage = $('see-it-result-image');
     const btnShare = $('see-it-share');
-    const btnNewRoom = $('see-it-new-room');
+    const btnTryAgain = $('see-it-try-again');
+    const btnTryAnother = $('see-it-try-another');
     const errorDiv = $('see-it-global-error');
+
+    // Email capture elements
+    const emailForm = $('see-it-email-form');
+    const emailInput = $('see-it-email-input');
+    const emailSubmit = $('see-it-email-submit');
+    const emailFormWrap = $('see-it-email-form-wrap');
+    const emailSuccess = $('see-it-email-success');
+
+    // Swiper elements
+    const swiper = $('see-it-swiper');
+    const swiperClose = $('see-it-swiper-close');
+    const swiperCard = $('see-it-swiper-card');
+    const swiperImg = $('see-it-swiper-img');
+    const swiperName = $('see-it-swiper-name');
+    const swiperCollection = $('see-it-swiper-collection');
+    const swiperPrev = $('see-it-swiper-prev');
+    const swiperNext = $('see-it-swiper-next');
+    const swiperSkipLeft = $('see-it-swiper-skip-left');
+    const swiperSkipRight = $('see-it-swiper-skip-right');
+    const swiperSelect = $('see-it-swiper-select');
 
     // DEBUG: Log which critical elements exist
     console.log('[See It] Element check:', {
@@ -205,7 +229,12 @@ document.addEventListener('DOMContentLoaded', function () {
         shopperToken: localStorage.getItem('see_it_shopper_token'),
         currentScreen: 'entry',
         normalizedWidth: 0,
-        normalizedHeight: 0
+        normalizedHeight: 0,
+        lastRenderJobId: null,
+        lastResultUrl: null,
+        collectionProducts: [],
+        collectionInfo: null,
+        swiperIndex: 0
     };
 
     // Canvas state - DUAL CANVAS ARCHITECTURE (like cleanup-ai reference)
@@ -230,6 +259,7 @@ document.addEventListener('DOMContentLoaded', function () {
             entry: screenEntry,
             prepare: screenPrepare,
             position: screenPosition,
+            loading: screenLoading,
             result: screenResult
         };
 
@@ -698,6 +728,18 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // Brush size slider
+    if (brushSlider) {
+        brushSlider.addEventListener('input', (e) => {
+            brushSize = parseInt(e.target.value);
+            if (ctx) ctx.lineWidth = brushSize;
+            if (maskCtx && state.normalizedWidth && maskCanvas) {
+                const scale = state.normalizedWidth / maskCanvas.width;
+                maskCtx.lineWidth = brushSize * scale;
+            }
+        });
+    }
+
     // Generate mask from hidden mask canvas (already at native resolution)
     const generateMask = () => {
         if (!hiddenMaskCanvas) {
@@ -835,6 +877,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
         e.preventDefault();
         e.stopPropagation();
+
+        // Hide the position hint on first interaction
+        positionHint?.classList.add('see-it-hidden');
 
         isDragging = true;
         productOverlay?.classList.add('dragging');
@@ -1468,14 +1513,14 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        showScreen('result');
+        showScreen('loading'); // Show loading screen first
         resetError();
 
         try {
             const payload = {
                 room_session_id: state.sessionId,
                 product_id: state.productId,
-                placement: { x: 0.5, y: 0.5, scale: state.scale || 1 },
+                placement: { x: state.x, y: state.y, scale: state.scale || 1 },
                 config: {
                     style_preset: 'neutral',
                     quality: 'standard',
@@ -1498,32 +1543,172 @@ document.addEventListener('DOMContentLoaded', function () {
                 throw new Error(data.error || 'Render failed');
             }
 
+            let imageUrl = null;
+            let jobId = null;
+
             if (data.status === 'completed' && data.imageUrl) {
-                console.log('[See It] Setting result image src:', data.imageUrl);
-                if (resultImage) {
-                    resultImage.onload = () => console.log('[See It] Result image loaded successfully');
-                    resultImage.onerror = (e) => console.error('[See It] Result image failed to load', e);
-                    resultImage.src = data.imageUrl;
-                }
-                return;
+                imageUrl = data.imageUrl;
+                jobId = data.job_id;
+            } else if (data.job_id) {
+                const result = await pollJobStatus(data.job_id);
+                imageUrl = result.imageUrl || result.image_url;
+                jobId = data.job_id;
             }
 
-            if (data.job_id) {
-                const result = await pollJobStatus(data.job_id);
-                if (resultImage && result.imageUrl) {
-                    resultImage.src = result.imageUrl;
-                }
+            if (imageUrl) {
+                // Save for email capture
+                state.lastRenderJobId = jobId;
+                state.lastResultUrl = imageUrl;
+
+                // Reset email form
+                if (emailFormWrap) emailFormWrap.classList.remove('see-it-hidden');
+                if (emailSuccess) emailSuccess.classList.add('see-it-hidden');
+                if (emailInput) emailInput.value = '';
+
+                // Set image and show result
+                if (resultImage) resultImage.src = imageUrl;
+                showScreen('result');
+
+                // Prefetch collection products for swiper
+                fetchCollectionProducts();
             }
         } catch (err) {
             console.error('[See It] Generate error:', err);
             showError('Generate failed: ' + err.message);
+            showScreen('position'); // Go back on error
         }
     };
 
     btnGenerate?.addEventListener('click', handleGenerate);
 
+    // --- Email Capture ---
+    const captureEmail = async (email) => {
+        try {
+            const res = await fetch('/apps/see-it/capture', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: email,
+                    product_id: state.productId,
+                    product_title: state.productTitle,
+                    render_job_id: state.lastRenderJobId,
+                    image_url: state.lastResultUrl
+                })
+            });
+            return res.ok;
+        } catch (e) {
+            console.error('[See It] Email capture failed:', e);
+            return false;
+        }
+    };
+
+    // --- Collection Products Fetcher ---
+    const fetchCollectionProducts = async () => {
+        try {
+            const res = await fetch(`/apps/see-it/collection-products?product_id=${state.productId}&limit=10`);
+            if (!res.ok) throw new Error('Failed to fetch');
+            const data = await res.json();
+            state.collectionProducts = data.products || [];
+            state.collectionInfo = data.collection || null;
+            state.swiperIndex = 0;
+            console.log('[See It] Collection products loaded:', state.collectionProducts.length);
+        } catch (e) {
+            console.error('[See It] Failed to load collection products:', e);
+            state.collectionProducts = [];
+        }
+    };
+
+    // --- Product Swiper ---
+    const showSwiper = () => {
+        if (state.collectionProducts.length === 0) {
+            console.log('[See It] No products to show in swiper');
+            showError('No other products available in this collection');
+            return;
+        }
+        updateSwiperCard();
+        swiper?.classList.add('see-it-active');
+    };
+
+    const hideSwiper = () => {
+        swiper?.classList.remove('see-it-active');
+    };
+
+    const updateSwiperCard = () => {
+        const product = state.collectionProducts[state.swiperIndex];
+        if (!product) return;
+
+        if (swiperImg) swiperImg.src = product.image || '';
+        if (swiperName) swiperName.textContent = product.title;
+        if (swiperCollection && state.collectionInfo) {
+            swiperCollection.textContent = state.collectionInfo.title;
+        }
+    };
+
+    const swipeCard = (direction) => {
+        swiperCard?.classList.add(direction === 'left' ? 'swiping-left' : 'swiping-right');
+
+        setTimeout(() => {
+            swiperCard?.classList.remove('swiping-left', 'swiping-right');
+
+            if (direction === 'right') {
+                state.swiperIndex = (state.swiperIndex + 1) % state.collectionProducts.length;
+            } else {
+                state.swiperIndex = (state.swiperIndex - 1 + state.collectionProducts.length) % state.collectionProducts.length;
+            }
+            updateSwiperCard();
+        }, 150);
+    };
+
+    const selectSwiperProduct = () => {
+        const product = state.collectionProducts[state.swiperIndex];
+        if (!product) return;
+
+        // Update state with new product
+        state.productId = product.id;
+        state.productTitle = product.title;
+        state.productImageUrl = product.image;
+
+        // Update product overlay image
+        if (productImage) productImage.src = product.image;
+
+        hideSwiper();
+        showScreen('position');
+    };
+
+    // Swiper touch support
+    const setupSwiperTouch = () => {
+        if (!swiperCard) return;
+
+        let startX = 0;
+        let currentX = 0;
+
+        swiperCard.addEventListener('touchstart', (e) => {
+            startX = e.touches[0].clientX;
+        });
+
+        swiperCard.addEventListener('touchmove', (e) => {
+            currentX = e.touches[0].clientX;
+            const diff = currentX - startX;
+            swiperCard.style.transform = `translateX(${diff}px) rotate(${diff * 0.05}deg)`;
+        });
+
+        swiperCard.addEventListener('touchend', () => {
+            const diff = currentX - startX;
+            swiperCard.style.transform = '';
+
+            if (Math.abs(diff) > 80) {
+                swipeCard(diff > 0 ? 'right' : 'left');
+            }
+            startX = 0;
+            currentX = 0;
+        });
+    };
+
+    // Initialize swiper touch
+    setupSwiperTouch();
+
     // --- Result Actions ---
-    btnNewRoom?.addEventListener('click', () => {
+    const resetToEntry = () => {
         state.sessionId = null;
         state.originalRoomImageUrl = null;
         state.cleanedRoomImageUrl = null;
@@ -1532,26 +1717,76 @@ document.addEventListener('DOMContentLoaded', function () {
         hasErased = false;
         strokes = [];
         showScreen('entry');
+    };
+
+    btnBackResult?.addEventListener('click', resetToEntry);
+    btnTryAgain?.addEventListener('click', resetToEntry);
+
+    btnTryAnother?.addEventListener('click', () => {
+        if (state.collectionProducts.length > 0) {
+            showSwiper();
+        } else {
+            showError('No other products available');
+        }
     });
 
+    // Email form
+    emailForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = emailInput?.value?.trim();
+        if (!email) return;
+
+        if (emailSubmit) {
+            emailSubmit.disabled = true;
+            emailSubmit.textContent = 'Sending...';
+        }
+
+        const success = await captureEmail(email);
+
+        if (success) {
+            if (emailFormWrap) emailFormWrap.classList.add('see-it-hidden');
+            if (emailSuccess) emailSuccess.classList.remove('see-it-hidden');
+        } else {
+            if (emailSubmit) {
+                emailSubmit.disabled = false;
+                emailSubmit.textContent = 'Send';
+            }
+        }
+    });
+
+    // Swiper controls
+    swiperClose?.addEventListener('click', hideSwiper);
+    swiperPrev?.addEventListener('click', () => swipeCard('left'));
+    swiperNext?.addEventListener('click', () => swipeCard('right'));
+    swiperSkipLeft?.addEventListener('click', () => swipeCard('left'));
+    swiperSkipRight?.addEventListener('click', () => swipeCard('right'));
+    swiperSelect?.addEventListener('click', selectSwiperProduct);
+
+    // Share button
     btnShare?.addEventListener('click', async () => {
-        if (!resultImage?.src) return;
+        if (!state.lastResultUrl) return;
 
         try {
-            const response = await fetch(resultImage.src);
-            const blob = await response.blob();
-            const file = new File([blob], 'see-it-result.jpg', { type: 'image/jpeg' });
-
             if (navigator.share) {
-                await navigator.share({ files: [file], title: 'See It Result' });
+                const response = await fetch(state.lastResultUrl);
+                const blob = await response.blob();
+                const file = new File([blob], 'see-it-room.jpg', { type: 'image/jpeg' });
+                await navigator.share({ files: [file], title: state.productTitle || 'My room' });
             } else {
+                // Fallback: download
                 const a = document.createElement('a');
-                a.href = resultImage.src;
-                a.download = 'see-it-result.jpg';
+                a.href = state.lastResultUrl;
+                a.download = 'see-it-room.jpg';
                 a.click();
             }
         } catch (err) {
-            console.error('[See It] Share error:', err);
+            if (err.name !== 'AbortError') {
+                // Fallback on error
+                const a = document.createElement('a');
+                a.href = state.lastResultUrl;
+                a.download = 'see-it-room.jpg';
+                a.click();
+            }
         }
     });
 

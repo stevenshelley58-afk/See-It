@@ -26,24 +26,18 @@
 }
 {% endschema %}
 
-{% comment %}
-  See It Button - UI Consistency Update
-  - Uses strictly scoped CSS classes (.see-it-widget-hook)
-  - Wires button_model and button_style correctly
-{% endcomment %}
-
 {% if product != blank and product.featured_image != blank %}
   {% assign product_image_url = product.featured_image | image_url: width: 800 %}
   {% assign product_title = product.title | default: "Product" %}
   {% assign product_price = product.price | money %}
+  {% assign product_collection = product.collections.first.handle | default: '' %}
   
-  {% comment %} Determine CTA class based on settings {% endcomment %}
   {% assign btn_class = 'see-it-btn-primary-pill' %}
   {% if block.settings.button_style == 'secondary' %}
     {% assign btn_class = 'see-it-btn-outline-pill' %}
   {% endif %}
 
-  <!-- Widget Container (Card Primitive) -->
+  <!-- Widget Container -->
   <div class="see-it-widget-hook">
     <div class="see-it-widget-content">
       <div class="see-it-widget-text">
@@ -52,7 +46,6 @@
       </div>
     </div>
     
-    <!-- Widget CTA -->
     <button
       id="see-it-trigger"
       class="{{ btn_class }}"
@@ -61,145 +54,212 @@
       data-product-image="{{ product_image_url }}"
       data-product-title="{{ product_title | escape }}"
       data-product-price="{{ product_price | escape }}"
+      data-product-collection="{{ product_collection }}"
       data-shop-domain="{{ shop.domain }}"
       type="button"
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" stroke="currentColor" stroke-width="2" fill="none"/>
-        <path d="M12 2 L12 22" stroke="currentColor" stroke-width="2"/>
-        <path d="M22 7 L12 12 L2 7" stroke="currentColor" stroke-width="2"/>
+        <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z"/>
+        <path d="M12 2 L12 22"/>
+        <path d="M22 7 L12 12 L2 7"/>
       </svg>
       {{ block.settings.button_label | default: "See it in your room" }}
     </button>
   </div>
 
-  <!-- Modal Markup (Hidden by default) -->
+  <!-- Modal -->
   <div id="see-it-modal" class="see-it-modal hidden">
     <div class="see-it-modal-content">
-      <!-- Error boundary container -->
       <div id="see-it-global-error" class="see-it-hidden"></div>
 
       <!-- ENTRY SCREEN -->
       <div id="see-it-screen-entry" class="see-it-screen see-it-screen-entry active">
-         <!-- Safe Area Header (Top Row) -->
-         <div class="see-it-header">
-            <button class="see-it-btn-icon" id="see-it-close-entry" aria-label="Close">
-               <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        <div class="see-it-header">
+          <button class="see-it-btn-icon" id="see-it-close-entry" aria-label="Close">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+          <div class="see-it-header-spacer"></div>
+        </div>
+
+        <div class="see-it-entry-content">
+          <div class="see-it-product-card-compact">
+            <img src="{{ product_image_url }}" alt="">
+            <div class="see-it-product-info-compact">
+              <p class="see-it-product-title-compact">{{ product_title }}</p>
+            </div>
+          </div>
+
+          <h1 class="see-it-entry-title">See it in your space</h1>
+          <p class="see-it-entry-description">Take a photo of your room to see how this looks instantly.</p>
+
+          <div class="see-it-entry-actions">
+            <button class="see-it-btn-primary-pill" id="see-it-btn-take-photo">
+              <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/></svg>
+              Take Photo
             </button>
-            <span class="see-it-header-title">PREVIEW</span>
-            <div style="width: 40px;"></div> <!-- Spacer -->
-         </div>
-
-         <div class="see-it-entry-content">
-            <!-- Compact Product Card (Context) -->
-            <div class="see-it-product-card-compact">
-               <img src="{{ product_image_url }}" alt="">
-               <div class="see-it-product-info-compact">
-                  <p class="see-it-product-title-compact">{{ product_title }}</p>
-                  <p class="see-it-product-price-compact">{{ product_price }}</p>
-               </div>
-            </div>
-
-            <h1 class="see-it-entry-title">See it in your space</h1>
-            <p class="see-it-entry-description">Take a photo of your room to see how this looks instantly.</p>
-
-            <div class="see-it-entry-actions">
-               <button class="see-it-btn-primary-pill" id="see-it-btn-take-photo">
-                  <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/></svg>
-                  Take Photo
-               </button>
-               <button class="see-it-btn-outline-pill" id="see-it-btn-upload">Upload</button>
-            </div>
-         </div>
+            <button class="see-it-btn-outline-pill" id="see-it-btn-upload">Upload</button>
+          </div>
+        </div>
       </div>
 
       <!-- PREPARE SCREEN -->
       <div id="see-it-screen-prepare" class="see-it-screen see-it-screen-prepare">
-         <div class="see-it-header">
-            <button class="see-it-btn-icon" id="see-it-back-prepare" aria-label="Back">
-               <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
-            </button>
-            <span class="see-it-header-title">PREPARE ROOM</span>
-            <div style="width: 40px;"></div>
-         </div>
+        <div class="see-it-header">
+          <button class="see-it-btn-icon" id="see-it-back-prepare" aria-label="Back">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <div class="see-it-header-spacer"></div>
+        </div>
 
-         <div class="see-it-prepare-room-container">
-            <img id="see-it-room-preview" class="see-it-room-preview" src="" alt="Room">
-            <canvas id="see-it-mask-canvas" class="see-it-mask-canvas"></canvas>
-         </div>
+        <div class="see-it-canvas-container">
+          <img id="see-it-room-preview" class="see-it-room-preview" src="" alt="Room">
+          <canvas id="see-it-mask-canvas" class="see-it-mask-canvas"></canvas>
+        </div>
 
-         <div class="see-it-prepare-bottom">
-            <div style="text-align: center; padding: 8px 16px; margin-bottom: 8px;">
-               <p style="color: var(--si-muted); font-size: 14px; margin: 0 0 6px 0;">Paint over objects to remove them</p>
-               <p style="color: var(--si-accent, #8b5cf6); font-size: 12px; margin: 0; opacity: 0.9;">💡 Pro Tip: Paint slightly outside the object to cover shadows & reflections</p>
-            </div>
-            <div class="see-it-prepare-actions-row">
-               <button class="see-it-btn-outline-pill" id="see-it-undo-btn" disabled>Undo</button>
-               <button class="see-it-btn-outline-pill" id="see-it-remove-btn">Erase</button>
-               <button class="see-it-btn-primary-pill" id="see-it-confirm-room">Continue</button>
-            </div>
-         </div>
+        <div class="see-it-prepare-footer">
+          <p class="see-it-prepare-hint">Paint over objects to remove them</p>
+          <div class="see-it-brush-control">
+            <span>Brush Size</span>
+            <input type="range" id="see-it-brush-slider" class="see-it-brush-slider" min="10" max="80" value="40">
+          </div>
+          <div class="see-it-prepare-actions">
+            <button class="see-it-btn-outline-pill see-it-btn-sm" id="see-it-undo-btn" disabled>Undo</button>
+            <button class="see-it-btn-outline-pill see-it-btn-sm" id="see-it-remove-btn">Erase</button>
+            <button class="see-it-btn-primary-pill see-it-btn-sm" id="see-it-confirm-room">Continue</button>
+          </div>
+        </div>
       </div>
 
       <!-- POSITION SCREEN -->
       <div id="see-it-screen-position" class="see-it-screen see-it-screen-position">
-         <div class="see-it-header">
-            <button class="see-it-btn-icon" id="see-it-back-position" aria-label="Back">
-               <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
-            </button>
-            <span class="see-it-header-title">POSITION</span>
-            <div style="width: 40px;"></div>
-         </div>
+        <div class="see-it-header">
+          <button class="see-it-btn-icon" id="see-it-back-position" aria-label="Back">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <div class="see-it-header-spacer"></div>
+        </div>
 
-         <!-- Room & Product Canvas Area -->
-         <div class="see-it-prepare-room-container" id="see-it-position-container">
-             <img id="see-it-room-image" src="" alt="Room" style="width: 100%; height: 100%; object-fit: contain;">
-             <!-- Product Overlay (draggable & resizable) -->
-             <div id="see-it-product-overlay" class="see-it-product-overlay">
-                 <img id="see-it-product-image" src="" alt="Product" draggable="false">
-                 <!-- Resize handles -->
-                 <div class="see-it-resize-handle see-it-resize-nw"></div>
-                 <div class="see-it-resize-handle see-it-resize-ne"></div>
-                 <div class="see-it-resize-handle see-it-resize-sw"></div>
-                 <div class="see-it-resize-handle see-it-resize-se"></div>
-             </div>
-         </div>
+        <div class="see-it-canvas-container" id="see-it-position-container">
+          <img id="see-it-room-image" src="" alt="Room">
+          <div id="see-it-product-overlay" class="see-it-product-overlay">
+            <img id="see-it-product-image" src="" alt="Product" draggable="false">
+            <div class="see-it-resize-handle see-it-resize-nw"></div>
+            <div class="see-it-resize-handle see-it-resize-ne"></div>
+            <div class="see-it-resize-handle see-it-resize-sw"></div>
+            <div class="see-it-resize-handle see-it-resize-se"></div>
+          </div>
+          <div id="see-it-position-hint" class="see-it-position-hint">Drag to move • Pinch to resize</div>
+        </div>
 
-         <div class="see-it-position-controls">
-            <div class="see-it-save-room-row">
-               <span>Save room for later</span>
-               <!-- Native checkbox for simplicity until custom toggle needed -->
-               <input type="checkbox" id="see-it-save-room-toggle" style="width: 20px; height: 20px; accent-color: var(--si-cta);">
-            </div>
-            <button class="see-it-btn-primary-pill" id="see-it-generate">Generate View</button>
-         </div>
+        <div class="see-it-position-footer">
+          <button class="see-it-btn-primary-pill" id="see-it-generate">Generate View</button>
+        </div>
+      </div>
+
+      <!-- LOADING SCREEN -->
+      <div id="see-it-screen-loading" class="see-it-screen see-it-screen-loading">
+        <div class="see-it-header">
+          <button class="see-it-btn-icon" disabled style="opacity:0.3">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <div class="see-it-header-spacer"></div>
+        </div>
+
+        <div class="see-it-loading-content">
+          <div class="see-it-spinner"></div>
+          <p class="see-it-loading-text">Creating your view...</p>
+        </div>
       </div>
 
       <!-- RESULT SCREEN -->
       <div id="see-it-screen-result" class="see-it-screen see-it-screen-result">
-          <div class="see-it-header">
-            <button class="see-it-btn-icon" id="see-it-close-result" aria-label="Close">
-               <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        <div class="see-it-header">
+          <button class="see-it-btn-icon" id="see-it-back-result" aria-label="Back">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <div style="flex:1"></div>
+          <button class="see-it-btn-icon" id="see-it-close-result" aria-label="Close">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div class="see-it-result-container">
+          <img id="see-it-result-image" src="" alt="Your visualization">
+        </div>
+
+        <div class="see-it-result-actions">
+          <button class="see-it-btn-primary-pill" id="see-it-share">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            Share
+          </button>
+          <div class="see-it-result-secondary">
+            <button class="see-it-btn-text" id="see-it-try-again">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              Try Again
             </button>
-            <span class="see-it-header-title">RESULT</span>
-            <div style="width: 40px;"></div> <!-- Spacer -->
-         </div>
+            <button class="see-it-btn-text" id="see-it-try-another">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+              Try Another Product
+            </button>
+          </div>
+        </div>
 
-         <div class="see-it-prepare-room-container" style="flex-direction: column;">
-             <div class="see-it-result-success">Complete</div>
-             <img id="see-it-result-image" src="" alt="Result" style="max-height: 80%; max-width: 100%;">
-         </div>
+        <div class="see-it-email-section">
+          <div id="see-it-email-form-wrap">
+            <p class="see-it-email-label">Save this to your inbox</p>
+            <form id="see-it-email-form" class="see-it-email-form">
+              <input type="email" id="see-it-email-input" placeholder="your@email.com" required>
+              <button type="submit" id="see-it-email-submit">Send</button>
+            </form>
+          </div>
+          <div id="see-it-email-success" class="see-it-hidden">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            <span>Sent! Check your inbox.</span>
+          </div>
+        </div>
 
-         <div class="see-it-position-controls">
-            <button class="see-it-btn-primary-pill" id="see-it-share">Share Result</button>
-            <button class="see-it-btn-outline-pill" id="see-it-new-room">Try Another</button>
-         </div>
+        <!-- Product Swiper Overlay -->
+        <div id="see-it-swiper" class="see-it-swiper">
+          <button class="see-it-swiper-close" id="see-it-swiper-close">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+          
+          <div class="see-it-swiper-nav" id="see-it-swiper-nav">
+            <button id="see-it-swiper-prev">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <button id="see-it-swiper-next">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+          
+          <div class="see-it-swiper-card" id="see-it-swiper-card">
+            <img id="see-it-swiper-img" src="" alt="Product">
+            <div class="see-it-swiper-info">
+              <div class="see-it-swiper-name" id="see-it-swiper-name"></div>
+              <div class="see-it-swiper-collection" id="see-it-swiper-collection"></div>
+            </div>
+          </div>
+
+          <p class="see-it-swiper-hint">Swipe to browse • Tap ✓ to try</p>
+
+          <div class="see-it-swiper-actions">
+            <button class="see-it-swiper-btn see-it-swiper-btn-skip" id="see-it-swiper-skip-left">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <button class="see-it-swiper-btn see-it-swiper-btn-select" id="see-it-swiper-select">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            </button>
+            <button class="see-it-swiper-btn see-it-swiper-btn-skip" id="see-it-swiper-skip-right">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
       
       <!-- Hidden File Inputs -->
-      <input type="file" id="see-it-upload-input" accept="image/*" style="display: none;" />
-      <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;" />
-
+      <input type="file" id="see-it-upload-input" accept="image/*" style="display: none;">
+      <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;">
     </div>
   </div>
 {% endif %}
