@@ -1134,29 +1134,60 @@
   }
 }
 
-/* --- Bug Fix: Resize Handles Visibility --- */
+/* --- v2.0.2 Fix: Overflow and Resize Handles --- */
+
+/* Fix overflow clipping on position screen */
+.see-it-screen-position .see-it-canvas-container,
+#see-it-position-container {
+  overflow: visible !important;
+}
+
+/* Product overlay must allow visible overflow for handles */
+.see-it-product-overlay {
+  position: absolute;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 10;
+  overflow: visible;
+}
+
+/* Resize handles - always visible with better styling */
 .see-it-resize-handle {
   position: absolute;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   background: #fff;
-  border: 2px solid var(--si-cta);
+  border: 3px solid #171717;
   border-radius: 50%;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  z-index: 11;
-  touch-action: none;
-}
-
-.see-it-product-overlay:hover .see-it-resize-handle,
-.see-it-product-overlay.dragging .see-it-resize-handle,
-.see-it-product-overlay.resizing .see-it-resize-handle {
   opacity: 1;
+  z-index: 100;
+  touch-action: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: grab;
 }
 
-/* Make handles always visible on touch devices */
-@media (hover: none) {
-  .see-it-resize-handle {
-    opacity: 0.7;
-  }
+.see-it-resize-nw {
+  top: -14px;
+  left: -14px;
+  cursor: nw-resize;
+}
+
+.see-it-resize-ne {
+  top: -14px;
+  right: -14px;
+  cursor: ne-resize;
+}
+
+.see-it-resize-sw {
+  bottom: -14px;
+  left: -14px;
+  cursor: sw-resize;
+}
+
+.see-it-resize-se {
+  bottom: -14px;
+  right: -14px;
+  cursor: se-resize;
 }

@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.28'; // Critical bug fixes: prepared image, swiper, handles, hint
+    const VERSION = '1.0.28'; // Fix: resize handles overflow, generate debug alerts
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)
@@ -1532,12 +1532,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // --- Generate ---
     const handleGenerate = async () => {
+        console.log('[See It] ========== handleGenerate START ==========');
+
         if (!state.sessionId || !state.productId) {
-            showError('Missing session or product');
+            const msg = `Missing session (${state.sessionId}) or product (${state.productId})`;
+            console.error('[See It]', msg);
+            showError(msg);
             return;
         }
 
-        showScreen('loading'); // Show loading screen first
+        showScreen('loading');
         resetError();
 
         try {
@@ -1552,7 +1556,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             };
 
-            console.log('[See It] Generate request:', payload);
+            console.log('[See It] Generate payload:', JSON.stringify(payload, null, 2));
 
             const res = await fetch('/apps/see-it/render', {
                 method: 'POST',
@@ -1560,11 +1564,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 body: JSON.stringify(payload)
             });
 
+            console.log('[See It] Response status:', res.status);
+
             const data = await res.json();
-            console.log('[See It] Generate response:', data);
+            console.log('[See It] Response data:', JSON.stringify(data, null, 2));
+
+            if (!res.ok) {
+                throw new Error(data.error || data.message || `HTTP ${res.status}`);
+            }
 
             if (data.status === 'failed') {
-                throw new Error(data.error || 'Render failed');
+                throw new Error(data.error || data.message || 'Render failed');
             }
 
             let imageUrl = null;
@@ -1598,7 +1608,13 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         } catch (err) {
             console.error('[See It] Generate error:', err);
-            showError('Generate failed: ' + err.message);
+            console.error('[See It] Error stack:', err.stack);
+
+            // Show error prominently for debugging
+            const errorMsg = 'Generate failed: ' + (err.message || 'Unknown error');
+            showError(errorMsg);
+            alert('[See It Debug] ' + errorMsg);  // Temporary - remove after debugging
+
             showScreen('position'); // Go back on error
         }
     };

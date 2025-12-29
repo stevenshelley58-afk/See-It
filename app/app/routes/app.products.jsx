@@ -228,17 +228,17 @@ export default function Products() {
     const handleBulkPrepare = async () => {
         const total = selectedIds.length;
         setBulkProgress({ current: 0, total, status: 'running', successCount: 0, failCount: 0 });
-
         let successCount = 0;
         let failCount = 0;
 
         for (let i = 0; i < selectedIds.length; i++) {
             const productId = selectedIds[i].split('/').pop(); // Extract ID from gid://shopify/Product/123
+            const formData = new FormData();
+            formData.append("productId", productId);
             try {
                 const res = await fetch('/api/products/prepare', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ productId })
+                    body: formData
                 });
                 if (res.ok) successCount++;
                 else failCount++;
@@ -249,12 +249,13 @@ export default function Products() {
         }
 
         setBulkProgress({ current: total, total, status: 'done', successCount, failCount });
+        // Update list immediately so user sees "Pending" or "Ready" badges update behind the banner
+        revalidator.revalidate();
 
         // Show done state for 3 seconds, then reset
         setTimeout(() => {
             setBulkProgress(null);
             setSelectedIds([]);
-            revalidator.revalidate();
         }, 3000);
     };
 
