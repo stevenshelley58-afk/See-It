@@ -180,7 +180,7 @@ export const loader = async ({ request }) => {
 };
 
 export default function Products() {
-    const { products, assetsMap, usage, quota, isPro, pageInfo, filter } = useLoaderData();
+    const { products, assetsMap, usage, quota, isPro, pageInfo, statusFilter, searchQuery } = useLoaderData();
     const singleFetcher = useFetcher();
     const revalidator = useRevalidator();
 
@@ -210,6 +210,11 @@ export default function Products() {
 
     return (
         <>
+            <style>{`
+                .checkerboard {
+                    background: repeating-conic-gradient(#f0f0f0 0% 25%, #fff 0% 50%) 50% / 20px 20px;
+                }
+            `}</style>
             <TitleBar title="See It Products" />
             <PageShell>
                 <div className="space-y-6">
@@ -372,19 +377,23 @@ export default function Products() {
                                                         />
                                                     </td>
                                                     <td className="px-4 py-3">
-                                                        <div className="flex items-center -space-x-2">
-                                                            <div className="w-10 h-10 rounded-lg border border-neutral-200 overflow-hidden bg-white flex items-center justify-center relative shadow-sm ring-2 ring-white z-10">
+                                                        <div className="flex items-center gap-2">
+                                                            {/* Original Image */}
+                                                            <div className="w-12 h-12 rounded-lg border border-neutral-200 overflow-hidden bg-neutral-50 flex-shrink-0">
                                                                 {originalImage ? (
-                                                                    <img src={originalImage} alt="" className="w-full h-full object-contain p-0.5" />
+                                                                    <img src={originalImage} alt="" className="w-full h-full object-cover" />
                                                                 ) : (
                                                                     <div className="w-4 h-4 rounded-full bg-neutral-200" />
                                                                 )}
                                                             </div>
+                                                            {/* Arrow + Prepared Image */}
                                                             {hasPrepared && (
-                                                                <div className="w-10 h-10 rounded-lg border border-emerald-200 overflow-hidden bg-white flex items-center justify-center relative shadow-md ring-2 ring-white z-20 animate-in slide-in-from-left-2 duration-500">
-                                                                    <img src={displayImage} alt="" className="w-full h-full object-contain p-0.5" />
-                                                                    <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none"></div>
-                                                                </div>
+                                                                <>
+                                                                    <span className="text-neutral-300 text-xs">→</span>
+                                                                    <div className="w-12 h-12 rounded-lg border-2 border-emerald-400 overflow-hidden checkerboard flex-shrink-0">
+                                                                        <img src={displayImage} alt="" className="w-full h-full object-contain" />
+                                                                    </div>
+                                                                </>
                                                             )}
                                                         </div>
                                                     </td>
@@ -398,24 +407,25 @@ export default function Products() {
                                                         <div className="text-neutral-900 font-medium whitespace-nowrap">
                                                             {price ? `${parseFloat(price.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} ${price.currencyCode}` : '—'}
                                                         </div>
+                                                        <div className={`text-xs mt-0.5 ${product.totalInventory > 0 ? 'text-neutral-500' : 'text-red-500'}`}>
+                                                            {product.totalInventory > 0 ? `${product.totalInventory} in stock` : 'Out of stock'}
+                                                        </div>
                                                     </td>
                                                     <td className="px-4 py-3">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                                                status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
-                                                                    status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                                                        'bg-neutral-100 text-neutral-600 border-neutral-200'
-                                                                }`}>
-                                                                {status === 'ready' && hasPrepared ? 'Ready' :
-                                                                    status === 'ready' ? 'Original' :
-                                                                        status}
-                                                            </span>
-                                                            {product.status !== 'ACTIVE' && (
-                                                                <span className="text-[10px] font-bold text-neutral-400 bg-neutral-50 px-1.5 py-0.5 rounded border border-neutral-200 uppercase">
-                                                                    {product.status}
-                                                                </span>
-                                                            )}
-                                                        </div>
+                                                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                            status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
+                                                                status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                                                    'bg-neutral-100 text-neutral-600 border-neutral-200'
+                                                            }`}>
+                                                            <span className={`w-1.5 h-1.5 rounded-full ${status === 'ready' ? 'bg-emerald-500' :
+                                                                status === 'failed' ? 'bg-red-500' :
+                                                                    status === 'processing' ? 'bg-blue-500 animate-pulse' :
+                                                                        'bg-neutral-400'
+                                                                }`}></span>
+                                                            {status === 'ready' && hasPrepared ? 'Ready' :
+                                                                status === 'ready' ? 'Original' :
+                                                                    status.charAt(0).toUpperCase() + status.slice(1)}
+                                                        </span>
                                                     </td>
                                                 </tr>
                                             );
