@@ -678,18 +678,15 @@ export async function compositeScene(
     productInstructions?: string
 ): Promise<CompositeResult> {
     const logContext = createLogContext("render", requestId, "start", {});
-    logger.info(logContext, `Processing scene composite with Gemini${productInstructions ? ' (with custom instructions)' : ''}`);
+    logger.info(logContext, `Processing scene composite with Gemini (direct fusion)${productInstructions ? ' - with custom instructions' : ''}`);
 
     // Track buffers for explicit cleanup
     let productBuffer: Buffer | null = null;
     let roomBuffer: Buffer | null = null;
     let resizedProduct: Buffer | null = null;
-    let guideImageBuffer: Buffer | null = null;
-    let placementMaskBuffer: Buffer | null = null;
-    let outputBuffer: Buffer | null = null;
 
     try {
-        // PERFORMANCE: Download both images in parallel
+        // STEP 1: Download both images in parallel
         const [productResult, roomResult] = await Promise.all([
             downloadToBuffer(preparedProductImageUrl, logContext),
             downloadToBuffer(roomImageUrl, logContext)
@@ -697,27 +694,26 @@ export async function compositeScene(
         productBuffer = productResult;
         roomBuffer = roomResult;
 
-        // PERFORMANCE: Get both metadata in parallel
+        // STEP 2: Get metadata for sizing calculations
         const [roomMetadata, productMetadata] = await Promise.all([
             sharp(roomBuffer).metadata(),
             sharp(productBuffer).metadata()
         ]);
 
         if (!roomMetadata.width || !roomMetadata.height) {
-            throw new Error("Room image is missing dimensions (metadata.width/height)");
+            throw new Error("Room image is missing dimensions");
         }
         if (!productMetadata.width || !productMetadata.height) {
-            throw new Error("Product image is missing dimensions (metadata.width/height)");
+            throw new Error("Product image is missing dimensions");
         }
 
         const roomWidth = roomMetadata.width;
         const roomHeight = roomMetadata.height;
-        const pixelX = Math.round(roomWidth * placement.x);
-        const pixelY = Math.round(roomHeight * placement.y);
 
+        // STEP 3: Resize product to intended scale
         // Two sizing modes (backwards-compatible):
-        // - Legacy: placement.scale is a multiplier on product pixels (existing behavior)
-        // - Preferred: placement.productWidthFraction maps UI size -> server pixels reliably
+        // - Legacy: placement.scale is a multiplier on product pixels
+        // - Preferred: placement.productWidthFraction maps UI size -> server pixels
         const widthFromFraction =
             Number.isFinite(placement.productWidthFraction) && (placement.productWidthFraction as number) > 0
                 ? Math.round(roomWidth * (placement.productWidthFraction as number))
@@ -725,215 +721,69 @@ export async function compositeScene(
 
         const widthFromScale = Math.round(productMetadata.width * (placement.scale || 1));
         const targetWidth = widthFromFraction ?? widthFromScale;
-        const clampedWidth = Math.max(32, Math.min(roomWidth * 2, targetWidth));
+        // Clamp to reasonable size (min 32px, max room width)
+        const clampedWidth = Math.max(32, Math.min(roomWidth, targetWidth));
 
-        // PERFORMANCE: Single pipeline for resize + get metadata
-        const resizedResult = await sharp(productBuffer)
+        resizedProduct = await sharp(productBuffer)
             .resize({ width: clampedWidth })
-            .toBuffer({ resolveWithObject: true });
+            .png() // Keep as PNG to preserve transparency
+            .toBuffer();
 
-        resizedProduct = resizedResult.data;
-        const productWidth = resizedResult.info.width;
-        const productHeight = resizedResult.info.height;
-
-        // Clean up original product buffer - no longer needed after resize
+        // Clean up original product buffer
         productBuffer = null;
 
-        // Calculate position: center product on click point, then clamp to room boundaries
-        // This ensures the product ALWAYS fits within the room (prevents Sharp composite error)
-        let adjustedX = pixelX - Math.round(productWidth / 2);
-        let adjustedY = pixelY - Math.round(productHeight / 2);
-
-        // Clamp TOP-LEFT to (0, 0) minimum
-        adjustedX = Math.max(0, adjustedX);
-        adjustedY = Math.max(0, adjustedY);
-
-        // Clamp BOTTOM-RIGHT to room boundaries
-        // If product would extend past room edge, shift it back
-        if (adjustedX + productWidth > roomWidth) {
-            adjustedX = Math.max(0, roomWidth - productWidth);
-        }
-        if (adjustedY + productHeight > roomHeight) {
-            adjustedY = Math.max(0, roomHeight - productHeight);
-        }
-
         logger.info(
-            { ...logContext, stage: "placement-calc" },
-            `Position: click=(${pixelX},${pixelY}), product=${productWidth}×${productHeight}, adjusted=(${adjustedX},${adjustedY}), room=${roomWidth}×${roomHeight}`
+            { ...logContext, stage: "resize" },
+            `Resized product: ${productMetadata.width}×${productMetadata.height} → ${clampedWidth}px wide, room=${roomWidth}×${roomHeight}`
         );
 
-        // Create a placement mask from the product alpha channel (best quality when product has transparency).
-        // This mask is used to constrain Gemini edits and to hard-lock pixels outside the edit region.
-        // NOTE: Use 3 channels (RGB) then convert to grayscale - sharp 0.33+ doesn't support create with channels: 1
-        const baseMask = await sharp({
-            create: { width: roomWidth, height: roomHeight, channels: 3, background: { r: 0, g: 0, b: 0 } }
-        })
-            .grayscale()
-            .png()
-            .toBuffer();
-
-        // Alpha mask (0..255) — if product has no transparency, this becomes a full rectangle (still safe).
-        const productAlpha = await sharp(resizedProduct)
-            .ensureAlpha()
-            .extractChannel('alpha')
-            .png()
-            .toBuffer();
-
-        // Place alpha mask into room-sized mask at the same position as the composite.
-        placementMaskBuffer = await sharp(baseMask)
-            .composite([{ input: productAlpha, top: adjustedY, left: adjustedX }])
-            .png()
-            .toBuffer();
-
-        // Expand + feather slightly to allow contact shadow + edge blending without touching the rest of the room.
-        const PLACEMENT_MASK_EXPANSION_PX = 24;
-        const PLACEMENT_MASK_FEATHER_SIGMA = 10;
-        const editRegionMask = await sharp(placementMaskBuffer)
-            .grayscale()
-            .removeAlpha()
-            .threshold(1)
-            .blur(Math.max(1, PLACEMENT_MASK_EXPANSION_PX * 0.7))
-            .threshold(64)
-            .blur(PLACEMENT_MASK_FEATHER_SIGMA)
-            .png()
-            .toBuffer();
-
-        logger.info(
-            { ...logContext, stage: "placement-mask" },
-            `placementMask: expansion=${PLACEMENT_MASK_EXPANSION_PX}px, feather=${PLACEMENT_MASK_FEATHER_SIGMA}px`
-        );
-
-        // Guide image = hard composite (product pasted where user placed it), then Gemini polishes INSIDE mask.
-        guideImageBuffer = await sharp(roomBuffer)
-            .composite([{ input: resizedProduct, top: adjustedY, left: adjustedX }])
-            .jpeg({ quality: 92 })
-            .toBuffer();
-
-        // Clean up intermediate buffers - no longer needed after composite/mask
-        roomBuffer = null;
-        resizedProduct = null;
-
-        // Step 2: AI composite with narrative prompt
-        // The productInstructions is now a PROSE DESCRIPTION written by AI during product prep
-        // and approved by the merchant. It describes what the product looks like.
+        // STEP 4: Build the narrative prompt
+        // The productInstructions is prose describing what the product looks like
         const productDescription = productInstructions?.trim() || '';
-
-        // Build the narrative prompt - describes the DESIRED OUTPUT, not instructions
         const prompt = buildCompositePrompt(productDescription, placement);
 
-        // Compute closest Gemini-supported aspect ratio from actual room dimensions
+        // Compute closest Gemini-supported aspect ratio
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
 
-        // DIAGNOSTIC: Capture actual dimensions of both images before Gemini call
-        // This helps identify the "Image to composite must have same dimensions or smaller" error
-        const [guideMeta, maskMeta] = await Promise.all([
-            sharp(guideImageBuffer).metadata(),
-            sharp(editRegionMask).metadata()
-        ]);
-
         logger.info(
-            { ...logContext, stage: "pre-gemini-dimensions" },
-            `DIMENSIONS CHECK: guideImage=${guideMeta.width}×${guideMeta.height}, mask=${maskMeta.width}×${maskMeta.height}, room=${roomWidth}×${roomHeight}, ratio=${closestRatio.label}`
+            { ...logContext, stage: "pre-gemini" },
+            `Sending to Gemini: room=${roomWidth}×${roomHeight}, ratio=${closestRatio.label}, placement=(${placement.x.toFixed(2)}, ${placement.y.toFixed(2)})`
         );
 
-        // Validate dimensions match before sending to Gemini
-        if (guideMeta.width !== maskMeta.width || guideMeta.height !== maskMeta.height) {
-            logger.error(
-                { ...logContext, stage: "dimension-mismatch" },
-                `DIMENSION MISMATCH: guideImage=${guideMeta.width}×${guideMeta.height} vs mask=${maskMeta.width}×${maskMeta.height}. This will cause Gemini to fail!`
-            );
-            throw new Error(`Dimension mismatch: guideImage (${guideMeta.width}×${guideMeta.height}) != mask (${maskMeta.width}×${maskMeta.height})`);
-        }
-
-        const base64Data = await callGemini(prompt, [guideImageBuffer, editRegionMask], {
+        // STEP 5: Send BOTH images to Gemini - let it do the fusion!
+        // Order matters: room first (the scene), then product (the item to place)
+        const base64Data = await callGemini(prompt, [roomBuffer, resizedProduct], {
             model: IMAGE_MODEL_PRO,
             aspectRatio: closestRatio.label,
             logContext
         });
 
-        outputBuffer = Buffer.from(base64Data, 'base64');
+        // Clean up input buffers
+        roomBuffer = null;
+        resizedProduct = null;
 
-        // Handle dimension mismatch WITHOUT stretching. Ensure buffers match room size for pixel-locked compositing.
-        const outputMeta = await sharp(outputBuffer).metadata();
-        const outputWidth = outputMeta.width!;
-        const outputHeight = outputMeta.height!;
+        // STEP 6: Trust Gemini's output - just convert and upload
+        const outputBuffer = Buffer.from(base64Data, 'base64');
 
-        let resizedGeminiOutput: Buffer;
-        if (outputWidth !== roomWidth || outputHeight !== roomHeight) {
-            const outputRatio = outputWidth / outputHeight;
-            const targetRatio = roomWidth / roomHeight;
-            const ratioDiff = Math.abs(outputRatio - targetRatio);
-
-            if (ratioDiff < 0.01) {
-                resizedGeminiOutput = await sharp(outputBuffer)
-                    .resize(roomWidth, roomHeight, { fit: 'fill' })
-                    .png()
-                    .toBuffer();
-            } else {
-                // Use fill (stretch) to maintain coordinate alignment with placement mask
-                resizedGeminiOutput = await sharp(outputBuffer)
-                    .resize(roomWidth, roomHeight, { fit: 'fill' })
-                    .png()
-                    .toBuffer();
-            }
-        } else {
-            resizedGeminiOutput = outputBuffer;
-        }
-
-        // Composite lock: outside edit region, keep guide composite EXACTLY.
-        // IMPORTANT: Use .extractChannel(0) to guarantee single-channel output for pixel blending
-        const compositeMask = await sharp(editRegionMask)
-            .resize(roomWidth, roomHeight, { fit: 'fill', kernel: 'nearest' })
-            .grayscale()
-            .extractChannel(0) // Ensure single channel for correct pixel indexing
-            .toBuffer();
-
-        const [baseRaw, gemRaw, maskRaw] = await Promise.all([
-            sharp(guideImageBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
-            sharp(resizedGeminiOutput).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
-            sharp(compositeMask).raw().toBuffer({ resolveWithObject: true })
-        ]);
-
-        const { data: baseData, info: baseInfo } = baseRaw;
-        const { data: gemData } = gemRaw;
-        const { data: maskData } = maskRaw;
-
-        const resultData = Buffer.alloc(baseData.length);
-        const pixelCount = baseInfo.width * baseInfo.height;
-        for (let i = 0; i < pixelCount; i++) {
-            const idx = i * 4;
-            const alpha = maskData[i] / 255;
-            const inv = 1 - alpha;
-
-            resultData[idx] = Math.round(baseData[idx] * inv + gemData[idx] * alpha);
-            resultData[idx + 1] = Math.round(baseData[idx + 1] * inv + gemData[idx + 1] * alpha);
-            resultData[idx + 2] = Math.round(baseData[idx + 2] * inv + gemData[idx + 2] * alpha);
-            resultData[idx + 3] = 255;
-        }
-
-        const lockedComposite = await sharp(resultData, {
-            raw: { width: baseInfo.width, height: baseInfo.height, channels: 4 }
-        })
+        // Convert to JPEG for storage efficiency
+        const finalImage = await sharp(outputBuffer)
             .jpeg({ quality: 92 })
             .toBuffer();
 
-        // Clean up guide image buffer after lock composite
-        guideImageBuffer = null;
-        placementMaskBuffer = null;
-        outputBuffer = null;
-
         const key = `composite/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-        const url = await uploadToGCS(key, lockedComposite, 'image/jpeg', logContext);
+        const url = await uploadToGCS(key, finalImage, 'image/jpeg', logContext);
+
+        logger.info(
+            { ...logContext, stage: "complete" },
+            `Composite complete: ${key}`
+        );
 
         return { imageUrl: url, imageKey: key };
     } finally {
-        // Explicit cleanup in finally block to help garbage collector
+        // Explicit cleanup in finally block
         productBuffer = null;
         roomBuffer = null;
         resizedProduct = null;
-        guideImageBuffer = null;
-        placementMaskBuffer = null;
-        outputBuffer = null;
     }
 }
 
