@@ -7,12 +7,32 @@ import { validateContentType } from "../utils/validation.server";
 // Maximum file size: 10MB
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
+function getCorsHeaders(shopDomain: string | null): Record<string, string> {
+    const headers: Record<string, string> = {
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    };
+    if (shopDomain) {
+        headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
+    }
+    return headers;
+}
+
 // Spec alignment: external path /apps/see-it/room/upload (spec Routes → Storefront app proxy routes)
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
+    const corsHeaders = getCorsHeaders(session?.shop ?? null);
+
+    // Handle preflight
+    if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+    }
 
     if (!session) {
-        return json({ status: "forbidden" }, { status: 403 });
+        return json({ status: "forbidden" }, { status: 403, headers: corsHeaders });
     }
 
     const shopDomain = session.shop;
@@ -29,7 +49,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     status: "error",
                     message: validation.error,
                     allowed_types: ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]
-                }, { status: 400 });
+                }, { status: 400, headers: corsHeaders });
             }
             contentType = validation.sanitized!;
         }
@@ -44,7 +64,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({
             status: "error",
             message: "Shop not found. Please reinstall the app."
-        }, { status: 404 });
+        }, { status: 404, headers: corsHeaders });
     }
 
     // Determine file extension from content type
@@ -96,15 +116,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             sessionId: roomSession.id,
             uploadUrl: uploadUrl,
             roomImageFutureUrl: publicUrl
-        });
+        }, { headers: corsHeaders });
     } catch (error) {
         // Clean up the room session if presigned URL generation fails
-        await prisma.roomSession.delete({ where: { id: roomSession.id } }).catch(() => {});
+        await prisma.roomSession.delete({ where: { id: roomSession.id } }).catch(() => { });
         console.error(`[RoomUpload] Failed to generate presigned URL for session ${roomSession.id}:`, error);
         return json({
             status: "error",
             message: "Failed to prepare upload. Please try again."
-        }, { status: 500 });
+        }, { status: 500, headers: corsHeaders });
     }
 };
 

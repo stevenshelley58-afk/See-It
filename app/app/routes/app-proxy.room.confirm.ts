@@ -4,11 +4,31 @@ import { StorageService } from "../services/storage.server";
 import prisma from "../db.server";
 import { validateSessionId } from "../utils/validation.server";
 
+function getCorsHeaders(shopDomain: string | null): Record<string, string> {
+    const headers: Record<string, string> = {
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    };
+    if (shopDomain) {
+        headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
+    }
+    return headers;
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
+    const corsHeaders = getCorsHeaders(session?.shop ?? null);
+
+    // Handle preflight
+    if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+    }
 
     if (!session) {
-        return json({ status: "forbidden" }, { status: 403 });
+        return json({ status: "forbidden" }, { status: 403, headers: corsHeaders });
     }
 
     const body = await request.json();
@@ -17,7 +37,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Validate session ID
     const sessionResult = validateSessionId(room_session_id);
     if (!sessionResult.valid) {
-        return json({ error: sessionResult.error }, { status: 400 });
+        return json({ error: sessionResult.error }, { status: 400, headers: corsHeaders });
     }
     const sanitizedSessionId = sessionResult.sanitized!;
 
@@ -27,7 +47,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (!roomSession || roomSession.shop.shopDomain !== session.shop) {
-        return json({ error: "Session not found" }, { status: 404 });
+        return json({ error: "Session not found" }, { status: 404, headers: corsHeaders });
     }
 
     // Use stored key if available, otherwise construct it (for legacy sessions)
@@ -36,7 +56,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Check if file exists and get a fresh signed URL
     const fileExists = await StorageService.fileExists(key);
     if (!fileExists) {
-        return json({ error: "Room image not uploaded yet" }, { status: 400 });
+        return json({ error: "Room image not uploaded yet" }, { status: 400, headers: corsHeaders });
     }
 
     // Get a fresh 1-hour signed read URL (shorter TTL since we can regenerate anytime)
@@ -58,5 +78,5 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ok: true,
         room_image_url: publicUrl,
         roomImageUrl: publicUrl
-    });
+    }, { headers: corsHeaders });
 };

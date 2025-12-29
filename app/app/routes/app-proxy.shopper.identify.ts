@@ -27,11 +27,31 @@ function validateEmail(email: unknown): { valid: boolean; error?: string; saniti
     return { valid: true, sanitized: trimmed };
 }
 
+function getCorsHeaders(shopDomain: string | null): Record<string, string> {
+    const headers: Record<string, string> = {
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    };
+    if (shopDomain) {
+        headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
+    }
+    return headers;
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
+    const corsHeaders = getCorsHeaders(session?.shop ?? null);
+
+    // Handle preflight
+    if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+    }
 
     if (!session) {
-        return json({ status: "forbidden" }, { status: 403 });
+        return json({ status: "forbidden" }, { status: 403, headers: corsHeaders });
     }
 
     const shopDomain = session.shop;
@@ -42,7 +62,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (!shop) {
-        return json({ error: "Shop not found" }, { status: 404 });
+        return json({ error: "Shop not found" }, { status: 404, headers: corsHeaders });
     }
 
     const body = await request.json();
@@ -51,7 +71,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Validate email
     const emailResult = validateEmail(email);
     if (!emailResult.valid) {
-        return json({ error: emailResult.error }, { status: 400 });
+        return json({ error: emailResult.error }, { status: 400, headers: corsHeaders });
     }
 
     const sanitizedEmail = emailResult.sanitized!;
@@ -78,5 +98,5 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     return json({
         shopper_token: token,
-    });
+    }, { headers: corsHeaders });
 };

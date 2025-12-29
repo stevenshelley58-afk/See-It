@@ -5,11 +5,31 @@ import { extractShopperToken, validateShopperToken } from "../utils/shopper-toke
 import { StorageService } from "../services/storage.server";
 import { validateSessionId } from "../utils/validation.server";
 
+function getCorsHeaders(shopDomain: string | null): Record<string, string> {
+    const headers: Record<string, string> = {
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    };
+    if (shopDomain) {
+        headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
+    }
+    return headers;
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
+    const corsHeaders = getCorsHeaders(session?.shop ?? null);
+
+    // Handle preflight
+    if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+    }
 
     if (!session) {
-        return json({ status: "forbidden" }, { status: 403 });
+        return json({ status: "forbidden" }, { status: 403, headers: corsHeaders });
     }
 
     const shopDomain = session.shop;
@@ -20,23 +40,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (!shop) {
-        return json({ error: "Shop not found" }, { status: 404 });
+        return json({ error: "Shop not found" }, { status: 404, headers: corsHeaders });
     }
 
     // Extract and validate shopper token
     const token = extractShopperToken(request);
     if (!token) {
-        return json({ error: "Shopper token required" }, { status: 401 });
+        return json({ error: "Shopper token required" }, { status: 401, headers: corsHeaders });
     }
 
     const payload = validateShopperToken(token);
     if (!payload) {
-        return json({ error: "Invalid or expired token" }, { status: 401 });
+        return json({ error: "Invalid or expired token" }, { status: 401, headers: corsHeaders });
     }
 
     // Verify token matches shop
     if (payload.shopDomain !== shopDomain) {
-        return json({ error: "Token does not match shop" }, { status: 403 });
+        return json({ error: "Token does not match shop" }, { status: 403, headers: corsHeaders });
     }
 
     const body = await request.json();
@@ -45,7 +65,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Validate room session ID
     const sessionResult = validateSessionId(room_session_id);
     if (!sessionResult.valid) {
-        return json({ error: sessionResult.error }, { status: 400 });
+        return json({ error: sessionResult.error }, { status: 400, headers: corsHeaders });
     }
     const sanitizedSessionId = sessionResult.sanitized!;
 
@@ -56,7 +76,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     if (!roomSession || roomSession.shop.shopDomain !== shopDomain) {
-        return json({ error: "Room session not found" }, { status: 404 });
+        return json({ error: "Room session not found" }, { status: 404, headers: corsHeaders });
     }
 
     // Find or create owner
@@ -71,13 +91,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (!owner) {
         // This shouldn't happen if token is valid, but handle it
-        return json({ error: "Owner not found" }, { status: 404 });
+        return json({ error: "Owner not found" }, { status: 404, headers: corsHeaders });
     }
 
     // Determine which image key to use (prefer cleaned, fallback to original)
     const sourceImageKey = roomSession.cleanedRoomImageKey || roomSession.originalRoomImageKey;
     if (!sourceImageKey) {
-        return json({ error: "Room session has no image" }, { status: 400 });
+        return json({ error: "Room session has no image" }, { status: 400, headers: corsHeaders });
     }
 
     // Create saved room record first to get the ID
@@ -119,14 +139,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({
             saved_room_id: savedRoom.id,
             preview_url: previewUrl,
-        });
+        }, { headers: corsHeaders });
     } catch (error) {
         // Clean up saved room record if file copy fails
-        await prisma.savedRoom.delete({ where: { id: savedRoom.id } }).catch(() => {});
-        
+        await prisma.savedRoom.delete({ where: { id: savedRoom.id } }).catch(() => { });
+
         console.error('[SaveRoom] Failed to copy files:', error);
-        return json({ 
-            error: "Failed to save room image" 
-        }, { status: 500 });
+        return json({
+            error: "Failed to save room image"
+        }, { status: 500, headers: corsHeaders });
     }
 };
