@@ -251,6 +251,18 @@ document.addEventListener('DOMContentLoaded', function () {
     let canvasListenersAttached = false; // PREVENT DUPLICATE LISTENERS
     const BRUSH_COLOR = 'rgba(6, 182, 212, 0.6)'; // Cyan highlighter (matches cleanup-ai)
 
+    // Loading screen messages - rotate during generation
+    const LOADING_MESSAGES = [
+        "Analysing your room",
+        "Teaching AI about furniture placement",
+        "Calculating optimal lighting",
+        "AI is doing its thing (slowly)",
+        "Matching shadows to your room",
+        "Almost there, AI is thinking hard",
+        "Making it look natural",
+        "Final touches"
+    ];
+
     const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
 
     // --- Screen Navigation ---
@@ -1544,6 +1556,16 @@ document.addEventListener('DOMContentLoaded', function () {
         showScreen('loading');
         resetError();
 
+        // Start cycling loading messages
+        let messageIndex = 0;
+        const loadingTextEl = document.getElementById('see-it-loading-text');
+        const messageInterval = setInterval(() => {
+            messageIndex = (messageIndex + 1) % LOADING_MESSAGES.length;
+            if (loadingTextEl) {
+                loadingTextEl.innerHTML = LOADING_MESSAGES[messageIndex] + '<span class="see-it-loading-dots"></span>';
+            }
+        }, 2500);
+
         try {
             const payload = {
                 room_session_id: state.sessionId,
@@ -1601,6 +1623,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 // Set image and show result
                 if (resultImage) resultImage.src = imageUrl;
+                clearInterval(messageInterval);
                 showScreen('result');
 
                 // Prefetch collection products for swiper
@@ -1615,6 +1638,7 @@ document.addEventListener('DOMContentLoaded', function () {
             showError(errorMsg);
             alert('[See It Debug] ' + errorMsg);  // Temporary - remove after debugging
 
+            clearInterval(messageInterval);
             showScreen('position'); // Go back on error
         }
     };
