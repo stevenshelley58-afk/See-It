@@ -733,13 +733,34 @@ export async function compositeScene(
             .toBuffer({ resolveWithObject: true });
 
         resizedProduct = resizedResult.data;
+        const productWidth = resizedResult.info.width;
+        const productHeight = resizedResult.info.height;
 
         // Clean up original product buffer - no longer needed after resize
         productBuffer = null;
 
-        // Use info from resize result instead of another metadata call
-        const adjustedX = Math.max(0, pixelX - Math.round(resizedResult.info.width / 2));
-        const adjustedY = Math.max(0, pixelY - Math.round(resizedResult.info.height / 2));
+        // Calculate position: center product on click point, then clamp to room boundaries
+        // This ensures the product ALWAYS fits within the room (prevents Sharp composite error)
+        let adjustedX = pixelX - Math.round(productWidth / 2);
+        let adjustedY = pixelY - Math.round(productHeight / 2);
+
+        // Clamp TOP-LEFT to (0, 0) minimum
+        adjustedX = Math.max(0, adjustedX);
+        adjustedY = Math.max(0, adjustedY);
+
+        // Clamp BOTTOM-RIGHT to room boundaries
+        // If product would extend past room edge, shift it back
+        if (adjustedX + productWidth > roomWidth) {
+            adjustedX = Math.max(0, roomWidth - productWidth);
+        }
+        if (adjustedY + productHeight > roomHeight) {
+            adjustedY = Math.max(0, roomHeight - productHeight);
+        }
+
+        logger.info(
+            { ...logContext, stage: "placement-calc" },
+            `Position: click=(${pixelX},${pixelY}), product=${productWidth}×${productHeight}, adjusted=(${adjustedX},${adjustedY}), room=${roomWidth}×${roomHeight}`
+        );
 
         // Create a placement mask from the product alpha channel (best quality when product has transparency).
         // This mask is used to constrain Gemini edits and to hard-lock pixels outside the edit region.
