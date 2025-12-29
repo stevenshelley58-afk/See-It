@@ -42,7 +42,9 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
 
         const formData = new FormData();
         formData.append("productId", product.id.split('/').pop());
-        formData.append("instructions", JSON.stringify(pendingMetadata));
+        // Save the PROSE DESCRIPTION directly (not JSON)
+        // This is the merchant-approved description that Gemini will use
+        formData.append("instructions", typeof pendingMetadata === 'string' ? pendingMetadata : JSON.stringify(pendingMetadata));
 
         fetcher.submit(formData, {
             method: "post",

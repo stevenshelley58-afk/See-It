@@ -55,6 +55,67 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
     return closest;
 }
 
+// ============================================================================
+// NARRATIVE PROMPT BUILDER
+// Converts prose product description + placement into Gemini-optimized prompt
+// ============================================================================
+
+/**
+ * Convert normalized coordinates to natural language position description
+ */
+function describePosition(placement: { x: number; y: number }): string {
+    const { x, y } = placement;
+    
+    // Horizontal position
+    const h = 
+        x < 0.2 ? 'on the far left' :
+        x < 0.35 ? 'on the left side' :
+        x > 0.8 ? 'on the far right' :
+        x > 0.65 ? 'on the right side' : 
+        'centrally positioned';
+    
+    // Depth/vertical position (y in image correlates to depth in room photography)
+    const v = 
+        y > 0.75 ? 'close to the camera in the foreground' :
+        y > 0.55 ? 'in the foreground' :
+        y < 0.25 ? 'deep in the background' :
+        y < 0.4 ? 'in the background' : 
+        'at a comfortable middle distance';
+    
+    return `${h}, ${v}`;
+}
+
+/**
+ * Build the narrative prompt for Gemini image compositing
+ * 
+ * This prompt describes the DESIRED OUTPUT as a photograph that already exists.
+ * Per Google's Gemini documentation: "A narrative, descriptive paragraph will
+ * almost always produce a better, more coherent image than a simple list."
+ * 
+ * Key insight: Describe the FINAL PHOTO, not the compositing process.
+ */
+function buildCompositePrompt(
+    productDescription: string,
+    placement: { x: number; y: number; scale?: number; productWidthFraction?: number }
+): string {
+    const position = describePosition(placement);
+    
+    // If no product description, use minimal fallback
+    if (!productDescription) {
+        return `A professionally photographed interior scene. The furniture piece from the reference image sits naturally ${position} within the room. Natural contact shadows anchor it to the surface. The ambient lighting wraps consistently around all objects in the frame. Shot with a wide-angle lens, sharp focus throughout, the kind of image you'd see in an interior design magazine.`;
+    }
+    
+    // Build the full narrative prompt - written as if describing an existing photograph
+    // No instructions, no technical language about compositing - just the final image
+    return `A professionally photographed interior scene for a home furnishings catalogue.
+
+${productDescription}
+
+The piece sits ${position} in the room, grounded naturally on its surface with a soft contact shadow beneath. The room's existing ambient light wraps around the product consistently - highlights fall where expected, shadows have the same softness and direction as everything else in the frame. Any reflective or glossy surfaces pick up subtle hints of the surrounding environment.
+
+The photograph has the polished, editorial quality of Architectural Digest or Elle Decor - technically perfect, naturally lit, effortlessly composed. A single cohesive image where every element belongs together.`;
+}
+
 /**
  * Error thrown when a Gemini API call times out
  */
@@ -731,41 +792,13 @@ export async function compositeScene(
         roomBuffer = null;
         resizedProduct = null;
 
-        // Step 2: AI polish with final render prompt
-        const productInstructionsText = productInstructions?.trim() || 'None provided.';
+        // Step 2: AI composite with narrative prompt
+        // The productInstructions is now a PROSE DESCRIPTION written by AI during product prep
+        // and approved by the merchant. It describes what the product looks like.
+        const productDescription = productInstructions?.trim() || '';
         
-        const prompt = `You are performing a realistic product placement into a real photograph.
-
-Primary task:
-Polish the placement of the product that is already composited into the guide image.
-
-You are given two images:
-1) guideCompositeImage: the room photo with the product roughly placed
-2) editRegionMaskImage: WHITE = region you may modify (product + immediate surrounding area), BLACK = must remain pixel-identical
-
-Hard constraints (must follow):
-- Preserve the product's exact shape, proportions, materials, and colors.
-- Preserve the room's existing geometry, perspective, walls, floors, and lighting.
-- Do not change any pixels outside the WHITE region of the mask.
-- Do not invent additional decor or structural elements.
-- Do not change camera angle or room layout.
-
-Physical realism rules:
-- The product must interact correctly with gravity.
-- The product must rest on appropriate surfaces unless explicitly stated otherwise.
-- Add a natural contact shadow where the product meets the surface.
-- Match lighting direction, intensity, and color temperature from the scene.
-
-Geometric alignment rules:
-- If the product is placed against a wall or surface, it must align to the plane of that surface.
-- The product must rotate and skew to match the wall's angle and perspective.
-- The product must not face the camera unless the wall itself faces the camera.
-
-Product-specific instructions:
-${productInstructionsText}
-
-Final check:
-If there is any conflict between realism assumptions and the product-specific instructions, the product-specific instructions override realism assumptions.`;
+        // Build the narrative prompt - describes the DESIRED OUTPUT, not instructions
+        const prompt = buildCompositePrompt(productDescription, placement);
 
         // Compute closest Gemini-supported aspect ratio from actual room dimensions
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
