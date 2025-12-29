@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.27'; // Widget redesign: email capture, swiper, loading screen
+    const VERSION = '1.0.28'; // Critical bug fixes: prepared image, swiper, handles, hint
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)
@@ -785,16 +785,37 @@ document.addEventListener('DOMContentLoaded', function () {
     let pinchStartDistance = 0;
     let pinchStartScale = 1;
 
-    const initPosition = () => {
+    // Fetch prepared product image (background removed)
+    const fetchPreparedProductImage = async (productId) => {
+        try {
+            const res = await fetch(`/apps/see-it/product/prepared?product_id=${productId}`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            if (data.prepared_image_url) {
+                console.log('[See It] Got prepared image:', data.prepared_image_url.substring(0, 80));
+                return data.prepared_image_url;
+            }
+            return null;
+        } catch (e) {
+            console.error('[See It] Failed to fetch prepared image:', e);
+            return null;
+        }
+    };
+
+    const initPosition = async () => {
         console.log('[See It] initPosition called');
 
         const url = getActiveRoomUrl();
         if (roomImage) roomImage.src = url;
 
+        // Try to fetch prepared (background-removed) product image
+        const preparedUrl = await fetchPreparedProductImage(state.productId);
+        const imageToUse = preparedUrl || state.productImageUrl;
+
         // Set product image
-        if (productImage && state.productImageUrl) {
-            productImage.src = state.productImageUrl;
-            console.log('[See It] Product image set:', state.productImageUrl);
+        if (productImage) {
+            productImage.src = imageToUse;
+            console.log('[See It] Product image set:', preparedUrl ? 'PREPARED' : 'RAW', imageToUse.substring(0, 80));
 
             // Wait for product image to load to get dimensions
             productImage.onload = () => {
@@ -960,6 +981,9 @@ document.addEventListener('DOMContentLoaded', function () {
         isResizing = true;
         resizeHandle = e.target.className;
         productOverlay?.classList.add('resizing');
+
+        // Hide hint
+        positionHint?.classList.add('see-it-hidden');
 
         const pos = getEventPos(e);
         dragStart = { x: pos.x, y: pos.y };
@@ -1659,17 +1683,20 @@ document.addEventListener('DOMContentLoaded', function () {
         }, 150);
     };
 
-    const selectSwiperProduct = () => {
+    const selectSwiperProduct = async () => {
         const product = state.collectionProducts[state.swiperIndex];
         if (!product) return;
 
         // Update state with new product
         state.productId = product.id;
         state.productTitle = product.title;
-        state.productImageUrl = product.image;
+
+        // Fetch prepared image for new product
+        const preparedUrl = await fetchPreparedProductImage(product.id);
+        state.productImageUrl = preparedUrl || product.image;
 
         // Update product overlay image
-        if (productImage) productImage.src = product.image;
+        if (productImage) productImage.src = state.productImageUrl;
 
         hideSwiper();
         showScreen('position');
