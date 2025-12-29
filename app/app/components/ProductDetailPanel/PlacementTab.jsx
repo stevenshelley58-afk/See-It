@@ -1,6 +1,46 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '../ui';
 
+// Fallback: Extract dimensions from product data if not in renderInstructions
+function extractDimensionsFallback(product) {
+    // Priority 1: Description
+    const desc = product.description || product.descriptionHtml || '';
+    const measurementMatch = desc.match(
+        /(?:measurements?|dimensions?|size)[:\s]*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i
+    );
+    if (measurementMatch) {
+        return {
+            height: Math.round(parseFloat(measurementMatch[1])) || null,
+            width: Math.round(parseFloat(measurementMatch[2])) || null,
+            source: 'description'
+        };
+    }
+
+    // Priority 2: Metafields
+    const metafields = product.metafields?.edges?.map(e => e.node) || [];
+    let height = null, width = null;
+    for (const field of metafields) {
+        const key = (field.key || '').toLowerCase();
+        const val = parseInt(field.value);
+        if (!isNaN(val)) {
+            if (key.includes('height')) height = val;
+            if (key.includes('width')) width = val;
+        }
+    }
+    if (height || width) {
+        return { height, width, source: 'metafield' };
+    }
+
+    // Priority 3: Tags
+    const tags = product.tags || [];
+    for (const tag of tags) {
+        const match = (typeof tag === 'string' ? tag : '').match(/(?:height|h)[-_]?(\d+)/i);
+        if (match) return { height: parseInt(match[1]), width: null, source: 'tag' };
+    }
+
+    return { height: null, width: null, source: null };
+}
+
 // Helper: Auto-detect metadata from title (from demo)
 function detectMetadata(title) {
     const t = title.toLowerCase();
@@ -73,24 +113,43 @@ function generatePromptPreview(meta) {
  */
 export function PlacementTab({ product, asset, onChange }) {
     // Parse initial metadata from asset.renderInstructions
+    // Parse initial metadata from asset.renderInstructions
     const initialMetadata = useMemo(() => {
+        let metadata = null;
+
+        // Try to load from stored renderInstructions
         try {
             if (asset?.renderInstructions && asset.renderInstructions.startsWith('{')) {
-                return JSON.parse(asset.renderInstructions);
+                metadata = JSON.parse(asset.renderInstructions);
             }
         } catch (e) {
             console.error("Failed to parse renderInstructions", e);
         }
 
-        // Fallback to auto-detection
-        const detected = detectMetadata(product.title);
-        return {
-            ...detected,
-            shadow: 'contact',
-            dimensions: { height: null, width: null },
-            customInstructions: ''
-        };
-    }, [asset, product.title]);
+        // If no stored metadata, use title-based detection
+        if (!metadata) {
+            const detected = detectMetadata(product.title);
+            metadata = {
+                ...detected,
+                shadow: 'contact',
+                dimensions: { height: null, width: null },
+                customInstructions: ''
+            };
+        }
+
+        // If dimensions still missing, try fallback extraction from product data
+        if (!metadata.dimensions?.height && !metadata.dimensions?.width) {
+            const fallbackDims = extractDimensionsFallback(product);
+            if (fallbackDims.height || fallbackDims.width) {
+                metadata.dimensions = {
+                    height: fallbackDims.height,
+                    width: fallbackDims.width
+                };
+            }
+        }
+
+        return metadata;
+    }, [asset, product]);
 
     const [metadata, setMetadata] = useState(initialMetadata);
 
@@ -126,6 +185,7 @@ export function PlacementTab({ product, asset, onChange }) {
     return (
         <div className="space-y-6 fade-in">
             {/* Auto-detection Hint */}
+            {/* Auto-detection Hint */}
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
                 <div className="bg-amber-500/10 p-1.5 rounded-lg shrink-0">
                     <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -133,9 +193,13 @@ export function PlacementTab({ product, asset, onChange }) {
                     </svg>
                 </div>
                 <div className="text-sm text-amber-800">
-                    <p className="font-bold">Auto-detected placement hints</p>
+                    <p className="font-bold">Auto-detected from product data</p>
                     <p className="opacity-90">
-                        Based on the title, we suggest: <strong>{detected.surface}</strong>, <strong>{detected.orientation}</strong>, <strong>{detected.material}</strong>. Adjust as needed.
+                        Suggested: <strong>{metadata.surface}</strong>, <strong>{metadata.orientation}</strong>, <strong>{metadata.material}</strong>.
+                        {metadata.dimensions?.height || metadata.dimensions?.width ? (
+                            <> Dimensions: <strong>{metadata.dimensions.height || '?'}cm × {metadata.dimensions.width || '?'}cm</strong>.</>
+                        ) : null}
+                        {' '}Review and adjust as needed.
                     </p>
                 </div>
             </div>
@@ -151,8 +215,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={s}
                                     onClick={() => updateField('surface', s)}
                                     className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${metadata.surface === s
-                                            ? 'bg-neutral-900 text-white shadow-md transform scale-105'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:bg-neutral-50'
+                                        ? 'bg-neutral-900 text-white shadow-md transform scale-105'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:bg-neutral-50'
                                         }`}
                                 >
                                     {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -170,8 +234,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={o}
                                     onClick={() => updateField('orientation', o)}
                                     className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${metadata.orientation === o
-                                            ? 'bg-neutral-900 text-white shadow-md transform scale-105'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:bg-neutral-50'
+                                        ? 'bg-neutral-900 text-white shadow-md transform scale-105'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:bg-neutral-50'
                                         }`}
                                 >
                                     {o.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
@@ -189,8 +253,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={m}
                                     onClick={() => updateField('material', m)}
                                     className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${metadata.material === m
-                                            ? 'bg-neutral-900 text-white shadow-md transform scale-105'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:bg-neutral-50'
+                                        ? 'bg-neutral-900 text-white shadow-md transform scale-105'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:bg-neutral-50'
                                         }`}
                                 >
                                     {m.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
@@ -208,8 +272,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={s}
                                     onClick={() => updateField('shadow', s)}
                                     className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${metadata.shadow === s
-                                            ? 'bg-neutral-900 text-white shadow-md transform scale-105'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:bg-neutral-50'
+                                        ? 'bg-neutral-900 text-white shadow-md transform scale-105'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400 hover:bg-neutral-50'
                                         }`}
                                 >
                                     {s.charAt(0).toUpperCase() + s.slice(1)}

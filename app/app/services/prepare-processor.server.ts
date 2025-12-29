@@ -3,6 +3,7 @@ import { prepareProduct, compositeScene } from "./gemini.server";
 import { logger, createLogContext, generateRequestId } from "../utils/logger.server";
 import { StorageService } from "./storage.server";
 import { incrementQuota } from "../quota.server";
+import { extractProductMetadata } from "./extract-metadata.server";
 
 let processorInterval: NodeJS.Timeout | null = null;
 let isProcessing = false;
@@ -168,6 +169,30 @@ async function processPendingAssets(batchRequestId: string) {
                 }
 
                 if (success && preparedImageUrl) {
+                    // Extract metadata with AI (non-blocking - failures don't stop prepare)
+                    let renderInstructions = asset.renderInstructions;
+                    if (!renderInstructions) {
+                        try {
+                            const metadata = await extractProductMetadata(
+                                asset.sourceImageUrl,
+                                asset.productTitle || '',
+                                '', // We don't have description here yet - AI will use image + title
+                                [],
+                                [],
+                                itemRequestId
+                            );
+                            if (metadata) {
+                                renderInstructions = JSON.stringify(metadata);
+                            }
+                        } catch (metadataError) {
+                            logger.warn(
+                                createLogContext("prepare", itemRequestId, "metadata-extract", { error: metadataError instanceof Error ? metadataError.message : String(metadataError) }),
+                                "Metadata extraction failed, continuing without",
+                                metadataError
+                            );
+                        }
+                    }
+
                     // Extract GCS key from the signed URL for on-demand URL generation
                     const preparedImageKey = extractGcsKeyFromUrl(preparedImageUrl);
 
@@ -177,6 +202,7 @@ async function processPendingAssets(batchRequestId: string) {
                             status: "ready",
                             preparedImageUrl: preparedImageUrl,
                             preparedImageKey: preparedImageKey,
+                            renderInstructions: renderInstructions,
                             retryCount: 0, // Reset retry count on success
                             errorMessage: null,
                             updatedAt: new Date()

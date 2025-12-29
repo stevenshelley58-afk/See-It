@@ -42,6 +42,19 @@ export const loader = async ({ request }) => {
                         handle
                         status
                         totalInventory
+                        description
+                        descriptionHtml
+                        tags
+                        metafields(first: 10) {
+                            edges {
+                                node {
+                                    namespace
+                                    key
+                                    value
+                                    type
+                                }
+                            }
+                        }
                         priceRangeV2 {
                             minVariantPrice { amount currencyCode }
                         }
