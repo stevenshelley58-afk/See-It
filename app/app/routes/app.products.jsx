@@ -225,8 +225,8 @@ export default function Products() {
                             Manage your product visualizations
                         </p>
                     </div>
-                    <Button 
-                        variant="primary" 
+                    <Button
+                        variant="primary"
                         className="flex-shrink-0"
                         onClick={() => revalidator.revalidate()}
                     >
@@ -246,26 +246,113 @@ export default function Products() {
                     )}
                 </div>
 
-                {/* Product listing removed */}
-                <div className="bg-white rounded-xl border border-neutral-200 p-5 text-sm text-neutral-700">
-                    <div className="font-medium text-neutral-900">Product listing removed</div>
-                    <div className="mt-1">
-                        This screen no longer renders the product grid. You can still use actions like syncing, preparing by ID (via API),
-                        and manual workflows from other screens.
-                    </div>
-                    <div className="mt-3 text-neutral-500">
-                        Products fetched: <span className="text-neutral-900 font-medium">{products.length}</span>
+                {/* Product Grid */}
+                <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+                    {products.length === 0 ? (
+                        <div className="p-10 text-center">
+                            <Text tone="subdued" as="p">No products found</Text>
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 font-medium">
+                                    <tr>
+                                        <th className="px-4 py-3 font-normal w-16">Image</th>
+                                        <th className="px-4 py-3 font-normal">Product</th>
+                                        <th className="px-4 py-3 font-normal">Status</th>
+                                        <th className="px-4 py-3 font-normal text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-neutral-100">
+                                    {products.map((product) => {
+                                        const asset = assetsMap[`gid://shopify/Product/${product.id.split('/').pop()}`];
+                                        const status = asset?.status || 'pending';
+                                        const hasPrepared = !!asset?.preparedImageUrlFresh || !!asset?.preparedImageUrl;
+
+                                        return (
+                                            <tr key={product.id} className="hover:bg-neutral-50/50 transition-colors">
+                                                <td className="px-4 py-3">
+                                                    <div className="w-10 h-10 rounded-lg border border-neutral-200 overflow-hidden bg-white flex items-center justify-center">
+                                                        {product.featuredImage ? (
+                                                            <img src={product.featuredImage.url} alt="" className="w-full h-full object-cover" />
+                                                        ) : (
+                                                            <div className="w-4 h-4 rounded-full bg-neutral-200" />
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <div className="font-medium text-neutral-900">{product.title}</div>
+                                                    <div className="text-neutral-500 text-xs truncate max-w-[200px]">
+                                                        {product.handle}
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                            status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
+                                                                status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                                                    'bg-neutral-100 text-neutral-600 border-neutral-200'
+                                                        }`}>
+                                                        {status === 'ready' && hasPrepared ? 'Ready' :
+                                                            status === 'ready' ? 'Ready (Original)' :
+                                                                status.charAt(0).toUpperCase() + status.slice(1)}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-right">
+                                                    <div className="flex justify-end gap-2">
+                                                        {processingId === product.id ? (
+                                                            <div className="h-8 px-3 flex items-center text-neutral-400">
+                                                                <span className="animate-spin mr-2">⟳</span> Processing...
+                                                            </div>
+                                                        ) : (
+                                                            <>
+                                                                <Button
+                                                                    variant="secondary"
+                                                                    size="sm"
+                                                                    onClick={() => openAdjustModal(product, true)}
+                                                                >
+                                                                    Draw Mask
+                                                                </Button>
+                                                                <Button
+                                                                    variant="secondary"
+                                                                    size="sm"
+                                                                    onClick={() => openImageModal(product)}
+                                                                >
+                                                                    Auto-Remove
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* Pagination */}
+                    <div className="border-t border-neutral-200 p-3 flex justify-center gap-2">
+                        {pageInfo?.hasPreviousPage && (
+                            <Link to={`?cursor=${pageInfo.startCursor}&direction=previous&filter=${filter}`}>
+                                <Button variant="secondary" size="sm">Previous</Button>
+                            </Link>
+                        )}
+                        {pageInfo?.hasNextPage && (
+                            <Link to={`?cursor=${pageInfo.endCursor}&direction=next&filter=${filter}`}>
+                                <Button variant="secondary" size="sm">Next</Button>
+                            </Link>
+                        )}
                     </div>
                 </div>
             </PageShell>
 
             {/* Toast */}
             {toast && (
-                <div className={`fixed bottom-5 left-1/2 -translate-x-1/2 px-5 py-3 rounded-lg text-sm font-medium text-white z-50 shadow-lg ${
-                    toast.type === 'success' ? 'bg-emerald-600' :
-                    toast.type === 'err' ? 'bg-red-600' :
-                    'bg-neutral-900'
-                }`}>
+                <div className={`fixed bottom-5 left-1/2 -translate-x-1/2 px-5 py-3 rounded-lg text-sm font-medium text-white z-50 shadow-lg ${toast.type === 'success' ? 'bg-emerald-600' :
+                        toast.type === 'err' ? 'bg-red-600' :
+                            'bg-neutral-900'
+                    }`}>
                     {toast.msg}
                 </div>
             )}
@@ -303,9 +390,8 @@ export default function Products() {
                                         <div
                                             key={edge.node.id}
                                             onClick={() => setSelectedImg(idx)}
-                                            className={`w-14 h-14 rounded-lg overflow-hidden cursor-pointer border-2 ${
-                                                idx === selectedImg ? 'border-neutral-900' : 'border-neutral-200'
-                                            }`}
+                                            className={`w-14 h-14 rounded-lg overflow-hidden cursor-pointer border-2 ${idx === selectedImg ? 'border-neutral-900' : 'border-neutral-200'
+                                                }`}
                                         >
                                             <img
                                                 src={edge.node.url}

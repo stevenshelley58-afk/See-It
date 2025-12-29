@@ -1499,7 +1499,12 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             if (data.status === 'completed' && data.imageUrl) {
-                if (resultImage) resultImage.src = data.imageUrl;
+                console.log('[See It] Setting result image src:', data.imageUrl);
+                if (resultImage) {
+                    resultImage.onload = () => console.log('[See It] Result image loaded successfully');
+                    resultImage.onerror = (e) => console.error('[See It] Result image failed to load', e);
+                    resultImage.src = data.imageUrl;
+                }
                 return;
             }
 
