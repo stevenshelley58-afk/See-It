@@ -15,7 +15,7 @@ export const loader = async ({ request }) => {
     const url = new URL(request.url);
     const cursor = url.searchParams.get("cursor");
     const direction = url.searchParams.get("direction") || "next";
-    const statusFilter = url.searchParams.get("status") || "all";
+    const statusFilter = url.searchParams.get("status") || "ACTIVE";
     const searchQuery = url.searchParams.get("q") || "";
 
     const pageSize = 12;
@@ -206,6 +206,9 @@ export default function Products() {
 
     // Bulk selection state
     const [selectedIds, setSelectedIds] = useState([]);
+    // Bulk progress state
+    const [bulkProgress, setBulkProgress] = useState(null);
+    // Shape: { current: 0, total: 0, status: 'idle' | 'running' | 'done', successCount: 0, failCount: 0 }
 
     const prevState = useRef(singleFetcher.state);
 
@@ -220,6 +223,40 @@ export default function Products() {
         setDetailPanelProduct(product);
         setDetailPanelOpen(true);
     }, []);
+
+    // Bulk prepare handler
+    const handleBulkPrepare = async () => {
+        const total = selectedIds.length;
+        setBulkProgress({ current: 0, total, status: 'running', successCount: 0, failCount: 0 });
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < selectedIds.length; i++) {
+            const productId = selectedIds[i].split('/').pop(); // Extract ID from gid://shopify/Product/123
+            try {
+                const res = await fetch('/api/products/prepare', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ productId })
+                });
+                if (res.ok) successCount++;
+                else failCount++;
+            } catch (e) {
+                failCount++;
+            }
+            setBulkProgress({ current: i + 1, total, status: 'running', successCount, failCount });
+        }
+
+        setBulkProgress({ current: total, total, status: 'done', successCount, failCount });
+
+        // Show done state for 3 seconds, then reset
+        setTimeout(() => {
+            setBulkProgress(null);
+            setSelectedIds([]);
+            revalidator.revalidate();
+        }, 3000);
+    };
 
     return (
         <>
@@ -266,8 +303,8 @@ export default function Products() {
                                 window.location.href = `${window.location.pathname}?${params.toString()}`;
                             }}
                         >
-                            <option value="all">All Products</option>
                             <option value="ACTIVE">Active</option>
+                            <option value="all">All Products</option>
                             <option value="DRAFT">Draft</option>
                             <option value="ARCHIVED">Archived</option>
                         </select>
@@ -283,32 +320,47 @@ export default function Products() {
                     {/* Bulk Actions Bar */}
                     {selectedIds.length > 0 && (
                         <div className="bg-neutral-900 text-white p-4 rounded-xl flex items-center justify-between shadow-2xl animate-in slide-in-from-bottom-4 duration-300">
-                            <div className="flex items-center gap-4">
-                                <span className="text-sm font-bold bg-white/20 px-3 py-1 rounded-full">
-                                    {selectedIds.length} items selected
-                                </span>
-                                <div className="h-4 w-[1px] bg-white/20"></div>
-                                <Button
-                                    variant="primary"
-                                    onClick={() => {
-                                        if (confirm(`Prepare background removal for ${selectedIds.length} selected products?`)) {
-                                            // Bulk prepare logic
-                                            showToast(`Preparing ${selectedIds.length} products...`, "info");
-                                        }
-                                    }}
-                                    className="bg-white text-neutral-900 hover:bg-neutral-100 border-none"
-                                >
-                                    Prepare Selected
-                                </Button>
+                            <div className="flex items-center gap-3">
+                                {!bulkProgress ? (
+                                    <>
+                                        <span className="text-sm font-semibold bg-white/20 px-3 py-1.5 rounded-full">
+                                            {selectedIds.length} selected
+                                        </span>
+                                        <button
+                                            onClick={handleBulkPrepare}
+                                            className="px-4 py-2 bg-white text-neutral-900 text-sm font-semibold rounded-lg hover:bg-neutral-100 transition-colors"
+                                        >
+                                            Prepare Selected
+                                        </button>
+                                    </>
+                                ) : bulkProgress.status === 'running' ? (
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-32 h-2 bg-white/20 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-white transition-all duration-300"
+                                                style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }}
+                                            />
+                                        </div>
+                                        <span className="text-sm">
+                                            Preparing {bulkProgress.current}/{bulkProgress.total}...
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <span className="text-sm font-medium">
+                                        Done! {bulkProgress.successCount} ready{bulkProgress.failCount > 0 ? `, ${bulkProgress.failCount} failed` : ''}
+                                    </span>
+                                )}
                             </div>
-                            <button
-                                onClick={() => setSelectedIds([])}
-                                className="text-white/60 hover:text-white transition-colors"
-                            >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
+                            {!bulkProgress && (
+                                <button
+                                    onClick={() => setSelectedIds([])}
+                                    className="p-2 text-white hover:bg-white/10 rounded-lg transition-colors"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            )}
                         </div>
                     )}
 

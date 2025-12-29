@@ -1,16 +1,12 @@
 # Deploy See It - Quick Guide
 
-## Changes Made (v1.0.20)
+## Changes Made (v1.0.28)
 
 I've made the following improvements:
 
-1. **Fixed product sync issue** - Now fetches ALL products from Shopify using pagination (was limited to 20 before)
-
-2. **Removed external Image Service dependency** - The app now uses a local Gemini service built into the main app. No separate Cloud Run service needed!
-
-3. **Fixed theme extension warnings** - Added width/height attributes to img tags.
-
-4. **Updated version to 1.0.20**
+1. **Improved Bulk Actions** - Added separate styling and progress tracking for bulk prepare
+2. **Products Filter** - Default filter is now "ACTIVE"
+3. **Updated version to 1.0.28**
 
 ## Step 1: Commit and Push to Trigger Railway Deployment
 
@@ -19,7 +15,7 @@ Run these commands in PowerShell from the `c:\See It` directory:
 ```powershell
 cd "c:\See It"
 git add -A
-git commit -m "v1.0.20: Fetch ALL products with pagination, use local Gemini service"
+git commit -m "v1.0.28: Improve bulk actions and default filter"
 git push origin main
 ```
 
