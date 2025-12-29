@@ -150,7 +150,7 @@ export const loader = async ({ request }) => {
 };
 
 export default function Products() {
-    const { products, assetsMap, usage, quota, isPro } = useLoaderData();
+    const { products, assetsMap, usage, quota, isPro, pageInfo, filter } = useLoaderData();
     const singleFetcher = useFetcher();
     const revalidator = useRevalidator();
 
