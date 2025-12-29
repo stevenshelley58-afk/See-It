@@ -1,12 +1,14 @@
 # Deploy See It - Quick Guide
 
-## Changes Made (v1.0.28)
+## Changes Made (v1.0.29)
 
 I've made the following improvements:
 
-1. **Improved Bulk Actions** - Added separate styling and progress tracking for bulk prepare
-2. **Products Filter** - Default filter is now "ACTIVE"
-3. **Updated version to 1.0.28**
+1. **Fixed Bulk Prepare Failure** - Changed API call to use `FormData` instead of JSON (which was causing 400 errors).
+2. **Improved Status Updates** - The product list now updates immediately after the bulk prepare finishes, showing "Pending" or "Ready" badges behind the "Done" banner.
+3. **Improved Bulk Actions** - Added separate styling and progress tracking for bulk prepare
+4. **Products Filter** - Default filter is now "ACTIVE"
+5. **Updated version to 1.0.29**
 
 ## Step 1: Commit and Push to Trigger Railway Deployment
 
@@ -15,7 +17,7 @@ Run these commands in PowerShell from the `c:\See It` directory:
 ```powershell
 cd "c:\See It"
 git add -A
-git commit -m "v1.0.28: Improve bulk actions and default filter"
+git commit -m "v1.0.29: Fix bulk prepare fetch to use FormData"
 git push origin main
 ```
 

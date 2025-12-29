@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.28'; // Fix: resize handles overflow, generate debug alerts
+    const VERSION = '1.0.29'; // Fix: resize handles overflow, generate debug alerts
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)

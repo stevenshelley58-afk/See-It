@@ -21,11 +21,11 @@ function getCorsHeaders(shopDomain: string | null): Record<string, string> {
         "Pragma": "no-cache",
         "Expires": "0",
     };
-    
+
     if (shopDomain) {
         headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
     }
-    
+
     return headers;
 }
 
@@ -236,11 +236,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Store both URL and key - key enables URL regeneration when signed URL expires
         await prisma.renderJob.update({
             where: { id: job.id },
-            data: { 
-                status: "completed", 
+            data: {
+                status: "completed",
                 imageUrl: result.imageUrl,
                 imageKey: result.imageKey,
-                completedAt: new Date() 
+                completedAt: new Date()
             }
         });
 
@@ -253,13 +253,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
 
         // Return job_id with status so client can skip polling if already complete
-        return json({ 
+        return json({
             job_id: job.id,
             status: "completed",
             image_url: result.imageUrl,
             imageUrl: result.imageUrl
         }, { headers: corsHeaders });
     } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
         logger.error(
             { ...shopLogContext, stage: "composite-error" },
             "Gemini composite failed",
@@ -270,11 +271,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             data: {
                 status: "failed",
                 errorCode: "GEMINI_ERROR",
-                errorMessage: error instanceof Error ? error.message : "Unknown error"
+                errorMessage: errorMessage
             }
         });
+
+        // Return error message to frontend for debugging
+        return json({
+            job_id: job.id,
+            status: "failed",
+            error: errorMessage,
+            error_code: "GEMINI_ERROR"
+        }, { headers: corsHeaders });
     }
 
-    // If we get here, the job failed - still return job_id so client can poll for error details
-    return json({ job_id: job.id, status: "failed" }, { headers: corsHeaders });
+    // If we get here without returning, something unexpected happened
+    return json({ job_id: job.id, status: "failed", error: "Unknown failure" }, { headers: corsHeaders });
 };
