@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.29'; // Fix: resize handles overflow, generate debug alerts
+    const VERSION = '1.0.29'; // Fix: desktop modal layout - contained Apple-style experience
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)
@@ -253,14 +253,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Loading screen messages - rotate during generation
     const LOADING_MESSAGES = [
-        "Analysing your room",
-        "Teaching AI about furniture placement",
-        "Calculating optimal lighting",
-        "AI is doing its thing (slowly)",
-        "Matching shadows to your room",
-        "Almost there, AI is thinking hard",
-        "Making it look natural",
-        "Final touches"
+        "I make things look pretty",
+        "I don't always get size correct",
+        "Doing very technical things...",
+        "Where did I put the tape measure...",
+        "Almost there...",
+        "Humans are still useful for checking dimensions"
     ];
 
     const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;

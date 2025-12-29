@@ -59,6 +59,7 @@ export async function removeObject(
     const formData = new FormData();
     formData.append('image_file', imageBlob, 'image.png');
     formData.append('mask_file', maskBlob, 'mask.png');
+    formData.append('mode', 'quality');  // Use quality mode for better reconstruction
 
     logger.info(
         { ...logContext, stage: 'request' },
