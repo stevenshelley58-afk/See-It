@@ -28,23 +28,23 @@ const GEMINI_TIMEOUT_MS = 60000; // 60 seconds
 // ASPECT RATIO NORMALIZATION (Gemini-compatible)
 // ============================================================================
 const GEMINI_SUPPORTED_RATIOS = [
-    { label: '1:1',   value: 1.0 },
-    { label: '4:5',   value: 0.8 },
-    { label: '5:4',   value: 1.25 },
-    { label: '3:4',   value: 0.75 },
-    { label: '4:3',   value: 4/3 },
-    { label: '2:3',   value: 2/3 },
-    { label: '3:2',   value: 1.5 },
-    { label: '9:16',  value: 9/16 },
-    { label: '16:9', value: 16/9 },
-    { label: '21:9', value: 21/9 },
+    { label: '1:1', value: 1.0 },
+    { label: '4:5', value: 0.8 },
+    { label: '5:4', value: 1.25 },
+    { label: '3:4', value: 0.75 },
+    { label: '4:3', value: 4 / 3 },
+    { label: '2:3', value: 2 / 3 },
+    { label: '3:2', value: 1.5 },
+    { label: '9:16', value: 9 / 16 },
+    { label: '16:9', value: 16 / 9 },
+    { label: '21:9', value: 21 / 9 },
 ];
 
 function findClosestGeminiRatio(width: number, height: number): { label: string; value: number } {
     const inputRatio = width / height;
     let closest = GEMINI_SUPPORTED_RATIOS[0];
     let minDiff = Math.abs(inputRatio - closest.value);
-    
+
     for (const r of GEMINI_SUPPORTED_RATIOS) {
         const diff = Math.abs(inputRatio - r.value);
         if (diff < minDiff) {
@@ -65,23 +65,23 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
  */
 function describePosition(placement: { x: number; y: number }): string {
     const { x, y } = placement;
-    
+
     // Horizontal position
-    const h = 
+    const h =
         x < 0.2 ? 'on the far left' :
-        x < 0.35 ? 'on the left side' :
-        x > 0.8 ? 'on the far right' :
-        x > 0.65 ? 'on the right side' : 
-        'centrally positioned';
-    
+            x < 0.35 ? 'on the left side' :
+                x > 0.8 ? 'on the far right' :
+                    x > 0.65 ? 'on the right side' :
+                        'centrally positioned';
+
     // Depth/vertical position (y in image correlates to depth in room photography)
-    const v = 
+    const v =
         y > 0.75 ? 'close to the camera in the foreground' :
-        y > 0.55 ? 'in the foreground' :
-        y < 0.25 ? 'deep in the background' :
-        y < 0.4 ? 'in the background' : 
-        'at a comfortable middle distance';
-    
+            y > 0.55 ? 'in the foreground' :
+                y < 0.25 ? 'deep in the background' :
+                    y < 0.4 ? 'in the background' :
+                        'at a comfortable middle distance';
+
     return `${h}, ${v}`;
 }
 
@@ -99,12 +99,12 @@ function buildCompositePrompt(
     placement: { x: number; y: number; scale?: number; productWidthFraction?: number }
 ): string {
     const position = describePosition(placement);
-    
+
     // If no product description, use minimal fallback
     if (!productDescription) {
         return `A professionally photographed interior scene. The furniture piece from the reference image sits naturally ${position} within the room. Natural contact shadows anchor it to the surface. The ambient lighting wraps consistently around all objects in the frame. Shot with a wide-angle lens, sharp focus throughout, the kind of image you'd see in an interior design magazine.`;
     }
-    
+
     // Build the full narrative prompt - written as if describing an existing photograph
     // No instructions, no technical language about compositing - just the final image
     return `A professionally photographed interior scene for a home furnishings catalogue.
@@ -527,29 +527,29 @@ export async function prepareProduct(
                 mimeType: 'image/png' | 'image/jpeg';
                 getBuffer: () => Promise<Buffer>;
             }> = [
-                {
-                    label: 'png',
-                    mimeType: 'image/png',
-                    getBuffer: async () => pngBuffer!
-                },
-                {
-                    label: 'jpeg-fallback',
-                    mimeType: 'image/jpeg',
-                    getBuffer: async () => {
-                        logger.info(
-                            { ...logContext, stage: "bg-remove" },
-                            "Fallback: converting to JPEG before background removal"
-                        );
-                        const jpegBuffer = await sharp(originalImageBuffer).jpeg({ quality: 95 }).toBuffer();
-                        const meta = await sharp(jpegBuffer).metadata();
-                        logger.debug(
-                            { ...logContext, stage: "bg-remove" },
-                            `JPEG fallback metadata: format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
-                        );
-                        return jpegBuffer;
+                    {
+                        label: 'png',
+                        mimeType: 'image/png',
+                        getBuffer: async () => pngBuffer!
+                    },
+                    {
+                        label: 'jpeg-fallback',
+                        mimeType: 'image/jpeg',
+                        getBuffer: async () => {
+                            logger.info(
+                                { ...logContext, stage: "bg-remove" },
+                                "Fallback: converting to JPEG before background removal"
+                            );
+                            const jpegBuffer = await sharp(originalImageBuffer).jpeg({ quality: 95 }).toBuffer();
+                            const meta = await sharp(jpegBuffer).metadata();
+                            logger.debug(
+                                { ...logContext, stage: "bg-remove" },
+                                `JPEG fallback metadata: format=${meta.format}, width=${meta.width}, height=${meta.height}, channels=${meta.channels}, hasAlpha=${meta.hasAlpha}`
+                            );
+                            return jpegBuffer;
+                        }
                     }
-                }
-            ];
+                ];
 
             // Enforce max attempts guard
             if (attempts.length > MAX_BG_REMOVAL_ATTEMPTS) {
@@ -796,17 +796,33 @@ export async function compositeScene(
         // The productInstructions is now a PROSE DESCRIPTION written by AI during product prep
         // and approved by the merchant. It describes what the product looks like.
         const productDescription = productInstructions?.trim() || '';
-        
+
         // Build the narrative prompt - describes the DESIRED OUTPUT, not instructions
         const prompt = buildCompositePrompt(productDescription, placement);
 
         // Compute closest Gemini-supported aspect ratio from actual room dimensions
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
-        
+
+        // DIAGNOSTIC: Capture actual dimensions of both images before Gemini call
+        // This helps identify the "Image to composite must have same dimensions or smaller" error
+        const [guideMeta, maskMeta] = await Promise.all([
+            sharp(guideImageBuffer).metadata(),
+            sharp(editRegionMask).metadata()
+        ]);
+
         logger.info(
-            { ...logContext, stage: "aspect-ratio" },
-            `Room image: ${roomWidth}×${roomHeight} → closest Gemini ratio: ${closestRatio.label}`
+            { ...logContext, stage: "pre-gemini-dimensions" },
+            `DIMENSIONS CHECK: guideImage=${guideMeta.width}×${guideMeta.height}, mask=${maskMeta.width}×${maskMeta.height}, room=${roomWidth}×${roomHeight}, ratio=${closestRatio.label}`
         );
+
+        // Validate dimensions match before sending to Gemini
+        if (guideMeta.width !== maskMeta.width || guideMeta.height !== maskMeta.height) {
+            logger.error(
+                { ...logContext, stage: "dimension-mismatch" },
+                `DIMENSION MISMATCH: guideImage=${guideMeta.width}×${guideMeta.height} vs mask=${maskMeta.width}×${maskMeta.height}. This will cause Gemini to fail!`
+            );
+            throw new Error(`Dimension mismatch: guideImage (${guideMeta.width}×${guideMeta.height}) != mask (${maskMeta.width}×${maskMeta.height})`);
+        }
 
         const base64Data = await callGemini(prompt, [guideImageBuffer, editRegionMask], {
             model: IMAGE_MODEL_PRO,
