@@ -1154,10 +1154,18 @@
 
 /* --- v2.0.2 Fix: Overflow and Resize Handles --- */
 
-/* Fix overflow clipping on position screen */
+/* Image-focused screens: no scrolling needed */
+.see-it-screen-prepare,
+.see-it-screen-position,
+.see-it-screen-loading,
+.see-it-screen-result {
+  overflow: hidden !important; /* Prevents scrollbar on image screens */
+}
+
+/* Position screen canvas: allow visible overflow for resize handles */
 .see-it-screen-position .see-it-canvas-container,
 #see-it-position-container {
-  overflow: visible !important;
+  overflow: visible !important; /* Allows resize handles to show outside bounds */
 }
 
 /* Product overlay must allow visible overflow for handles */

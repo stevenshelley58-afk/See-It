@@ -1,6 +1,6 @@
 /**
  * DESCRIPTION WRITER SERVICE
- * See It AR - Production Grade
+ * See It - Production Grade
  * 
  * Purpose: Take structured product data and write an optimized prose description
  * that Gemini will use for compositing.

@@ -3,7 +3,7 @@ import { useFetcher } from '@remix-run/react';
 import { Button } from '../ui';
 
 /**
- * PlacementTab - Product preparation for AR rendering
+ * PlacementTab - Product preparation for rendering
  * 
  * Flow:
  * 1. Auto-extract structured fields from product data
