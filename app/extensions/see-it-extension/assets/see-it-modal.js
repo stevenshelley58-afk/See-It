@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.28';
+    const VERSION = '1.1.0'; // Dual-canvas architecture for better mask quality
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)
@@ -208,14 +208,19 @@ document.addEventListener('DOMContentLoaded', function () {
         normalizedHeight: 0
     };
 
-    // Canvas state
-    let ctx = null;
+    // Canvas state - DUAL CANVAS ARCHITECTURE (like cleanup-ai reference)
+    // Visual canvas (maskCanvas) shows cyan highlights at UI scale
+    // Hidden mask canvas (hiddenMaskCanvas) draws pure white at NATIVE resolution
+    let ctx = null;           // Visual canvas context
+    let maskCtx = null;       // Hidden mask canvas context (native resolution)
+    let hiddenMaskCanvas = null; // Hidden canvas element for API mask
     let isDrawing = false;
-    let strokes = [];
+    let strokes = [];         // Array of {points: [], brushSize: number}
     let currentStroke = [];
+    let brushSize = 50;       // Current brush size in UI pixels
     let hasErased = false;
     let canvasListenersAttached = false; // PREVENT DUPLICATE LISTENERS
-    const BRUSH_COLOR = 'rgba(139, 92, 246, 0.9)';
+    const BRUSH_COLOR = 'rgba(6, 182, 212, 0.6)'; // Cyan highlighter (matches cleanup-ai)
 
     const getActiveRoomUrl = () => state.cleanedRoomImageUrl || state.originalRoomImageUrl || state.localImageDataUrl;
 
@@ -277,7 +282,9 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     };
 
-    // --- Canvas Drawing ---
+    // --- Canvas Drawing (DUAL CANVAS ARCHITECTURE) ---
+    // Visual canvas: sized to fit container, shows cyan highlights
+    // Hidden mask canvas: native resolution, draws pure white for API
     const initCanvas = () => {
         console.log('[See It] initCanvas called', {
             normalizedWidth: state.normalizedWidth,
@@ -290,7 +297,7 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        // Use stored normalized dimensions
+        // Use stored normalized dimensions (native resolution)
         let natW = state.normalizedWidth;
         let natH = state.normalizedHeight;
 
@@ -314,34 +321,83 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
 
-        // Set canvas internal dimensions
-        maskCanvas.width = natW;
-        maskCanvas.height = natH;
+        // Calculate UI dimensions (fit within container)
+        const container = maskCanvas.parentElement;
+        if (!container) return;
 
-        // Position canvas to match where image actually renders (object-fit: contain)
-        positionCanvasToMatchImage();
+        const containerRect = container.getBoundingClientRect();
+        const maxWidth = containerRect.width;
+        const maxHeight = containerRect.height;
 
-        // Get drawing context
+        // Calculate scale to fit
+        let scale = maxWidth / natW;
+        if (natH * scale > maxHeight) {
+            scale = maxHeight / natH;
+        }
+
+        const uiW = Math.floor(natW * scale);
+        const uiH = Math.floor(natH * scale);
+
+        // VISUAL CANVAS: sized for smooth UI display
+        maskCanvas.width = uiW;
+        maskCanvas.height = uiH;
+
+        // Position canvas CSS to center in container
+        const offsetX = (maxWidth - uiW) / 2;
+        const offsetY = (maxHeight - uiH) / 2;
+        maskCanvas.style.position = 'absolute';
+        maskCanvas.style.left = offsetX + 'px';
+        maskCanvas.style.top = offsetY + 'px';
+        maskCanvas.style.width = uiW + 'px';
+        maskCanvas.style.height = uiH + 'px';
+
+        // HIDDEN MASK CANVAS: native resolution for API
+        if (!hiddenMaskCanvas) {
+            hiddenMaskCanvas = document.createElement('canvas');
+            hiddenMaskCanvas.style.display = 'none';
+        }
+        hiddenMaskCanvas.width = natW;
+        hiddenMaskCanvas.height = natH;
+
+        // Get contexts
         ctx = maskCanvas.getContext('2d');
-        if (!ctx) {
+        maskCtx = hiddenMaskCanvas.getContext('2d');
+
+        if (!ctx || !maskCtx) {
             console.error('[See It] initCanvas: failed to get 2d context!');
             return;
         }
 
+        // Initialize visual canvas context (cyan highlighter)
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.strokeStyle = BRUSH_COLOR;
-        ctx.lineWidth = Math.max(20, Math.min(50, natW / 20));
-        ctx.globalCompositeOperation = 'source-over';
+        ctx.lineWidth = brushSize;
 
-        // Clear canvas
-        ctx.clearRect(0, 0, natW, natH);
+        // Initialize hidden mask canvas context (pure white on black)
+        maskCtx.fillStyle = 'black';
+        maskCtx.fillRect(0, 0, natW, natH);
+        maskCtx.strokeStyle = 'white';
+        maskCtx.lineCap = 'round';
+        maskCtx.lineJoin = 'round';
 
-        console.log('[See It] Canvas initialized:', {
-            width: maskCanvas.width,
-            height: maskCanvas.height,
-            lineWidth: ctx.lineWidth,
-            ctxExists: !!ctx
+        // Calculate scale factor for brush on mask canvas
+        const maskScale = natW / uiW;
+        maskCtx.lineWidth = brushSize * maskScale;
+
+        // Clear visual canvas
+        ctx.clearRect(0, 0, uiW, uiH);
+
+        // Draw room image on visual canvas for context
+        if (roomPreview && roomPreview.complete) {
+            ctx.drawImage(roomPreview, 0, 0, uiW, uiH);
+        }
+
+        console.log('[See It] Dual canvas initialized:', {
+            uiCanvas: `${uiW}x${uiH}`,
+            maskCanvas: `${natW}x${natH}`,
+            scale: maskScale.toFixed(3),
+            brushSize: brushSize
         });
     };
 
@@ -433,13 +489,11 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     const startDraw = (e) => {
-        console.log('[See It] startDraw', { ctxExists: !!ctx, canvasExists: !!maskCanvas });
-
-        if (!ctx) {
-            console.warn('[See It] startDraw: ctx not initialized, attempting init...');
+        if (!ctx || !maskCtx) {
+            console.warn('[See It] startDraw: contexts not initialized, attempting init...');
             initCanvas();
-            if (!ctx) {
-                console.error('[See It] startDraw: ctx still null after init!');
+            if (!ctx || !maskCtx) {
+                console.error('[See It] startDraw: contexts still null after init!');
                 showError('Canvas not ready. Please try again.');
                 return;
             }
@@ -452,23 +506,31 @@ document.addEventListener('DOMContentLoaded', function () {
         currentStroke = [];
 
         const pos = getCanvasPos(e);
-        console.log('[See It] startDraw pos:', pos);
-
         if (!pos.valid) {
-            console.warn('[See It] startDraw: invalid position');
             isDrawing = false;
             return;
         }
 
         currentStroke.push(pos);
+
+        // Draw on visual canvas (cyan highlight)
+        ctx.lineWidth = brushSize;
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
         ctx.lineTo(pos.x + 0.1, pos.y + 0.1);
         ctx.stroke();
+
+        // Draw on hidden mask canvas (white at native resolution)
+        const scale = state.normalizedWidth / maskCanvas.width;
+        maskCtx.lineWidth = brushSize * scale;
+        maskCtx.beginPath();
+        maskCtx.moveTo(pos.x * scale, pos.y * scale);
+        maskCtx.lineTo(pos.x * scale + 0.1, pos.y * scale + 0.1);
+        maskCtx.stroke();
     };
 
     const draw = (e) => {
-        if (!isDrawing || !ctx) return;
+        if (!isDrawing || !ctx || !maskCtx) return;
         e.preventDefault();
         e.stopPropagation();
 
@@ -476,10 +538,19 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!pos.valid) return;
 
         currentStroke.push(pos);
+
+        // Draw on visual canvas
         ctx.lineTo(pos.x, pos.y);
         ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(pos.x, pos.y);
+
+        // Draw on hidden mask canvas
+        const scale = state.normalizedWidth / maskCanvas.width;
+        maskCtx.lineTo(pos.x * scale, pos.y * scale);
+        maskCtx.stroke();
+        maskCtx.beginPath();
+        maskCtx.moveTo(pos.x * scale, pos.y * scale);
     };
 
     const stopDraw = (e) => {
@@ -487,28 +558,65 @@ document.addEventListener('DOMContentLoaded', function () {
         isDrawing = false;
 
         if (currentStroke.length > 0) {
-            strokes.push([...currentStroke]);
+            // Store stroke with its brush size (for undo/redraw)
+            strokes.push({ points: [...currentStroke], brushSize: brushSize });
             console.log('[See It] Stroke recorded:', {
                 points: currentStroke.length,
-                totalStrokes: strokes.length
+                totalStrokes: strokes.length,
+                brushSize: brushSize
             });
         }
         currentStroke = [];
         ctx?.beginPath();
+        maskCtx?.beginPath();
         updatePaintButtons();
     };
 
+    // Redraw all strokes on both canvases (for undo)
     const redrawStrokes = () => {
-        if (!ctx || !maskCanvas) return;
+        if (!ctx || !maskCanvas || !maskCtx || !hiddenMaskCanvas) return;
 
-        ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        const uiW = maskCanvas.width;
+        const uiH = maskCanvas.height;
+        const natW = hiddenMaskCanvas.width;
+        const natH = hiddenMaskCanvas.height;
+        const scale = natW / uiW;
 
+        // Clear visual canvas and redraw room image
+        ctx.clearRect(0, 0, uiW, uiH);
+        if (roomPreview && roomPreview.complete) {
+            ctx.drawImage(roomPreview, 0, 0, uiW, uiH);
+        }
+
+        // Clear and reset hidden mask canvas
+        maskCtx.fillStyle = 'black';
+        maskCtx.fillRect(0, 0, natW, natH);
+        maskCtx.strokeStyle = 'white';
+        maskCtx.lineCap = 'round';
+        maskCtx.lineJoin = 'round';
+
+        // Redraw each stroke with its original brush size
         strokes.forEach(stroke => {
-            if (stroke.length === 0) return;
+            if (!stroke.points || stroke.points.length === 0) return;
+
+            const strokeBrushSize = stroke.brushSize || brushSize;
+
+            // Visual canvas (cyan highlight)
+            ctx.strokeStyle = BRUSH_COLOR;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = strokeBrushSize;
             ctx.beginPath();
-            ctx.moveTo(stroke[0].x, stroke[0].y);
-            stroke.forEach(p => ctx.lineTo(p.x, p.y));
+            ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+            stroke.points.forEach(p => ctx.lineTo(p.x, p.y));
             ctx.stroke();
+
+            // Hidden mask canvas (white at native resolution)
+            maskCtx.lineWidth = strokeBrushSize * scale;
+            maskCtx.beginPath();
+            maskCtx.moveTo(stroke.points[0].x * scale, stroke.points[0].y * scale);
+            stroke.points.forEach(p => maskCtx.lineTo(p.x * scale, p.y * scale));
+            maskCtx.stroke();
         });
     };
 
@@ -598,14 +706,15 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // Generate mask from hidden mask canvas (already at native resolution)
     const generateMask = () => {
-        if (!maskCanvas) {
-            console.error('[See It] generateMask: no canvas');
+        if (!hiddenMaskCanvas) {
+            console.error('[See It] generateMask: no hidden mask canvas');
             return null;
         }
 
-        const w = maskCanvas.width;
-        const h = maskCanvas.height;
+        const w = hiddenMaskCanvas.width;
+        const h = hiddenMaskCanvas.height;
 
         if (w === 0 || h === 0) {
             console.error('[See It] generateMask: canvas has zero dimensions');
@@ -617,44 +726,18 @@ document.addEventListener('DOMContentLoaded', function () {
             return null;
         }
 
-        const lineWidth = ctx?.lineWidth || Math.max(20, Math.min(50, w / 20));
+        // The hidden mask canvas already has the mask drawn in real-time
+        // Black background with white strokes at native resolution
+        const dataUrl = hiddenMaskCanvas.toDataURL('image/png');
 
-        const out = document.createElement('canvas');
-        out.width = w;
-        out.height = h;
-        const outCtx = out.getContext('2d');
-
-        // Black background = keep, White strokes = remove
-        outCtx.fillStyle = '#000000';
-        outCtx.fillRect(0, 0, w, h);
-
-        outCtx.strokeStyle = '#FFFFFF';
-        outCtx.lineCap = 'round';
-        outCtx.lineJoin = 'round';
-        outCtx.lineWidth = lineWidth;
-
-        strokes.forEach(stroke => {
-            if (stroke.length === 0) return;
-            outCtx.beginPath();
-            outCtx.moveTo(stroke[0].x, stroke[0].y);
-            stroke.forEach(p => outCtx.lineTo(p.x, p.y));
-            outCtx.stroke();
-        });
-
-        const dataUrl = out.toDataURL('image/png');
-        console.log('[See It] Mask generated:', {
+        console.log('[See It] Mask generated from hidden canvas:', {
             dimensions: `${w}x${h}`,
             normalizedDimensions: `${state.normalizedWidth}x${state.normalizedHeight}`,
             strokes: strokes.length,
             dataUrlLength: dataUrl.length,
             match: w === state.normalizedWidth && h === state.normalizedHeight
         });
-        if (w !== state.normalizedWidth || h !== state.normalizedHeight) {
-            console.error('[See It] DIMENSION MISMATCH!', {
-                mask: `${w}x${h}`,
-                normalized: `${state.normalizedWidth}x${state.normalizedHeight}`
-            });
-        }
+
         return dataUrl;
     };
 
@@ -1217,8 +1300,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 throw new Error(error);
             }
 
-            const maskW = maskCanvas.width;
-            const maskH = maskCanvas.height;
+            const maskW = hiddenMaskCanvas.width;
+            const maskH = hiddenMaskCanvas.height;
             if (maskW !== state.normalizedWidth || maskH !== state.normalizedHeight) {
                 const error = `Dimension mismatch! Mask: ${maskW}x${maskH}, Expected: ${state.normalizedWidth}x${state.normalizedHeight}. Please re-upload and try again.`;
                 console.error('[See It]', error);
@@ -1228,7 +1311,7 @@ document.addEventListener('DOMContentLoaded', function () {
             console.log('[See It] Sending cleanup request...', {
                 maskDimensions: `${maskW}x${maskH}`,
                 normalizedDimensions: `${state.normalizedWidth}x${state.normalizedHeight}`,
-                match: maskW === state.normalizedWidth && maskH === state.normalizedHeight
+                strokes: strokes.length
             });
             const result = await cleanupWithMask(mask);
 
@@ -1245,12 +1328,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
             state.cleanedRoomImageUrl = newUrl;
 
-            // Clear strokes and canvas FIRST before loading new image
-            strokes = [];
-            if (ctx && maskCanvas) {
-                ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-            }
+            // Keep strokes visible during loading - DON'T clear yet!
             hasErased = true;
+
+            // Show loading state on the button
+            if (btnRemove) {
+                btnRemove.textContent = 'Loading...';
+            }
 
             // CRITICAL FIX: GCS signed URLs don't work directly in <img> elements
             // We must fetch the image first, then create a blob URL
@@ -1268,18 +1352,35 @@ document.addEventListener('DOMContentLoaded', function () {
                 console.log('[See It] Created blob URL:', blobUrl);
                 console.log('[See It] Blob size:', blob.size);
 
-                // Set the blob URL on the image elements
+                // Preload the image before displaying
+                const preloadImg = new Image();
+                await new Promise((resolve, reject) => {
+                    preloadImg.onload = resolve;
+                    preloadImg.onerror = reject;
+                    preloadImg.src = blobUrl;
+                });
+
+                console.log('[See It] Image preloaded, now clearing mask and updating display...');
+
+                // NOW clear strokes and canvases (image is ready)
+                strokes = [];
+                redrawStrokes(); // This redraws room image and clears mask
+
+                // Set the blob URL on the image elements (instant since preloaded)
                 if (roomPreview) {
+                    roomPreview.style.opacity = '0';
                     roomPreview.src = blobUrl;
+                    // Fade in the new image
+                    requestAnimationFrame(() => {
+                        roomPreview.style.transition = 'opacity 0.3s ease';
+                        roomPreview.style.opacity = '1';
+                    });
                     console.log('[See It] ✅ roomPreview src set to blob URL');
                 }
                 if (roomImage) {
                     roomImage.src = blobUrl;
                     console.log('[See It] ✅ roomImage src set to blob URL');
                 }
-
-                // Wait a moment for the images to render
-                await new Promise(resolve => setTimeout(resolve, 100));
 
                 // Verify the images loaded
                 if (roomPreview) {
@@ -1294,6 +1395,8 @@ document.addEventListener('DOMContentLoaded', function () {
             } catch (fetchErr) {
                 console.error('[See It] Failed to fetch cleaned image:', fetchErr);
                 // Fallback: try setting the URL directly (might work in some browsers)
+                strokes = [];
+                redrawStrokes();
                 if (roomPreview) roomPreview.src = newUrl;
                 if (roomImage) roomImage.src = newUrl;
             }

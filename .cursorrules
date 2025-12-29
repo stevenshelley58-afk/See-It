@@ -41,6 +41,34 @@ The app uses `@imgly/background-removal-node` for product background removal, NO
 
 ---
 
+## 🎯 Object Removal (Inpainting) - MUST USE CLIPDROP
+
+**Object removal uses Clipdrop Cleanup API, NOT Vertex AI Imagen.**
+
+### Why Clipdrop?
+- ✅ **Better results** - Cleaner inpainting
+- ✅ **Faster** - Direct API, no multi-hop latency
+- ✅ **Simpler** - REST API with FormData
+
+### Implementation
+- **Backend:** `app/app/services/image-removal.server.ts` - Uses `CLIPDROP_API_KEY`
+- **Endpoint:** `https://clipdrop-api.co/cleanup/v1`
+- **Frontend:** `app/extensions/see-it-extension/assets/see-it-modal.js` - Dual canvas architecture
+
+### ❌ DO NOT USE for object removal:
+- Vertex AI Imagen 3 (`EDIT_MODE_INPAINT_REMOVAL`)
+- Google Gemini image editing
+- Any other AI model
+
+### Canvas Architecture (Frontend)
+The frontend uses a **dual-canvas approach** (from cleanup-ai reference):
+1. **Visual canvas** - UI-sized, shows cyan highlights
+2. **Hidden mask canvas** - Native resolution, white on black for API
+
+**DO NOT simplify to single canvas** - This causes blurry results.
+
+---
+
 ## General Rules
 - Follow existing code patterns and conventions
 - Don't refactor code unless specifically asked
