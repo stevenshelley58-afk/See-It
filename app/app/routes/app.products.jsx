@@ -265,7 +265,15 @@ export default function Products() {
                                 </thead>
                                 <tbody className="divide-y divide-neutral-100">
                                     {products.map((product) => {
-                                        const asset = assetsMap[`gid://shopify/Product/${product.id.split('/').pop()}`];
+                                        let asset = null;
+                                        try {
+                                            const pid = product.id.split('/').pop();
+                                            const key = `gid://shopify/Product/${pid}`;
+                                            asset = assetsMap ? assetsMap[key] : null;
+                                        } catch (e) {
+                                            console.error("Error accessing asset for product", product.id, e);
+                                        }
+
                                         const status = asset?.status || 'pending';
                                         const hasPrepared = !!asset?.preparedImageUrlFresh || !!asset?.preparedImageUrl;
 
@@ -288,9 +296,9 @@ export default function Products() {
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                                            status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
-                                                                status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                                                    'bg-neutral-100 text-neutral-600 border-neutral-200'
+                                                        status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
+                                                            status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                                                'bg-neutral-100 text-neutral-600 border-neutral-200'
                                                         }`}>
                                                         {status === 'ready' && hasPrepared ? 'Ready' :
                                                             status === 'ready' ? 'Ready (Original)' :
@@ -350,8 +358,8 @@ export default function Products() {
             {/* Toast */}
             {toast && (
                 <div className={`fixed bottom-5 left-1/2 -translate-x-1/2 px-5 py-3 rounded-lg text-sm font-medium text-white z-50 shadow-lg ${toast.type === 'success' ? 'bg-emerald-600' :
-                        toast.type === 'err' ? 'bg-red-600' :
-                            'bg-neutral-900'
+                    toast.type === 'err' ? 'bg-red-600' :
+                        'bg-neutral-900'
                     }`}>
                     {toast.msg}
                 </div>
