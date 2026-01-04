@@ -1,0 +1,7 @@
+{
+  "name": "CleanUp AI",
+  "description": "A high-performance image object removal tool powered by Clipdrop API. Upload an image, paint over unwanted objects, and watch them disappear instantly.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

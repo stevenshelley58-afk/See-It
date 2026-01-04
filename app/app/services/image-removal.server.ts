@@ -1,36 +1,36 @@
 /**
- * Image Removal Service - Clipdrop Cleanup API
+ * Image Removal Service - Gemini 2.5 Flash
  * 
- * Uses Clipdrop Cleanup API for object removal (inpainting).
- * Endpoint: https://clipdrop-api.co/cleanup/v1
- * Method: REST API with multipart/form-data
+ * Uses Google Gemini 2.5 Flash for object removal (inpainting) using a mask.
+ * Capabilities: Understands scene geometry and reconstructs background naturally.
  */
 
 import { logger, createLogContext } from '../utils/logger.server';
+import { GoogleGenAI } from "@google/genai";
+import sharp from "sharp";
+import crypto from 'crypto';
 
-const CLIPDROP_ENDPOINT = 'https://clipdrop-api.co/cleanup/v1';
+// Initialize Gemini SDK with API key from environment
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-/**
- * Get Clipdrop API key from environment
- */
-function getApiKey(): string {
-    const apiKey = process.env.CLIPDROP_API_KEY;
-    if (!apiKey) {
-        throw new Error('CLIPDROP_API_KEY environment variable is required');
-    }
-    return apiKey;
+// Validation for API Key
+if (!GEMINI_API_KEY) {
+    // Logic inside function handles expected errors
 }
 
 export interface RemovalResult {
     imageBase64: string;
 }
 
+function getHash(data: string): string {
+    return crypto.createHash('sha256').update(data.substring(0, 1000)).digest('hex').substring(0, 8);
+}
+
 /**
- * Removes an object from an image using Clipdrop Cleanup API.
+ * Removes an object from an image using Gemini 2.5 Flash.
  * 
- * @param imageBase64 - Original image (Base64 string, no data URI prefix).
- * @param maskBase64 - Mask image (Base64 string, no data URI prefix).
- *                     White pixels = Remove. Black pixels = Keep.
+ * @param imageBase64 - Original image (Base64 string).
+ * @param maskBase64 - Mask image (Base64 string). White pixels = Remove.
  * @param requestId - Request ID for logging
  * @returns The cleaned image as a Base64 string.
  */
@@ -40,60 +40,120 @@ export async function removeObject(
     requestId: string = 'image-removal'
 ): Promise<RemovalResult> {
     const logContext = createLogContext('cleanup', requestId, 'start', {});
+    const inputHash = getHash(imageBase64);
+    const maskHash = getHash(maskBase64);
 
     logger.info(
-        { ...logContext, stage: 'auth' },
-        `Using Clipdrop Cleanup API`
+        { ...logContext, stage: 'auth', inputHash, maskHash },
+        `Using Gemini 2.5 Flash for Object Removal (Model: gemini-2.5-flash-image)`
     );
 
-    const apiKey = getApiKey();
-
-    // Convert base64 strings to Blobs for FormData
-    const imageBuffer = Buffer.from(imageBase64, 'base64');
-    const maskBuffer = Buffer.from(maskBase64, 'base64');
-
-    const imageBlob = new Blob([imageBuffer], { type: 'image/png' });
-    const maskBlob = new Blob([maskBuffer], { type: 'image/png' });
-
-    // Build FormData
-    const formData = new FormData();
-    formData.append('image_file', imageBlob, 'image.png');
-    formData.append('mask_file', maskBlob, 'mask.png');
-    formData.append('mode', 'quality');  // Use quality mode for better reconstruction
-
-    logger.info(
-        { ...logContext, stage: 'request' },
-        `Calling Clipdrop Cleanup API`
-    );
-
-    // Make request
-    const response = await fetch(CLIPDROP_ENDPOINT, {
-        method: 'POST',
-        headers: {
-            'x-api-key': apiKey,
-        },
-        body: formData,
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        logger.error(
-            { ...logContext, stage: 'error', status: response.status },
-            `Clipdrop API Failed: ${errorText}`
-        );
-        throw new Error(`Clipdrop API Failed (${response.status}): ${errorText}`);
+    if (!GEMINI_API_KEY) {
+        throw new Error('GEMINI_API_KEY environment variable is required');
     }
 
-    // Clipdrop returns the image as a blob, convert to base64
-    const resultBuffer = Buffer.from(await response.arrayBuffer());
-    const resultBase64 = resultBuffer.toString('base64');
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    logger.info(
-        { ...logContext, stage: 'complete' },
-        `Object removal completed successfully`
-    );
+    try {
+        // 1. Detect format of Input Image (mimic file.type from reference)
+        // We use the original data to avoid re-encoding overhead/changes.
+        const imageBuffer = Buffer.from(imageBase64, 'base64');
+        const metadata = await sharp(imageBuffer).metadata();
+        let mimeType = 'image/png'; // Default
+        if (metadata.format === 'jpeg' || metadata.format === 'jpg') {
+            mimeType = 'image/jpeg';
+        } else if (metadata.format === 'webp') {
+            mimeType = 'image/webp';
+        } else if (metadata.format === 'png') {
+            mimeType = 'image/png';
+        } else {
+            // Fallback for uncommon types: convert to PNG
+            logger.info({ ...logContext }, `Converting ${metadata.format} to PNG`);
+            const convertedBuffer = await sharp(imageBuffer).toFormat('png').toBuffer();
+            imageBase64 = convertedBuffer.toString('base64');
+            mimeType = 'image/png';
+        }
 
-    return {
-        imageBase64: resultBase64,
-    };
+        logger.info(
+            { ...logContext, stage: 'detect-mime', mimeType, format: metadata.format },
+            `Input image detected as ${mimeType}`
+        );
+
+        // 2. Pass Mask as-is (Caller is responsible for PNG format, mostly)
+        // Reference code: const maskBase64 = await fileToSib64(maskBlob);
+        // We trust maskBase64 is already a valid PNG (backend usually ensures this).
+        // If needed we can verify but reference code doesn't.
+
+        logger.info(
+            { ...logContext, stage: 'request' },
+            `Calling Gemini generateContent`
+        );
+
+        // Using EXACT model from working reference: 'gemini-2.5-flash-image'
+        // No safety settings.
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+                parts: [
+                    {
+                        inlineData: {
+                            data: imageBase64,
+                            mimeType: mimeType,
+                        },
+                    },
+                    {
+                        inlineData: {
+                            data: maskBase64,
+                            mimeType: 'image/png', // Mask is always expected to be PNG in reference
+                        },
+                    },
+                    {
+                        text: "The first image is a source photograph. The second image is a binary mask where the white area indicates an object that should be completely removed. Please reconstruct the background in the white area naturally based on the surroundings in the first image. Return only the edited image.",
+                    },
+                ],
+            },
+        });
+
+        const finishReason = response.candidates?.[0]?.finishReason;
+        logger.info(
+            { ...logContext, stage: 'response', finishReason },
+            `Gemini response received`
+        );
+
+        const imagePart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+
+        if (!imagePart || !imagePart.inlineData || !imagePart.inlineData.data) {
+            logger.error(
+                { ...logContext, stage: 'error', response: JSON.stringify(response) },
+                `Gemini API did not return an image. FinishReason: ${finishReason}`
+            );
+            throw new Error(`Gemini API did not return a valid result. Reason: ${finishReason}`);
+        }
+
+        const resultBase64 = imagePart.inlineData.data;
+        const outputHash = getHash(resultBase64);
+
+        if (inputHash === outputHash) {
+            logger.warn(
+                { ...logContext, stage: 'warning' },
+                `Gemini returned original image! (Input Hash == Output Hash)`
+            );
+        }
+
+        logger.info(
+            { ...logContext, stage: 'complete', outputHash },
+            `Object removal completed successfully`
+        );
+
+        return {
+            imageBase64: resultBase64,
+        };
+
+    } catch (error: any) {
+        logger.error(
+            { ...logContext, stage: 'error', error: error.message },
+            `Gemini API Failed: ${error.message}`
+        );
+        throw new Error(`Gemini API Failed: ${error.message}`);
+    }
 }

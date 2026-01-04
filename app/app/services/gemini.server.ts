@@ -86,13 +86,11 @@ function describePosition(placement: { x: number; y: number }): string {
 }
 
 /**
- * Build the narrative prompt for Gemini image compositing
+ * Build the composition prompt for Gemini image compositing
  * 
- * This prompt describes the DESIRED OUTPUT as a photograph that already exists.
- * Per Google's Gemini documentation: "A narrative, descriptive paragraph will
- * almost always produce a better, more coherent image than a simple list."
- * 
- * Key insight: Describe the FINAL PHOTO, not the compositing process.
+ * Uses explicit, task-oriented language as recommended by Google docs.
+ * References images by their labels (ROOM IMAGE, PRODUCT IMAGE) which
+ * are inserted before each image in the API call.
  */
 function buildCompositePrompt(
     productDescription: string,
@@ -100,20 +98,17 @@ function buildCompositePrompt(
 ): string {
     const position = describePosition(placement);
 
-    // If no product description, use minimal fallback
-    if (!productDescription) {
-        return `A professionally photographed interior scene. The furniture piece from the reference image sits naturally ${position} within the room. Natural contact shadows anchor it to the surface. The ambient lighting wraps consistently around all objects in the frame. Shot with a wide-angle lens, sharp focus throughout, the kind of image you'd see in an interior design magazine.`;
-    }
+    return `Composite the PRODUCT IMAGE into the ROOM IMAGE to create a realistic interior photograph.
 
-    // Build the full narrative prompt - written as if describing an existing photograph
-    // No instructions, no technical language about compositing - just the final image
-    return `A professionally photographed interior scene for a home furnishings catalogue.
+Task: Place the product ${position} in the room.
 
-${productDescription}
-
-The piece sits ${position} in the room, grounded naturally on its surface with a soft contact shadow beneath. The room's existing ambient light wraps around the product consistently - highlights fall where expected, shadows have the same softness and direction as everything else in the frame. Any reflective or glossy surfaces pick up subtle hints of the surrounding environment.
-
-The photograph has the polished, editorial quality of Architectural Digest or Elle Decor - technically perfect, naturally lit, effortlessly composed. A single cohesive image where every element belongs together.`;
+${productDescription ? `Product details:\n${productDescription}\n` : ''}
+Requirements:
+- Match the room's existing lighting direction and color temperature
+- Add a natural contact shadow beneath the product
+- Preserve the product's exact appearance, proportions, and fine details
+- The result should look like the product was actually photographed in this room
+- Maintain the room's original perspective and depth of field`;
 }
 
 /**
@@ -282,9 +277,15 @@ async function uploadToGCS(
     }
 }
 
+// Type for labeled images
+interface LabeledImage {
+    label: string;
+    buffer: Buffer;
+}
+
 async function callGemini(
     prompt: string,
-    imageBuffers: Buffer | Buffer[],
+    images: Buffer | Buffer[] | LabeledImage[],
     options: { model?: string; aspectRatio?: string; logContext?: ReturnType<typeof createLogContext>; timeoutMs?: number } = {}
 ): Promise<string> {
     const { model = IMAGE_MODEL_FAST, aspectRatio, logContext, timeoutMs = GEMINI_TIMEOUT_MS } = options;
@@ -293,13 +294,28 @@ async function callGemini(
 
     const parts: any[] = [{ text: prompt }];
 
-    const buffers = Array.isArray(imageBuffers) ? imageBuffers : [imageBuffers];
-    for (const buffer of buffers) {
-        if (buffer) {
+    // Handle both legacy Buffer[] format and new LabeledImage[] format
+    const imageArray = Array.isArray(images) ? images : [images];
+    for (const item of imageArray) {
+        if (!item) continue;
+
+        // Check if it's a LabeledImage (has label and buffer properties)
+        if (typeof item === 'object' && 'label' in item && 'buffer' in item) {
+            const labeled = item as LabeledImage;
+            // Add label text before the image
+            parts.push({ text: `${labeled.label}:` });
             parts.push({
                 inlineData: {
                     mimeType: 'image/png',
-                    data: buffer.toString('base64')
+                    data: labeled.buffer.toString('base64')
+                }
+            });
+        } else if (Buffer.isBuffer(item)) {
+            // Legacy: plain Buffer without label
+            parts.push({
+                inlineData: {
+                    mimeType: 'image/png',
+                    data: item.toString('base64')
                 }
             });
         }
@@ -375,7 +391,7 @@ async function callGemini(
         // Fallback to fast model if pro fails (except for timeouts - let them propagate)
         if (model === IMAGE_MODEL_PRO && !(error instanceof GeminiTimeoutError)) {
             logger.info(context, "Falling back to fast model");
-            return callGemini(prompt, imageBuffers, { ...options, model: IMAGE_MODEL_FAST });
+            return callGemini(prompt, images, { ...options, model: IMAGE_MODEL_FAST });
         }
         throw error;
     }
@@ -750,9 +766,12 @@ export async function compositeScene(
             `Sending to Gemini: room=${roomWidth}×${roomHeight}, ratio=${closestRatio.label}, placement=(${placement.x.toFixed(2)}, ${placement.y.toFixed(2)})`
         );
 
-        // STEP 5: Send BOTH images to Gemini - let it do the fusion!
-        // Order matters: room first (the scene), then product (the item to place)
-        const base64Data = await callGemini(prompt, [roomBuffer, resizedProduct], {
+        // STEP 5: Send labeled images to Gemini for compositing
+        // Labels help Gemini understand which image is which
+        const base64Data = await callGemini(prompt, [
+            { label: "ROOM IMAGE", buffer: roomBuffer },
+            { label: "PRODUCT IMAGE", buffer: resizedProduct }
+        ], {
             model: IMAGE_MODEL_PRO,
             aspectRatio: closestRatio.label,
             logContext
