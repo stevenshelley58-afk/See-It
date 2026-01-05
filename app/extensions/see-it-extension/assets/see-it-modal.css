@@ -1134,6 +1134,16 @@
   overflow: visible;
 }
 
+/* Product image inside overlay - allow clicks to pass through to resize handles */
+.see-it-product-overlay img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
 /* Resize handles - always visible with better styling */
 .see-it-resize-handle {
   position: absolute;

@@ -226,6 +226,8 @@ document.addEventListener('DOMContentLoaded', function () {
         isUploading: false,
         isCleaningUp: false,
         uploadComplete: false,
+        uploadPromise: null,  // Background upload promise
+        uploadError: null,    // Error from background upload
         shopperToken: localStorage.getItem('see_it_shopper_token'),
         currentScreen: 'entry',
         normalizedWidth: 0,
@@ -654,15 +656,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const updatePaintButtons = () => {
         const hasStrokes = strokes.length > 0;
-        const canErase = hasStrokes && !state.isCleaningUp && state.uploadComplete;
-
-        console.log('[See It] updatePaintButtons:', {
-            hasStrokes,
-            isCleaningUp: state.isCleaningUp,
-            uploadComplete: state.uploadComplete,
-            canErase,
-            sessionId: state.sessionId
-        });
+        // Enable erase if has strokes and not currently cleaning (upload happens silently)
+        const canErase = hasStrokes && !state.isCleaningUp;
 
         if (btnUndo) {
             btnUndo.disabled = !hasStrokes;
@@ -670,31 +665,17 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (btnRemove) {
-            const wasDisabled = btnRemove.disabled;
             btnRemove.disabled = !canErase;
             btnRemove.style.opacity = canErase ? '1' : '0.5';
 
-            // Log when button state changes
-            if (wasDisabled !== btnRemove.disabled) {
-                console.log('[See It] Erase button state changed:', {
-                    wasDisabled,
-                    nowDisabled: btnRemove.disabled,
-                    reason: !hasStrokes ? 'no strokes' : !state.uploadComplete ? 'upload not complete' : state.isCleaningUp ? 'cleaning in progress' : 'unknown'
-                });
-            }
-
-            // Update button text to show status
-            if (!state.uploadComplete && !state.isCleaningUp) {
-                btnRemove.textContent = 'Uploading...';
-            } else if (state.isCleaningUp) {
+            // Clean button text - no upload status shown to user
+            if (state.isCleaningUp) {
                 btnRemove.textContent = 'Erasing...';
             } else if (!hasStrokes) {
                 btnRemove.textContent = 'Draw First';
             } else {
                 btnRemove.textContent = 'Erase';
             }
-
-            console.log('[See It] Erase button now:', btnRemove.textContent, 'disabled:', btnRemove.disabled);
         }
 
         if (btnConfirmRoom) {
@@ -1231,72 +1212,64 @@ document.addEventListener('DOMContentLoaded', function () {
         state.originalRoomImageUrl = null;
         state.sessionId = null;
         state.uploadComplete = false;
+        state.uploadPromise = null;
+        state.uploadError = null;
         hasErased = false;
         strokes = [];
         currentStroke = [];
         ctx = null;
 
-        state.isUploading = true;
-        updatePaintButtons();
-
         try {
-            // Normalize image
+            // Normalize image locally (instant)
             const normalized = await normalizeRoomImage(file);
             state.normalizedWidth = normalized.width;
             state.normalizedHeight = normalized.height;
-            console.log('[See It] Normalized:', normalized.width, 'x', normalized.height);
 
-            // Set preview
+            // Set preview immediately (instant - local data)
             const dataUrl = URL.createObjectURL(normalized.blob);
             state.localImageDataUrl = dataUrl;
 
-            if (roomPreview) {
-                roomPreview.src = dataUrl;
-            }
-            if (roomImage) {
-                roomImage.src = dataUrl;
-            }
+            if (roomPreview) roomPreview.src = dataUrl;
+            if (roomImage) roomImage.src = dataUrl;
 
+            // Show prepare screen immediately
             showScreen('prepare');
 
-            // Wait for image to load
+            // Wait for image element to render
             await new Promise(resolve => {
                 if (roomPreview) {
                     roomPreview.onload = resolve;
-                    setTimeout(resolve, 200); // Fallback
+                    setTimeout(resolve, 200);
                 } else {
                     resolve();
                 }
             });
 
             initCanvas();
+            updatePaintButtons();
 
-            // Upload to backend
-            console.log('[See It] Starting upload...');
-            const session = await startSession();
-            state.sessionId = session.sessionId || session.room_session_id;
-            console.log('[See It] Session:', state.sessionId);
+            // Start upload SILENTLY in background - user doesn't see this
+            state.uploadPromise = (async () => {
+                try {
+                    const session = await startSession();
+                    state.sessionId = session.sessionId || session.room_session_id;
 
-            const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
-            await uploadImage(normalizedFile, session.uploadUrl || session.upload_url);
-            console.log('[See It] Upload complete, confirming...');
+                    const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
+                    await uploadImage(normalizedFile, session.uploadUrl || session.upload_url);
 
-            const confirm = await confirmRoom(state.sessionId);
-            state.originalRoomImageUrl = confirm.roomImageUrl || confirm.room_image_url;
-            state.uploadComplete = true;
-
-            console.log('[See It] Upload confirmed!', {
-                sessionId: state.sessionId,
-                uploadComplete: state.uploadComplete
-            });
+                    const confirm = await confirmRoom(state.sessionId);
+                    state.originalRoomImageUrl = confirm.roomImageUrl || confirm.room_image_url;
+                    state.uploadComplete = true;
+                    console.log('[See It] Background upload complete');
+                } catch (err) {
+                    console.error('[See It] Background upload error:', err);
+                    state.uploadError = err.message;
+                }
+            })();
 
         } catch (err) {
-            console.error('[See It] Upload error:', err);
-            showError('Upload failed: ' + err.message);
-            state.sessionId = null;
-        } finally {
-            state.isUploading = false;
-            updatePaintButtons();
+            console.error('[See It] File processing error:', err);
+            showError('Failed to process image: ' + err.message);
         }
     };
 
@@ -1327,27 +1300,9 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- ERASE BUTTON ---
     const handleRemove = async () => {
         console.log('[See It] ========== ERASE CLICKED ==========');
-        console.log('[See It] State:', {
-            isCleaningUp: state.isCleaningUp,
-            sessionId: state.sessionId,
-            uploadComplete: state.uploadComplete,
-            strokeCount: strokes.length,
-            ctxExists: !!ctx
-        });
 
         // Validation
-        if (state.isCleaningUp) {
-            console.log('[See It] Blocked: already cleaning');
-            return;
-        }
-        if (!state.sessionId) {
-            showError('Session expired. Please re-upload your image.');
-            return;
-        }
-        if (!state.uploadComplete) {
-            showError('Please wait for upload to complete.');
-            return;
-        }
+        if (state.isCleaningUp) return;
         if (strokes.length === 0) {
             showError('Draw over the object you want to remove first.');
             return;
@@ -1356,6 +1311,26 @@ document.addEventListener('DOMContentLoaded', function () {
         resetError();
         state.isCleaningUp = true;
         updatePaintButtons();
+
+        // Wait for background upload to complete if still in progress
+        if (state.uploadPromise && !state.uploadComplete) {
+            console.log('[See It] Waiting for background upload...');
+            await state.uploadPromise;
+        }
+
+        // Check upload succeeded
+        if (state.uploadError) {
+            showError('Upload failed: ' + state.uploadError + '. Please try again.');
+            state.isCleaningUp = false;
+            updatePaintButtons();
+            return;
+        }
+        if (!state.sessionId) {
+            showError('Session expired. Please re-upload your image.');
+            state.isCleaningUp = false;
+            updatePaintButtons();
+            return;
+        }
 
         const strokesBackup = JSON.parse(JSON.stringify(strokes));
 

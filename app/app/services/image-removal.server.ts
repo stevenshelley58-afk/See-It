@@ -90,11 +90,31 @@ export async function removeObject(
         );
 
         // Using EXACT model from working reference: 'gemini-2.5-flash-image'
-        // No safety settings.
+        // Best practices: text first, then images, with explicit removal-only instructions
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
             contents: {
                 parts: [
+                    {
+                        text: `You are performing inpainting for OBJECT REMOVAL ONLY.
+
+Inputs:
+- Image 1: source photograph
+- Image 2: mask where white indicates the region to remove; black indicates the region to preserve as much as possible.
+
+Goal:
+Remove the object(s) indicated by the white mask and reconstruct the natural background (walls/floor/etc.) behind them.
+
+Rules:
+1) Remove ALL parts of the object(s) indicated by the mask. If small parts of the same object extend slightly outside the white mask, you may remove those remnants too.
+2) Preserve everything else. Do not change furniture, layout, colors, or details outside the removal area, except for minimal blending near the boundary to make the edit seamless.
+3) Reconstruct ONLY background surfaces that would naturally be behind the removed object. Match surrounding lighting, texture, shadows, and perspective.
+4) Do NOT add or invent any new objects, furniture, decorations, text, patterns, or elements. Do not "replace" the removed object with anything.
+5) If the mask includes some true background, reconstruct it to match the surrounding background exactly.
+
+Output:
+Return only the edited image.`,
+                    },
                     {
                         inlineData: {
                             data: imageBase64,
@@ -104,13 +124,13 @@ export async function removeObject(
                     {
                         inlineData: {
                             data: maskBase64,
-                            mimeType: 'image/png', // Mask is always expected to be PNG in reference
+                            mimeType: 'image/png',
                         },
                     },
-                    {
-                        text: "The first image is a source photograph. The second image is a binary mask where the white area indicates an object that should be completely removed. Please reconstruct the background in the white area naturally based on the surroundings in the first image. Return only the edited image.",
-                    },
                 ],
+            },
+            config: {
+                responseModalities: ['TEXT', 'IMAGE'],
             },
         });
 
