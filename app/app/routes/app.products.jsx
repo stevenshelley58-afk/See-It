@@ -255,39 +255,72 @@ export default function Products() {
         setDetailPanelOpen(true);
     }, []);
 
-    // Bulk prepare handler
+    // Bulk prepare handler - uses batch endpoint for better performance
     const handleBulkPrepare = async () => {
         const total = selectedIds.length;
-        setBulkProgress({ current: 0, total, status: 'running', successCount: 0, failCount: 0 });
-        let successCount = 0;
-        let failCount = 0;
+        setBulkProgress({ current: 0, total, status: 'running', successCount: 0, failCount: 0, errors: [] });
 
-        for (let i = 0; i < selectedIds.length; i++) {
-            const productId = selectedIds[i].split('/').pop(); // Extract ID from gid://shopify/Product/123
+        try {
+            // Extract product IDs from GID format
+            const productIds = selectedIds.map(id => id.split('/').pop());
             const formData = new FormData();
-            formData.append("productId", productId);
-            try {
-                const res = await fetch('/api/products/prepare', {
-                    method: 'POST',
-                    body: formData
+            formData.append("productIds", JSON.stringify(productIds));
+
+            const res = await fetch('/api/products/batch-prepare', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await res.json();
+
+            if (res.ok) {
+                const queued = data.queued || data.processed || 0;
+                const errors = data.errors || [];
+                const failCount = errors.length;
+                const successCount = queued;
+
+                setBulkProgress({
+                    current: total,
+                    total,
+                    status: 'done',
+                    successCount,
+                    failCount,
+                    errors: errors // Store errors for display
                 });
-                if (res.ok) successCount++;
-                else failCount++;
-            } catch (e) {
-                failCount++;
+            } else {
+                // Handle quota or other errors
+                const errorMsg = data.error || data.message || 'Batch prepare failed';
+                setBulkProgress({
+                    current: total,
+                    total,
+                    status: 'done',
+                    successCount: 0,
+                    failCount: total,
+                    errors: [{ error: errorMsg }]
+                });
+                showToast(errorMsg, 'err');
             }
-            setBulkProgress({ current: i + 1, total, status: 'running', successCount, failCount });
+        } catch (e) {
+            const errorMsg = e instanceof Error ? e.message : 'Network error';
+            setBulkProgress({
+                current: total,
+                total,
+                status: 'done',
+                successCount: 0,
+                failCount: total,
+                errors: [{ error: errorMsg }]
+            });
+            showToast('Failed to prepare products', 'err');
         }
 
-        setBulkProgress({ current: total, total, status: 'done', successCount, failCount });
         // Update list immediately so user sees "Pending" or "Ready" badges update behind the banner
         revalidator.revalidate();
 
-        // Show done state for 3 seconds, then reset
+        // Show done state for 5 seconds (longer to see errors), then reset
         setTimeout(() => {
             setBulkProgress(null);
             setSelectedIds([]);
-        }, 3000);
+        }, 5000);
     };
 
     const handleSort = (field) => {
@@ -420,9 +453,26 @@ export default function Products() {
                                         </span>
                                     </div>
                                 ) : (
-                                    <span className="text-sm font-medium">
-                                        Done! {bulkProgress.successCount} ready{bulkProgress.failCount > 0 ? `, ${bulkProgress.failCount} failed` : ''}
-                                    </span>
+                                    <div className="flex flex-col gap-2">
+                                        <span className="text-sm font-medium">
+                                            Done! {bulkProgress.successCount} queued{bulkProgress.failCount > 0 ? `, ${bulkProgress.failCount} failed` : ''}
+                                        </span>
+                                        {bulkProgress.errors && bulkProgress.errors.length > 0 && (
+                                            <details className="text-xs text-white/80">
+                                                <summary className="cursor-pointer hover:text-white">Show errors ({bulkProgress.errors.length})</summary>
+                                                <ul className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                                                    {bulkProgress.errors.slice(0, 5).map((err, idx) => (
+                                                        <li key={idx} className="pl-2 border-l-2 border-white/20">
+                                                            {err.productId ? `Product ${err.productId}: ` : ''}{err.error}
+                                                        </li>
+                                                    ))}
+                                                    {bulkProgress.errors.length > 5 && (
+                                                        <li className="text-white/60">... and {bulkProgress.errors.length - 5} more</li>
+                                                    )}
+                                                </ul>
+                                            </details>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                             {!bulkProgress && (

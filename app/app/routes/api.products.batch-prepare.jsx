@@ -60,137 +60,154 @@ export const action = async ({ request }) => {
         let queued = 0;
         const errors = [];
 
-        for (const productId of productIds) {
-            try {
-                // Convert numeric ID to GID format if needed
-                const productGid = String(productId).startsWith('gid://')
-                    ? productId
-                    : `gid://shopify/Product/${productId}`;
+        // Convert all product IDs to GID format
+        const productGids = productIds.map(id => 
+            String(id).startsWith('gid://') ? id : `gid://shopify/Product/${id}`
+        );
 
-                // Fetch product details from Shopify GraphQL
-                const response = await admin.graphql(
-                    `#graphql
-                query getProduct($id: ID!) {
-                  product(id: $id) {
-                    id
-                    title
-                    featuredImage {
-                      id
-                      url
+        // Batch fetch all products in a single GraphQL query (fixes N+1 problem)
+        const response = await admin.graphql(
+            `#graphql
+            query getProducts($ids: [ID!]!) {
+                nodes(ids: $ids) {
+                    ... on Product {
+                        id
+                        title
+                        featuredImage {
+                            id
+                            url
+                        }
                     }
-                  }
-                }`,
-                    {
-                        variables: { id: productGid }
-                    }
-                );
-
-                const responseJson = await response.json();
-                const product = responseJson.data?.product;
-
-                // Check for GraphQL errors
-                if (responseJson.errors?.length > 0) {
-                    const gqlError = responseJson.errors[0]?.message || "GraphQL error";
-                    logger.error(
-                        createLogContext("prepare", requestId, "batch-graphql-error", { shopId, productId, productGid }),
-                        `Shopify GraphQL error: ${gqlError}`,
-                        { graphqlErrors: responseJson.errors }
-                    );
-                    errors.push({ productId, error: `GraphQL: ${gqlError}` });
-                    continue;
                 }
+            }`,
+            {
+                variables: { ids: productGids }
+            }
+        );
 
-                if (!product) {
-                    logger.warn(
-                        createLogContext("prepare", requestId, "batch-product-not-found", { shopId, productId, productGid }),
-                        `Product not found in Shopify (may be deleted or ID mismatch)`
-                    );
-                    errors.push({ productId, error: "Product not found in Shopify" });
-                    continue;
+        const responseJson = await response.json();
+        const products = responseJson.data?.nodes || [];
+
+        // Check for GraphQL errors
+        if (responseJson.errors?.length > 0) {
+            const gqlError = responseJson.errors[0]?.message || "GraphQL error";
+            logger.error(
+                createLogContext("prepare", requestId, "batch-graphql-error", { shopId }),
+                `Shopify GraphQL batch error: ${gqlError}`,
+                { graphqlErrors: responseJson.errors }
+            );
+            // If batch query fails entirely, mark all as errors
+            productIds.forEach(productId => {
+                errors.push({ productId, error: `GraphQL: ${gqlError}` });
+            });
+        } else {
+            // Create a map of GID -> product for quick lookup
+            const productMap = new Map();
+            products.forEach(product => {
+                if (product && product.id) {
+                    // Extract numeric ID from GID for mapping
+                    const numericId = product.id.split('/').pop();
+                    productMap.set(numericId, product);
                 }
+            });
 
-                if (!product.featuredImage) {
-                    logger.warn(
-                        createLogContext("prepare", requestId, "batch-no-image", { shopId, productId }),
-                        `Product has no featured image - cannot prepare`
-                    );
-                    errors.push({ productId, error: "No featured image - upload an image first" });
-                    continue;
-                }
-
-                const imageId = product.featuredImage.id;
-                const imageUrl = product.featuredImage.url;
-                const productTitle = product.title; // For Grounded SAM text-prompted segmentation
-
-                // Validate image URL
+            // Process each product
+            for (const productId of productIds) {
                 try {
-                    validateShopifyUrl(imageUrl, "product image URL");
-                } catch (urlError) {
-                    logger.error(
-                        createLogContext("prepare", requestId, "batch-validation", { shopId, productId }),
-                        "Invalid image URL from Shopify GraphQL (unexpected)",
-                        urlError
-                    );
-                    errors.push({ productId, error: "Invalid image URL from Shopify" });
-                    continue;
-                }
+                    const product = productMap.get(String(productId));
 
-                // Create or Update asset to "pending" - use transaction for atomicity
-                await prisma.$transaction(async (tx) => {
-                    const existing = await tx.productAsset.findFirst({
-                        where: {
-                            shopId,
-                            productId: String(productId)
+                    if (!product) {
+                        logger.warn(
+                            createLogContext("prepare", requestId, "batch-product-not-found", { shopId, productId }),
+                            `Product not found in Shopify (may be deleted or ID mismatch)`
+                        );
+                        errors.push({ productId, error: "Product not found in Shopify" });
+                        continue;
+                    }
+
+                    if (!product.featuredImage) {
+                        logger.warn(
+                            createLogContext("prepare", requestId, "batch-no-image", { shopId, productId }),
+                            `Product has no featured image - cannot prepare`
+                        );
+                        errors.push({ productId, error: "No featured image - upload an image first" });
+                        continue;
+                    }
+
+                    const imageId = product.featuredImage.id;
+                    const imageUrl = product.featuredImage.url;
+                    const productTitle = product.title; // For Grounded SAM text-prompted segmentation
+
+                    // Validate image URL
+                    try {
+                        validateShopifyUrl(imageUrl, "product image URL");
+                    } catch (urlError) {
+                        logger.error(
+                            createLogContext("prepare", requestId, "batch-validation", { shopId, productId }),
+                            "Invalid image URL from Shopify GraphQL (unexpected)",
+                            urlError
+                        );
+                        errors.push({ productId, error: "Invalid image URL from Shopify" });
+                        continue;
+                    }
+
+                    // Create or Update asset to "pending" - use transaction for atomicity
+                    await prisma.$transaction(async (tx) => {
+                        const existing = await tx.productAsset.findFirst({
+                            where: {
+                                shopId,
+                                productId: String(productId)
+                            }
+                        });
+
+                        if (existing) {
+                            await tx.productAsset.update({
+                                where: { id: existing.id },
+                                data: {
+                                    status: "pending",
+                                    prepStrategy: "batch",
+                                    sourceImageUrl: String(imageUrl),
+                                    sourceImageId: String(imageId),
+                                    productTitle: productTitle, // Store for Grounded SAM
+                                    retryCount: 0, // Reset retry count so processor picks it up
+                                    errorMessage: null, // Clear previous error
+                                    updatedAt: new Date()
+                                }
+                            });
+                        } else {
+                            await tx.productAsset.create({
+                                data: {
+                                    shopId,
+                                    productId: String(productId),
+                                    productTitle: productTitle, // Store for Grounded SAM
+                                    sourceImageId: String(imageId),
+                                    sourceImageUrl: String(imageUrl),
+                                    status: "pending",
+                                    prepStrategy: "batch",
+                                    promptVersion: 1,
+                                    createdAt: new Date()
+                                }
+                            });
                         }
                     });
 
-                    if (existing) {
-                        await tx.productAsset.update({
-                            where: { id: existing.id },
-                            data: {
-                                status: "pending",
-                                prepStrategy: "batch",
-                                sourceImageUrl: String(imageUrl),
-                                sourceImageId: String(imageId),
-                                productTitle: productTitle, // Store for Grounded SAM
-                                retryCount: 0, // Reset retry count so processor picks it up
-                                errorMessage: null, // Clear previous error
-                                updatedAt: new Date()
-                            }
-                        });
-                    } else {
-                        await tx.productAsset.create({
-                            data: {
-                                shopId,
-                                productId: String(productId),
-                                productTitle: productTitle, // Store for Grounded SAM
-                                sourceImageId: String(imageId),
-                                sourceImageUrl: String(imageUrl),
-                                status: "pending",
-                                prepStrategy: "batch",
-                                promptVersion: 1,
-                                createdAt: new Date()
-                            }
-                        });
-                    }
-                });
+                    queued++;
 
-                queued++;
-
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : "Unknown error";
-                logger.error(
-                    createLogContext("prepare", requestId, "batch-item-queue", {
-                        shopId,
-                        productId: String(productId),
-                    }),
-                    "Error queuing product for batch",
-                    error
-                );
-                errors.push({
-                    productId,
-                    error: errorMessage
-                });
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+                    logger.error(
+                        createLogContext("prepare", requestId, "batch-item-queue", {
+                            shopId,
+                            productId: String(productId),
+                        }),
+                        "Error queuing product for batch",
+                        error
+                    );
+                    errors.push({
+                        productId,
+                        error: errorMessage
+                    });
+                }
             }
         }
 
