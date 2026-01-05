@@ -4,7 +4,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { checkQuota, incrementQuota } from "../quota.server";
 import { checkRateLimit } from "../rate-limit.server";
-import { compositeScene } from "../services/gemini.server";
+import { compositeScene, type CompositeOptions } from "../services/gemini.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
@@ -134,6 +134,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Product asset is optional - we can render without background removal
     // Include renderInstructions for custom AI prompts
+    // Include Gemini file info for pre-uploaded optimization
     const productAsset = await prisma.productAsset.findFirst({
         where: { shopId: shop.id, productId: product_id },
         select: {
@@ -143,6 +144,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             sourceImageUrl: true,
             status: true,
             renderInstructions: true,
+            geminiFileUri: true,
+            geminiFileExpiresAt: true,
         }
     });
 
@@ -219,6 +222,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         // Call Gemini directly - no more Cloud Run!
         // Pass custom product instructions if available
+        // Include Gemini file URIs if available for faster renders
+        const compositeOptions: CompositeOptions = {
+            roomGeminiUri: roomSession.geminiFileUri,
+            roomGeminiExpiresAt: roomSession.geminiFileExpiresAt,
+            productGeminiUri: productAsset?.geminiFileUri ?? null,
+            productGeminiExpiresAt: productAsset?.geminiFileExpiresAt ?? null,
+        };
+        
         const result = await compositeScene(
             productImageUrl,
             roomImageUrl,
@@ -230,7 +241,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
             config?.style_preset || "neutral",
             requestId,
-            productAsset?.renderInstructions || undefined
+            productAsset?.renderInstructions || undefined,
+            compositeOptions
         );
 
         // Store both URL and key - key enables URL regeneration when signed URL expires

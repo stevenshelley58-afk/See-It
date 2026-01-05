@@ -1105,25 +1105,16 @@
   }
 }
 
-/* --- v2.0.2 Fix: Overflow and Resize Handles --- */
+/* =========================================
+   Position Screen - Canvas with Resize Handles
+   ========================================= */
 
-/* All screens: no scrolling - Apple-style contained experience */
-.see-it-screen-entry,
-.see-it-screen-prepare,
-.see-it-screen-position,
-.see-it-screen-loading,
-.see-it-screen-result {
-  overflow: hidden !important;
+/* Position canvas needs visible overflow for resize handles */
+.see-it-position-canvas {
+  overflow: visible;
 }
 
-/* Position screen canvas: allow visible overflow for resize handles */
-.see-it-screen-position .see-it-canvas-container,
-#see-it-position-container {
-  overflow: visible !important;
-  /* Allows resize handles to show outside bounds */
-}
-
-/* Product overlay must allow visible overflow for handles */
+/* Product overlay - the draggable/resizable product container */
 .see-it-product-overlay {
   position: absolute;
   cursor: move;
@@ -1131,14 +1122,12 @@
   user-select: none;
   -webkit-user-select: none;
   z-index: 10;
-  overflow: visible;
-  /* Dotted border to show resize boundary */
-  border: 2px dashed rgba(23, 23, 23, 0.5);
+  border: 2px dashed rgba(23, 23, 23, 0.6);
   border-radius: 4px;
   box-sizing: border-box;
 }
 
-/* Product image inside overlay - allow clicks to pass through to resize handles */
+/* Product image inside overlay */
 .see-it-product-overlay img {
   width: 100%;
   height: 100%;
@@ -1149,45 +1138,46 @@
   display: block;
 }
 
-/* Resize handles - corner circles for dragging */
+/* Resize handles - corner circles */
 .see-it-resize-handle {
   position: absolute;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   background: #ffffff;
   border: 2px solid #171717;
   border-radius: 50%;
-  z-index: 100;
+  z-index: 20;
   touch-action: none;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
   pointer-events: auto;
+  transition: transform 0.1s ease, background 0.1s ease;
 }
 
 .see-it-resize-handle:hover {
-  background: #f0f0f0;
-  transform: scale(1.1);
+  background: #e5e5e5;
+  transform: scale(1.15);
 }
 
 .see-it-resize-nw {
-  top: -12px;
-  left: -12px;
+  top: -10px;
+  left: -10px;
   cursor: nw-resize;
 }
 
 .see-it-resize-ne {
-  top: -12px;
-  right: -12px;
+  top: -10px;
+  right: -10px;
   cursor: ne-resize;
 }
 
 .see-it-resize-sw {
-  bottom: -12px;
-  left: -12px;
+  bottom: -10px;
+  left: -10px;
   cursor: sw-resize;
 }
 
 .see-it-resize-se {
-  bottom: -12px;
-  right: -12px;
+  bottom: -10px;
+  right: -10px;
   cursor: se-resize;
 }

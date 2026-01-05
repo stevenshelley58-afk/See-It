@@ -1,11 +1,12 @@
 // Gemini AI service - runs directly in Railway, no separate Cloud Run service
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, createPartFromUri } from "@google/genai";
 import { removeBackground } from "@imgly/background-removal-node";
 import sharp from "sharp";
 import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { segmentWithGroundedSam, isGroundedSamAvailable, extractObjectType } from "./grounded-sam.server";
+import { uploadToGeminiFiles, isGeminiFileValid, type GeminiFileInfo } from "./gemini-files.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -56,59 +57,28 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
 }
 
 // ============================================================================
-// NARRATIVE PROMPT BUILDER
-// Converts prose product description + placement into Gemini-optimized prompt
+// PROMPT BUILDER
 // ============================================================================
-
-/**
- * Convert normalized coordinates to natural language position description
- */
-function describePosition(placement: { x: number; y: number }): string {
-    const { x, y } = placement;
-
-    // Horizontal position
-    const h =
-        x < 0.2 ? 'on the far left' :
-            x < 0.35 ? 'on the left side' :
-                x > 0.8 ? 'on the far right' :
-                    x > 0.65 ? 'on the right side' :
-                        'centrally positioned';
-
-    // Depth/vertical position (y in image correlates to depth in room photography)
-    const v =
-        y > 0.75 ? 'close to the camera in the foreground' :
-            y > 0.55 ? 'in the foreground' :
-                y < 0.25 ? 'deep in the background' :
-                    y < 0.4 ? 'in the background' :
-                        'at a comfortable middle distance';
-
-    return `${h}, ${v}`;
-}
 
 /**
  * Build the composition prompt for Gemini image compositing
  * 
- * Uses explicit, task-oriented language as recommended by Google docs.
- * References images by their labels (ROOM IMAGE, PRODUCT IMAGE) which
- * are inserted before each image in the API call.
+ * Uses exact normalized coordinates (0-1) for precise placement.
+ * Product description assists with rendering (lighting, shadows, materials)
+ * but placement is determined by user interaction.
  */
 function buildCompositePrompt(
     productDescription: string,
     placement: { x: number; y: number; scale?: number; productWidthFraction?: number }
 ): string {
-    const position = describePosition(placement);
+    const sizePercent = ((placement.productWidthFraction || 0.25) * 100).toFixed(0);
 
-    return `Composite the PRODUCT IMAGE into the ROOM IMAGE to create a realistic interior photograph.
+    return `Composite the PRODUCT IMAGE into the ROOM IMAGE.
 
-Task: Place the product ${position} in the room.
-
-${productDescription ? `Product details:\n${productDescription}\n` : ''}
-Requirements:
-- Match the room's existing lighting direction and color temperature
-- Add a natural contact shadow beneath the product
-- Preserve the product's exact appearance, proportions, and fine details
-- The result should look like the product was actually photographed in this room
-- Maintain the room's original perspective and depth of field`;
+Position: x=${placement.x.toFixed(2)}, y=${placement.y.toFixed(2)}
+Size: ${sizePercent}% of room width
+${productDescription ? `\nProduct: ${productDescription}\n` : ''}
+Place exactly as specified. Match room lighting. Add natural shadow.`;
 }
 
 /**
@@ -283,6 +253,13 @@ interface LabeledImage {
     buffer: Buffer;
 }
 
+// Return type for prepareProduct function
+export interface PrepareProductResult {
+    url: string;
+    geminiFileUri: string | null;
+    geminiFileExpiresAt: Date | null;
+}
+
 async function callGemini(
     prompt: string,
     images: Buffer | Buffer[] | LabeledImage[],
@@ -404,7 +381,7 @@ export async function prepareProduct(
     assetId: string,
     requestId: string = "background-processor",
     productTitle?: string // Optional product title for Grounded SAM text-prompted segmentation
-): Promise<string> {
+): Promise<PrepareProductResult> {
     const logContext = createLogContext("prepare", requestId, "start", {
         shopId,
         productId,
@@ -656,6 +633,29 @@ export async function prepareProduct(
         const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
         const url = await uploadToGCS(key, outputBuffer, 'image/png', logContext);
 
+        // Pre-upload to Gemini Files API for faster render times
+        // This is non-blocking - failure doesn't stop the flow
+        let geminiFileInfo: GeminiFileInfo | null = null;
+        try {
+            geminiFileInfo = await uploadToGeminiFiles(
+                outputBuffer,
+                'image/png',
+                `product-${productId}`,
+                requestId
+            );
+            logger.info(
+                { ...logContext, stage: "gemini-upload" },
+                `Pre-uploaded to Gemini Files API: ${geminiFileInfo.uri} (expires: ${geminiFileInfo.expiresAt.toISOString()})`
+            );
+        } catch (geminiError) {
+            // Log but don't fail - Gemini upload is an optimization, not required
+            logger.warn(
+                { ...logContext, stage: "gemini-upload-failed" },
+                "Gemini Files API upload failed (will use fallback at render time)",
+                geminiError
+            );
+        }
+
         // Clean up output buffer after upload
         outputBuffer = null;
 
@@ -664,7 +664,11 @@ export async function prepareProduct(
             `Product preparation completed successfully: ${url.substring(0, 80)}...`
         );
 
-        return url;
+        return {
+            url,
+            geminiFileUri: geminiFileInfo?.uri ?? null,
+            geminiFileExpiresAt: geminiFileInfo?.expiresAt ?? null,
+        };
     } catch (error: any) {
         logger.error(
             logContext,
@@ -685,16 +689,38 @@ export interface CompositeResult {
     imageKey: string;
 }
 
+/**
+ * Options for compositeScene with optional Gemini file URIs
+ * When URIs are provided and valid (not expired), they'll be used
+ * instead of downloading and re-uploading images
+ */
+export interface CompositeOptions {
+    /** Pre-uploaded Gemini file URI for room image */
+    roomGeminiUri?: string | null;
+    /** Expiration time for room Gemini file */
+    roomGeminiExpiresAt?: Date | null;
+    /** Pre-uploaded Gemini file URI for product image */
+    productGeminiUri?: string | null;
+    /** Expiration time for product Gemini file */
+    productGeminiExpiresAt?: Date | null;
+}
+
 export async function compositeScene(
     preparedProductImageUrl: string,
     roomImageUrl: string,
     placement: { x: number; y: number; scale: number; productWidthFraction?: number },
     stylePreset: string = 'neutral',
     requestId: string = "composite",
-    productInstructions?: string
+    productInstructions?: string,
+    options?: CompositeOptions
 ): Promise<CompositeResult> {
     const logContext = createLogContext("render", requestId, "start", {});
-    logger.info(logContext, `Processing scene composite with Gemini (direct fusion)${productInstructions ? ' - with custom instructions' : ''}`);
+    
+    // Check if we can use pre-uploaded Gemini files
+    const useRoomUri = options?.roomGeminiUri && isGeminiFileValid(options.roomGeminiExpiresAt);
+    const useProductUri = options?.productGeminiUri && isGeminiFileValid(options.productGeminiExpiresAt);
+    
+    logger.info(logContext, `Processing scene composite with Gemini (direct fusion)${productInstructions ? ' - with custom instructions' : ''}${useRoomUri ? ' [room: Gemini URI]' : ''}${useProductUri ? ' [product: Gemini URI]' : ''}`);
 
     // Track buffers for explicit cleanup
     let productBuffer: Buffer | null = null;
@@ -767,15 +793,72 @@ export async function compositeScene(
         );
 
         // STEP 5: Send labeled images to Gemini for compositing
-        // Labels help Gemini understand which image is which
-        const base64Data = await callGemini(prompt, [
-            { label: "ROOM IMAGE", buffer: roomBuffer },
-            { label: "PRODUCT IMAGE", buffer: resizedProduct }
-        ], {
-            model: IMAGE_MODEL_PRO,
-            aspectRatio: closestRatio.label,
-            logContext
-        });
+        // When Gemini URIs are available, use createPartFromUri for faster requests
+        // Otherwise fall back to inline base64 data
+        let base64Data: string;
+        
+        if (useRoomUri) {
+            // OPTIMIZED PATH: Use pre-uploaded room URI (saves ~2-3s of upload time)
+            logger.info(
+                { ...logContext, stage: "gemini-uri-mode" },
+                `Using Gemini file URI for room: ${options!.roomGeminiUri!.substring(0, 60)}...`
+            );
+            
+            // Build parts array with URI reference for room, inline for product
+            const parts: any[] = [
+                { text: prompt },
+                { text: "ROOM IMAGE:" },
+                createPartFromUri(options!.roomGeminiUri!, 'image/jpeg'),
+                { text: "PRODUCT IMAGE:" },
+                {
+                    inlineData: {
+                        mimeType: 'image/png',
+                        data: resizedProduct!.toString('base64')
+                    }
+                }
+            ];
+            
+            const config: any = { responseModalities: ['TEXT', 'IMAGE'] };
+            if (closestRatio.label) {
+                config.imageConfig = { aspectRatio: closestRatio.label };
+            }
+            
+            const client = getGeminiClient();
+            const response = await withTimeout(
+                client.models.generateContent({
+                    model: IMAGE_MODEL_PRO,
+                    contents: parts,
+                    config,
+                }),
+                GEMINI_TIMEOUT_MS,
+                `Gemini composite with URI`
+            );
+            
+            // Extract image from response
+            const candidates = response.candidates;
+            if (candidates?.[0]?.content?.parts) {
+                for (const part of candidates[0].content.parts) {
+                    if (part.inlineData?.data) {
+                        base64Data = part.inlineData.data;
+                        break;
+                    }
+                }
+            }
+            
+            if (!base64Data!) {
+                throw new Error("No image in Gemini response (URI mode)");
+            }
+        } else {
+            // STANDARD PATH: Use inline base64 for both images
+            base64Data = await callGemini(prompt, [
+                { label: "ROOM IMAGE", buffer: roomBuffer! },
+                { label: "PRODUCT IMAGE", buffer: resizedProduct! }
+            ], {
+                model: IMAGE_MODEL_PRO,
+                aspectRatio: closestRatio.label,
+                logContext
+            });
+        }
 
         // Clean up input buffers
         roomBuffer = null;

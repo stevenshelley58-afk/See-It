@@ -219,11 +219,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
 
         // Update room session with cleaned image
+        // IMPORTANT: Invalidate Gemini URI since the image changed
+        // Next pre-upload will upload the new cleaned image
         await prisma.roomSession.update({
             where: { id: room_session_id },
             data: {
                 cleanedRoomImageUrl: cleanedImageUrl,
                 cleanedRoomImageKey: cleanedImageKey,
+                // Invalidate stale Gemini URI - it was for the old image
+                geminiFileUri: null,
+                geminiFileExpiresAt: null,
             }
         });
 

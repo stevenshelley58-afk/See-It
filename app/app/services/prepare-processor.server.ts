@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { prepareProduct, compositeScene } from "./gemini.server";
+import { prepareProduct, compositeScene, type PrepareProductResult } from "./gemini.server";
 import { logger, createLogContext, generateRequestId } from "../utils/logger.server";
 import { StorageService } from "./storage.server";
 import { incrementQuota } from "../quota.server";
@@ -113,7 +113,7 @@ async function processPendingAssets(batchRequestId: string) {
                 // Attempt processing with inline retry for transient errors
                 let lastError: unknown = null;
                 let success = false;
-                let preparedImageUrl: string | null = null;
+                let prepareResult: PrepareProductResult | null = null;
 
                 for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !success; attempt++) {
                     try {
@@ -130,7 +130,7 @@ async function processPendingAssets(batchRequestId: string) {
                             await sleep(delay);
                         }
 
-                        preparedImageUrl = await prepareProduct(
+                        prepareResult = await prepareProduct(
                             asset.sourceImageUrl,
                             asset.shopId,
                             asset.productId,
@@ -168,7 +168,7 @@ async function processPendingAssets(batchRequestId: string) {
                     }
                 }
 
-                if (success && preparedImageUrl) {
+                if (success && prepareResult) {
                     // Extract metadata with AI (non-blocking - failures don't stop prepare)
                     let renderInstructions = asset.renderInstructions;
                     if (!renderInstructions) {
@@ -194,15 +194,17 @@ async function processPendingAssets(batchRequestId: string) {
                     }
 
                     // Extract GCS key from the signed URL for on-demand URL generation
-                    const preparedImageKey = extractGcsKeyFromUrl(preparedImageUrl);
+                    const preparedImageKey = extractGcsKeyFromUrl(prepareResult.url);
 
                     await prisma.productAsset.update({
                         where: { id: asset.id },
                         data: {
                             status: "ready",
-                            preparedImageUrl: preparedImageUrl,
+                            preparedImageUrl: prepareResult.url,
                             preparedImageKey: preparedImageKey,
                             renderInstructions: renderInstructions,
+                            geminiFileUri: prepareResult.geminiFileUri,
+                            geminiFileExpiresAt: prepareResult.geminiFileExpiresAt,
                             retryCount: 0, // Reset retry count on success
                             errorMessage: null,
                             updatedAt: new Date()
@@ -213,9 +215,10 @@ async function processPendingAssets(batchRequestId: string) {
                         createLogContext("prepare", itemRequestId, "asset-complete", {
                             assetId: asset.id,
                             productId: asset.productId,
-                            gcsKey: preparedImageKey
+                            gcsKey: preparedImageKey,
+                            geminiUri: prepareResult.geminiFileUri ?? '(not uploaded)'
                         }),
-                        `Product ${asset.productId} prepared successfully -> ${preparedImageKey}`
+                        `Product ${asset.productId} prepared successfully -> ${preparedImageKey}${prepareResult.geminiFileUri ? ' + Gemini pre-upload' : ''}`
                     );
                 } else {
                     // All retries exhausted or permanent error

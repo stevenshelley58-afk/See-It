@@ -1,5 +1,5 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, useRouteError, isRouteErrorResponse, useRevalidator, Link } from "@remix-run/react";
+import { useLoaderData, useFetcher, useRouteError, isRouteErrorResponse, useRevalidator, Link, useNavigate } from "@remix-run/react";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { Modal, BlockStack, InlineStack, Text } from "@shopify/polaris";
@@ -196,6 +196,7 @@ export default function Products() {
     const { products, assetsMap, usage, quota, isPro, pageInfo, statusFilter, searchQuery } = useLoaderData();
     const singleFetcher = useFetcher();
     const revalidator = useRevalidator();
+    const navigate = useNavigate();
 
     // UI state
     const [toast, setToast] = useState(null);
@@ -209,8 +210,6 @@ export default function Products() {
     // Bulk progress state
     const [bulkProgress, setBulkProgress] = useState(null);
     // Shape: { current: 0, total: 0, status: 'idle' | 'running' | 'done', successCount: 0, failCount: 0 }
-
-    const prevState = useRef(singleFetcher.state);
 
     const showToast = useCallback((msg, type = "info") => {
         setToast({ msg, type });
@@ -261,11 +260,12 @@ export default function Products() {
 
     return (
         <>
-            <style>{`
+            <style dangerouslySetInnerHTML={{
+                __html: `
                 .checkerboard {
                     background: repeating-conic-gradient(#f0f0f0 0% 25%, #fff 0% 50%) 50% / 20px 20px;
                 }
-            `}</style>
+            `}} />
             <TitleBar title="See It Products" />
             <PageShell>
                 <div className="space-y-6">
@@ -281,7 +281,7 @@ export default function Products() {
                                 if (q) params.set('q', q);
                                 else params.delete('q');
                                 params.delete('cursor');
-                                window.location.href = `${window.location.pathname}?${params.toString()}`;
+                                navigate(`${window.location.pathname}?${params.toString()}`);
                             }}
                         >
                             <div className="relative flex-1">
@@ -313,7 +313,7 @@ export default function Products() {
                                 const params = new URLSearchParams(window.location.search);
                                 params.set('status', e.target.value);
                                 params.delete('cursor');
-                                window.location.href = `${window.location.pathname}?${params.toString()}`;
+                                navigate(`${window.location.pathname}?${params.toString()}`);
                             }}
                         >
                             <option value="ACTIVE">Active</option>
@@ -483,7 +483,7 @@ export default function Products() {
                                                     </td>
                                                     <td className="px-4 py-3">
                                                         <div className="text-neutral-900 font-medium whitespace-nowrap">
-                                                            {price ? `${parseFloat(price.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} ${price.currencyCode}` : '—'}
+                                                            {price ? `${parseFloat(price.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${price.currencyCode}` : '—'}
                                                         </div>
                                                         <div className={`text-xs mt-0.5 ${product.totalInventory > 0 ? 'text-neutral-500' : 'text-red-500'}`}>
                                                             {product.totalInventory > 0 ? `${product.totalInventory} in stock` : 'Out of stock'}
@@ -528,34 +528,38 @@ export default function Products() {
                         </div>
                     </div>
                 </div>
-            </PageShell>
+            </PageShell >
 
             {/* Toast */}
-            {toast && (
-                <div className={`fixed bottom-5 left-1/2 -translate-x-1/2 px-5 py-3 rounded-lg text-sm font-medium text-white z-50 shadow-lg ${toast.type === 'success' ? 'bg-emerald-600' :
-                    toast.type === 'err' ? 'bg-red-600' :
-                        'bg-neutral-900'
-                    }`}>
-                    {toast.msg}
-                </div>
-            )}
+            {
+                toast && (
+                    <div className={`fixed bottom-5 left-1/2 -translate-x-1/2 px-5 py-3 rounded-lg text-sm font-medium text-white z-50 shadow-lg ${toast.type === 'success' ? 'bg-emerald-600' :
+                        toast.type === 'err' ? 'bg-red-600' :
+                            'bg-neutral-900'
+                        }`}>
+                        {toast.msg}
+                    </div>
+                )
+            }
 
             {/* Product Detail Panel (One-stop shop) */}
-            {detailPanelProduct && (
-                <ProductDetailPanel
-                    key={detailPanelProduct.id}
-                    isOpen={detailPanelOpen}
-                    onClose={() => {
-                        setDetailPanelOpen(false);
-                        revalidator.revalidate(); // Refresh when closed to ensure we have latest image/status
-                    }}
-                    product={detailPanelProduct}
-                    asset={assetsMap[detailPanelProduct.id]}
-                    onSave={(metadata) => {
-                        showToast("Settings saved!", "success");
-                    }}
-                />
-            )}
+            {
+                detailPanelProduct && (
+                    <ProductDetailPanel
+                        key={detailPanelProduct.id}
+                        isOpen={detailPanelOpen}
+                        onClose={() => {
+                            setDetailPanelOpen(false);
+                            revalidator.revalidate(); // Refresh when closed to ensure we have latest image/status
+                        }}
+                        product={detailPanelProduct}
+                        asset={assetsMap[detailPanelProduct.id]}
+                        onSave={(metadata) => {
+                            showToast("Settings saved!", "success");
+                        }}
+                    />
+                )
+            }
         </>
     );
 }

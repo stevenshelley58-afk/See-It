@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.29'; // Fix: desktop modal layout - contained Apple-style experience
+    const VERSION = '1.0.31'; // Gemini Files API pre-upload for faster renders
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)
@@ -236,7 +236,10 @@ document.addEventListener('DOMContentLoaded', function () {
         lastResultUrl: null,
         collectionProducts: [],
         collectionInfo: null,
-        swiperIndex: 0
+        swiperIndex: 0,
+        // Preloaded prepared product image
+        preparedProductImageUrl: null,
+        preparedProductImagePreloaded: null  // Image object for instant display
     };
 
     // Canvas state - DUAL CANVAS ARCHITECTURE (like cleanup-ai reference)
@@ -799,33 +802,49 @@ document.addEventListener('DOMContentLoaded', function () {
         const url = getActiveRoomUrl();
         if (roomImage) roomImage.src = url;
 
-        // Try to fetch prepared (background-removed) product image
-        const preparedUrl = await fetchPreparedProductImage(state.productId);
-        const imageToUse = preparedUrl || state.productImageUrl;
+        // Use preloaded prepared image if available, otherwise fetch (or fallback to raw)
+        let imageToUse = state.productImageUrl;
+        let usingPreloaded = false;
+
+        if (state.preparedProductImagePreloaded) {
+            // Use the preloaded image - instant display, no placeholder!
+            imageToUse = state.preparedProductImageUrl;
+            usingPreloaded = true;
+            console.log('[See It] Using PRELOADED prepared product image');
+        } else if (state.preparedProductImageUrl) {
+            // URL is ready but image not yet loaded - still faster than fetching
+            imageToUse = state.preparedProductImageUrl;
+            console.log('[See It] Using prepared URL (not yet preloaded)');
+        } else {
+            // Fallback: fetch now (this was the old slow path)
+            console.log('[See It] No preloaded image, fetching prepared product image...');
+            const preparedUrl = await fetchPreparedProductImage(state.productId);
+            if (preparedUrl) {
+                imageToUse = preparedUrl;
+                state.preparedProductImageUrl = preparedUrl;
+            }
+        }
 
         // Set product image
         if (productImage) {
             productImage.src = imageToUse;
-            console.log('[See It] Product image set:', preparedUrl ? 'PREPARED' : 'RAW', imageToUse.substring(0, 80));
+            console.log('[See It] Product image set:', usingPreloaded ? 'PRELOADED' : (state.preparedProductImageUrl ? 'PREPARED' : 'RAW'), imageToUse.substring(0, 80));
 
-            // Wait for product image to load to get dimensions
-            productImage.onload = () => {
-                state.productNaturalWidth = productImage.naturalWidth;
-                state.productNaturalHeight = productImage.naturalHeight;
-                console.log('[See It] Product natural size:', state.productNaturalWidth, 'x', state.productNaturalHeight);
-
-                // Set initial size (25% of container width, maintain aspect ratio)
-                if (positionContainer) {
-                    const containerRect = positionContainer.getBoundingClientRect();
-                    const targetWidth = Math.min(containerRect.width * 0.25, 200);
-                    const aspectRatio = state.productNaturalHeight / state.productNaturalWidth;
-                    state.productWidth = targetWidth;
-                    state.productHeight = targetWidth * aspectRatio;
-                    state.scale = 1.0;
-
-                    updateProductOverlay();
-                }
-            };
+            // If preloaded, we can set dimensions immediately
+            if (usingPreloaded && state.preparedProductImagePreloaded) {
+                state.productNaturalWidth = state.preparedProductImagePreloaded.naturalWidth;
+                state.productNaturalHeight = state.preparedProductImagePreloaded.naturalHeight;
+                console.log('[See It] Product natural size (from preload):', state.productNaturalWidth, 'x', state.productNaturalHeight);
+                setInitialProductSize();
+            } else {
+                // Wait for product image to load to get dimensions
+                productImage.onload = () => {
+                    state.productNaturalWidth = productImage.naturalWidth;
+                    state.productNaturalHeight = productImage.naturalHeight;
+                    console.log('[See It] Product natural size:', state.productNaturalWidth, 'x', state.productNaturalHeight);
+                    setInitialProductSize();
+                };
+            }
         }
 
         // Reset position to center
@@ -843,6 +862,33 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Initial update
         updateProductOverlay();
+    };
+
+    // Helper to set initial product size - larger on mobile for easier interaction
+    const setInitialProductSize = () => {
+        if (!positionContainer) return;
+
+        const containerRect = positionContainer.getBoundingClientRect();
+        const isMobile = containerRect.width < 768;
+
+        // Mobile: 40% of container width (easier to drag/pinch)
+        // Desktop: 25% of container width
+        const sizePercent = isMobile ? 0.40 : 0.25;
+        const maxWidth = isMobile ? 280 : 200;
+
+        const targetWidth = Math.min(containerRect.width * sizePercent, maxWidth);
+        const aspectRatio = state.productNaturalHeight / state.productNaturalWidth;
+        state.productWidth = targetWidth;
+        state.productHeight = targetWidth * aspectRatio;
+        state.scale = 1.0;
+
+        updateProductOverlay();
+        console.log('[See It] Initial product size set:', {
+            isMobile,
+            sizePercent: sizePercent * 100 + '%',
+            width: state.productWidth,
+            height: state.productHeight
+        });
     };
 
     const updateProductOverlay = () => {
@@ -1179,6 +1225,32 @@ document.addEventListener('DOMContentLoaded', function () {
         state.productPrice = trigger.dataset.productPrice || state.productPrice;
         state.productImageUrl = trigger.dataset.productImage || state.productImageUrl;
 
+        // Preload the prepared product image in background (don't await)
+        // This ensures the image is ready by the time we reach the position screen
+        if (state.productId && !state.preparedProductImageUrl) {
+            console.log('[See It] Starting background preload of prepared product image');
+            (async () => {
+                try {
+                    const preparedUrl = await fetchPreparedProductImage(state.productId);
+                    if (preparedUrl) {
+                        state.preparedProductImageUrl = preparedUrl;
+                        // Preload the actual image so it displays instantly
+                        const img = new Image();
+                        img.onload = () => {
+                            state.preparedProductImagePreloaded = img;
+                            console.log('[See It] Prepared product image preloaded successfully');
+                        };
+                        img.onerror = () => {
+                            console.warn('[See It] Failed to preload prepared product image');
+                        };
+                        img.src = preparedUrl;
+                    }
+                } catch (err) {
+                    console.warn('[See It] Background preload error:', err);
+                }
+            })();
+        }
+
         if (state.sessionId && getActiveRoomUrl()) {
             showScreen('prepare');
         } else {
@@ -1294,6 +1366,20 @@ document.addEventListener('DOMContentLoaded', function () {
             showError('Please wait for upload to complete');
             return;
         }
+
+        // Trigger Gemini pre-upload in background (non-blocking)
+        if (state.sessionId) {
+            fetch('/apps/see-it/room/gemini-upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ room_session_id: state.sessionId })
+            }).then(res => res.json()).then(data => {
+                console.log('[See It] Gemini pre-upload:', data.success ? 'success' : 'skipped');
+            }).catch(err => {
+                console.warn('[See It] Gemini pre-upload failed (will use fallback):', err);
+            });
+        }
+
         showScreen('position');
     });
 
