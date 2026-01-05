@@ -22,6 +22,7 @@ import { GEMINI_IMAGE_MODEL_PRO, GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-mod
 // ============================================================================
 const V2_ALLOWED_SHOPS = [
   'test-store-1100000000000000000000000000000002307.myshopify.com', // Test store
+  'bohoem58.myshopify.com', // BHM Showroom
 ];
 
 // Valid variant IDs
