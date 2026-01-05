@@ -21,9 +21,7 @@ import { GEMINI_IMAGE_MODEL_PRO, GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-mod
 // V2 SHOP ALLOWLIST - Must match render-v2.ts
 // ============================================================================
 const V2_ALLOWED_SHOPS = [
-  'bohoem58.myshopify.com',        // BHM test store
-  'your-test-store.myshopify.com', // Placeholder for additional test stores
-  // Add more test shops here during development
+  'test-store-1100000000000000000000000000000002307.myshopify.com', // Test store
 ];
 
 // Valid variant IDs
