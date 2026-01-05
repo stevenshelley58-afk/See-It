@@ -1,14 +1,18 @@
-import { listSessions, getShopStats } from '@/lib/gcs';
+import { listSessions, listAllShops } from '@/lib/gcs';
 import { truncateShop, formatTimeAgo } from '@/lib/utils';
 import Link from 'next/link';
-import type { SessionMeta } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
 export const revalidate = 60;
 
 export default async function ShopsPage() {
+    // Get shops from index files (shows shops even with 0 sessions)
+    const shopIndexes = await listAllShops();
+    
+    // Also get sessions to merge data
     const sessions = await listSessions({ limit: 200 });
-
-    // Group sessions by shop
+    
+    // Group sessions by shop for stats
     const shopMap = new Map<string, typeof sessions>();
     for (const session of sessions) {
         const existing = shopMap.get(session.shop) || [];
@@ -16,18 +20,29 @@ export default async function ShopsPage() {
         shopMap.set(session.shop, existing);
     }
 
-    const shops = Array.from(shopMap.entries()).map(([shop, shopSessions]) => {
+    // Merge shop indexes with session data
+    const allShopDomains = new Set<string>();
+    shopIndexes.forEach(idx => allShopDomains.add(idx.shop));
+    sessions.forEach(s => allShopDomains.add(s.shop));
+
+    const shops = Array.from(allShopDomains).map(shop => {
+        const shopIndex = shopIndexes.find(idx => idx.shop === shop);
+        const shopSessions = shopMap.get(shop) || [];
+        
         const completed = shopSessions.filter(s => s.status === 'complete').length;
         const failed = shopSessions.filter(s => s.status === 'failed').length;
-        const lastSession = shopSessions[0];
+        const lastSession = shopSessions[0] || shopIndex?.sessions[0];
+        
+        // Use shop index data if available, otherwise use session data
+        const totalSessions = shopIndex?.totalSessions || shopSessions.length;
 
         return {
             shop,
-            totalSessions: shopSessions.length,
+            totalSessions,
             completedSessions: completed,
             failedSessions: failed,
-            completionRate: Math.round((completed / shopSessions.length) * 100),
-            lastActivity: lastSession?.updatedAt || '',
+            completionRate: totalSessions > 0 ? Math.round((completed / totalSessions) * 100) : 0,
+            lastActivity: lastSession?.startedAt || '',
         };
     }).sort((a, b) => b.totalSessions - a.totalSessions);
 

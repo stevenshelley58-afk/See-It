@@ -285,3 +285,54 @@ export async function getShopIndex(shopDomain: string): Promise<ShopIndex | null
         return null;
     }
 }
+
+/**
+ * List all shops from shop index files in GCS
+ */
+export async function listAllShops(): Promise<ShopIndex[]> {
+    const storage = getStorage();
+    const bucket = storage.bucket(SESSION_BUCKET);
+
+    try {
+        const [bucketExists] = await bucket.exists();
+        if (!bucketExists) {
+            return [];
+        }
+
+        // List all shop directories
+        const [files] = await bucket.getFiles({
+            prefix: 'shops/',
+            delimiter: '/',
+        });
+
+        // Get prefixes (shop directories)
+        const [, , apiResponse] = await bucket.getFiles({
+            prefix: 'shops/',
+            delimiter: '/',
+            autoPaginate: false,
+        });
+
+        const prefixes = (apiResponse as { prefixes?: string[] })?.prefixes || [];
+        const shops: ShopIndex[] = [];
+
+        for (const prefix of prefixes) {
+            // Extract shop domain from prefix (e.g., "shops/example.myshopify.com/" -> "example.myshopify.com")
+            const shopDomain = prefix.replace('shops/', '').replace('/', '');
+            if (!shopDomain) continue;
+
+            try {
+                const index = await getShopIndex(shopDomain);
+                if (index) {
+                    shops.push(index);
+                }
+            } catch (error) {
+                console.error(`[GCS] Failed to read shop index for ${shopDomain}:`, error);
+            }
+        }
+
+        return shops.sort((a, b) => b.totalSessions - a.totalSessions);
+    } catch (error) {
+        console.error('[GCS] Failed to list shops:', error);
+        return [];
+    }
+}
