@@ -109,6 +109,12 @@ export const loader = async ({ request }) => {
   // Check if setup is complete (has at least one ready product asset)
   const setupComplete = productsReady > 0;
 
+  // Check for unlimited bypass
+  const isUnlimited = shop.shopDomain === 'bohoem58.myshopify.com';
+  const displayPlan = isUnlimited ? 'unlimited' : (shop.plan === PLANS.PRO.id ? 'pro' : 'free');
+  const dailyLimit = isUnlimited ? 1000000 : shop.dailyQuota;
+  const monthlyLimit = isUnlimited ? 10000000 : shop.monthlyQuota;
+
   return json({
     stats: {
       customersUsed,
@@ -119,14 +125,14 @@ export const loader = async ({ request }) => {
     usage: {
       daily: {
         used: usage?.compositeRenders || 0,
-        limit: shop.dailyQuota
+        limit: dailyLimit
       },
       monthly: {
         used: monthlyUsage,
-        limit: shop.monthlyQuota
+        limit: monthlyLimit
       }
     },
-    plan: shop.plan === PLANS.PRO.id ? 'pro' : 'free',
+    plan: displayPlan,
     recentActivity,
     setupComplete
   });
@@ -184,8 +190,8 @@ export default function Index() {
             <UsageBar used={usage.daily.used} limit={usage.daily.limit} label="Today" />
             <UsageBar used={usage.monthly.used} limit={usage.monthly.limit} label="This month" />
             {plan === 'free' && (
-              <Button 
-                variant="secondary" 
+              <Button
+                variant="secondary"
                 className="w-full mt-4 md:mt-6"
                 onClick={handleUpgrade}
               >
@@ -205,9 +211,8 @@ export default function Index() {
                   recentActivity.map(activity => (
                     <div key={activity.id} className="flex items-center justify-between py-3 border-b border-neutral-100 last:border-0">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                          activity.success ? 'bg-emerald-500' : 'bg-red-500'
-                        }`} />
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${activity.success ? 'bg-emerald-500' : 'bg-red-500'
+                          }`} />
                         <div className="min-w-0">
                           <div className="text-sm text-neutral-900 truncate">{activity.action}</div>
                           <div className="text-xs text-neutral-500 truncate">{activity.product}</div>
@@ -223,8 +228,8 @@ export default function Index() {
                 )}
               </div>
               {recentActivity.length > 0 && (
-                <Button 
-                  variant="secondary" 
+                <Button
+                  variant="secondary"
                   className="w-full mt-4 text-neutral-500"
                   onClick={() => window.location.href = '/app/analytics'}
                 >
@@ -245,7 +250,7 @@ export default function Index() {
                   Add the See It button to your product pages to start capturing leads
                 </p>
               </div>
-              <Button 
+              <Button
                 variant="primary"
                 className="w-full md:w-auto"
                 onClick={() => window.location.href = 'https://admin.shopify.com/store/' + (window.location.hostname.match(/[\w-]+\.myshopify\.com/)?.[0] || '') + '/themes'}

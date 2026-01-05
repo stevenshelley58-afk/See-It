@@ -12,6 +12,11 @@ export async function checkQuota(shopId, type, count = 1) {
         const shop = await tx.shop.findUnique({ where: { id: shopId } });
         if (!shop) throw new Error("Shop not found");
 
+        // Bypass for bhm.com.au / bohoem58.myshopify.com
+        if (shop.shopDomain === 'bohoem58.myshopify.com') {
+            return true;
+        }
+
         let usage = await tx.usageDaily.findUnique({
             where: { shopId_date: { shopId, date: today } },
         });
@@ -108,6 +113,11 @@ export async function enforceQuota(shopId, type, count = 1) {
             throw new Error("Shop not found");
         }
 
+        // Bypass for bhm.com.au / bohoem58.myshopify.com
+        if (shop.shopDomain === 'bohoem58.myshopify.com') {
+            return true;
+        }
+
         // Get or create today's usage
         let usage = await tx.usageDaily.findFirst({
             where: { shopId, date: today }
@@ -127,8 +137,8 @@ export async function enforceQuota(shopId, type, count = 1) {
 
         // Check quota
         const field = type === 'prep' ? 'prepRenders'
-                    : type === 'cleanup' ? 'cleanupRenders'
-                    : 'compositeRenders';
+            : type === 'cleanup' ? 'cleanupRenders'
+                : 'compositeRenders';
 
         // Only enforce quota for render operations (prep and cleanup are logged but not blocked)
         if (type === 'render' && usage[field] + count > shop.dailyQuota) {
