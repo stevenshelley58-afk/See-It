@@ -17,6 +17,8 @@ export const loader = async ({ request }) => {
     const direction = url.searchParams.get("direction") || "next";
     const statusFilter = url.searchParams.get("status") || "ACTIVE";
     const searchQuery = url.searchParams.get("q") || "";
+    const sortField = url.searchParams.get("sort") || "manual"; // title, price, manual
+    const sortDir = url.searchParams.get("sortDir") || "asc";
 
     const pageSize = 12;
     let queryArgs = { first: pageSize };
@@ -26,6 +28,17 @@ export const loader = async ({ request }) => {
             : { first: pageSize, after: cursor };
     }
 
+    let sortKey = "ID"; // Default
+    let reverse = false;
+
+    if (sortField === 'title') {
+        sortKey = "TITLE";
+        reverse = sortDir === 'desc';
+    } else if (sortField === 'price') {
+        sortKey = "PRICE";
+        reverse = sortDir === 'desc';
+    }
+
     const queryParts = [];
     if (searchQuery) queryParts.push(`title:*${searchQuery}* OR tag:*${searchQuery}*`);
     if (statusFilter !== "all") queryParts.push(`status:${statusFilter}`);
@@ -33,8 +46,8 @@ export const loader = async ({ request }) => {
 
     const response = await admin.graphql(
         `#graphql
-        query getProducts($first: Int, $last: Int, $after: String, $before: String, $query: String) {
-            products(first: $first, last: $last, after: $after, before: $before, query: $query) {
+        query getProducts($first: Int, $last: Int, $after: String, $before: String, $query: String, $sortKey: ProductSortKeys, $reverse: Boolean) {
+            products(first: $first, last: $last, after: $after, before: $before, query: $query, sortKey: $sortKey, reverse: $reverse) {
                 edges {
                     node {
                         id
@@ -66,7 +79,7 @@ export const loader = async ({ request }) => {
                 pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
             }
         }`,
-        { variables: { ...queryArgs, query: finalQuery } }
+        { variables: { ...queryArgs, query: finalQuery, sortKey, reverse } }
     );
 
     const responseJson = await response.json();
@@ -74,22 +87,30 @@ export const loader = async ({ request }) => {
     let products = edges.map((edge) => edge.node);
 
     // Apply custom sort point 7: active -> in-stock -> price desc
-    products.sort((a, b) => {
-        // 1. Status (ACTIVE > others)
-        if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1;
-        if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1;
+    // ONLY if we are in "manual" sort mode (default) OR explicitly sorting by status (which we hack here for now)
+    if (sortField === 'manual' || sortField === 'status') {
+        products.sort((a, b) => {
+            // 1. Status (ACTIVE > others)
+            if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1;
+            if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1;
 
-        // 2. In stock
-        const aInStock = (a.totalInventory || 0) > 0;
-        const bInStock = (b.totalInventory || 0) > 0;
-        if (aInStock && !bInStock) return -1;
-        if (!aInStock && bInStock) return 1;
+            // 2. In stock
+            const aInStock = (a.totalInventory || 0) > 0;
+            const bInStock = (b.totalInventory || 0) > 0;
+            if (aInStock && !bInStock) return -1;
+            if (!aInStock && bInStock) return 1;
 
-        // 3. Price desc
-        const aPrice = parseFloat(a.priceRangeV2?.minVariantPrice?.amount || '0');
-        const bPrice = parseFloat(b.priceRangeV2?.minVariantPrice?.amount || '0');
-        return bPrice - aPrice;
-    });
+            // 3. Price desc
+            const aPrice = parseFloat(a.priceRangeV2?.minVariantPrice?.amount || '0');
+            const bPrice = parseFloat(b.priceRangeV2?.minVariantPrice?.amount || '0');
+            return bPrice - aPrice;
+        });
+
+        // If specific status sort requested, we might want to flip it
+        if (sortField === 'status' && sortDir === 'desc') {
+            products.reverse();
+        }
+    }
 
     // Billing check
     let planId = PLANS.FREE.id;
@@ -188,12 +209,14 @@ export const loader = async ({ request }) => {
         quota: { monthly: shop.monthlyQuota },
         isPro: shop.plan === PLANS.PRO.id,
         statusFilter,
-        searchQuery
+        searchQuery,
+        sortField,
+        sortDir
     });
 };
 
 export default function Products() {
-    const { products, assetsMap, usage, quota, isPro, pageInfo, statusFilter, searchQuery } = useLoaderData();
+    const { products, assetsMap, usage, quota, isPro, pageInfo, statusFilter, searchQuery, sortField, sortDir } = useLoaderData();
     const singleFetcher = useFetcher();
     const revalidator = useRevalidator();
     const navigate = useNavigate();
@@ -257,6 +280,35 @@ export default function Products() {
             setSelectedIds([]);
         }, 3000);
     };
+
+    const handleSort = (field) => {
+        const params = new URLSearchParams(window.location.search);
+        // Default to asc if new field, toggle if same
+        let newDir = 'asc';
+        if (field === sortField) {
+            newDir = sortDir === 'asc' ? 'desc' : 'asc';
+        }
+        params.set('sort', field);
+        params.set('sortDir', newDir);
+        params.delete('cursor'); // Reset pagination on sort change
+        navigate(`${window.location.pathname}?${params.toString()}`);
+    };
+
+    const SortHeader = ({ label, field }) => (
+        <th
+            className="px-4 py-3 font-normal cursor-pointer hover:bg-neutral-100 transition-colors select-none"
+            onClick={() => handleSort(field)}
+        >
+            <div className="flex items-center gap-1">
+                {label}
+                {sortField === field && (
+                    <span className="text-xs text-neutral-400">
+                        {sortDir === 'asc' ? '↑' : '↓'}
+                    </span>
+                )}
+            </div>
+        </th>
+    );
 
     return (
         <>
@@ -412,9 +464,9 @@ export default function Products() {
                                                 />
                                             </th>
                                             <th className="px-4 py-3 font-normal w-24">Images</th>
-                                            <th className="px-4 py-3 font-normal">Product</th>
-                                            <th className="px-4 py-3 font-normal">Price</th>
-                                            <th className="px-4 py-3 font-normal">Status</th>
+                                            <SortHeader label="Product" field="title" />
+                                            <SortHeader label="Price" field="price" />
+                                            <SortHeader label="Status" field="status" />
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-neutral-100">
@@ -516,12 +568,12 @@ export default function Products() {
                         {/* Pagination */}
                         <div className="border-t border-neutral-200 p-3 flex justify-center gap-2">
                             {pageInfo?.hasPreviousPage && (
-                                <Link to={`?cursor=${pageInfo.startCursor}&direction=previous&q=${searchQuery}&status=${statusFilter}`}>
+                                <Link to={`?cursor=${pageInfo.startCursor}&direction=previous&q=${searchQuery}&status=${statusFilter}&sort=${sortField}&sortDir=${sortDir}`}>
                                     <Button variant="secondary" size="sm">Previous</Button>
                                 </Link>
                             )}
                             {pageInfo?.hasNextPage && (
-                                <Link to={`?cursor=${pageInfo.endCursor}&direction=next&q=${searchQuery}&status=${statusFilter}`}>
+                                <Link to={`?cursor=${pageInfo.endCursor}&direction=next&q=${searchQuery}&status=${statusFilter}&sort=${sortField}&sortDir=${sortDir}`}>
                                     <Button variant="secondary" size="sm">Next</Button>
                                 </Link>
                             )}

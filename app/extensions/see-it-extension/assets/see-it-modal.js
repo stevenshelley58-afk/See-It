@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.31'; // Gemini Files API pre-upload for faster renders
+    const VERSION = '1.0.29'; // Gemini Files API pre-upload for faster renders
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
     // Helper: check if element is visible (has non-zero dimensions)
@@ -1626,10 +1626,38 @@ document.addEventListener('DOMContentLoaded', function () {
         }, 2500);
 
         try {
+            const containerRect = positionContainer?.getBoundingClientRect();
+            let productWidthFraction = undefined;
+
+            if (containerRect && containerRect.width > 0) {
+                // Calculate the visual width of the product as displayed
+                // state.productWidth is CSS pixels, state.scale is user's resize multiplier
+                const visualProductWidth = state.productWidth * (state.scale || 1);
+                
+                // Calculate fraction of container (which maps to room image)
+                productWidthFraction = visualProductWidth / containerRect.width;
+                
+                // Log details for debugging
+                console.log('[See It] Size calculation:', {
+                    productNaturalWidth: state.productNaturalWidth,
+                    productNaturalHeight: state.productNaturalHeight,
+                    cssProductWidth: state.productWidth,
+                    scale: state.scale,
+                    visualProductWidth: visualProductWidth.toFixed(0),
+                    containerWidth: containerRect.width.toFixed(0),
+                    productWidthFraction: productWidthFraction.toFixed(3)
+                });
+            }
+
             const payload = {
                 room_session_id: state.sessionId,
                 product_id: state.productId,
-                placement: { x: state.x, y: state.y, scale: state.scale || 1 },
+                placement: {
+                    x: state.x,
+                    y: state.y,
+                    scale: state.scale || 1,
+                    product_width_fraction: productWidthFraction
+                },
                 config: {
                     style_preset: 'neutral',
                     quality: 'standard',

@@ -60,25 +60,52 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
 // PROMPT BUILDER
 // ============================================================================
 
+interface PromptDimensions {
+    room: { width: number; height: number };
+    product: { width: number; height: number };
+}
+
 /**
  * Build the composition prompt for Gemini image compositing
  * 
  * Uses exact normalized coordinates (0-1) for precise placement.
- * Product description assists with rendering (lighting, shadows, materials)
- * but placement is determined by user interaction.
+ * Includes explicit sizing information so Gemini preserves user's intended scale.
+ * Product description assists with rendering (lighting, shadows, materials).
  */
 function buildCompositePrompt(
     productDescription: string,
-    placement: { x: number; y: number; scale?: number; productWidthFraction?: number }
+    placement: { x: number; y: number },
+    dimensions: PromptDimensions
 ): string {
-    const sizePercent = ((placement.productWidthFraction || 0.25) * 100).toFixed(0);
+    const { room, product } = dimensions;
+    
+    // Calculate what percentage of room width the product occupies
+    const widthPercent = ((product.width / room.width) * 100).toFixed(1);
+    const heightPercent = ((product.height / room.height) * 100).toFixed(1);
 
-    return `Composite the PRODUCT IMAGE into the ROOM IMAGE.
+    return `You are compositing a product into a room photo for an AR furniture visualization app.
 
-Position: x=${placement.x.toFixed(2)}, y=${placement.y.toFixed(2)}
-Size: ${sizePercent}% of room width
-${productDescription ? `\nProduct: ${productDescription}\n` : ''}
-Place exactly as specified. Match room lighting. Add natural shadow.`;
+IMAGE SPECIFICATIONS:
+- ROOM IMAGE: ${room.width}×${room.height}px - the customer's actual room
+- PRODUCT IMAGE: ${product.width}×${product.height}px - already sized correctly by the user
+
+SIZING (CRITICAL):
+The user has manually resized the product to their desired scale.
+The product occupies ${widthPercent}% of room width and ${heightPercent}% of room height.
+This size is INTENTIONAL. Do NOT resize, scale, stretch, or adjust the product dimensions.
+
+PLACEMENT:
+Position the product center at x=${placement.x.toFixed(2)}, y=${placement.y.toFixed(2)} (normalized 0-1 coordinates).
+The user placed it here deliberately. Make only minor adjustments for realism (e.g., grounding to floor).
+
+${productDescription ? `PRODUCT DETAILS:
+${productDescription}
+` : ''}
+RULES:
+- Preserve the product's exact size as provided
+- Match the room's existing lighting and color temperature
+- Add natural contact shadow where product meets surface
+- Do not modify, add, or remove anything else in the room`;
 }
 
 /**
@@ -630,6 +657,36 @@ export async function prepareProduct(
             throw error;
         }
 
+        // TRIM TRANSPARENT PADDING
+        // This ensures PNG dimensions match the actual visible product content.
+        // Without this, the CSS bounding box is larger than the visible product,
+        // causing size calculations to be inaccurate.
+        try {
+            const beforeMeta = await sharp(outputBuffer).metadata();
+            const trimmedBuffer = await sharp(outputBuffer)
+                .trim() // Removes transparent edges
+                .png()
+                .toBuffer();
+            
+            const afterMeta = await sharp(trimmedBuffer).metadata();
+            
+            // Only use trimmed version if it's valid and meaningfully smaller
+            if (trimmedBuffer.length > 0 && afterMeta.width && afterMeta.height) {
+                outputBuffer = trimmedBuffer;
+                logger.info(
+                    { ...logContext, stage: "trim" },
+                    `Trimmed transparent padding: ${beforeMeta.width}×${beforeMeta.height} → ${afterMeta.width}×${afterMeta.height}`
+                );
+            }
+        } catch (trimError) {
+            // Trim failed - continue with untrimmed image
+            logger.warn(
+                { ...logContext, stage: "trim" },
+                "Failed to trim transparent padding, continuing with original",
+                trimError
+            );
+        }
+
         const key = `products/${shopId}/${productId}/${assetId}_prepared.png`;
         const url = await uploadToGCS(key, outputBuffer, 'image/png', logContext);
 
@@ -715,11 +772,11 @@ export async function compositeScene(
     options?: CompositeOptions
 ): Promise<CompositeResult> {
     const logContext = createLogContext("render", requestId, "start", {});
-    
+
     // Check if we can use pre-uploaded Gemini files
     const useRoomUri = options?.roomGeminiUri && isGeminiFileValid(options.roomGeminiExpiresAt);
     const useProductUri = options?.productGeminiUri && isGeminiFileValid(options.productGeminiExpiresAt);
-    
+
     logger.info(logContext, `Processing scene composite with Gemini (direct fusion)${productInstructions ? ' - with custom instructions' : ''}${useRoomUri ? ' [room: Gemini URI]' : ''}${useProductUri ? ' [product: Gemini URI]' : ''}`);
 
     // Track buffers for explicit cleanup
@@ -774,15 +831,23 @@ export async function compositeScene(
         // Clean up original product buffer
         productBuffer = null;
 
+        // Get actual resized dimensions (Sharp maintains aspect ratio)
+        const resizedMetadata = await sharp(resizedProduct).metadata();
+        const resizedWidth = resizedMetadata.width || clampedWidth;
+        const resizedHeight = resizedMetadata.height || Math.round(clampedWidth * (productMetadata.height / productMetadata.width));
+
         logger.info(
             { ...logContext, stage: "resize" },
-            `Resized product: ${productMetadata.width}×${productMetadata.height} → ${clampedWidth}px wide, room=${roomWidth}×${roomHeight}`
+            `Resized product: ${productMetadata.width}×${productMetadata.height} → ${resizedWidth}×${resizedHeight}px, room=${roomWidth}×${roomHeight}`
         );
 
-        // STEP 4: Build the narrative prompt
-        // The productInstructions is prose describing what the product looks like
+        // STEP 4: Build the narrative prompt with explicit sizing
+        // Pass actual dimensions so Gemini knows the product is already correctly sized
         const productDescription = productInstructions?.trim() || '';
-        const prompt = buildCompositePrompt(productDescription, placement);
+        const prompt = buildCompositePrompt(productDescription, placement, {
+            room: { width: roomWidth, height: roomHeight },
+            product: { width: resizedWidth, height: resizedHeight }
+        });
 
         // Compute closest Gemini-supported aspect ratio
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
@@ -796,14 +861,14 @@ export async function compositeScene(
         // When Gemini URIs are available, use createPartFromUri for faster requests
         // Otherwise fall back to inline base64 data
         let base64Data: string;
-        
+
         if (useRoomUri) {
             // OPTIMIZED PATH: Use pre-uploaded room URI (saves ~2-3s of upload time)
             logger.info(
                 { ...logContext, stage: "gemini-uri-mode" },
                 `Using Gemini file URI for room: ${options!.roomGeminiUri!.substring(0, 60)}...`
             );
-            
+
             // Build parts array with URI reference for room, inline for product
             const parts: any[] = [
                 { text: prompt },
@@ -817,12 +882,12 @@ export async function compositeScene(
                     }
                 }
             ];
-            
+
             const config: any = { responseModalities: ['TEXT', 'IMAGE'] };
             if (closestRatio.label) {
                 config.imageConfig = { aspectRatio: closestRatio.label };
             }
-            
+
             const client = getGeminiClient();
             const response = await withTimeout(
                 client.models.generateContent({
@@ -833,7 +898,7 @@ export async function compositeScene(
                 GEMINI_TIMEOUT_MS,
                 `Gemini composite with URI`
             );
-            
+
             // Extract image from response
             const candidates = response.candidates;
             if (candidates?.[0]?.content?.parts) {
@@ -844,7 +909,7 @@ export async function compositeScene(
                     }
                 }
             }
-            
+
             if (!base64Data!) {
                 throw new Error("No image in Gemini response (URI mode)");
             }
