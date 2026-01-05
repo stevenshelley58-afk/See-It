@@ -703,9 +703,11 @@ function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled
 }
 
 // Add Styles for scrollbar hiding
-const style = document.createElement('style');
-style.textContent = `
-  .scrollbar-hide::-webkit-scrollbar { display: none; }
-  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-`;
-if (typeof document !== 'undefined') document.head.appendChild(style);
+if (typeof document !== 'undefined') {
+    const style = document.createElement('style');
+    style.textContent = `
+      .scrollbar-hide::-webkit-scrollbar { display: none; }
+      .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    `;
+    document.head.appendChild(style);
+}

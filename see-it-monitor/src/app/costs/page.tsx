@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import { aiRequests } from '@/lib/db/schema';
-import { sql, gte, eq } from 'drizzle-orm';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { gte } from 'drizzle-orm';
+import CostCharts from './CostCharts';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,8 +37,6 @@ export default async function CostsPage() {
   const providerData = Object.entries(byProvider).map(([name, value]) => ({ name, value }));
   const operationData = Object.entries(byOperation).map(([name, value]) => ({ name, value }));
 
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
-
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Cost Analysis (Last 30 Days)</h1>
@@ -61,33 +59,7 @@ export default async function CostsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="card p-6">
-          <h2 className="font-semibold mb-4">By Provider</h2>
-          <ResponsiveContainer width="100%" height={250}>
-            <PieChart>
-              <Pie data={providerData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}>
-                {providerData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="card p-6">
-          <h2 className="font-semibold mb-4">By Operation</h2>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={operationData}>
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="value" fill="#3b82f6" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      <CostCharts providerData={providerData} operationData={operationData} />
     </div>
   );
 }
