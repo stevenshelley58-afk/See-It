@@ -1,13 +1,13 @@
 import { db } from '@/lib/db/client';
-import { sessions, sessionSteps } from '@/lib/db/schema';
-import { eq, and, gte, sql } from 'drizzle-orm';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { sessions } from '@/lib/db/schema';
+import { gte } from 'drizzle-orm';
+import JourneyCharts from './JourneyCharts';
 
 export const dynamic = 'force-dynamic';
 
 export default async function JourneyPage() {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  
+
   const allSessions = await db
     .select()
     .from(sessions)
@@ -42,14 +42,7 @@ export default async function JourneyPage() {
 
       <div className="card p-6">
         <h2 className="font-semibold mb-4">Funnel</h2>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={funnelData}>
-            <XAxis dataKey="step" />
-            <YAxis />
-            <Tooltip />
-            <Bar dataKey="count" fill="#3b82f6" />
-          </BarChart>
-        </ResponsiveContainer>
+        <JourneyCharts funnelData={funnelData} />
         <div className="mt-4 space-y-2">
           {funnelData.map((item) => (
             <div key={item.step} className="flex items-center justify-between">
@@ -76,3 +69,4 @@ export default async function JourneyPage() {
     </div>
   );
 }
+
