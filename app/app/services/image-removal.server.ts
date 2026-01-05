@@ -91,12 +91,9 @@ export async function removeObject(
 
         // Using EXACT model from working reference: 'gemini-2.5-flash-image'
         // Best practices: text first, then images, with explicit removal-only instructions
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: {
-                parts: [
-                    {
-                        text: `You are performing inpainting for OBJECT REMOVAL ONLY.
+        const parts = [
+            {
+                text: `You are performing inpainting for OBJECT REMOVAL ONLY.
 
 Inputs:
 - Image 1: source photograph
@@ -114,21 +111,24 @@ Rules:
 
 Output:
 Return only the edited image.`,
-                    },
-                    {
-                        inlineData: {
-                            data: imageBase64,
-                            mimeType: mimeType,
-                        },
-                    },
-                    {
-                        inlineData: {
-                            data: maskBase64,
-                            mimeType: 'image/png',
-                        },
-                    },
-                ],
             },
+            {
+                inlineData: {
+                    data: imageBase64,
+                    mimeType: mimeType,
+                },
+            },
+            {
+                inlineData: {
+                    data: maskBase64,
+                    mimeType: 'image/png',
+                },
+            },
+        ];
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: parts,
             config: {
                 responseModalities: ['TEXT', 'IMAGE'],
             },
