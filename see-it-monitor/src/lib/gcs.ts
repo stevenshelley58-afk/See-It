@@ -7,7 +7,7 @@ import { Storage } from '@google-cloud/storage';
 import type { SessionMeta, ShopIndex, SessionCardData, FunnelData, ErrorSummary, ShopStats } from './types';
 
 const PROJECT_ID = process.env.GCS_PROJECT_ID;
-const SESSION_BUCKET = process.env.GCS_SESSION_BUCKET || 'see-it-sessions';
+const SESSION_BUCKET = process.env.GCS_SESSION_BUCKET || 'see-it-room';
 
 let storageInstance: Storage | null = null;
 
