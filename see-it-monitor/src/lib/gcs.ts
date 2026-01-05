@@ -65,6 +65,13 @@ export async function listSessions(options: {
     const { limit = 50, status, shop } = options;
 
     try {
+        // Check if bucket exists first
+        const [bucketExists] = await bucket.exists();
+        if (!bucketExists) {
+            console.warn(`[GCS] Bucket ${SESSION_BUCKET} does not exist`);
+            return [];
+        }
+
         // List session directories
         const [files] = await bucket.getFiles({
             prefix: 'sessions/',

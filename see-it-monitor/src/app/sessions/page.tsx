@@ -3,6 +3,7 @@ import { formatTimeAgo, getStepLabel, getStatusColor, truncateShop, formatDurati
 import Link from 'next/link';
 import Image from 'next/image';
 
+export const dynamic = 'force-dynamic'; // Force dynamic rendering since we need GCS access
 export const revalidate = 30;
 
 export default async function SessionsPage() {
