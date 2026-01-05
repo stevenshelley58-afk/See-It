@@ -75,7 +75,17 @@ function autoDetectFields(product) {
         dimensions = { height: parseInt(dimMatch[1]), width: parseInt(dimMatch[2]) };
     }
     
-    return { surface, material, orientation, dimensions };
+    // v2 fields: Auto-detect defaults
+    // Large items (sofas, mirrors, cabinets) → Dominant + Similar Size or Position + Yes
+    // Small items (lamps, decor) → Integrated + None + No
+    const largeItemKeywords = ['sofa', 'couch', 'sectional', 'mirror', 'cabinet', 'dresser', 'bookshelf', 'bed', 'table', 'desk', 'console'];
+    const isLargeItem = largeItemKeywords.some(k => allText.includes(k));
+    
+    const sceneRole = isLargeItem ? 'Dominant' : 'Integrated';
+    const replacementRule = isLargeItem ? 'Similar Size or Position' : 'None';
+    const allowSpaceCreation = isLargeItem;
+    
+    return { surface, material, orientation, dimensions, sceneRole, replacementRule, allowSpaceCreation };
 }
 
 // ============================================================================
@@ -106,18 +116,32 @@ export function PlacementTab({ product, asset, onChange }) {
         additionalNotes: '',
     });
     
+    // v2 fields state - use existing asset values or auto-detected defaults
+    const [v2Fields, setV2Fields] = useState({
+        sceneRole: asset?.sceneRole || detectedFields.sceneRole || null,
+        replacementRule: asset?.replacementRule || detectedFields.replacementRule || null,
+        allowSpaceCreation: asset?.allowSpaceCreation !== undefined ? asset.allowSpaceCreation : detectedFields.allowSpaceCreation,
+    });
+    
     const [description, setDescription] = useState(existingDescription || '');
     const [isGenerating, setIsGenerating] = useState(false);
     const [hasEdited, setHasEdited] = useState(false);
     const [showEditWarning, setShowEditWarning] = useState(false);
     
-    // Notify parent when description changes
+    // Notify parent when description or v2 fields change
     useEffect(() => {
-        if (onChange && description) {
-            // Pass the prose description directly (not JSON)
-            onChange(description);
+        if (onChange) {
+            // Pass both renderInstructions and v2 config
+            onChange({
+                renderInstructions: description || null,
+                v2Config: {
+                    sceneRole: v2Fields.sceneRole || null,
+                    replacementRule: v2Fields.replacementRule || null,
+                    allowSpaceCreation: v2Fields.allowSpaceCreation !== undefined ? v2Fields.allowSpaceCreation : null,
+                }
+            });
         }
-    }, [description, onChange]);
+    }, [description, v2Fields, onChange]);
     
     // Update a field
     const updateField = useCallback((field, value) => {
@@ -181,6 +205,10 @@ export function PlacementTab({ product, asset, onChange }) {
     const orientations = ['upright', 'flat', 'leaning', 'wall-mounted', 'hanging', 'draped', 'other'];
     const materials = ['fabric', 'wood', 'metal', 'glass', 'ceramic', 'stone', 'leather', 'mixed', 'other'];
     const shadows = ['contact', 'cast', 'soft', 'none'];
+    
+    // v2 field options
+    const sceneRoles = ['Dominant', 'Integrated'];
+    const replacementRules = ['Same Role Only', 'Similar Size or Position', 'Any Blocking Object', 'None'];
 
     return (
         <div className="space-y-8 fade-in">
@@ -330,6 +358,83 @@ export function PlacementTab({ product, asset, onChange }) {
                         maxLength={200}
                     />
                     <p className="text-xs text-neutral-400 text-right">{(fields.additionalNotes || '').length}/200</p>
+                </div>
+            </div>
+            
+            {/* Divider */}
+            <div className="border-t border-neutral-200"></div>
+            
+            {/* SECTION: v2 Placement Rules */}
+            <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-bold text-neutral-900">v2 Placement Rules</h3>
+                    <span className="text-xs text-neutral-500 bg-neutral-100 px-2 py-1 rounded-full">
+                        Auto-detected • Review & adjust
+                    </span>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Scene Role */}
+                    <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-neutral-700">
+                            Scene Role
+                        </label>
+                        <p className="text-xs text-neutral-500">How does this product fit in the room?</p>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                            {sceneRoles.map(role => (
+                                <button
+                                    key={role}
+                                    onClick={() => setV2Fields(prev => ({ ...prev, sceneRole: role }))}
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                                        v2Fields.sceneRole === role
+                                            ? 'bg-neutral-900 text-white'
+                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                    }`}
+                                >
+                                    {role}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    
+                    {/* Replacement Rule */}
+                    <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-neutral-700">
+                            Replacement Rule
+                        </label>
+                        <p className="text-xs text-neutral-500">What can be replaced when placing this product?</p>
+                        <div className="flex flex-col gap-2 mt-2">
+                            {replacementRules.map(rule => (
+                                <button
+                                    key={rule}
+                                    onClick={() => setV2Fields(prev => ({ ...prev, replacementRule: rule }))}
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all text-left ${
+                                        v2Fields.replacementRule === rule
+                                            ? 'bg-neutral-900 text-white'
+                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                    }`}
+                                >
+                                    {rule}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+                
+                {/* Allow Space Creation */}
+                <div className="space-y-2">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={v2Fields.allowSpaceCreation === true}
+                            onChange={(e) => setV2Fields(prev => ({ ...prev, allowSpaceCreation: e.target.checked }))}
+                            className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                        />
+                        <div>
+                            <span className="block text-sm font-semibold text-neutral-700">Allow Space Creation</span>
+                            <span className="block text-xs text-neutral-500">Allow minimal space creation if product doesn't fit</span>
+                        </div>
+                    </label>
                 </div>
             </div>
             

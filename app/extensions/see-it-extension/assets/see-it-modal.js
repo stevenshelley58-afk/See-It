@@ -206,6 +206,131 @@ document.addEventListener('DOMContentLoaded', function () {
         errorDiv: !!errorDiv
     });
 
+    // --- Analytics Integration ---
+    let analytics = null;
+    const shopDomain = window.Shopify?.shop || window.location.hostname || 'unknown';
+    const analyticsEndpoint = 'https://see-it-monitor.vercel.app/api/analytics/events';
+    
+    // Simple analytics wrapper (fail silently - never break the app)
+    const initAnalytics = () => {
+        try {
+            // Try to use the full SDK if available (from app/app/utils/analytics.ts)
+            if (typeof window !== 'undefined' && (window as any).SeeItAnalytics) {
+                analytics = new (window as any).SeeItAnalytics({
+                    shopDomain,
+                    endpoint: analyticsEndpoint,
+                    debug: false,
+                });
+            } else {
+                // Fallback: simple event tracker
+                analytics = {
+                    startSession: (productId, productTitle, productPrice) => {
+                        try {
+                            const sessionId = `sess_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;
+                            fetch(analyticsEndpoint, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    events: [{
+                                        type: 'session_started',
+                                        sessionId,
+                                        shopDomain,
+                                        data: { productId, productTitle, productPrice },
+                                        timestamp: new Date().toISOString(),
+                                    }],
+                                }),
+                                keepalive: true,
+                            }).catch(() => {}); // Fail silently
+                            return sessionId;
+                        } catch (err) {
+                            return `sess_${Date.now()}`;
+                        }
+                    },
+                    trackStep: (step, status, metadata) => {
+                        try {
+                            fetch(analyticsEndpoint, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    events: [{
+                                        type: 'step_update',
+                                        sessionId: state.sessionId,
+                                        shopDomain,
+                                        data: { step, status, ...metadata },
+                                        timestamp: new Date().toISOString(),
+                                    }],
+                                }),
+                                keepalive: true,
+                            }).catch(() => {});
+                        } catch (err) {}
+                    },
+                    endSession: (status, metadata) => {
+                        try {
+                            fetch(analyticsEndpoint, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    events: [{
+                                        type: 'session_ended',
+                                        sessionId: state.sessionId,
+                                        shopDomain,
+                                        data: { status, ...metadata },
+                                        timestamp: new Date().toISOString(),
+                                    }],
+                                }),
+                                keepalive: true,
+                            }).catch(() => {});
+                        } catch (err) {}
+                    },
+                    trackError: (errorCode, errorMessage, severity) => {
+                        try {
+                            fetch(analyticsEndpoint, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    events: [{
+                                        type: 'error',
+                                        sessionId: state.sessionId,
+                                        shopDomain,
+                                        data: { errorCode, errorMessage, severity },
+                                        timestamp: new Date().toISOString(),
+                                    }],
+                                }),
+                                keepalive: true,
+                            }).catch(() => {});
+                        } catch (err) {}
+                    },
+                    trackARButtonClick: () => {
+                        try {
+                            fetch(analyticsEndpoint, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    events: [{
+                                        type: 'ar_button_click',
+                                        shopDomain,
+                                        data: {
+                                            productId: state.productId,
+                                            productTitle: state.productTitle,
+                                            productPrice: state.productPrice,
+                                        },
+                                        timestamp: new Date().toISOString(),
+                                    }],
+                                }),
+                                keepalive: true,
+                            }).catch(() => {});
+                        } catch (err) {}
+                    },
+                };
+            }
+        } catch (err) {
+            console.warn('[See It] Analytics initialization failed:', err);
+            analytics = null; // Fail gracefully
+        }
+    };
+    
+    initAnalytics();
+
     // --- State ---
     let state = {
         sessionId: null,
@@ -1214,6 +1339,16 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- Modal Open/Close ---
     trigger.addEventListener('click', async () => {
         console.log('[See It] Modal opened');
+        
+        // Track AR button click
+        if (analytics) {
+            try {
+                analytics.trackARButtonClick();
+            } catch (err) {
+                console.warn('[See It] Analytics error:', err);
+            }
+        }
+        
         ensureModalPortaled();
         lockScroll();
         modal.classList.remove('hidden');
@@ -1224,6 +1359,19 @@ document.addEventListener('DOMContentLoaded', function () {
         state.productTitle = trigger.dataset.productTitle || state.productTitle;
         state.productPrice = trigger.dataset.productPrice || state.productPrice;
         state.productImageUrl = trigger.dataset.productImage || state.productImageUrl;
+        
+        // Start analytics session
+        if (analytics && !state.sessionId) {
+            try {
+                state.sessionId = analytics.startSession(
+                    state.productId,
+                    state.productTitle,
+                    state.productPrice ? parseFloat(state.productPrice) : undefined
+                );
+            } catch (err) {
+                console.warn('[See It] Analytics error:', err);
+            }
+        }
 
         // Preload the prepared product image in background (don't await)
         // This ensures the image is ready by the time we reach the position screen
@@ -1263,6 +1411,17 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     const closeModal = () => {
+        // Track session end (abandoned)
+        if (analytics && state.sessionId) {
+            try {
+                analytics.endSession('abandoned', {
+                    abandonmentStep: state.currentScreen,
+                });
+            } catch (err) {
+                console.warn('[See It] Analytics error:', err);
+            }
+        }
+        
         modal.classList.add('hidden');
         unlockScroll();
         if (triggerWidget) triggerWidget.style.display = '';
@@ -1292,6 +1451,22 @@ document.addEventListener('DOMContentLoaded', function () {
         ctx = null;
 
         try {
+            // Track room capture started
+            if (analytics) {
+                try {
+                    if (!state.sessionId) {
+                        state.sessionId = analytics.startSession(
+                            state.productId,
+                            state.productTitle,
+                            state.productPrice ? parseFloat(state.productPrice) : undefined
+                        );
+                    }
+                    analytics.trackStep('room_capture', 'started');
+                } catch (err) {
+                    console.warn('[See It] Analytics error:', err);
+                }
+            }
+            
             // Normalize image locally (instant)
             const normalized = await normalizeRoomImage(file);
             state.normalizedWidth = normalized.width;
@@ -1365,6 +1540,17 @@ document.addEventListener('DOMContentLoaded', function () {
         if (state.isUploading) {
             showError('Please wait for upload to complete');
             return;
+        }
+        
+        // Track room capture completed
+        if (analytics) {
+            try {
+                analytics.trackStep('room_capture', 'completed', {
+                    retakeCount: 0, // Could track this if needed
+                });
+            } catch (err) {
+                console.warn('[See It] Analytics error:', err);
+            }
         }
 
         // Trigger Gemini pre-upload in background (non-blocking)
@@ -1611,6 +1797,15 @@ document.addEventListener('DOMContentLoaded', function () {
             showError(msg);
             return;
         }
+        
+        // Track inpaint started
+        if (analytics) {
+            try {
+                analytics.trackStep('inpaint', 'started');
+            } catch (err) {
+                console.warn('[See It] Analytics error:', err);
+            }
+        }
 
         showScreen('loading');
         resetError();
@@ -1712,6 +1907,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (resultImage) resultImage.src = imageUrl;
                 clearInterval(messageInterval);
                 showScreen('result');
+                
+                // Track inpaint completed and session completed
+                if (analytics) {
+                    try {
+                        analytics.trackStep('inpaint', 'completed');
+                        analytics.trackStep('placement', 'completed');
+                        analytics.endSession('completed');
+                    } catch (err) {
+                        console.warn('[See It] Analytics error:', err);
+                    }
+                }
 
                 // Prefetch collection products for swiper
                 fetchCollectionProducts();
@@ -1724,6 +1930,16 @@ document.addEventListener('DOMContentLoaded', function () {
             const errorMsg = 'Generate failed: ' + (err.message || 'Unknown error');
             showError(errorMsg);
             alert('[See It Debug] ' + errorMsg);  // Temporary - remove after debugging
+            
+            // Track error
+            if (analytics) {
+                try {
+                    analytics.trackError('GENERATE_FAILED', errorMsg, 'error');
+                    analytics.trackStep('inpaint', 'failed');
+                } catch (analyticsErr) {
+                    console.warn('[See It] Analytics error:', analyticsErr);
+                }
+            }
 
             clearInterval(messageInterval);
             showScreen('position'); // Go back on error

@@ -1,0 +1,4 @@
+﻿src/app/api/cron/health-check/route.ts(78,36): error TS2339: Property 'responseTime' does not exist on type '{ status: string; responseTime?: number | undefined; error?: string | undefined; service: string; } | { service: string; status: string; error: any; }'.
+  Property 'responseTime' does not exist on type '{ service: string; status: string; error: any; }'.
+src/app/api/cron/health-check/route.ts(88,34): error TS2339: Property 'responseTime' does not exist on type '{ status: string; responseTime?: number | undefined; error?: string | undefined; service: string; } | { service: string; status: string; error: any; }'.
+  Property 'responseTime' does not exist on type '{ service: string; status: string; error: any; }'.

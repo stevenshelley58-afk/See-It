@@ -11,7 +11,28 @@ import { PageShell, Button } from "../components/ui";
 import { ProductDetailPanel } from "../components/ProductDetailPanel";
 
 export const loader = async ({ request }) => {
-    const { admin, session, billing } = await authenticate.admin(request);
+    try {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:13',message:'Loader entry',data:{url:request.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        let admin, session, billing;
+    try {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:14',message:'Before authenticate',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        const authResult = await authenticate.admin(request);
+        admin = authResult.admin;
+        session = authResult.session;
+        billing = authResult.billing;
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:14',message:'After authenticate',data:{shop:session?.shop,hasAdmin:!!admin,hasBilling:!!billing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+    } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:14',message:'Authenticate error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        throw error;
+    }
     const url = new URL(request.url);
     const cursor = url.searchParams.get("cursor");
     const direction = url.searchParams.get("direction") || "next";
@@ -44,7 +65,12 @@ export const loader = async ({ request }) => {
     if (statusFilter !== "all") queryParts.push(`status:${statusFilter}`);
     const finalQuery = queryParts.join(" AND ");
 
-    const response = await admin.graphql(
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'Before GraphQL query',data:{queryArgs,query:finalQuery,sortKey,reverse},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    let response;
+    try {
+        response = await admin.graphql(
         `#graphql
         query getProducts($first: Int, $last: Int, $after: String, $before: String, $query: String, $sortKey: ProductSortKeys, $reverse: Boolean) {
             products(first: $first, last: $last, after: $after, before: $before, query: $query, sortKey: $sortKey, reverse: $reverse) {
@@ -81,8 +107,31 @@ export const loader = async ({ request }) => {
         }`,
         { variables: { ...queryArgs, query: finalQuery, sortKey, reverse } }
     );
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:83',message:'After GraphQL query',data:{hasResponse:!!response,status:response?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+    } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'GraphQL query error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        throw error;
+    }
 
-    const responseJson = await response.json();
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'Before response.json',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+    // #endregion
+    let responseJson;
+    try {
+        responseJson = await response.json();
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'After response.json',data:{hasData:!!responseJson?.data,hasProducts:!!responseJson?.data?.products,hasErrors:!!responseJson?.errors,errors:responseJson?.errors?.map(e=>e?.message)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        // #endregion
+    } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'response.json error',data:{error:error?.message,errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        // #endregion
+        throw error;
+    }
     const { edges, pageInfo } = responseJson.data.products;
     let products = edges.map((edge) => edge.node);
 
@@ -126,57 +175,129 @@ export const loader = async ({ request }) => {
     let dailyQuota = PLANS.FREE.dailyQuota;
     let monthlyQuota = PLANS.FREE.monthlyQuota;
 
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:129',message:'Before billing check',data:{hasBilling:!!billing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
     try {
         const { hasActivePayment } = await billing.check({
             plans: [PLANS.PRO.name],
             isTest: process.env.SHOPIFY_BILLING_TEST_MODE !== 'false'
         });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:130',message:'After billing check',data:{hasActivePayment},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         if (hasActivePayment) {
             planId = PLANS.PRO.id;
             dailyQuota = PLANS.PRO.dailyQuota;
             monthlyQuota = PLANS.PRO.monthlyQuota;
         }
     } catch (e) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:129',message:'Billing check error',data:{error:e?.message,errorName:e?.name,stack:e?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         console.error("Billing check failed", e);
     }
 
     // Shop sync
-    let shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:144',message:'Before shop lookup',data:{shopDomain:session?.shop},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    let shop;
+    try {
+        shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:144',message:'After shop lookup',data:{found:!!shop,shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+    } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:144',message:'Shop lookup error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        throw error;
+    }
     if (!shop) {
-        const shopResponse = await admin.graphql(`#graphql query { shop { id } }`);
-        const shopData = await shopResponse.json();
-        const shopifyShopId = shopData.data.shop.id.replace('gid://shopify/Shop/', '');
-        shop = await prisma.shop.create({
-            data: {
-                shopDomain: session.shop,
-                shopifyShopId,
-                accessToken: session.accessToken || "pending",
-                plan: planId,
-                dailyQuota,
-                monthlyQuota
-            }
-        });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:146',message:'Creating new shop',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        try {
+            const shopResponse = await admin.graphql(`#graphql query { shop { id } }`);
+            const shopData = await shopResponse.json();
+            const shopifyShopId = shopData.data.shop.id.replace('gid://shopify/Shop/', '');
+            shop = await prisma.shop.create({
+                data: {
+                    shopDomain: session.shop,
+                    shopifyShopId,
+                    accessToken: session.accessToken || "pending",
+                    plan: planId,
+                    dailyQuota,
+                    monthlyQuota
+                }
+            });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:149',message:'Shop created',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+        } catch (error) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:146',message:'Shop create error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+            throw error;
+        }
     } else if (shop.plan !== planId) {
-        shop = await prisma.shop.update({
-            where: { id: shop.id },
-            data: { plan: planId, dailyQuota, monthlyQuota }
-        });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:159',message:'Updating shop plan',data:{oldPlan:shop.plan,newPlan:planId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        try {
+            shop = await prisma.shop.update({
+                where: { id: shop.id },
+                data: { plan: planId, dailyQuota, monthlyQuota }
+            });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:160',message:'Shop updated',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+        } catch (error) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:159',message:'Shop update error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+            throw error;
+        }
     }
 
     // Assets map
     let assetsMap = {};
     if (products.length > 0) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:168',message:'Before assets query',data:{productCount:products.length,shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
         const normalizedIds = products.map(p => p.id.split('/').pop());
-        const assets = await prisma.productAsset.findMany({
-            where: { shopId: shop.id, productId: { in: normalizedIds } }
-        });
+        let assets;
+        try {
+            assets = await prisma.productAsset.findMany({
+                where: { shopId: shop.id, productId: { in: normalizedIds } }
+            });
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:170',message:'After assets query',data:{assetCount:assets?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+        } catch (error) {
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:170',message:'Assets query error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            // #endregion
+            throw error;
+        }
 
         for (const a of assets) {
             let preparedImageUrlFresh = a.preparedImageUrl;
             if (a.status === "ready" && a.preparedImageKey) {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:177',message:'Before storage URL',data:{assetId:a.id,key:a.preparedImageKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                // #endregion
                 try {
                     preparedImageUrlFresh = await StorageService.getSignedReadUrl(a.preparedImageKey, 60 * 60 * 1000);
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:178',message:'After storage URL',data:{assetId:a.id,hasUrl:!!preparedImageUrlFresh},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                    // #endregion
                 } catch (err) {
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:177',message:'Storage URL error',data:{assetId:a.id,error:err?.message,errorName:err?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                    // #endregion
                     console.error(`Failed to sign URL for asset ${a.id}`);
                 }
             }
@@ -194,34 +315,78 @@ export const loader = async ({ request }) => {
     startOfMonth.setHours(0, 0, 0, 0);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const monthlyUsageAgg = await prisma.usageDaily.aggregate({
-        where: { shopId: shop.id, date: { gte: startOfMonth } },
-        _sum: { compositeRenders: true }
-    });
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:197',message:'Before usage aggregate',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    let monthlyUsageAgg;
+    try {
+        monthlyUsageAgg = await prisma.usageDaily.aggregate({
+            where: { shopId: shop.id, date: { gte: startOfMonth } },
+            _sum: { compositeRenders: true }
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:197',message:'After usage aggregate',data:{usage:monthlyUsageAgg?._sum?.compositeRenders},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+    } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:197',message:'Usage aggregate error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        throw error;
+    }
     const monthlyUsage = monthlyUsageAgg._sum.compositeRenders || 0;
 
     // Status counts
-    const statusGroups = await prisma.productAsset.groupBy({
-        by: ['status'],
-        where: { shopId: shop.id },
-        _count: { status: true }
-    });
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:204',message:'Before status groupBy',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    let statusGroups;
+    try {
+        statusGroups = await prisma.productAsset.groupBy({
+            by: ['status'],
+            where: { shopId: shop.id },
+            _count: { status: true }
+        });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:204',message:'After status groupBy',data:{groupCount:statusGroups?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+    } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:204',message:'Status groupBy error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        // #endregion
+        throw error;
+    }
     const statusCounts = { ready: 0, pending: 0, failed: 0, processing: 0 };
     statusGroups.forEach(g => { statusCounts[g.status] = g._count.status; });
 
-    return json({
-        products,
-        assetsMap,
-        statusCounts,
-        pageInfo,
-        usage: { monthly: monthlyUsage },
-        quota: { monthly: shop.monthlyQuota },
-        isPro: shop.plan === PLANS.PRO.id,
-        statusFilter,
-        searchQuery,
-        sortField,
-        sortDir
-    });
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:212',message:'Before return json',data:{productCount:products.length,assetCount:Object.keys(assetsMap).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    try {
+        return json({
+            products,
+            assetsMap,
+            statusCounts,
+            pageInfo,
+            usage: { monthly: monthlyUsage },
+            quota: { monthly: shop.monthlyQuota },
+            isPro: shop.plan === PLANS.PRO.id,
+            statusFilter,
+            searchQuery,
+            sortField,
+            sortDir
+        });
+    } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:212',message:'Return json error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        throw error;
+    }
+    } catch (topLevelError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:13',message:'Top-level loader error',data:{error:topLevelError?.message,errorName:topLevelError?.name,stack:topLevelError?.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        throw topLevelError;
+    }
 };
 
 export default function Products() {

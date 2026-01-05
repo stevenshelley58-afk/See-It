@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { AlertBanner } from '@/components/alerts/AlertBanner';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -21,6 +22,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen">
+        <AlertBanner />
         <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between h-16">
@@ -42,22 +44,28 @@ export default function RootLayout({
                     Sessions
                   </Link>
                   <Link
-                    href="/stats"
+                    href="/merchants"
                     className="text-secondary hover:text-primary transition-colors"
                   >
-                    Stats
+                    Merchants
+                  </Link>
+                  <Link
+                    href="/journey"
+                    className="text-secondary hover:text-primary transition-colors"
+                  >
+                    Journey
+                  </Link>
+                  <Link
+                    href="/costs"
+                    className="text-secondary hover:text-primary transition-colors"
+                  >
+                    Costs
                   </Link>
                   <Link
                     href="/errors"
                     className="text-secondary hover:text-primary transition-colors"
                   >
                     Errors
-                  </Link>
-                  <Link
-                    href="/shops"
-                    className="text-secondary hover:text-primary transition-colors"
-                  >
-                    Shops
                   </Link>
                 </div>
               </div>

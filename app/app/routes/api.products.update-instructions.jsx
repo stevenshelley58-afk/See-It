@@ -6,11 +6,14 @@ import { logger, createLogContext } from "../utils/logger.server";
 /**
  * POST /api/products/update-instructions
  *
- * Update custom render instructions for a product asset
+ * Update custom render instructions and v2 config for a product asset
  *
  * Body (FormData):
  * - productId: Shopify product ID (numeric)
  * - instructions: Custom AI instructions for final render (can be empty string to clear)
+ * - sceneRole: (optional) "Dominant" | "Integrated"
+ * - replacementRule: (optional) "Same Role Only" | "Similar Size or Position" | "Any Blocking Object" | "None"
+ * - allowSpaceCreation: (optional) "true" | "false"
  */
 export const action = async ({ request }) => {
     const requestId = `update-instructions-${Date.now()}`;
@@ -23,12 +26,29 @@ export const action = async ({ request }) => {
         const formData = await request.formData();
         const productId = formData.get("productId")?.toString();
         const instructions = formData.get("instructions")?.toString() ?? "";
+        
+        // Extract v2 fields
+        const sceneRole = formData.get("sceneRole")?.toString() || null;
+        const replacementRule = formData.get("replacementRule")?.toString() || null;
+        const allowSpaceCreationRaw = formData.get("allowSpaceCreation")?.toString();
+        const allowSpaceCreation = allowSpaceCreationRaw === 'true' ? true : allowSpaceCreationRaw === 'false' ? false : null;
 
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
         }
+        
+        // Validate v2 fields
+        const validSceneRoles = ['Dominant', 'Integrated'];
+        if (sceneRole && !validSceneRoles.includes(sceneRole)) {
+            return json({ success: false, error: `Invalid sceneRole. Must be one of: ${validSceneRoles.join(', ')}` }, { status: 400 });
+        }
+        
+        const validReplacementRules = ['Same Role Only', 'Similar Size or Position', 'Any Blocking Object', 'None'];
+        if (replacementRule && !validReplacementRules.includes(replacementRule)) {
+            return json({ success: false, error: `Invalid replacementRule. Must be one of: ${validReplacementRules.join(', ')}` }, { status: 400 });
+        }
 
-        logger.info(logContext, `Update instructions: productId=${productId}, length=${instructions.length}`);
+        logger.info(logContext, `Update instructions: productId=${productId}, length=${instructions.length}, sceneRole=${sceneRole}, replacementRule=${replacementRule}, allowSpaceCreation=${allowSpaceCreation}`);
 
         // Get shop record
         const shop = await prisma.shop.findUnique({
@@ -47,6 +67,23 @@ export const action = async ({ request }) => {
             },
         });
 
+        // Prepare update data
+        const updateData = {
+            renderInstructions: instructions.trim() || null,
+            updatedAt: new Date(),
+        };
+        
+        // Add v2 fields if provided
+        if (sceneRole !== null) {
+            updateData.sceneRole = sceneRole;
+        }
+        if (replacementRule !== null) {
+            updateData.replacementRule = replacementRule;
+        }
+        if (allowSpaceCreation !== null) {
+            updateData.allowSpaceCreation = allowSpaceCreation;
+        }
+
         if (!asset) {
             // No asset exists yet - create a minimal one to store instructions
             // This allows setting instructions before background removal
@@ -59,7 +96,7 @@ export const action = async ({ request }) => {
                     status: "pending",
                     prepStrategy: "manual",
                     promptVersion: 1,
-                    renderInstructions: instructions.trim() || null,
+                    ...updateData,
                     createdAt: new Date(),
                 },
             });
@@ -79,10 +116,7 @@ export const action = async ({ request }) => {
         // Update existing asset
         await prisma.productAsset.update({
             where: { id: asset.id },
-            data: {
-                renderInstructions: instructions.trim() || null,
-                updatedAt: new Date(),
-            },
+            data: updateData,
         });
 
         logger.info(

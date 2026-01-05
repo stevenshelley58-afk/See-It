@@ -28,13 +28,14 @@ const V2_ALLOWED_SHOPS = [
 ];
 
 // ============================================================================
-// PLACEMENT VARIANTS - 4 different AI-guided placements
+// PLACEMENT VARIANTS - 5 different AI-guided placements (v2 spec)
 // ============================================================================
 const PLACEMENT_VARIANTS = [
-  { id: 'open', hint: 'Place naturally in the most open floor space, centered' },
-  { id: 'wall', hint: 'Place against the main wall, slightly off-center' },
-  { id: 'light', hint: 'Place near the window or brightest area to catch natural light' },
-  { id: 'corner', hint: 'Place in the emptiest corner area of the room' },
+  { id: 'center', hint: 'Center', variation: 'Center' },
+  { id: 'left', hint: 'Slightly left', variation: 'Slightly left' },
+  { id: 'right', hint: 'Slightly right', variation: 'Slightly right' },
+  { id: 'higher', hint: 'Slightly higher (if wall-based) or slightly forward (if floor-based)', variation: 'Slightly higher' },
+  { id: 'lower', hint: 'Slightly lower (if wall-based) or slightly back (if floor-based)', variation: 'Slightly lower' },
 ] as const;
 
 type VariantId = typeof PLACEMENT_VARIANTS[number]['id'];
@@ -116,19 +117,26 @@ async function downloadToBuffer(
 }
 
 // ============================================================================
-// Build Hero Shot Prompt
+// Build Hero Shot Prompt (v2 spec)
 // ============================================================================
 function buildHeroShotPrompt(
   productInstructions: string | null,
-  placementHint: string
+  variant: { id: string; hint: string; variation: string },
+  v2Config: {
+    sceneRole: string | null;
+    replacementRule: string | null;
+    allowSpaceCreation: boolean | null;
+  } | null
 ): string {
-  return `Place this furniture naturally into this room photograph.
+  // If v2 config is missing, fall back to simple prompt
+  if (!v2Config || !v2Config.sceneRole || !v2Config.replacementRule) {
+    return `Place this furniture naturally into this room photograph.
 
 PRODUCT:
 ${productInstructions || 'Furniture piece'}
 
 PLACEMENT GUIDANCE:
-${placementHint}
+${variant.hint}
 
 Look at the room and choose the most logical position following the guidance above.
 
@@ -138,6 +146,63 @@ RULES:
 - Keep the product's exact proportions - do not stretch or distort
 - Make it look like a professional interior photograph
 - Do not modify anything else in the room`;
+  }
+
+  // Build v2 spec-compliant prompt
+  const parts: string[] = [];
+
+  parts.push(`PRODUCT:`);
+  parts.push(`${productInstructions || 'Furniture piece'}`);
+  parts.push(``);
+
+  // Scene Role placement rules
+  parts.push(`SCENE ROLE: ${v2Config.sceneRole}`);
+  if (v2Config.sceneRole === 'Dominant') {
+    parts.push(`- Place as a main object in the room.`);
+    parts.push(`- Prefer a clear wall or primary open area.`);
+    parts.push(`- Do not place on surfaces or inside decor clusters.`);
+  } else if (v2Config.sceneRole === 'Integrated') {
+    parts.push(`- Place as part of the existing scene.`);
+    parts.push(`- Use an appropriate surface or grouping.`);
+    parts.push(`- Do not center or hero the product.`);
+  }
+  parts.push(``);
+
+  // Replacement rules
+  parts.push(`REPLACEMENT RULE: ${v2Config.replacementRule}`);
+  if (v2Config.replacementRule === 'Same Role Only') {
+    parts.push(`- Replace only an object with the same purpose.`);
+  } else if (v2Config.replacementRule === 'Similar Size or Position') {
+    parts.push(`- Replace an object in the same wall or floor position.`);
+  } else if (v2Config.replacementRule === 'Any Blocking Object') {
+    parts.push(`- Remove a smaller object if it blocks placement.`);
+  } else if (v2Config.replacementRule === 'None') {
+    parts.push(`- Do not remove anything.`);
+  }
+  parts.push(``);
+
+  // Space creation
+  parts.push(`SPACE CREATION: ${v2Config.allowSpaceCreation ? 'Yes' : 'No'}`);
+  if (v2Config.allowSpaceCreation === true) {
+    parts.push(`- If the product does not fit, remove or push back a small blocking object.`);
+    parts.push(`- Changes must be minimal.`);
+  }
+  parts.push(``);
+
+  // Variation instruction
+  parts.push(`VARIATION: ${variant.variation}`);
+  parts.push(`${variant.hint}`);
+  parts.push(``);
+
+  // Hard realism rules (always)
+  parts.push(`HARD REALISM RULES (always):`);
+  parts.push(`- Do not redesign the room.`);
+  parts.push(`- Do not move furniture unless allowed.`);
+  parts.push(`- Match real scale using dimensions.`);
+  parts.push(`- Match lighting, perspective, and grain.`);
+  parts.push(`- Do not invent objects, text, people, or reflections.`);
+
+  return parts.join('\n');
 }
 
 // ============================================================================
@@ -146,8 +211,13 @@ RULES:
 async function generateVariant(
   roomBuffer: Buffer,
   productBuffer: Buffer,
-  variant: { id: string; hint: string },
+  variant: { id: string; hint: string; variation: string },
   productInstructions: string | null,
+  v2Config: {
+    sceneRole: string | null;
+    replacementRule: string | null;
+    allowSpaceCreation: boolean | null;
+  } | null,
   logContext: ReturnType<typeof createLogContext>
 ): Promise<{ id: string; base64: string; hint: string }> {
   const variantLogContext = { ...logContext, variantId: variant.id };
@@ -158,7 +228,7 @@ async function generateVariant(
   );
 
   const startTime = Date.now();
-  const prompt = buildHeroShotPrompt(productInstructions, variant.hint);
+  const prompt = buildHeroShotPrompt(productInstructions, variant, v2Config);
 
   const client = getGeminiClient();
 
@@ -324,7 +394,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const shopLogContext = { ...logContext, shopId: shop.id, productId: product_id };
 
-  // Quota check (only increment ONCE for all 4 variants)
+  // Quota check (only increment ONCE for all 5 variants)
   try {
     await checkQuota(shop.id, "render", 1);
   } catch (error) {
@@ -347,7 +417,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  // Fetch ProductAsset
+  // Fetch ProductAsset (including v2 config)
   const productAsset = await prisma.productAsset.findFirst({
     where: { shopId: shop.id, productId: product_id },
     select: {
@@ -356,6 +426,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       preparedImageKey: true,
       sourceImageUrl: true,
       renderInstructions: true,
+      sceneRole: true,
+      replacementRule: true,
+      allowSpaceCreation: true,
     }
   });
 
@@ -410,13 +483,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Generate a unique session ID for this v2 render batch
     const v2SessionId = `v2_${room_session_id}_${Date.now()}`;
 
-    // Generate all 4 variants in PARALLEL
+    // Prepare v2 config
+    const v2Config = productAsset ? {
+      sceneRole: productAsset.sceneRole,
+      replacementRule: productAsset.replacementRule,
+      allowSpaceCreation: productAsset.allowSpaceCreation,
+    } : null;
+
+    // Generate all 5 variants in PARALLEL
     const variantPromises = PLACEMENT_VARIANTS.map(variant =>
       generateVariant(
         roomBuffer,
         productBuffer,
         variant,
         productAsset?.renderInstructions ?? null,
+        v2Config,
         shopLogContext
       ).catch(error => {
         logger.error(

@@ -42,9 +42,28 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
 
         const formData = new FormData();
         formData.append("productId", product.id.split('/').pop());
-        // Save the PROSE DESCRIPTION directly (not JSON)
-        // This is the merchant-approved description that Gemini will use
-        formData.append("instructions", typeof pendingMetadata === 'string' ? pendingMetadata : JSON.stringify(pendingMetadata));
+
+        // Handle both old format (string) and new format (object with renderInstructions and v2Config)
+        if (typeof pendingMetadata === 'string') {
+            // Old format: just renderInstructions
+            formData.append("instructions", pendingMetadata);
+        } else if (pendingMetadata && typeof pendingMetadata === 'object') {
+            // New format: object with renderInstructions and v2Config
+            formData.append("instructions", pendingMetadata.renderInstructions || '');
+            if (pendingMetadata.v2Config) {
+                if (pendingMetadata.v2Config.sceneRole) {
+                    formData.append("sceneRole", pendingMetadata.v2Config.sceneRole);
+                }
+                if (pendingMetadata.v2Config.replacementRule) {
+                    formData.append("replacementRule", pendingMetadata.v2Config.replacementRule);
+                }
+                if (pendingMetadata.v2Config.allowSpaceCreation !== undefined && pendingMetadata.v2Config.allowSpaceCreation !== null) {
+                    formData.append("allowSpaceCreation", pendingMetadata.v2Config.allowSpaceCreation ? 'true' : 'false');
+                }
+            }
+        } else {
+            formData.append("instructions", JSON.stringify(pendingMetadata));
+        }
 
         fetcher.submit(formData, {
             method: "post",

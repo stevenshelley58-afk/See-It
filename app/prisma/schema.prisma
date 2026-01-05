@@ -69,6 +69,9 @@ model ProductAsset {
   retryCount         Int      @default(0) @map("retry_count") // Track retry attempts
   isDefault          Boolean  @default(false) @map("is_default") // Only one default per shop+product
   renderInstructions    String?   @map("render_instructions") // Custom AI instructions for final render (optional)
+  sceneRole              String?   @map("scene_role") // v2: "Dominant" | "Integrated"
+  replacementRule        String?   @map("replacement_rule") // v2: "Same Role Only" | "Similar Size or Position" | "Any Blocking Object" | "None"
+  allowSpaceCreation     Boolean?  @map("allow_space_creation") // v2: Allow minimal space creation for placement
   geminiFileUri         String?   @map("gemini_file_uri") // Pre-uploaded Gemini Files API URI
   geminiFileExpiresAt   DateTime? @map("gemini_file_expires_at") // Gemini file expiration (48h from upload)
   createdAt             DateTime  @map("created_at")
