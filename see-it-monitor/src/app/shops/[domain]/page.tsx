@@ -1,10 +1,12 @@
-import { listSessions, getShopIndex } from '@/lib/gcs';
+import { db } from '@/lib/db/client';
+import { sessions } from '@/lib/db/schema';
+import { eq, desc } from 'drizzle-orm';
 import { formatTimeAgo, formatDate, getStatusColor, truncateShop, formatDuration } from '@/lib/utils';
 import Link from 'next/link';
-import Image from 'next/image';
 import { notFound } from 'next/navigation';
 
 export const revalidate = 60;
+export const dynamic = 'force-dynamic';
 
 interface PageProps {
     params: Promise<{ domain: string }>;
@@ -14,23 +16,35 @@ export default async function ShopDetailPage({ params }: PageProps) {
     const { domain } = await params;
     const decodedDomain = decodeURIComponent(domain);
 
-    // Get all sessions for this shop
-    const allSessions = await listSessions({ limit: 200 });
-    const shopSessions = allSessions.filter(s => s.shop === decodedDomain);
+    // Get recently active sessions for this shop from DB
+    const shopSessions = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.shopDomain, decodedDomain))
+        .orderBy(desc(sessions.startedAt))
+        .limit(200);
 
     if (shopSessions.length === 0) {
+        // If we have no sessions, check if the shop exists at all? 
+        // For now, let's just return empty state or notFound if strict.
+        // The previous code returned notFound() if no sessions found.
+        // We can relax this or keep it. Let's keep it but handle if it's a new shop with 0 sessions
+        // using the shops table query if we wanted to be robust, but sticking to existing logic:
         notFound();
     }
 
-    const completed = shopSessions.filter(s => s.status === 'complete').length;
-    const failed = shopSessions.filter(s => s.status === 'failed').length;
+    const completed = shopSessions.filter(s => s.status === 'completed' || s.status === 'complete').length;
+    const failed = shopSessions.filter(s => s.status === 'failed' || s.status === 'error').length;
+    // 'abandoned' is in DB schema
     const abandoned = shopSessions.filter(s => s.status === 'abandoned').length;
-    const completionRate = Math.round((completed / shopSessions.length) * 100);
+    const completionRate = shopSessions.length > 0 ? Math.round((completed / shopSessions.length) * 100) : 0;
 
     // Group by day for activity visualization
     const dayActivity: Record<string, number> = {};
     for (const session of shopSessions) {
-        const day = new Date(session.startedAt).toISOString().split('T')[0];
+        // sessions.startedAt is a Date object from Drizzle
+        const dateObj = new Date(session.startedAt);
+        const day = dateObj.toISOString().split('T')[0];
         dayActivity[day] = (dayActivity[day] || 0) + 1;
     }
 
@@ -94,7 +108,7 @@ export default async function ShopDetailPage({ params }: PageProps) {
             {/* Sessions List */}
             <div className="card divide-y divide-gray-100">
                 <div className="p-4 border-b border-gray-100">
-                    <h2 className="font-semibold">Sessions</h2>
+                    <h2 className="font-semibold">Recent Sessions</h2>
                 </div>
                 {shopSessions.map((session) => {
                     const statusColors = getStatusColor(session.status);
@@ -104,23 +118,11 @@ export default async function ShopDetailPage({ params }: PageProps) {
                             href={`/sessions/${session.sessionId}`}
                             className="flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors"
                         >
-                            {/* Thumbnail */}
-                            <div className="w-16 h-12 rounded-lg bg-gray-100 relative flex-shrink-0 overflow-hidden">
-                                {session.latestImageUrl ? (
-                                    <Image
-                                        src={session.latestImageUrl}
-                                        alt="Session"
-                                        fill
-                                        className="object-cover"
-                                        unoptimized
-                                    />
-                                ) : (
-                                    <div className="absolute inset-0 flex items-center justify-center text-gray-300">
-                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14" />
-                                        </svg>
-                                    </div>
-                                )}
+                            {/* Thumbnail Placeholder - Image not available in list view yet */}
+                            <div className="w-16 h-12 rounded-lg bg-gray-100 relative flex-shrink-0 flex items-center justify-center text-gray-300">
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14" />
+                                </svg>
                             </div>
 
                             {/* Details */}
@@ -132,9 +134,14 @@ export default async function ShopDetailPage({ params }: PageProps) {
                                     <span className="text-sm text-secondary">
                                         {session.stepsCompleted} steps
                                     </span>
+                                    {session.productTitle && (
+                                        <span className="text-sm text-gray-500 truncate max-w-[200px]" title={session.productTitle}>
+                                            • {session.productTitle}
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="text-sm text-gray-400 mt-1">
-                                    {session.device && `${session.device} · `}
+                                    {session.deviceType && `${session.deviceType} · `}
                                     {session.browser}
                                 </div>
                             </div>
@@ -146,6 +153,11 @@ export default async function ShopDetailPage({ params }: PageProps) {
                         </Link>
                     );
                 })}
+                {shopSessions.length === 0 && (
+                    <div className="p-8 text-center text-gray-500">
+                        No sessions found
+                    </div>
+                )}
             </div>
         </div>
     );

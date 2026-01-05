@@ -7,13 +7,6 @@ import { RefineView } from './ProductDetailPanel/RefineView';
 
 /**
  * ProductDetailPanel - Modal for editing product preparation and placement settings.
- * 
- * Props:
- * - product: Shopify product object (title, handle, images, etc.)
- * - asset: ProductAsset database record (status, preparedImageUrl, renderInstructions, etc.)
- * - isOpen: Boolean to control modal visibility
- * - onClose: Function to close the modal
- * - onSave: Function to save changes
  */
 export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) {
     const fetcher = useFetcher();
@@ -21,20 +14,30 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
     const [pendingMetadata, setPendingMetadata] = useState(null);
     const [isRefining, setIsRefining] = useState(false);
 
-    // Reset state when modal closes or product changes
+    // Dynamic Footer Config from children
+    // { primary: { label, onClick, disabled, variant }, secondary: { ... }, tertiary: { ... } }
+    const [footerConfig, setFooterConfig] = useState(null);
+
+    // Reset state when modal closes
     useEffect(() => {
         if (!isOpen) {
             setIsRefining(false);
             setActiveTab('prepare');
+            setFooterConfig(null);
         }
     }, [isOpen]);
+
+    // Reset footer config when tab changes
+    useEffect(() => {
+        setFooterConfig(null);
+    }, [activeTab]);
 
     if (!isOpen || !product) return null;
 
     const status = asset?.status || 'pending';
     const hasPrepared = !!asset?.preparedImageUrl;
 
-    const handleSave = useCallback(() => {
+    const handlePlacementSave = useCallback(() => {
         if (!pendingMetadata) {
             onClose();
             return;
@@ -43,12 +46,9 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
         const formData = new FormData();
         formData.append("productId", product.id.split('/').pop());
 
-        // Handle both old format (string) and new format (object with renderInstructions and v2Config)
         if (typeof pendingMetadata === 'string') {
-            // Old format: just renderInstructions
             formData.append("instructions", pendingMetadata);
         } else if (pendingMetadata && typeof pendingMetadata === 'object') {
-            // New format: object with renderInstructions and v2Config
             formData.append("instructions", pendingMetadata.renderInstructions || '');
             if (pendingMetadata.v2Config) {
                 if (pendingMetadata.v2Config.sceneRole) {
@@ -70,15 +70,80 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
             action: "/api/products/update-instructions"
         });
 
-        // Optimistically close or notify parent
         if (onSave) onSave(pendingMetadata);
         onClose();
     }, [product.id, pendingMetadata, fetcher, onClose, onSave]);
 
+    // Derived Footer Actions
+    const renderFooter = () => {
+        // If child provided config, use it
+        if (footerConfig) {
+            return (
+                <div className="flex items-center justify-end gap-3 w-full">
+                    {/* Mobile: Space between? Desktop: Aligned right. User said "Save + Edit aligned right" for Desktop */}
+
+                    {footerConfig.tertiary && (
+                        <div className="mr-auto">
+                            <Button
+                                variant="tertiary"
+                                onClick={footerConfig.tertiary.onClick}
+                                disabled={footerConfig.tertiary.disabled}
+                                className={footerConfig.tertiary.className}
+                            >
+                                {footerConfig.tertiary.label}
+                            </Button>
+                        </div>
+                    )}
+
+                    {footerConfig.secondary && (
+                        <Button
+                            variant="secondary"
+                            onClick={footerConfig.secondary.onClick}
+                            disabled={footerConfig.secondary.disabled}
+                            className={`min-w-[100px] ${footerConfig.secondary.className || ''}`}
+                        >
+                            {footerConfig.secondary.label}
+                        </Button>
+                    )}
+
+                    {footerConfig.primary && (
+                        <Button
+                            variant="primary"
+                            onClick={footerConfig.primary.onClick}
+                            disabled={footerConfig.primary.disabled}
+                            loading={footerConfig.primary.loading}
+                            className={`min-w-[100px] ${footerConfig.primary.className || ''}`}
+                        >
+                            {footerConfig.primary.label}
+                        </Button>
+                    )}
+                </div>
+            );
+        }
+
+        // Default Footer (Placement Tab mostly)
+        return (
+            <div className="flex items-center justify-end gap-3 w-full">
+                <Button variant="secondary" onClick={onClose}>
+                    Cancel
+                </Button>
+                <Button
+                    variant="primary"
+                    onClick={handlePlacementSave}
+                    loading={fetcher.state !== 'idle'}
+                >
+                    Save
+                </Button>
+            </div>
+        );
+    };
+
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm transition-opacity duration-300">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm transition-opacity duration-300 p-0 sm:p-4 font-['SF_Pro_Display',-apple-system,BlinkMacSystemFont,sans-serif]">
+            {/* Modal Container: fixed height layout */}
             <div
-                className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl slide-up"
+                className="bg-white w-full max-w-4xl flex flex-col shadow-2xl relative sm:rounded-2xl overflow-hidden"
+                style={{ height: 'calc(100vh - 64px)', maxHeight: '100vh' }}
                 onClick={(e) => e.stopPropagation()}
             >
                 {isRefining ? (
@@ -87,103 +152,78 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                         imageUrl={asset?.sourceImageUrl || product.featuredImage?.url}
                         onComplete={(data) => {
                             setIsRefining(false);
-                            // Refresh logic could go here
                         }}
                         onCancel={() => setIsRefining(false)}
                     />
                 ) : (
                     <>
-                        {/* Header */}
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200">
-                            <div className="flex items-center gap-3">
-                                <h2 className="text-xl font-bold text-neutral-900 tracking-tight">{product.title}</h2>
-                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors ${(status === 'ready' && hasPrepared) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                    status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
-                                        status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                            'bg-neutral-100 text-neutral-600 border-neutral-200'
-                                    }`}>
-                                    <span className={`w-2 h-2 rounded-full ${(status === 'ready' && hasPrepared) ? 'bg-emerald-500' :
-                                        status === 'failed' ? 'bg-red-500' :
-                                            status === 'processing' ? 'bg-blue-500 animate-pulse' :
-                                                'bg-neutral-400'
-                                        }`}></span>
-                                    {(status === 'ready' && hasPrepared) ? 'Ready' :
-                                        status === 'ready' ? 'Original' :
-                                            status.charAt(0).toUpperCase() + status.slice(1)}
-                                </span>
-                            </div>
+                        {/* 1. Header (Fixed) */}
+                        <div className="h-[52px] lg:h-[56px] flex items-center justify-between px-4 lg:px-6 border-b border-neutral-200 bg-white shrink-0 z-10">
+                            <h2 className="text-lg font-bold text-neutral-900 truncate pr-4">{product.title}</h2>
                             <button
                                 onClick={onClose}
                                 className="p-2 hover:bg-neutral-100 rounded-lg transition-colors text-neutral-500 hover:text-neutral-700"
                             >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
                                 </svg>
                             </button>
                         </div>
 
-                        {/* Tab Navigation */}
-                        <div className="flex border-b border-neutral-200 px-6 bg-white shrink-0">
-                            <button
-                                onClick={() => setActiveTab('prepare')}
-                                className={`px-5 py-3.5 text-sm font-semibold border-b-2 transition-all ${activeTab === 'prepare'
-                                    ? 'border-neutral-900 text-neutral-900'
-                                    : 'border-transparent text-neutral-400 hover:text-neutral-600'
-                                    }`}
-                            >
-                                Prepare Image
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('placement')}
-                                className={`px-5 py-3.5 text-sm font-semibold border-b-2 transition-all ${activeTab === 'placement'
-                                    ? 'border-neutral-900 text-neutral-900'
-                                    : 'border-transparent text-neutral-400 hover:text-neutral-600'
-                                    }`}
-                            >
-                                Placement Settings
-                            </button>
+                        {/* 2. Content Region (Flex) */}
+                        <div className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden">
+                            {/* Tabs (Fixed at top of Content) */}
+                            <div className="flex border-b border-neutral-200 px-4 lg:px-6 shrink-0 h-[44px]">
+                                <button
+                                    onClick={() => setActiveTab('prepare')}
+                                    className={`px-4 h-full text-sm font-semibold border-b-2 transition-all ${activeTab === 'prepare'
+                                        ? 'border-neutral-900 text-neutral-900'
+                                        : 'border-transparent text-neutral-400 hover:text-neutral-600'
+                                        }`}
+                                >
+                                    Prepare
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('placement')}
+                                    className={`px-4 h-full text-sm font-semibold border-b-2 transition-all ${activeTab === 'placement'
+                                        ? 'border-neutral-900 text-neutral-900'
+                                        : 'border-transparent text-neutral-400 hover:text-neutral-600'
+                                        }`}
+                                >
+                                    Settings
+                                </button>
+                            </div>
+
+                            {/* Actual Scrollable/Flex Content */}
+                            <div className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
+                                {activeTab === 'prepare' ? (
+                                    <PrepareTab
+                                        product={product}
+                                        asset={asset}
+                                        onPrepareComplete={() => { }}
+                                        onRefine={() => setIsRefining(true)}
+                                        setFooterConfig={setFooterConfig}
+                                        onSave={handlePlacementSave}
+                                    />
+                                ) : (
+                                    <div className="flex-1 overflow-y-auto p-4 lg:p-6 bg-neutral-50/30">
+                                        <PlacementTab
+                                            product={product}
+                                            asset={asset}
+                                            onChange={(meta) => setPendingMetadata(meta)}
+                                        />
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
-                        {/* Content Area */}
-                        <div className="flex-1 overflow-y-auto p-6 bg-neutral-50/30">
-                            {activeTab === 'prepare' ? (
-                                <PrepareTab
-                                    product={product}
-                                    asset={asset}
-                                    onPrepareComplete={() => {
-                                        // Optional: any extra logic when auto-remove finishes
-                                    }}
-                                    onRefine={() => setIsRefining(true)}
-                                />
-                            ) : (
-                                <PlacementTab
-                                    product={product}
-                                    asset={asset}
-                                    onChange={(meta) => setPendingMetadata(meta)}
-                                />
-                            )}
-                        </div>
-
-                        {/* Footer */}
-                        <div className="flex items-center justify-between px-6 py-5 border-t border-neutral-200 bg-white">
-                            <Button
-                                variant="tertiary"
-                                onClick={onClose}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                variant="primary"
-                                onClick={handleSave}
-                                loading={fetcher.state !== 'idle'}
-                            >
-                                Save Changes
-                            </Button>
+                        {/* 3. Footer (Fixed) */}
+                        <div className="h-[72px] lg:h-[64px] flex items-center px-4 lg:px-6 border-t border-neutral-200 bg-white shrink-0 z-20">
+                            {renderFooter()}
                         </div>
                     </>
                 )}
             </div>
-
             {/* Animation Styles */}
             <style dangerouslySetInnerHTML={{
                 __html: `

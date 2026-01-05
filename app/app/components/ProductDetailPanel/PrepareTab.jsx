@@ -18,9 +18,9 @@ function clamp(n, a, b) {
  * - View & Compare (Original vs Prepared)
  * - Auto Remove Background
  * - Manual Refine (Add/Remove brush) with Undo/Redo
- * - Mobile-first responsive layout (Bottom bar on mobile, Sidebar on desktop)
+ * - Mobile-first responsive layout (Global Footer controlled via props)
  */
-export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
+export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFooterConfig, onSave }) {
     const fetcher = useFetcher();
 
     // -- STATE --
@@ -83,15 +83,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
                 if (mode === 'editing' && fetcher.data.preparedImageUrl) {
                     setMode("normal");
                     setView("prepared");
-                    // Clear strokes after successful apply? Or keep them? 
-                    // Clearing them makes sense as we are now working on a "new" base, 
-                    // but technically the base image is the same. 
-                    // For now, let's keep them in case they want to edit again immediately, 
-                    // although strictly speaking the "prepared" image is updated.
-                    // Actually, if we apply mask, the backend generates a NEW prepared image.
-                    // The strokes were relative to the *original*.
-                    // If we edit again, we probably edit the *original* again?
-                    // Yes, typically we refine the mask on the original.
+                    // Keep strokes in history but we are done
                 }
             } else {
                 setError(fetcher.data.error || 'Operation failed');
@@ -108,10 +100,6 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
         img.crossOrigin = "anonymous";
         img.onload = () => {
             imageRef.current = img;
-            // Force redraw if needed
-            if (mode === "editing") {
-                // trigger redraw? The CanvasPainter handles this via refs usually
-            }
         };
         img.src = selectedImageUrl;
     }, [selectedImageUrl]);
@@ -121,7 +109,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
 
     const handleRemoveBackground = useCallback(() => {
         setError(null);
-        setIsBusy(true); // Artificial delay start
+        setIsBusy(true);
 
         const formData = new FormData();
         formData.append('productId', product.id.split('/').pop());
@@ -145,10 +133,6 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
         // Always start editing on "original" so you see what you are doing
         setView("original");
         setBrushMode("add");
-        // Ensure we have the latest mask or start fresh?
-        // For this lightweight version, we start fresh strokes on top of "Original".
-        // ideally we would load the existing mask, but we don't have it easily.
-        // So "Edit" here effectively means "Refine Manually" drawing from scratch or adding to current session.
     };
 
     const handleCancelEdit = () => {
@@ -173,8 +157,6 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         // Draw strokes
-        // We need to replay strokes at full resolution
-        // We need a helper to draw strokes on a context
         strokesToContext(ctx, strokeStore.strokes.slice(0, strokeStore.cursor), canvas.width, canvas.height);
 
         // 2. Get Data URL
@@ -192,6 +174,56 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
         });
     };
 
+    // -- FOOTER INTEGRATION --
+    useEffect(() => {
+        if (!setFooterConfig) return;
+
+        if (mode === 'editing') {
+            setFooterConfig({
+                primary: {
+                    label: 'Apply',
+                    onClick: handleApplyEdits,
+                    disabled: isLoading,
+                    loading: isLoading
+                },
+                secondary: {
+                    label: 'Cancel',
+                    onClick: handleCancelEdit,
+                    disabled: isLoading
+                }
+            });
+        } else {
+            // Normal Mode
+            // Primary: Save (if ready) or Remove BG (if not)
+            // Secondary: Edit
+            const isReady = hasPrepared;
+            setFooterConfig({
+                primary: isReady ? {
+                    label: 'Save',
+                    onClick: onSave, // Trigger global save/close
+                    disabled: isLoading,
+                } : {
+                    label: 'Remove BG',
+                    onClick: handleRemoveBackground,
+                    disabled: isLoading,
+                    loading: isLoading
+                },
+                secondary: {
+                    label: 'Edit',
+                    onClick: handleEnterEdit,
+                    disabled: isLoading
+                },
+                tertiary: isReady ? {
+                    label: 'Start Over (Auto)',
+                    onClick: handleStartOver,
+                    disabled: isLoading,
+                    className: "text-red-600 hover:bg-red-50 hover:text-red-700 px-0"
+                } : null
+            });
+        }
+    }, [mode, hasPrepared, isLoading, setFooterConfig, onSave, handleApplyEdits, handleCancelEdit, handleRemoveBackground, handleEnterEdit, handleStartOver]);
+
+
     // -- HELPER: Draw strokes to a context --
     const strokesToContext = (ctx, strokes, w, h) => {
         ctx.lineCap = "round";
@@ -202,7 +234,6 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
             if (points.length < 2) return;
 
             ctx.beginPath();
-            // Scale points (0-1) to width/height
             ctx.moveTo(points[0].x * w, points[0].y * h);
             for (let i = 1; i < points.length; i++) {
                 ctx.lineTo(points[i].x * w, points[i].y * h);
@@ -217,12 +248,6 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
                 ctx.strokeStyle = "black";
             }
 
-            // Scale brush size relative to image? 
-            // Let's assume stroke.size is proportional to the view width (e.g. 1/20th) 
-            // OR we just used raw pixels on screen. 
-            // We should try to scale it to be consistent. 
-            // For now, let's map screen pixels roughly to image pixels.
-            // If screen view was ~500px, and image is 2000px, multiplier is 4.
             const scale = w / 500; // rough approximation
             ctx.lineWidth = size * scale;
 
@@ -246,293 +271,215 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine }) {
     const showPrepared = mode === "normal" && hasPrepared && view === "prepared";
 
     return (
-        <div className="h-full flex flex-col font-['SF_Pro_Display',-apple-system,BlinkMacSystemFont,sans-serif]">
+        <div className="flex flex-col h-full font-['SF_Pro_Display',-apple-system,BlinkMacSystemFont,sans-serif]">
             {/* Hidden mask canvas for processing */}
             <canvas ref={maskCanvasRef} className="hidden" />
 
-            {/* Main Content Body */}
-            <div className="flex-1 flex flex-col min-h-0 lg:flex-row">
+            {/* Content Region: Canvas + Overlays */}
+            <div className="flex-1 min-h-0 relative bg-neutral-50 overflow-hidden flex items-center justify-center">
 
-                {/* Left: Canvas Area */}
-                <div className="flex-1 p-4 lg:p-6 overflow-y-auto lg:overflow-hidden flex flex-col">
+                {/* Checkerboard Background */}
+                <div className={cx("absolute inset-0 pointer-events-none transition-opacity duration-300", showPrepared ? "opacity-100" : "opacity-0")}
+                    style={{
+                        backgroundImage: 'repeating-conic-gradient(#e5e5e5 0% 25%, #f5f5f5 0% 50%)',
+                        backgroundSize: '20px 20px'
+                    }}
+                />
 
-                    <div className="relative flex-1 min-h-[400px] w-full bg-neutral-50 rounded-2xl border border-neutral-200 overflow-hidden shadow-inner flex items-center justify-center">
+                {/* Content Container (Constrained) */}
+                <div className="relative w-full h-full p-4 lg:p-8 flex items-center justify-center">
 
-                        {/* Checkerboard Background */}
-                        <div className={cx("absolute inset-0 pointer-events-none", showPrepared ? "opacity-100" : "opacity-0")}
-                            style={{
-                                backgroundImage: 'repeating-conic-gradient(#e5e5e5 0% 25%, #f5f5f5 0% 50%)',
-                                backgroundSize: '20px 20px'
-                            }}
+                    {isLoading && (
+                        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm transition-all duration-300">
+                            <div className="bg-white p-6 rounded-3xl shadow-xl border border-neutral-100 flex flex-col items-center gap-4">
+                                <Spinner size="large" />
+                                <div className="text-center">
+                                    <p className="font-bold text-neutral-900">{mode === 'editing' ? 'Applying Edits...' : 'Removing Background...'}</p>
+                                    <p className="text-xs text-neutral-500 mt-1">This may take a few seconds</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* The Image (Card backed for contrast) */}
+                    <div className={cx(
+                        "relative flex items-center justify-center transition-all duration-500",
+                        showPrepared ? "p-0" : ""
+                    )}>
+                        {showPrepared && (
+                            /* White card backing for prepared image to improve contrast */
+                            <div className="absolute inset-4 bg-white rounded-xl shadow-2xl -z-10 opacity-0 animate-[fadeIn_0.5s_ease_forwards]" />
+                        )}
+
+                        <img
+                            src={showPrepared ? preparedImageUrl : selectedImageUrl}
+                            alt="Product"
+                            className={cx(
+                                "max-h-[calc(100vh-280px)] max-w-full object-contain transition-all duration-300 select-none",
+                                showPrepared ? "drop-shadow-sm" : ""
+                            )}
+                            draggable={false}
                         />
 
-                        {/* Content Container */}
-                        <div className="relative w-full h-full max-w-full max-h-full flex items-center justify-center p-6">
-
-                            {isLoading && (
-                                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm transition-all duration-300">
-                                    <div className="bg-white p-6 rounded-3xl shadow-xl border border-neutral-100 flex flex-col items-center gap-4">
-                                        <Spinner size="large" />
-                                        <div className="text-center">
-                                            <p className="font-bold text-neutral-900">{mode === 'editing' ? 'Applying Edits...' : 'Removing Background...'}</p>
-                                            <p className="text-xs text-neutral-500 mt-1">This may take a few seconds</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* The Image */}
-                            <img
-                                src={showPrepared ? preparedImageUrl : selectedImageUrl}
-                                alt="Product"
-                                className={cx(
-                                    "max-h-full max-w-full object-contain transition-all duration-300",
-                                    showPrepared ? "drop-shadow-xl" : ""
-                                )}
+                        {/* Canvas Painter Overlay (Only in Edit Mode) */}
+                        {mode === "editing" && !isLoading && (
+                            <MaskPainter
+                                imageUrl={selectedImageUrl}
+                                strokes={strokeStore.strokes}
+                                cursor={strokeStore.cursor}
+                                brushMode={brushMode}
+                                brushSize={brushSize}
+                                disabled={!canInteract}
+                                onCommitStroke={(stroke) => {
+                                    setStrokeStore(prev => {
+                                        const newStrokes = prev.strokes.slice(0, prev.cursor);
+                                        newStrokes.push(stroke);
+                                        return { strokes: newStrokes, cursor: newStrokes.length };
+                                    });
+                                }}
                             />
-
-                            {/* Canvas Painter Overlay (Only in Edit Mode) */}
-                            {mode === "editing" && !isLoading && (
-                                <MaskPainter
-                                    imageUrl={selectedImageUrl}
-                                    strokes={strokeStore.strokes}
-                                    cursor={strokeStore.cursor}
-                                    brushMode={brushMode}
-                                    brushSize={brushSize}
-                                    disabled={!canInteract}
-                                    onCommitStroke={(stroke) => {
-                                        setStrokeStore(prev => {
-                                            const newStrokes = prev.strokes.slice(0, prev.cursor);
-                                            newStrokes.push(stroke);
-                                            return { strokes: newStrokes, cursor: newStrokes.length };
-                                        });
-                                    }}
-                                />
-                            )}
-                        </div>
-
-                        {/* View Toggle Pill (Normal Mode + Has Prepared) */}
-                        {mode === "normal" && hasPrepared && (
-                            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10">
-                                <div className="flex p-1 bg-white/90 backdrop-blur border border-neutral-200 rounded-full shadow-lg">
-                                    <button
-                                        onClick={() => setView("original")}
-                                        className={cx(
-                                            "px-4 py-2 rounded-full text-xs font-bold transition-all duration-200",
-                                            view === "original" ? "bg-neutral-900 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
-                                        )}
-                                    >
-                                        Original
-                                    </button>
-                                    <button
-                                        onClick={() => setView("prepared")}
-                                        className={cx(
-                                            "px-4 py-2 rounded-full text-xs font-bold transition-all duration-200",
-                                            view === "prepared" ? "bg-emerald-500 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
-                                        )}
-                                    >
-                                        Prepared
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Editing Tools Overlay (Bottom of Canvas) */}
-                        {mode === "editing" && (
-                            <div className="absolute bottom-4 left-4 right-4 md:left-auto md:right-auto md:w-auto md:min-w-[400px] md:-translate-x-1/2 md:left-1/2 z-10">
-                                <div className="bg-white/95 backdrop-blur-md border border-neutral-200 shadow-xl rounded-2xl p-3 flex flex-col gap-3 md:flex-row md:items-center">
-
-                                    {/* Brush Mode */}
-                                    <div className="flex bg-neutral-100 p-1 rounded-xl shrink-0">
-                                        <button
-                                            onClick={() => setBrushMode("add")}
-                                            className={cx(
-                                                "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                                                brushMode === "add" ? "bg-white text-blue-600 shadow-sm ring-1 ring-black/5" : "text-neutral-500 hover:text-neutral-700"
-                                            )}
-                                        >
-                                            <span className="flex items-center justify-center gap-1.5">
-                                                <span className="w-2 h-2 rounded-full bg-blue-500" /> Add
-                                            </span>
-                                        </button>
-                                        <button
-                                            onClick={() => setBrushMode("remove")}
-                                            className={cx(
-                                                "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                                                brushMode === "remove" ? "bg-white text-red-600 shadow-sm ring-1 ring-black/5" : "text-neutral-500 hover:text-neutral-700"
-                                            )}
-                                        >
-                                            <span className="flex items-center justify-center gap-1.5">
-                                                <span className="w-2 h-2 rounded-full bg-red-500" /> Remove
-                                            </span>
-                                        </button>
-                                    </div>
-
-                                    {/* Divider */}
-                                    <div className="hidden md:block w-px h-8 bg-neutral-200"></div>
-
-                                    {/* Size Slider */}
-                                    <div className="flex items-center gap-3 px-2 flex-1">
-                                        <div className="w-2 h-2 bg-neutral-300 rounded-full shrink-0" />
-                                        <input
-                                            type="range"
-                                            min="10"
-                                            max="80"
-                                            value={brushSize}
-                                            onChange={(e) => setBrushSize(parseInt(e.target.value))}
-                                            className="flex-1 h-1.5 bg-neutral-100 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-neutral-900"
-                                        />
-                                        <div className="w-4 h-4 bg-neutral-900 rounded-full shrink-0 border border-neutral-200 shadow-sm" style={{ transform: `scale(${brushSize / 40})` }} />
-                                    </div>
-
-                                    {/* Divider */}
-                                    <div className="hidden md:block w-px h-8 bg-neutral-200"></div>
-
-                                    {/* Undo / Redo */}
-                                    <div className="flex items-center gap-1 justify-end">
-                                        <button
-                                            onClick={undo}
-                                            disabled={strokeStore.cursor === 0}
-                                            className="p-2 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
-                                        >
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
-                                        </button>
-                                        <button
-                                            onClick={redo}
-                                            disabled={strokeStore.cursor === strokeStore.strokes.length}
-                                            className="p-2 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
-                                        >
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6" /></svg>
-                                        </button>
-                                    </div>
-
-                                </div>
-                            </div>
                         )}
                     </div>
+                </div>
 
-                    {/* Use Source Image strip */}
-                    {mode === "normal" && allImages.length > 1 && (
-                        <div className="mt-4 flex gap-2 overflow-x-auto pb-2 scrollbar-hide py-1">
-                            {allImages.map((img, idx) => (
+                {/* View Toggle Pill (Normal Mode + Has Prepared) - Bottom Center of Canvas */}
+                {mode === "normal" && hasPrepared && (
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
+                        <div className="flex p-1 bg-white/90 backdrop-blur border border-neutral-200 rounded-full shadow-lg">
+                            <button
+                                onClick={() => setView("original")}
+                                className={cx(
+                                    "px-4 py-2 rounded-full text-xs font-bold transition-all duration-200",
+                                    view === "original" ? "bg-neutral-900 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
+                                )}
+                            >
+                                Original
+                            </button>
+                            <button
+                                onClick={() => setView("prepared")}
+                                className={cx(
+                                    "px-4 py-2 rounded-full text-xs font-bold transition-all duration-200",
+                                    view === "prepared" ? "bg-emerald-500 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
+                                )}
+                            >
+                                Prepared
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Edit Tools Overlay (Editing Mode) - Bottom Center of Canvas */}
+                {mode === "editing" && (
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 w-[90%] max-w-[400px]">
+                        <div className="bg-white/95 backdrop-blur-md border border-neutral-200 shadow-xl rounded-2xl p-3 flex flex-col gap-3 md:flex-row md:items-center">
+                            {/* Brush Mode */}
+                            <div className="flex bg-neutral-100 p-1 rounded-xl shrink-0">
                                 <button
-                                    key={idx}
-                                    onClick={() => setSelectedImageUrl(img.url)}
+                                    onClick={() => setBrushMode("add")}
                                     className={cx(
-                                        "relative w-12 h-12 rounded-lg overflow-hidden border transition-all flex-shrink-0",
-                                        selectedImageUrl === img.url ? "border-neutral-900 ring-2 ring-neutral-900/10 opacity-100" : "border-neutral-200 opacity-60 hover:opacity-100"
+                                        "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                                        brushMode === "add" ? "bg-white text-blue-600 shadow-sm ring-1 ring-black/5" : "text-neutral-500 hover:text-neutral-700"
                                     )}
                                 >
-                                    <img src={img.url} className="w-full h-full object-cover" alt="" />
+                                    <span className="flex items-center justify-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full bg-blue-500" /> Add
+                                    </span>
                                 </button>
-                            ))}
+                                <button
+                                    onClick={() => setBrushMode("remove")}
+                                    className={cx(
+                                        "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                                        brushMode === "remove" ? "bg-white text-red-600 shadow-sm ring-1 ring-black/5" : "text-neutral-500 hover:text-neutral-700"
+                                    )}
+                                >
+                                    <span className="flex items-center justify-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full bg-red-500" /> Remove
+                                    </span>
+                                </button>
+                            </div>
+
+                            {/* Divider */}
+                            <div className="hidden md:block w-px h-8 bg-neutral-200"></div>
+
+                            {/* Size Slider */}
+                            <div className="flex items-center gap-3 px-2 flex-1">
+                                <div className="w-2 h-2 bg-neutral-300 rounded-full shrink-0" />
+                                <input
+                                    type="range"
+                                    min="10"
+                                    max="80"
+                                    value={brushSize}
+                                    onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                                    className="flex-1 h-1.5 bg-neutral-100 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-neutral-900"
+                                />
+                                <div className="w-4 h-4 bg-neutral-900 rounded-full shrink-0 border border-neutral-200 shadow-sm" style={{ transform: `scale(${brushSize / 40})` }} />
+                            </div>
+
+                            {/* Divider */}
+                            <div className="hidden md:block w-px h-8 bg-neutral-200"></div>
+
+                            {/* Undo / Redo */}
+                            <div className="flex items-center gap-1 justify-end">
+                                <button
+                                    onClick={undo}
+                                    disabled={strokeStore.cursor === 0}
+                                    className="p-2 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
+                                </button>
+                                <button
+                                    onClick={redo}
+                                    disabled={strokeStore.cursor === strokeStore.strokes.length}
+                                    className="p-2 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6" /></svg>
+                                </button>
+                            </div>
                         </div>
-                    )}
-
-                </div>
-
-                {/* Right: Sidebar Actions (Desktop) */}
-                <div className="hidden lg:flex w-[320px] bg-white border-l border-neutral-100 flex-col p-6 z-20">
-                    <h3 className="text-lg font-bold text-neutral-900 mb-1">
-                        {mode === 'editing' ? 'Refine Selection' : 'Preparation'}
-                    </h3>
-                    <p className="text-sm text-neutral-500 mb-6 leading-relaxed">
-                        {mode === 'editing'
-                            ? "Paint over the object to fix any missing or extra areas. Use 'Add' to keep parts, 'Remove' to erase."
-                            : hasPrepared
-                                ? "Your image is ready. Use the toggle to compare results or 'Edit' to manually refine edges."
-                                : "Remove the background to isolate your product. This enables realistic placement."
-                        }
-                    </p>
-
-                    <div className="flex-1 space-y-3">
-                        {/* NORMAL MODE ACTIONS */}
-                        {mode === "normal" && (
-                            <>
-                                {!hasPrepared ? (
-                                    <Button variant="primary" onClick={handleRemoveBackground} disabled={isLoading} className="w-full">
-                                        {isLoading ? "Processing..." : "Remove Background"}
-                                    </Button>
-                                ) : (
-                                    <Button variant="primary" onClick={() => { }} disabled={isLoading} className="w-full">
-                                        Save & Close
-                                    </Button>
-                                )}
-
-                                <Button variant="secondary" onClick={handleEnterEdit} disabled={isLoading} className="w-full">
-                                    {hasPrepared ? "Edit Manually" : "Manual Selection"}
-                                </Button>
-
-                                {hasPrepared && (
-                                    <div className="pt-4 mt-2 border-t border-neutral-100">
-                                        <Button variant="tertiary" onClick={handleStartOver} disabled={isLoading} className="w-full text-red-600 hover:bg-red-50 hover:text-red-700">
-                                            Start Over (Auto)
-                                        </Button>
-                                    </div>
-                                )}
-                            </>
-                        )}
-
-                        {/* EDIT MODE ACTIONS */}
-                        {mode === "editing" && (
-                            <>
-                                <Button variant="primary" onClick={handleApplyEdits} disabled={isLoading} className="w-full">
-                                    Done
-                                </Button>
-                                <Button variant="secondary" onClick={handleCancelEdit} disabled={isLoading} className="w-full">
-                                    Cancel
-                                </Button>
-
-                                <div className="p-4 bg-neutral-50 rounded-xl mt-4 border border-neutral-100">
-                                    <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-widest mb-2">Shortcuts</h4>
-                                    <ul className="text-xs text-neutral-500 space-y-1">
-                                        <li className="flex justify-between"><span>Undo</span> <span className="font-mono bg-white px-1 rounded border">Cmd+Z</span></li>
-                                        <li className="flex justify-between"><span>Redo</span> <span className="font-mono bg-white px-1 rounded border">Shift+Cmd+Z</span></li>
-                                    </ul>
-                                </div>
-                            </>
-                        )}
                     </div>
-
-                    {/* Error Message */}
-                    {error && (
-                        <div className="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded-xl border border-red-100 flex items-start gap-2 animate-in fade-in slide-in-from-bottom-2">
-                            <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                            {error}
-                        </div>
-                    )}
-                </div>
-
+                )}
             </div>
 
-            {/* Bottom Bar: Mobile Actions (< lg) */}
-            <div className="lg:hidden p-4 bg-white border-t border-neutral-100 sticky bottom-0 z-30 shadow-[0_-4px_16px_rgba(0,0,0,0.05)]">
-                <div className="flex gap-3">
-                    {mode === "normal" ? (
-                        <>
-                            {hasPrepared ? (
-                                <Button variant="primary" className="flex-1" onClick={() => { }} disabled={isLoading}>Save</Button>
-                            ) : (
-                                <Button variant="primary" className="flex-1" onClick={handleRemoveBackground} disabled={isLoading}>
-                                    {isLoading ? "..." : "Remove BG"}
-                                </Button>
-                            )}
-                            <Button variant="secondary" className="flex-1" onClick={handleEnterEdit} disabled={isLoading}>Edit</Button>
-                        </>
-                    ) : (
-                        <>
-                            <Button variant="secondary" className="flex-1" onClick={handleCancelEdit} disabled={isLoading}>Cancel</Button>
-                            <Button variant="primary" className="flex-1" onClick={handleApplyEdits} disabled={isLoading}>Done</Button>
-                        </>
-                    )}
+            {/* Thumbnails Row (Fixed Height) */}
+            {mode === "normal" && allImages.length > 1 && (
+                <div className="bg-white border-t border-neutral-100 shrink-0 z-10 w-full overflow-hidden">
+                    <div className="h-[68px] lg:h-[76px] flex items-center gap-3 overflow-x-auto px-4 lg:px-6 hide-scrollbar">
+                        {allImages.map((img, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => setSelectedImageUrl(img.url)}
+                                className={cx(
+                                    "relative w-12 h-12 lg:w-14 lg:h-14 rounded-lg overflow-hidden border transition-all flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
+                                    selectedImageUrl === img.url ? "border-neutral-900 ring-1 ring-neutral-900 opacity-100 shadow-md scale-105" : "border-neutral-200 opacity-60 hover:opacity-100 hover:scale-105"
+                                )}
+                            >
+                                <img src={img.url} className="w-full h-full object-cover" alt="" />
+                            </button>
+                        ))}
+                        {/* Spacers for end of scroll */}
+                        <div className="w-2 shrink-0"></div>
+                    </div>
                 </div>
-                {/* Safe area spacer if needed, usually handled by padding */}
-            </div>
+            )}
 
+            {/* Error Message Toast */}
+            {error && (
+                <div className="absolute top-4 left-4 right-4 z-50 flex justify-center">
+                    <div className="bg-red-50 text-red-700 px-4 py-3 rounded-xl border border-red-100 shadow-lg flex items-center gap-2 animate-in slide-in-from-top-2 fade-in">
+                        <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                        <span className="text-sm font-medium">{error}</span>
+                    </div>
+                </div>
+            )}
+
+            <style dangerouslySetInnerHTML={{
+                __html: `
+                .hide-scrollbar::-webkit-scrollbar { display: none; }
+                .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+            `}} />
         </div>
     );
 }
-
 
 /**
  * Sub-component: Handle the specific Canvas Drawing logic
@@ -558,17 +505,6 @@ function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled
         return { x: clamp(x, 0, 1), y: clamp(y, 0, 1) };
     };
 
-    const drawLine = (ctx, p1, p2, width, color) => {
-        ctx.beginPath();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = width;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-    };
-
     const redraw = useCallback(() => {
         const canvas = canvasRef.current;
         const wrap = wrapRef.current;
@@ -577,7 +513,7 @@ function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled
         // Resize canvas to match display size (responsive)
         const rect = wrap.getBoundingClientRect();
         // DPR usually 2 or 3
-        const dpr = window.devicePixelRatio || 1;
+        const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
 
         // Logical size
         const w = rect.width;
@@ -594,13 +530,6 @@ function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled
         const ctx = canvas.getContext("2d");
         ctx.scale(dpr, dpr);
         ctx.clearRect(0, 0, w, h);
-
-        // -- VISUALIZATION STRATEGY --
-        // We want to show "What is being added" (Blue) and "What is being removed" (Red).
-        // Since we are just drawing strokes on top of an image, we can just draw them directly.
-        // We don't need to actually composite a mask here visually, 
-        // passing the stroke data to the backend handles the semantic logic.
-        // Here we just give visual feedback.
 
         // 1. Draw committed strokes
         const activeStrokes = strokes.slice(0, cursor);
@@ -702,12 +631,3 @@ function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled
     );
 }
 
-// Add Styles for scrollbar hiding
-if (typeof document !== 'undefined') {
-    const style = document.createElement('style');
-    style.textContent = `
-      .scrollbar-hide::-webkit-scrollbar { display: none; }
-      .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-    `;
-    document.head.appendChild(style);
-}

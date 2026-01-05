@@ -1,4 +1,6 @@
-import { listSessions, listAllShops } from '@/lib/gcs';
+import { db } from '@/lib/db/client';
+import { sessions } from '@/lib/db/schema';
+import { desc, sql } from 'drizzle-orm';
 import { truncateShop, formatTimeAgo } from '@/lib/utils';
 import Link from 'next/link';
 
@@ -6,45 +8,34 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 60;
 
 export default async function ShopsPage() {
-    // Get shops from index files (shows shops even with 0 sessions)
-    const shopIndexes = await listAllShops();
-    
-    // Also get sessions to merge data
-    const sessions = await listSessions({ limit: 200 });
-    
-    // Group sessions by shop for stats
-    const shopMap = new Map<string, typeof sessions>();
-    for (const session of sessions) {
-        const existing = shopMap.get(session.shop) || [];
-        existing.push(session);
-        shopMap.set(session.shop, existing);
-    }
+    // Aggregate session stats by shop_domain from the database
+    // We group by shop_domain and calculate counts/timestamps
+    const shopsData = await db
+        .select({
+            shop: sessions.shopDomain,
+            totalSessions: sql<number>`count(*)`,
+            completedSessions: sql<number>`count(*) filter (where ${sessions.status} = 'completed')`,
+            // Check for various failure statuses typically used
+            failedSessions: sql<number>`count(*) filter (where ${sessions.status} = 'error' or ${sessions.status} = 'failed')`,
+            lastActivity: sql<string>`max(${sessions.startedAt})`,
+        })
+        .from(sessions)
+        .groupBy(sessions.shopDomain)
+        .orderBy(sql`max(${sessions.startedAt}) desc`);
 
-    // Merge shop indexes with session data
-    const allShopDomains = new Set<string>();
-    shopIndexes.forEach(idx => allShopDomains.add(idx.shop));
-    sessions.forEach(s => allShopDomains.add(s.shop));
-
-    const shops = Array.from(allShopDomains).map(shop => {
-        const shopIndex = shopIndexes.find(idx => idx.shop === shop);
-        const shopSessions = shopMap.get(shop) || [];
-        
-        const completed = shopSessions.filter(s => s.status === 'complete').length;
-        const failed = shopSessions.filter(s => s.status === 'failed').length;
-        const lastSession = shopSessions[0] || shopIndex?.sessions[0];
-        
-        // Use shop index data if available, otherwise use session data
-        const totalSessions = shopIndex?.totalSessions || shopSessions.length;
+    const shops = shopsData.map(shop => {
+        const total = Number(shop.totalSessions);
+        const completed = Number(shop.completedSessions);
 
         return {
-            shop,
-            totalSessions,
+            shop: shop.shop,
+            totalSessions: total,
             completedSessions: completed,
-            failedSessions: failed,
-            completionRate: totalSessions > 0 ? Math.round((completed / totalSessions) * 100) : 0,
-            lastActivity: lastSession?.startedAt || '',
+            failedSessions: Number(shop.failedSessions),
+            completionRate: total > 0 ? Math.round((completed / total) * 100) : 0,
+            lastActivity: shop.lastActivity,
         };
-    }).sort((a, b) => b.totalSessions - a.totalSessions);
+    });
 
     return (
         <div className="space-y-6">
@@ -65,7 +56,7 @@ export default async function ShopsPage() {
                         <div>
                             <div className="font-medium">{truncateShop(shop.shop)}</div>
                             <div className="text-sm text-secondary mt-1">
-                                {shop.totalSessions} sessions · {shop.completedSessions} complete · {shop.failedSessions} failed
+                                {shop.totalSessions} sessions · {shop.completedSessions} complete
                             </div>
                         </div>
                         <div className="text-right">
