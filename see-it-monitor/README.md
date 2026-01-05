@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# See It Session Monitor
 
-## Getting Started
+Dashboard for monitoring See It app sessions. Displays session data logged from the See It Shopify app to GCS bucket `see-it-sessions`.
 
-First, run the development server:
+## Setup
 
+1. Install dependencies:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Set environment variables in Vercel (or `.env.local` for local development):
+```
+GOOGLE_CREDENTIALS_JSON=base64_encoded_or_raw_json_string
+GCS_SESSION_BUCKET=see-it-sessions
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The `GOOGLE_CREDENTIALS_JSON` can be:
+- Base64-encoded JSON string
+- Raw JSON string (must be properly escaped for your environment)
+- The service account JSON object as a string
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Run locally:
+```bash
+npm run dev
+```
 
-## Learn More
+4. Deploy to Vercel:
+```bash
+vercel deploy
+```
 
-To learn more about Next.js, take a look at the following resources:
+## API Endpoints
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### `GET /api/health`
+Health check endpoint. Returns:
+- GCS connection status
+- Number of sessions found
+- Latest session timestamp
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### `GET /api/sessions`
+Get all sessions. Query params:
+- `includeImages=true` - Include signed URLs for images (mask, inpaint)
 
-## Deploy on Vercel
+### `GET /api/sessions/[sessionId]`
+Get a single session by ID. Query params:
+- `includeImages=true` - Include signed URLs for images
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### `POST /api/resync`
+Rescan GCS bucket and rebuild session index. Useful if data gets out of sync.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Session Data Structure
+
+Sessions are stored in GCS with the following structure:
+```
+sessions/
+  {sessionId}/
+    room.json      - Room step metadata
+    mask.json      - Mask step metadata
+    inpaint.json   - Inpaint step metadata
+    placement.json - Placement step metadata
+    final.json     - Final step metadata
+    images/
+      mask.png     - Mask image (if available)
+      inpaint.png  - Inpainted image (if available)
+```
+
+## Troubleshooting
+
+**No sessions showing:**
+1. Check `/api/health` to verify GCS connection
+2. Verify `GOOGLE_CREDENTIALS_JSON` is set correctly in Vercel
+3. Verify bucket `see-it-sessions` exists
+4. Check that session logging is working in the See It app (check Railway logs)
+5. Use `POST /api/resync` to rebuild the index
+
+**GCS connection errors:**
+- Verify credentials JSON is valid
+- Check that the service account has permissions to read from the bucket
+- Ensure the bucket name is correct (`GCS_SESSION_BUCKET` env var)
