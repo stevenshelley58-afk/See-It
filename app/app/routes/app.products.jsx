@@ -271,7 +271,19 @@ export default function Products() {
                 <div className="space-y-6">
                     {/* Header with Search & Filter */}
                     <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="relative flex-1 flex gap-2">
+                        <form
+                            className="relative flex-1 flex gap-2"
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                const formData = new FormData(e.target);
+                                const q = formData.get('q') || '';
+                                const params = new URLSearchParams(window.location.search);
+                                if (q) params.set('q', q);
+                                else params.delete('q');
+                                params.delete('cursor');
+                                window.location.href = `${window.location.pathname}?${params.toString()}`;
+                            }}
+                        >
                             <div className="relative flex-1">
                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -280,29 +292,20 @@ export default function Products() {
                                 </span>
                                 <input
                                     type="text"
+                                    name="q"
                                     placeholder="Search products..."
                                     defaultValue={searchQuery}
                                     className="w-full pl-9 pr-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/5 focus:border-neutral-900 transition-all"
-                                    onChange={(e) => {
-                                        const params = new URLSearchParams(window.location.search);
-                                        if (e.target.value) params.set('q', e.target.value);
-                                        else params.delete('q');
-                                        params.delete('cursor');
-                                        window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
-                                    }}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter') revalidator.revalidate();
-                                    }}
                                 />
                             </div>
                             <Button
+                                type="submit"
                                 variant="secondary"
                                 className="flex-shrink-0"
-                                onClick={() => revalidator.revalidate()}
                             >
                                 Search
                             </Button>
-                        </div>
+                        </form>
                         <select
                             defaultValue={statusFilter}
                             className="bg-white border border-neutral-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/5 focus:border-neutral-900 transition-all cursor-pointer"
