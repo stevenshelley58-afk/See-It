@@ -60,10 +60,7 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
 // PROMPT BUILDER
 // ============================================================================
 
-interface PromptDimensions {
-    room: { width: number; height: number };
-    product: { width: number; height: number };
-}
+
 
 /**
  * Build the composition prompt for Gemini image compositing
@@ -74,35 +71,18 @@ interface PromptDimensions {
  */
 function buildCompositePrompt(
     productDescription: string,
-    placement: { x: number; y: number },
-    dimensions: PromptDimensions
+    placement: { x: number; y: number }
 ): string {
-    const { room, product } = dimensions;
-    
-    // Calculate what percentage of room width the product occupies
-    const widthPercent = ((product.width / room.width) * 100).toFixed(1);
-    const heightPercent = ((product.height / room.height) * 100).toFixed(1);
-
     return `You are compositing a product into a room photo for an AR furniture visualization app.
 
-IMAGE SPECIFICATIONS:
-- ROOM IMAGE: ${room.width}×${room.height}px - the customer's actual room
-- PRODUCT IMAGE: ${product.width}×${product.height}px - already sized correctly by the user
-
-SIZING (CRITICAL):
-The user has manually resized the product to their desired scale.
-The product occupies ${widthPercent}% of room width and ${heightPercent}% of room height.
-This size is INTENTIONAL. Do NOT resize, scale, stretch, or adjust the product dimensions.
+SIZING:
+The user has already sized this product for this location. Minor adjustments for realism are fine, but respect the user's intended size.
 
 PLACEMENT:
-Position the product center at x=${placement.x.toFixed(2)}, y=${placement.y.toFixed(2)} (normalized 0-1 coordinates).
-The user placed it here deliberately. Make only minor adjustments for realism (e.g., grounding to floor).
+Position the product center at approximately x=${placement.x.toFixed(2)}, y=${placement.y.toFixed(2)} (normalized 0-1 coordinates).
 
-${productDescription ? `PRODUCT DETAILS:
-${productDescription}
-` : ''}
+${productDescription ? `PRODUCT:\n${productDescription}\n` : ''}
 RULES:
-- Preserve the product's exact size as provided
 - Match the room's existing lighting and color temperature
 - Add natural contact shadow where product meets surface
 - Do not modify, add, or remove anything else in the room`;
@@ -667,9 +647,9 @@ export async function prepareProduct(
                 .trim() // Removes transparent edges
                 .png()
                 .toBuffer();
-            
+
             const afterMeta = await sharp(trimmedBuffer).metadata();
-            
+
             // Only use trimmed version if it's valid and meaningfully smaller
             if (trimmedBuffer.length > 0 && afterMeta.width && afterMeta.height) {
                 outputBuffer = trimmedBuffer;
@@ -844,10 +824,7 @@ export async function compositeScene(
         // STEP 4: Build the narrative prompt with explicit sizing
         // Pass actual dimensions so Gemini knows the product is already correctly sized
         const productDescription = productInstructions?.trim() || '';
-        const prompt = buildCompositePrompt(productDescription, placement, {
-            room: { width: roomWidth, height: roomHeight },
-            product: { width: resizedWidth, height: resizedHeight }
-        });
+        const prompt = buildCompositePrompt(productDescription, placement);
 
         // Compute closest Gemini-supported aspect ratio
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
