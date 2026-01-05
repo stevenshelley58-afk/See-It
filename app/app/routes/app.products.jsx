@@ -31,13 +31,13 @@ export const loader = async ({ request }) => {
     let sortKey = "ID"; // Default
     let reverse = false;
 
+    // Note: Only TITLE, CREATED_AT, UPDATED_AT, PRODUCT_TYPE, VENDOR, INVENTORY_TOTAL, PUBLISHED_AT, RELEVANCE, ID
+    // are valid ProductSortKeys for Admin API. PRICE is only valid in Storefront API.
     if (sortField === 'title') {
         sortKey = "TITLE";
         reverse = sortDir === 'desc';
-    } else if (sortField === 'price') {
-        sortKey = "PRICE";
-        reverse = sortDir === 'desc';
     }
+    // Price sorting is handled client-side after fetch since PRICE is not a valid Admin API sort key
 
     const queryParts = [];
     if (searchQuery) queryParts.push(`title:*${searchQuery}* OR tag:*${searchQuery}*`);
@@ -110,6 +110,15 @@ export const loader = async ({ request }) => {
         if (sortField === 'status' && sortDir === 'desc') {
             products.reverse();
         }
+    }
+
+    // Handle price sorting client-side (PRICE is not a valid Admin API sort key)
+    if (sortField === 'price') {
+        products.sort((a, b) => {
+            const aPrice = parseFloat(a.priceRangeV2?.minVariantPrice?.amount || '0');
+            const bPrice = parseFloat(b.priceRangeV2?.minVariantPrice?.amount || '0');
+            return sortDir === 'asc' ? aPrice - bPrice : bPrice - aPrice;
+        });
     }
 
     // Billing check
