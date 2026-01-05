@@ -271,28 +271,37 @@ export default function Products() {
                 <div className="space-y-6">
                     {/* Header with Search & Filter */}
                     <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="relative flex-1">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                                </svg>
-                            </span>
-                            <input
-                                type="text"
-                                placeholder="Search products..."
-                                defaultValue={searchQuery}
-                                className="w-full pl-9 pr-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/5 focus:border-neutral-900 transition-all"
-                                onChange={(e) => {
-                                    const params = new URLSearchParams(window.location.search);
-                                    if (e.target.value) params.set('q', e.target.value);
-                                    else params.delete('q');
-                                    params.delete('cursor');
-                                    window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
-                                }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') revalidator.revalidate();
-                                }}
-                            />
+                        <div className="relative flex-1 flex gap-2">
+                            <div className="relative flex-1">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                    </svg>
+                                </span>
+                                <input
+                                    type="text"
+                                    placeholder="Search products..."
+                                    defaultValue={searchQuery}
+                                    className="w-full pl-9 pr-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/5 focus:border-neutral-900 transition-all"
+                                    onChange={(e) => {
+                                        const params = new URLSearchParams(window.location.search);
+                                        if (e.target.value) params.set('q', e.target.value);
+                                        else params.delete('q');
+                                        params.delete('cursor');
+                                        window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') revalidator.revalidate();
+                                    }}
+                                />
+                            </div>
+                            <Button
+                                variant="secondary"
+                                className="flex-shrink-0"
+                                onClick={() => revalidator.revalidate()}
+                            >
+                                Search
+                            </Button>
                         </div>
                         <select
                             defaultValue={statusFilter}
