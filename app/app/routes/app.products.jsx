@@ -9,11 +9,14 @@ import { PLANS } from "../billing";
 import { StorageService } from "../services/storage.server";
 import { PageShell, Button } from "../components/ui";
 import { ProductDetailPanel } from "../components/ProductDetailPanel";
+import { writeFile } from "fs/promises";
+import { join } from "path";
 
 export const loader = async ({ request }) => {
     try {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:13',message:'Loader entry',data:{url:request.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        console.error('[DEBUG] Loader entry', request.url);
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:13',message:'Loader entry',data:{url:request.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch((e)=>console.error('[DEBUG] Log fetch failed:',e));
         // #endregion
         let admin, session, billing;
     try {
@@ -132,8 +135,35 @@ export const loader = async ({ request }) => {
         // #endregion
         throw error;
     }
+    // #region agent log
+    console.error('[DEBUG] GraphQL response received, has data:', !!responseJson?.data, 'has products:', !!responseJson?.data?.products, 'has errors:', !!responseJson?.errors);
+    if (responseJson?.errors) {
+        console.error('[DEBUG] GraphQL errors:', responseJson.errors);
+    }
+    // #endregion
+    if (!responseJson?.data?.products) {
+        // #region agent log
+        const errorMsg = responseJson?.errors?.[0]?.message || 'Unknown error';
+        const fullResponse = JSON.stringify(responseJson, null, 2).substring(0, 1000);
+        console.error('[DEBUG] GraphQL response missing products data. Full response:', fullResponse);
+        console.error('[DEBUG] GraphQL errors:', responseJson?.errors);
+        // #endregion
+        throw new Error(`GraphQL query failed: ${errorMsg}. Response: ${fullResponse.substring(0, 200)}`);
+    }
     const { edges, pageInfo } = responseJson.data.products;
-    let products = edges.map((edge) => edge.node);
+    if (!edges || !Array.isArray(edges)) {
+        // #region agent log
+        console.error('[DEBUG] GraphQL response missing edges array. edges:', edges, 'pageInfo:', pageInfo);
+        // #endregion
+        throw new Error(`GraphQL query returned invalid data: edges is not an array. Got: ${typeof edges}`);
+    }
+    let products = edges.map((edge) => {
+        if (!edge?.node) {
+            console.error('[DEBUG] Edge missing node:', edge);
+            return null;
+        }
+        return edge.node;
+    }).filter(Boolean);
 
     // Apply custom sort point 7: active -> in-stock -> price desc
     // ONLY if we are in "manual" sort mode (default) OR explicitly sorting by status (which we hack here for now)
@@ -170,32 +200,53 @@ export const loader = async ({ request }) => {
         });
     }
 
-    // Billing check
+    // Billing check - wrapped in try-catch to prevent crashes
     let planId = PLANS.FREE.id;
     let dailyQuota = PLANS.FREE.dailyQuota;
     let monthlyQuota = PLANS.FREE.monthlyQuota;
 
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:129',message:'Before billing check',data:{hasBilling:!!billing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    console.error('[DEBUG] Before billing check, hasBilling:', !!billing, 'billing type:', typeof billing);
+    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:203',message:'Before billing check',data:{hasBilling:!!billing,billingType:typeof billing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
     // #endregion
+    
+    // Safely check billing - if it fails, just use free plan
     try {
-        const { hasActivePayment } = await billing.check({
-            plans: [PLANS.PRO.name],
-            isTest: process.env.SHOPIFY_BILLING_TEST_MODE !== 'false'
-        });
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:130',message:'After billing check',data:{hasActivePayment},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
-        if (hasActivePayment) {
-            planId = PLANS.PRO.id;
-            dailyQuota = PLANS.PRO.dailyQuota;
-            monthlyQuota = PLANS.PRO.monthlyQuota;
+        if (billing && typeof billing.check === 'function') {
+            try {
+                const billingResult = await billing.check({
+                    plans: [PLANS.PRO.name],
+                    isTest: process.env.SHOPIFY_BILLING_TEST_MODE !== 'false'
+                });
+                // #region agent log
+                console.error('[DEBUG] After billing check, result:', billingResult);
+                fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:214',message:'After billing check',data:{hasActivePayment:billingResult?.hasActivePayment},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
+                if (billingResult?.hasActivePayment) {
+                    planId = PLANS.PRO.id;
+                    dailyQuota = PLANS.PRO.dailyQuota;
+                    monthlyQuota = PLANS.PRO.monthlyQuota;
+                }
+            } catch (billingError) {
+                // #region agent log
+                console.error('[DEBUG] Billing check error:', billingError);
+                fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:214',message:'Billing check error',data:{error:billingError?.message,errorName:billingError?.name,stack:billingError?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
+                console.error("Billing check failed, using free plan", billingError);
+                // Continue with free plan - don't throw
+            }
+        } else {
+            // #region agent log
+            console.error('[DEBUG] Billing is not available or check method missing, skipping check');
+            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:203',message:'Billing not available',data:{hasBilling:!!billing,hasCheckMethod:!!(billing && typeof billing.check === 'function')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
         }
-    } catch (e) {
+    } catch (outerBillingError) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:129',message:'Billing check error',data:{error:e?.message,errorName:e?.name,stack:e?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        console.error('[DEBUG] Outer billing check error:', outerBillingError);
         // #endregion
-        console.error("Billing check failed", e);
+        console.error("Billing check outer error, using free plan", outerBillingError);
+        // Continue with free plan - don't throw
     }
 
     // Shop sync
@@ -263,8 +314,15 @@ export const loader = async ({ request }) => {
 
     // Assets map
     let assetsMap = {};
+    if (!shop) {
+        // #region agent log
+        console.error('[DEBUG] Shop is undefined after shop sync!');
+        // #endregion
+        throw new Error('Shop not found or could not be created');
+    }
     if (products.length > 0) {
         // #region agent log
+        console.error('[DEBUG] Before assets query, productCount:', products.length, 'shopId:', shop.id);
         fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:168',message:'Before assets query',data:{productCount:products.length,shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
         const normalizedIds = products.map(p => p.id.split('/').pop());
@@ -287,25 +345,30 @@ export const loader = async ({ request }) => {
             let preparedImageUrlFresh = a.preparedImageUrl;
             if (a.status === "ready" && a.preparedImageKey) {
                 // #region agent log
+                console.error('[DEBUG] Before storage URL, assetId:', a.id, 'key:', a.preparedImageKey);
                 fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:177',message:'Before storage URL',data:{assetId:a.id,key:a.preparedImageKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
                 // #endregion
                 try {
                     preparedImageUrlFresh = await StorageService.getSignedReadUrl(a.preparedImageKey, 60 * 60 * 1000);
                     // #region agent log
+                    console.error('[DEBUG] After storage URL, assetId:', a.id, 'hasUrl:', !!preparedImageUrlFresh);
                     fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:178',message:'After storage URL',data:{assetId:a.id,hasUrl:!!preparedImageUrlFresh},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
                     // #endregion
                 } catch (err) {
                     // #region agent log
+                    console.error('[DEBUG] Storage URL error, assetId:', a.id, 'error:', err);
                     fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:177',message:'Storage URL error',data:{assetId:a.id,error:err?.message,errorName:err?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
                     // #endregion
-                    console.error(`Failed to sign URL for asset ${a.id}`);
+                    console.error(`Failed to sign URL for asset ${a.id}`, err);
                 }
             }
-            assetsMap[`gid://shopify/Product/${a.productId}`] = {
-                ...a,
-                preparedImageUrlFresh,
-                renderInstructions: a.renderInstructions || ""
-            };
+            if (a.productId) {
+                assetsMap[`gid://shopify/Product/${a.productId}`] = {
+                    ...a,
+                    preparedImageUrlFresh,
+                    renderInstructions: a.renderInstructions || ""
+                };
+            }
         }
     }
 
@@ -383,9 +446,34 @@ export const loader = async ({ request }) => {
     }
     } catch (topLevelError) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:13',message:'Top-level loader error',data:{error:topLevelError?.message,errorName:topLevelError?.name,stack:topLevelError?.stack?.substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        const errorDetails = {
+            message: topLevelError?.message || 'Unknown error',
+            name: topLevelError?.name || 'Error',
+            stack: topLevelError?.stack || 'No stack trace',
+            cause: topLevelError?.cause
+        };
+        console.error('========================================');
+        console.error('[DEBUG] TOP-LEVEL LOADER ERROR');
+        console.error('========================================');
+        console.error('Error Message:', errorDetails.message);
+        console.error('Error Name:', errorDetails.name);
+        console.error('Error Stack:', errorDetails.stack.substring(0, 1000));
+        console.error('Full Error Object:', topLevelError);
+        console.error('========================================');
+        const logEntry = JSON.stringify({location:'app.products.jsx:13',message:'Top-level loader error',data:errorDetails,timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'}) + '\n';
+        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:logEntry.trim()}).catch(async (e)=>{
+            console.error('[DEBUG] Log fetch failed:',e);
+            try {
+                await writeFile(join(process.cwd(), '.cursor', 'debug.log'), logEntry, { flag: 'a' });
+            } catch (fileErr) {
+                console.error('[DEBUG] File log also failed:', fileErr);
+            }
+        });
         // #endregion
-        throw topLevelError;
+        // Re-throw with more context
+        const enhancedError = new Error(`Products loader failed: ${errorDetails.message}`);
+        enhancedError.cause = topLevelError;
+        throw enhancedError;
     }
 };
 
@@ -844,27 +932,56 @@ export function ErrorBoundary() {
     const error = useRouteError();
     let title = "Error";
     let message = "Something went wrong";
+    let errorDetails = null;
 
     if (isRouteErrorResponse(error)) {
         title = `${error.status}`;
-        message = error.data?.message || error.statusText;
+        message = error.data?.message || error.statusText || "Unexpected Server Error";
+        errorDetails = error.data;
     } else if (error instanceof Error) {
-        message = error.message;
+        message = error.message || "Unexpected Server Error";
+        errorDetails = {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+            cause: error.cause
+        };
+    } else {
+        message = String(error) || "Unexpected Server Error";
+        errorDetails = { raw: error };
     }
+
+    // Always show error details in development, and also show a simplified version in production
+    const isDev = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
     return (
         <>
             <TitleBar title="See It Products" />
             <PageShell>
-                <div className="bg-white rounded-xl border border-neutral-200 p-6">
+                <div className="bg-white rounded-xl border border-red-200 p-6">
                     <div className="space-y-4">
                         <div>
                             <h1 className="text-lg font-semibold text-red-600">{title}</h1>
-                            <p className="text-sm text-neutral-600 mt-1">{message}</p>
+                            <p className="text-sm text-neutral-600 mt-1 font-medium">{message}</p>
+                            {(errorDetails || isDev) && (
+                                <details className="mt-4 text-xs" open={isDev}>
+                                    <summary className="cursor-pointer text-neutral-500 hover:text-neutral-900 font-medium">
+                                        Error Details {isDev ? '(Development Mode)' : '(Click to expand)'}
+                                    </summary>
+                                    <pre className="mt-2 p-3 bg-neutral-50 rounded overflow-auto max-h-96 text-xs border border-neutral-200">
+                                        {JSON.stringify(errorDetails || error, null, 2)}
+                                    </pre>
+                                </details>
+                            )}
                         </div>
-                        <Button variant="primary" onClick={() => window.location.reload()}>
-                            Refresh
-                        </Button>
+                        <div className="flex gap-3">
+                            <Button variant="primary" onClick={() => window.location.reload()}>
+                                Refresh
+                            </Button>
+                            <Button variant="secondary" onClick={() => window.location.href = '/app'}>
+                                Go to Dashboard
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </PageShell>
