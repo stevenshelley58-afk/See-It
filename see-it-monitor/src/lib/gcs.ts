@@ -11,7 +11,7 @@ const SESSION_BUCKET = process.env.GCS_SESSION_BUCKET || 'see-it-sessions';
 
 let storageInstance: Storage | null = null;
 
-function getStorage(): Storage {
+export function getStorage(): Storage {
     if (storageInstance) return storageInstance;
 
     if (process.env.GCS_PRIVATE_KEY && process.env.GCS_CLIENT_EMAIL) {
