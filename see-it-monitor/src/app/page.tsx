@@ -3,6 +3,7 @@ import { formatTimeAgo, getStepLabel, getStatusColor, truncateShop } from '@/lib
 import Link from 'next/link';
 import Image from 'next/image';
 
+export const dynamic = 'force-dynamic'; // Force dynamic rendering since we need GCS access
 export const revalidate = 30; // Revalidate every 30 seconds
 
 export default async function ControlRoom() {
