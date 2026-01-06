@@ -1,9 +1,59 @@
-document.addEventListener('DOMContentLoaded', function () {
-    const VERSION = '1.0.29'; // Gemini Files API pre-upload for faster renders
-    console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
+// Document-level event delegation (ALWAYS active, runs immediately when script loads)
+// This is the most reliable method - works regardless of when script loads or elements appear
+// MUST be outside IIFE to ensure it always runs
+(function() {
+    'use strict';
+    document.addEventListener('click', function(e) {
+        const target = e.target;
+        const trigger = target && (target.id === 'see-it-trigger' || target.closest('#see-it-trigger'));
+        
+        if (trigger) {
+            console.log('[See It] 🔵 DOCUMENT DELEGATION CLICK FIRED');
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const modal = document.getElementById('see-it-modal');
+            if (modal) {
+                // Ensure modal is portaled to body
+                if (modal.parentElement !== document.body) {
+                    document.body.appendChild(modal);
+                }
+                
+                modal.classList.remove('hidden');
+                modal.style.display = 'block';
+                modal.style.position = 'fixed';
+                modal.style.top = '0';
+                modal.style.left = '0';
+                modal.style.right = '0';
+                modal.style.bottom = '0';
+                modal.style.width = '100%';
+                modal.style.height = '100%';
+                modal.style.zIndex = '999999';
+                modal.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                
+                // Lock scroll
+                const scrollY = window.scrollY;
+                document.body.style.position = 'fixed';
+                document.body.style.width = '100%';
+                document.body.style.top = `-${scrollY}px`;
+                
+                console.log('[See It] Document delegation: Modal opened');
+            } else {
+                console.error('[See It] Document delegation: Modal not found');
+            }
+        }
+    }, true);
+})();
 
-    // --- DOM Elements ---
-    const $ = id => document.getElementById(id);
+(function() {
+    const VERSION = '1.0.29'; // Gemini Files API pre-upload for faster renders
+    
+    // Function to initialize - runs when DOM is ready
+    function initSeeIt() {
+        console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now(), readyState: document.readyState });
+
+        // --- DOM Elements ---
+        const $ = id => document.getElementById(id);
 
     // Helper: check if element is visible (has non-zero dimensions)
     const isVisible = (el) => el && el.offsetWidth > 0 && el.offsetHeight > 0;
@@ -157,21 +207,6 @@ document.addEventListener('DOMContentLoaded', function () {
             fallbackTrigger.onclick = fallbackHandler;
         }
     }, 3000);
-    
-    // Also try delegation from document (catches clicks even if button is added later)
-    document.addEventListener('click', function(e) {
-        if (e.target && (e.target.id === 'see-it-trigger' || e.target.closest('#see-it-trigger'))) {
-            console.log('[See It] 🔵 DOCUMENT DELEGATION CLICK FIRED');
-            e.preventDefault();
-            e.stopPropagation();
-            const modal = document.getElementById('see-it-modal');
-            if (modal) {
-                modal.classList.remove('hidden');
-                modal.style.display = 'block';
-                console.log('[See It] Document delegation: Modal opened');
-            }
-        }
-    }, true);
     
     // Initialize when elements are ready
     waitForElements((trigger, modal) => {
@@ -2277,4 +2312,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     console.log('[See It] Initialization complete');
     }); // End of waitForElements callback
-});
+    } // End of initSeeIt function
+    
+    // Run immediately if DOM is ready, otherwise wait for DOMContentLoaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initSeeIt);
+    } else {
+        // DOM already loaded, run immediately
+        initSeeIt();
+    }
+})();
