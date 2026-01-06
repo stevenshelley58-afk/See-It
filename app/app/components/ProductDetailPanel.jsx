@@ -80,11 +80,10 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
         // If child provided config, use it
         if (footerConfig) {
             return (
-                <div className="flex items-center justify-end gap-3 w-full">
-                    {/* Mobile: Space between? Desktop: Aligned right. User said "Save + Edit aligned right" for Desktop */}
-
+                <div className="flex items-center w-full gap-3 md:justify-end">
+                    {/* Mobile: 50/50 buttons, Desktop: Aligned right */}
                     {footerConfig.tertiary && (
-                        <div className="mr-auto">
+                        <div className="mr-auto hidden md:block">
                             <Button
                                 variant="tertiary"
                                 onClick={footerConfig.tertiary.onClick}
@@ -101,7 +100,7 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                             variant="secondary"
                             onClick={footerConfig.secondary.onClick}
                             disabled={footerConfig.secondary.disabled}
-                            className={`min-w-[100px] ${footerConfig.secondary.className || ''}`}
+                            className={`flex-1 md:flex-none md:min-w-[100px] ${footerConfig.secondary.className || ''}`}
                         >
                             {footerConfig.secondary.label}
                         </Button>
@@ -113,7 +112,7 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                             onClick={footerConfig.primary.onClick}
                             disabled={footerConfig.primary.disabled}
                             loading={footerConfig.primary.loading}
-                            className={`min-w-[100px] ${footerConfig.primary.className || ''}`}
+                            className={`flex-1 md:flex-none md:min-w-[100px] ${footerConfig.primary.className || ''}`}
                         >
                             {footerConfig.primary.label}
                         </Button>
@@ -124,14 +123,19 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
 
         // Default Footer (Placement Tab mostly)
         return (
-            <div className="flex items-center justify-end gap-3 w-full">
-                <Button variant="secondary" onClick={onClose}>
+            <div className="flex items-center w-full gap-3 md:justify-end">
+                <Button 
+                    variant="secondary" 
+                    onClick={onClose}
+                    className="flex-1 md:flex-none"
+                >
                     Cancel
                 </Button>
                 <Button
                     variant="primary"
                     onClick={handlePlacementSave}
                     loading={fetcher.state !== 'idle'}
+                    className="flex-1 md:flex-none"
                 >
                     Save
                 </Button>
@@ -144,7 +148,7 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
             {/* Modal Container: fixed height layout */}
             <div
                 className="bg-white w-full max-w-4xl flex flex-col shadow-2xl relative sm:rounded-2xl overflow-hidden"
-                style={{ height: 'calc(100vh - 64px)', maxHeight: '100vh' }}
+                style={{ maxHeight: 'calc(100vh - 64px)', height: 'auto' }}
                 onClick={(e) => e.stopPropagation()}
             >
                 {isRefining ? (
@@ -159,7 +163,7 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                 ) : (
                     <>
                         {/* 1. Header (Fixed) */}
-                        <div className="h-[52px] lg:h-[56px] flex items-center justify-between px-4 lg:px-6 border-b border-neutral-200 bg-white shrink-0 z-10">
+                        <div className="h-[52px] lg:h-[56px] flex items-center justify-between px-4 lg:px-6 border-b border-neutral-200 bg-white flex-shrink-0 z-10">
                             <h2 className="text-lg font-bold text-neutral-900 truncate pr-4">{product.title}</h2>
                             <button
                                 onClick={onClose}
@@ -204,7 +208,7 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                                         onPrepareComplete={() => { }}
                                         onRefine={() => setIsRefining(true)}
                                         setFooterConfig={setFooterConfig}
-                                        onSave={handlePlacementSave}
+                                        onSave={onClose}
                                     />
                                 ) : (
                                     <div className="flex-1 overflow-y-auto p-4 lg:p-6 bg-neutral-50/30">
@@ -219,7 +223,7 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                         </div>
 
                         {/* 3. Footer (Fixed) */}
-                        <div className="h-[72px] lg:h-[64px] flex items-center px-4 lg:px-6 border-t border-neutral-200 bg-white shrink-0 z-20">
+                        <div className="h-[72px] lg:h-[64px] flex items-center px-4 lg:px-6 border-t border-neutral-200 bg-white flex-shrink-0 z-20">
                             {renderFooter()}
                         </div>
                     </>

@@ -36,11 +36,17 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         asset?.preparedImageUrlFresh || asset?.preparedImageUrl
     );
 
-    // Mode: "normal" | "editing"
+    // Mode: "normal" | "edit"
     const [mode, setMode] = useState("normal");
 
-    // View: "prepared" | "original"
-    const [view, setView] = useState("prepared");
+    // View: "original" | "result"
+    const [view, setView] = useState(() => {
+        const hasResult = !!(asset?.preparedImageUrlFresh || asset?.preparedImageUrl);
+        return hasResult ? "result" : "original";
+    });
+    
+    // Derived: resultExists
+    const resultExists = !!preparedImageUrl;
 
     // Edit Tools
     const [brushMode, setBrushMode] = useState("add"); // "add" | "remove"
@@ -57,17 +63,21 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
     const isFetcherLoading = fetcher.state !== "idle";
     const [isBusy, setIsBusy] = useState(false); // Local busy state for smooth transitions
 
-    const status = preparedImageUrl ? "ready" : "none";
-    const hasPrepared = status === "ready";
     const isLoading = isFetcherLoading || isBusy;
     const canInteract = !isLoading;
 
     // Sync prop changes
     useEffect(() => {
         if (asset?.preparedImageUrlFresh || asset?.preparedImageUrl) {
-            setPreparedImageUrl(asset.preparedImageUrlFresh || asset.preparedImageUrl);
+            const newUrl = asset.preparedImageUrlFresh || asset.preparedImageUrl;
+            const hadResult = !!preparedImageUrl;
+            setPreparedImageUrl(newUrl);
+            // Update view if result now exists and we didn't have one before
+            if (newUrl && !hadResult && mode === "normal") {
+                setView("result");
+            }
         }
-    }, [asset]);
+    }, [asset, preparedImageUrl, mode]);
 
     // Handle Fetcher Responses
     useEffect(() => {
@@ -75,14 +85,18 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             if (fetcher.data.success) {
                 if (fetcher.data.preparedImageUrl) {
                     setPreparedImageUrl(fetcher.data.preparedImageUrl);
+                    // If we just generated a result, switch to result view
+                    if (mode === 'normal' && !resultExists) {
+                        setView("result");
+                    }
                 }
                 setError(null);
                 if (onPrepareComplete) onPrepareComplete(fetcher.data);
 
                 // If we just finished applying a mask, switch back to normal
-                if (mode === 'editing' && fetcher.data.preparedImageUrl) {
+                if (mode === 'edit' && fetcher.data.preparedImageUrl) {
                     setMode("normal");
-                    setView("prepared");
+                    setView("result");
                     // Keep strokes in history but we are done
                 }
             } else {
@@ -90,7 +104,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             }
             setIsBusy(false);
         }
-    }, [fetcher.data, fetcher.state, onPrepareComplete, mode]);
+    }, [fetcher.data, fetcher.state, onPrepareComplete, mode, resultExists]);
 
 
     // Initialize Canvas Image
@@ -129,7 +143,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
     };
 
     const handleEnterEdit = () => {
-        setMode("editing");
+        setMode("edit");
         // Always start editing on "original" so you see what you are doing
         setView("original");
         setBrushMode("add");
@@ -137,7 +151,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
     const handleCancelEdit = () => {
         setMode("normal");
-        setView(hasPrepared ? "prepared" : "original");
+        setView(resultExists ? "result" : "original");
     };
 
     // Convert strokes to mask and submit
@@ -174,11 +188,33 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         });
     };
 
+    // Handle Save: If no result exists, auto-generate first, then show result. If result exists, save and exit.
+    const handleSave = useCallback(() => {
+        if (!resultExists) {
+            // Auto-generate first
+            setError(null);
+            setIsBusy(true);
+            
+            const formData = new FormData();
+            formData.append('productId', product.id.split('/').pop());
+            formData.append('imageUrl', selectedImageUrl);
+            
+            fetcher.submit(formData, {
+                method: 'post',
+                action: '/api/products/remove-background'
+            });
+            // After fetcher completes, view will be set to "result" via useEffect
+        } else {
+            // Save and exit
+            if (onSave) onSave();
+        }
+    }, [resultExists, product.id, selectedImageUrl, fetcher, onSave]);
+
     // -- FOOTER INTEGRATION --
     useEffect(() => {
         if (!setFooterConfig) return;
 
-        if (mode === 'editing') {
+        if (mode === 'edit') {
             setFooterConfig({
                 primary: {
                     label: 'Apply',
@@ -194,34 +230,29 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             });
         } else {
             // Normal Mode
-            // Primary: Save (if ready) or Remove BG (if not)
+            // Primary: Save (auto-generates if no result, saves and exits if result exists)
             // Secondary: Edit
-            const isReady = hasPrepared;
             setFooterConfig({
-                primary: isReady ? {
+                primary: {
                     label: 'Save',
-                    onClick: onSave, // Trigger global save/close
+                    onClick: handleSave,
                     disabled: isLoading,
-                } : {
-                    label: 'Remove BG',
-                    onClick: handleRemoveBackground,
-                    disabled: isLoading,
-                    loading: isLoading
+                    loading: isLoading && !resultExists // Show loading when auto-generating
                 },
                 secondary: {
                     label: 'Edit',
                     onClick: handleEnterEdit,
-                    disabled: isLoading
+                    disabled: isLoading || !resultExists // Disable edit if no result exists
                 },
-                tertiary: isReady ? {
-                    label: 'Start Over (Auto)',
+                tertiary: resultExists ? {
+                    label: 'Start over',
                     onClick: handleStartOver,
                     disabled: isLoading,
-                    className: "text-red-600 hover:bg-red-50 hover:text-red-700 px-0"
+                    className: "text-red-600 hover:bg-red-50 hover:text-red-700 px-0 text-sm"
                 } : null
             });
         }
-    }, [mode, hasPrepared, isLoading, setFooterConfig, onSave, handleApplyEdits, handleCancelEdit, handleRemoveBackground, handleEnterEdit, handleStartOver]);
+    }, [mode, resultExists, isLoading, setFooterConfig, handleSave, handleApplyEdits, handleCancelEdit, handleEnterEdit, handleStartOver]);
 
 
     // -- HELPER: Draw strokes to a context --
@@ -268,18 +299,18 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
     // -- RENDER --
 
-    const showPrepared = mode === "normal" && hasPrepared && view === "prepared";
+    const showResult = mode === "normal" && resultExists && view === "result";
 
     return (
-        <div className="flex flex-col h-full font-['SF_Pro_Display',-apple-system,BlinkMacSystemFont,sans-serif]">
+        <div className="flex flex-col h-full min-h-0 font-['SF_Pro_Display',-apple-system,BlinkMacSystemFont,sans-serif]">
             {/* Hidden mask canvas for processing */}
             <canvas ref={maskCanvasRef} className="hidden" />
 
             {/* Content Region: Canvas + Overlays */}
             <div className="flex-1 min-h-0 relative bg-neutral-50 overflow-hidden flex items-center justify-center">
 
-                {/* Checkerboard Background */}
-                <div className={cx("absolute inset-0 pointer-events-none transition-opacity duration-300", showPrepared ? "opacity-100" : "opacity-0")}
+                {/* Checkerboard Background (only in result view) */}
+                <div className={cx("absolute inset-0 pointer-events-none transition-opacity duration-300", showResult ? "opacity-100" : "opacity-0")}
                     style={{
                         backgroundImage: 'repeating-conic-gradient(#e5e5e5 0% 25%, #f5f5f5 0% 50%)',
                         backgroundSize: '20px 20px'
@@ -287,14 +318,14 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                 />
 
                 {/* Content Container (Constrained) */}
-                <div className="relative w-full h-full p-4 lg:p-8 flex items-center justify-center">
+                <div className="relative w-full h-full p-4 lg:p-6 flex items-center justify-center min-h-0">
 
                     {isLoading && (
                         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm transition-all duration-300">
                             <div className="bg-white p-6 rounded-3xl shadow-xl border border-neutral-100 flex flex-col items-center gap-4">
                                 <Spinner size="large" />
                                 <div className="text-center">
-                                    <p className="font-bold text-neutral-900">{mode === 'editing' ? 'Applying Edits...' : 'Removing Background...'}</p>
+                                    <p className="font-bold text-neutral-900">{mode === 'edit' ? 'Applying Edits...' : 'Removing Background...'}</p>
                                     <p className="text-xs text-neutral-500 mt-1">This may take a few seconds</p>
                                 </div>
                             </div>
@@ -303,26 +334,26 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
                     {/* The Image (Card backed for contrast) */}
                     <div className={cx(
-                        "relative flex items-center justify-center transition-all duration-500",
-                        showPrepared ? "p-0" : ""
+                        "relative flex items-center justify-center transition-all duration-500 w-full h-full",
+                        showResult ? "p-0" : ""
                     )}>
-                        {showPrepared && (
-                            /* White card backing for prepared image to improve contrast */
+                        {showResult && (
+                            /* White card backing for result image to improve contrast */
                             <div className="absolute inset-4 bg-white rounded-xl shadow-2xl -z-10 opacity-0 animate-[fadeIn_0.5s_ease_forwards]" />
                         )}
 
                         <img
-                            src={showPrepared ? preparedImageUrl : selectedImageUrl}
+                            src={showResult ? preparedImageUrl : selectedImageUrl}
                             alt="Product"
                             className={cx(
-                                "max-h-[calc(100vh-280px)] max-w-full object-contain transition-all duration-300 select-none",
-                                showPrepared ? "drop-shadow-sm" : ""
+                                "max-h-full max-w-full w-auto h-auto object-contain transition-all duration-300 select-none",
+                                showResult ? "drop-shadow-sm" : ""
                             )}
                             draggable={false}
                         />
 
                         {/* Canvas Painter Overlay (Only in Edit Mode) */}
-                        {mode === "editing" && !isLoading && (
+                        {mode === "edit" && !isLoading && (
                             <MaskPainter
                                 imageUrl={selectedImageUrl}
                                 strokes={strokeStore.strokes}
@@ -342,8 +373,8 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                     </div>
                 </div>
 
-                {/* View Toggle Pill (Normal Mode + Has Prepared) - Bottom Center of Canvas */}
-                {mode === "normal" && hasPrepared && (
+                {/* View Toggle Pill (Normal Mode + Has Result) - Bottom Center of Canvas */}
+                {mode === "normal" && resultExists && (
                     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
                         <div className="flex p-1 bg-white/90 backdrop-blur border border-neutral-200 rounded-full shadow-lg">
                             <button
@@ -356,20 +387,20 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                                 Original
                             </button>
                             <button
-                                onClick={() => setView("prepared")}
+                                onClick={() => setView("result")}
                                 className={cx(
                                     "px-4 py-2 rounded-full text-xs font-bold transition-all duration-200",
-                                    view === "prepared" ? "bg-emerald-500 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
+                                    view === "result" ? "bg-emerald-500 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
                                 )}
                             >
-                                Prepared
+                                Result
                             </button>
                         </div>
                     </div>
                 )}
 
-                {/* Edit Tools Overlay (Editing Mode) - Bottom Center of Canvas */}
-                {mode === "editing" && (
+                {/* Edit Tools Overlay (Edit Mode) - Bottom Center of Canvas */}
+                {mode === "edit" && (
                     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 w-[90%] max-w-[400px]">
                         <div className="bg-white/95 backdrop-blur-md border border-neutral-200 shadow-xl rounded-2xl p-3 flex flex-col gap-3 md:flex-row md:items-center">
                             {/* Brush Mode */}
@@ -412,6 +443,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                                     onChange={(e) => setBrushSize(parseInt(e.target.value))}
                                     className="flex-1 h-1.5 bg-neutral-100 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-neutral-900"
                                 />
+                                <span className="text-xs font-medium text-neutral-600 min-w-[32px] text-right">{brushSize}px</span>
                                 <div className="w-4 h-4 bg-neutral-900 rounded-full shrink-0 border border-neutral-200 shadow-sm" style={{ transform: `scale(${brushSize / 40})` }} />
                             </div>
 
@@ -442,8 +474,8 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
             {/* Thumbnails Row (Fixed Height) */}
             {mode === "normal" && allImages.length > 1 && (
-                <div className="bg-white border-t border-neutral-100 shrink-0 z-10 w-full overflow-hidden">
-                    <div className="h-[68px] lg:h-[76px] flex items-center gap-3 overflow-x-auto px-4 lg:px-6 hide-scrollbar">
+                <div className="bg-white border-t border-neutral-100 flex-shrink-0 z-10 w-full overflow-hidden">
+                    <div className="h-[68px] lg:h-[76px] flex items-center gap-3 overflow-x-auto overflow-y-hidden px-4 lg:px-6 hide-scrollbar whitespace-nowrap">
                         {allImages.map((img, idx) => (
                             <button
                                 key={idx}
