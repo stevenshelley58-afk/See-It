@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 export default async function CostsPage() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   const requests = await db
     .select()

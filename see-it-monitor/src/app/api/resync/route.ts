@@ -19,10 +19,11 @@ export async function POST() {
       sessionsProcessed: sessions.length,
       timestamp: new Date().toISOString(),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({
       status: 'error',
-      message: error.message || 'Unknown error',
+      message,
       timestamp: new Date().toISOString(),
     }, { status: 500 });
   }

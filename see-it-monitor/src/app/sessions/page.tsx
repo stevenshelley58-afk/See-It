@@ -1,5 +1,5 @@
-import { listSessions } from '@/lib/gcs';
-import { formatTimeAgo, getStepLabel, getStatusColor, truncateShop, formatDuration } from '@/lib/utils';
+import { getGcsSessionHealthSummary, listSessions } from '@/lib/gcs';
+import { formatTimeAgo, getStepLabel, getStatusColor, truncateShop } from '@/lib/utils';
 import Link from 'next/link';
 import Image from 'next/image';
 
@@ -7,7 +7,23 @@ export const dynamic = 'force-dynamic'; // Force dynamic rendering since we need
 export const revalidate = 30;
 
 export default async function SessionsPage() {
-    const sessions = await listSessions({ limit: 50 });
+    let sessions: Awaited<ReturnType<typeof listSessions>> = [];
+    let gcsHealth: Awaited<ReturnType<typeof getGcsSessionHealthSummary>> | null = null;
+
+    try {
+        sessions = await listSessions({ limit: 50, offset: 0 });
+    } catch {
+        // listSessions already logs; fall through to health summary for user-facing diagnostics
+        sessions = [];
+    }
+
+    if (sessions.length === 0) {
+        try {
+            gcsHealth = await getGcsSessionHealthSummary();
+        } catch {
+            gcsHealth = null;
+        }
+    }
 
     return (
         <div className="space-y-6">
@@ -19,6 +35,24 @@ export default async function SessionsPage() {
             </div>
 
             <div className="card divide-y divide-gray-100">
+                {sessions.length === 0 && (
+                    <div className="p-8 space-y-3">
+                        <div className="text-center text-secondary">
+                            No sessions found
+                        </div>
+                        <div className="text-sm text-gray-500 text-center">
+                            If this is unexpected, check the health endpoint for GCS credentials/bucket status:{' '}
+                            <a className="underline" href="/api/health">/api/health</a>
+                        </div>
+                        {gcsHealth && (
+                            <div className="mx-auto max-w-xl text-xs text-gray-500 bg-gray-50 rounded-lg p-3">
+                                <div><span className="font-medium">Bucket</span>: {gcsHealth.bucketName}</div>
+                                <div><span className="font-medium">Bucket exists</span>: {String(gcsHealth.bucketExists)}</div>
+                                <div><span className="font-medium">meta.json files (sample)</span>: {gcsHealth.metaFileCount}</div>
+                            </div>
+                        )}
+                    </div>
+                )}
                 {sessions.map((session) => {
                     const statusColors = getStatusColor(session.status);
                     return (
@@ -72,12 +106,6 @@ export default async function SessionsPage() {
                         </Link>
                     );
                 })}
-
-                {sessions.length === 0 && (
-                    <div className="p-12 text-center text-secondary">
-                        No sessions found
-                    </div>
-                )}
             </div>
         </div>
     );

@@ -41,7 +41,7 @@ export function formatTimeAgo(dateInput: string | Date | null | undefined): stri
 /**
  * Get step label for display
  */
-export function getStepLabel(step: StepName): string {
+export function getStepLabel(step: StepName | string): string {
     const labels: Record<StepName | string, string> = {
         room: 'Room',
         mask: 'Mask',

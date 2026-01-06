@@ -5,6 +5,7 @@
 
 import { Storage } from '@google-cloud/storage';
 import type { SessionMeta, ShopIndex, SessionCardData, FunnelData, ErrorSummary, ShopStats } from './types';
+import crypto from 'crypto';
 
 const PROJECT_ID = process.env.GCS_PROJECT_ID;
 const SESSION_BUCKET = process.env.GCS_SESSION_BUCKET || 'see-it-sessions';
@@ -62,7 +63,7 @@ export async function listSessions(options: {
 }): Promise<SessionCardData[]> {
     const storage = getStorage();
     const bucket = storage.bucket(SESSION_BUCKET);
-    const { limit = 50, status, shop } = options;
+    const { limit = 50, offset = 0, status, shop } = options;
 
     try {
         // Check if bucket exists first
@@ -72,41 +73,50 @@ export async function listSessions(options: {
             return [];
         }
 
-        // List session directories
-        const [files] = await bucket.getFiles({
-            prefix: 'sessions/',
-            delimiter: '/',
-        });
+        // IMPORTANT: GCS "prefix" listing is not time-ordered. We must load metas, sort,
+        // and only then apply pagination. Otherwise the UI can look unsorted / miss new sessions.
+        const [files] = await bucket.getFiles({ prefix: 'sessions/' });
+        const metaFiles = files.filter((f) => f.name.endsWith('/meta.json'));
 
-        // Get meta.json for each session
-        const sessions: SessionCardData[] = [];
+        // Cap worst-case work to keep Vercel functions healthy.
+        // If you exceed this, consider adding a precomputed index file in GCS.
+        const MAX_META_FILES_TO_SCAN = 5000;
+        const metaFileNames = metaFiles.slice(0, MAX_META_FILES_TO_SCAN).map((f) => f.name);
 
-        // Get prefixes (session directories)
-        const [, , apiResponse] = await bucket.getFiles({
-            prefix: 'sessions/',
-            delimiter: '/',
-            autoPaginate: false,
-        });
+        const metas: Array<{ prefix: string; meta: SessionMeta }> = [];
 
-        const prefixes = (apiResponse as { prefixes?: string[] })?.prefixes || [];
+        // Download/parse meta.json with modest concurrency
+        const CONCURRENCY = 10;
+        let idx = 0;
 
-        for (const prefix of prefixes.slice(0, limit * 2)) {
-            try {
-                const metaFile = bucket.file(`${prefix}meta.json`);
-                const [exists] = await metaFile.exists();
-                if (!exists) continue;
+        async function worker() {
+            while (idx < metaFileNames.length) {
+                const myIdx = idx++;
+                const name = metaFileNames[myIdx];
+                try {
+                    const [content] = await bucket.file(name).download();
+                    const meta: SessionMeta = JSON.parse(content.toString());
+                    if (status && meta.status !== status) continue;
+                    if (shop && meta.shop !== shop) continue;
+                    const prefix = name.replace(/meta\.json$/, '');
+                    metas.push({ prefix, meta });
+                } catch (error) {
+                    console.error(`Failed to read session meta ${name}:`, error);
+                }
+            }
+        }
 
-                const [content] = await metaFile.download();
-                const meta: SessionMeta = JSON.parse(content.toString());
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, metaFileNames.length) }, () => worker()));
 
-                // Apply filters
-                if (status && meta.status !== status) continue;
-                if (shop && meta.shop !== shop) continue;
+        metas.sort((a, b) => new Date(b.meta.updatedAt).getTime() - new Date(a.meta.updatedAt).getTime());
 
+        const page = metas.slice(offset, offset + limit);
+
+        return await Promise.all(
+            page.map(async ({ prefix, meta }) => {
                 const lastStep = meta.steps[meta.steps.length - 1];
                 const latestFile = lastStep?.file || lastStep?.files?.[0];
-
-                sessions.push({
+                return {
                     sessionId: meta.sessionId,
                     shop: meta.shop,
                     status: meta.status,
@@ -118,21 +128,84 @@ export async function listSessions(options: {
                     device: meta.device,
                     browser: meta.browser,
                     productTitle: meta.product?.title,
-                });
-
-                if (sessions.length >= limit) break;
-            } catch (error) {
-                console.error(`Failed to read session ${prefix}:`, error);
-            }
-        }
-
-        // Sort by updatedAt descending
-        sessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-
-        return sessions;
+                };
+            })
+        );
     } catch (error) {
         console.error('[GCS] Failed to list sessions:', error);
         return [];
+    }
+}
+
+export async function getGcsSessionHealthSummary(): Promise<{
+    bucketName: string;
+    bucketExists: boolean;
+    metaFileCount: number;
+}> {
+    const storage = getStorage();
+    const bucket = storage.bucket(SESSION_BUCKET);
+    const [bucketExists] = await bucket.exists();
+    if (!bucketExists) {
+        return { bucketName: SESSION_BUCKET, bucketExists: false, metaFileCount: 0 };
+    }
+    const [files] = await bucket.getFiles({ prefix: 'sessions/', maxResults: 2000 });
+    const metaFileCount = files.filter((f) => f.name.endsWith('/meta.json')).length;
+    return { bucketName: SESSION_BUCKET, bucketExists: true, metaFileCount };
+}
+
+export type AnalyticsEventForStorage = {
+    type: string;
+    sessionId?: string;
+    shopDomain: string;
+    data: Record<string, unknown>;
+    timestamp: string;
+    deviceContext?: Record<string, unknown>;
+};
+
+export async function writeAnalyticsEventsToGcs(args: {
+    events: AnalyticsEventForStorage[];
+    requestInfo?: {
+        origin?: string | null;
+        userAgent?: string | null;
+        ip?: string | null;
+    };
+}): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+    try {
+        const storage = getStorage();
+        const bucket = storage.bucket(SESSION_BUCKET);
+
+        const [bucketExists] = await bucket.exists();
+        if (!bucketExists) {
+            return { ok: false, error: `Bucket ${SESSION_BUCKET} does not exist` };
+        }
+
+        const now = new Date();
+        const y = now.getUTCFullYear();
+        const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(now.getUTCDate()).padStart(2, '0');
+
+        const nonce = crypto.randomBytes(8).toString('hex');
+        const filePath = `analytics/events/${y}/${m}/${d}/${now.toISOString()}_${nonce}.json`;
+
+        const payload = {
+            serverTimestamp: now.toISOString(),
+            request: {
+                origin: args.requestInfo?.origin || null,
+                userAgent: args.requestInfo?.userAgent || null,
+                ip: args.requestInfo?.ip || null,
+            },
+            events: args.events,
+        };
+
+        await bucket.file(filePath).save(JSON.stringify(payload), {
+            contentType: 'application/json',
+            resumable: false,
+        });
+
+        return { ok: true, path: filePath };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: message };
     }
 }
 
@@ -298,12 +371,6 @@ export async function listAllShops(): Promise<ShopIndex[]> {
         if (!bucketExists) {
             return [];
         }
-
-        // List all shop directories
-        const [files] = await bucket.getFiles({
-            prefix: 'shops/',
-            delimiter: '/',
-        });
 
         // Get prefixes (shop directories)
         const [, , apiResponse] = await bucket.getFiles({

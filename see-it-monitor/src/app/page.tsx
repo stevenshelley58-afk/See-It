@@ -158,7 +158,7 @@ export default function ControlRoom() {
 }
 
 function SessionCard({ session }: { session: LiveSession }) {
-  const statusColors = getStatusColor(session.status as any);
+  const statusColors = getStatusColor(session.status);
   const stepNumber = session.stepsCompleted;
 
   return (
@@ -183,7 +183,7 @@ function SessionCard({ session }: { session: LiveSession }) {
 
           <div className="flex items-center justify-between text-sm">
             <span className="text-secondary">
-              {session.currentStep ? `Step ${stepNumber}: ${getStepLabel(session.currentStep as any)}` : 'Starting...'}
+              {session.currentStep ? `Step ${stepNumber}: ${getStepLabel(session.currentStep)}` : 'Starting...'}
             </span>
             <span className="text-gray-400">{formatTimeAgo(session.updatedAt)}</span>
           </div>

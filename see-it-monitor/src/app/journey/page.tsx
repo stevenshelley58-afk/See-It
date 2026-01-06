@@ -6,7 +6,8 @@ import JourneyCharts from './JourneyCharts';
 export const dynamic = 'force-dynamic';
 
 export default async function JourneyPage() {
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
   const allSessions = await db
     .select()

@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { analyticsEvents, sessions, sessionSteps, errors, aiRequests, shops } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { writeAnalyticsEventsToGcs } from '@/lib/gcs';
 
 // Data retention: 1 year
 const MAX_EVENT_AGE_MS = 365 * 24 * 60 * 60 * 1000;
@@ -77,31 +78,30 @@ function isAllowedOrigin(origin: string | null): boolean {
   }
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    // CORS handling
-    const origin = getOriginFromRequest(request);
-    if (origin && isAllowedOrigin(origin)) {
-      // Set CORS headers
-      const headers = new Headers();
-      headers.set('Access-Control-Allow-Origin', origin);
-      headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-      headers.set('Access-Control-Allow-Headers', 'Content-Type');
-      headers.set('Access-Control-Max-Age', '86400');
-      
-      // Handle preflight
-      if (request.method === 'OPTIONS') {
-        return new NextResponse(null, { status: 204, headers });
-      }
-    }
+function buildCorsHeaders(origin: string | null): Headers {
+  const headers = new Headers();
+  if (origin && isAllowedOrigin(origin)) {
+    headers.set('Access-Control-Allow-Origin', origin);
+    headers.set('Vary', 'Origin');
+    headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    headers.set('Access-Control-Allow-Headers', 'Content-Type');
+    headers.set('Access-Control-Max-Age', '86400');
+  }
+  return headers;
+}
 
+export async function POST(request: NextRequest) {
+  const origin = getOriginFromRequest(request);
+  const corsHeaders = buildCorsHeaders(origin);
+
+  try {
     const body = await request.json();
     const { events } = body;
 
     if (!Array.isArray(events) || events.length === 0) {
       return NextResponse.json(
         { error: 'Events array is required' },
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
 
@@ -122,6 +122,23 @@ export async function POST(request: NextRequest) {
 
       processedEvents.push(event);
     }
+
+    // Always persist raw events to GCS as an append-only log so we can "store everything for now"
+    const gcsResult = await writeAnalyticsEventsToGcs({
+      events: processedEvents.map((e) => ({
+        type: e.type,
+        sessionId: e.sessionId,
+        shopDomain: e.shopDomain,
+        data: e.data,
+        timestamp: e.timestamp,
+        deviceContext: e.deviceContext as Record<string, unknown> | undefined,
+      })),
+      requestInfo: {
+        origin,
+        userAgent: request.headers.get('user-agent'),
+        ip: request.headers.get('x-forwarded-for')?.split(',')[0] || null,
+      },
+    });
 
     // Process events in batch
     const insertPromises: Promise<unknown>[] = [];
@@ -173,12 +190,17 @@ export async function POST(request: NextRequest) {
       success: true,
       processed: processedEvents.length,
       errors: errors.length > 0 ? errors : undefined,
-    });
+      stored: {
+        gcs: gcsResult.ok,
+        gcsPath: gcsResult.ok ? gcsResult.path : null,
+        gcsError: gcsResult.ok ? null : gcsResult.error,
+      },
+    }, { headers: corsHeaders });
   } catch (error) {
     console.error('[Analytics API] Error processing events:', error);
     return NextResponse.json(
       { error: 'Failed to process events' },
-      { status: 500 }
+      { status: 500, headers: corsHeaders }
     );
   }
 }
@@ -455,14 +477,6 @@ async function handleAIRequest(event: AnalyticsEvent) {
 // Handle OPTIONS for CORS preflight
 export async function OPTIONS(request: NextRequest) {
   const origin = getOriginFromRequest(request);
-  const headers = new Headers();
-  
-  if (origin && isAllowedOrigin(origin)) {
-    headers.set('Access-Control-Allow-Origin', origin);
-    headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    headers.set('Access-Control-Allow-Headers', 'Content-Type');
-    headers.set('Access-Control-Max-Age', '86400');
-  }
-  
+  const headers = buildCorsHeaders(origin);
   return new NextResponse(null, { status: 204, headers });
 }

@@ -8,6 +8,13 @@ import { getStorage } from '@/lib/gcs';
 
 const SESSION_BUCKET = process.env.GCS_SESSION_BUCKET || 'see-it-sessions';
 
+type HealthSessionSummary = {
+  sessionId: string;
+  shop: string;
+  updatedAt: string;
+  stepsCompleted: number;
+};
+
 export async function GET() {
   try {
     const storage = getStorage();
@@ -28,7 +35,7 @@ export async function GET() {
 
     // Try to list some sessions to verify access
     let sessionCount = 0;
-    let latestSession: any = null;
+    let latestSession: HealthSessionSummary | null = null;
 
     try {
       const [files] = await bucket.getFiles({
@@ -53,16 +60,24 @@ export async function GET() {
         const [exists] = await metaFile.exists();
         if (exists) {
           const [content] = await metaFile.download();
-          const meta = JSON.parse(content.toString());
+          const meta: unknown = JSON.parse(content.toString());
+          const m = meta as Partial<{
+            sessionId: string;
+            shop: string;
+            updatedAt: string;
+            steps: Array<{ status?: string }>;
+          }>;
           latestSession = {
-            sessionId: meta.sessionId,
-            shop: meta.shop,
-            updatedAt: meta.updatedAt,
-            stepsCompleted: meta.steps.filter((s: any) => s.status === 'success').length,
+            sessionId: m.sessionId || sessionId,
+            shop: m.shop || '',
+            updatedAt: m.updatedAt || '',
+            stepsCompleted: Array.isArray(m.steps)
+              ? m.steps.filter((s) => s?.status === 'success').length
+              : 0,
           };
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[Health] Error checking sessions:', error);
       // Continue with available info
     }
@@ -74,10 +89,12 @@ export async function GET() {
       sessionCount,
       latestSession,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({
       status: 'error',
-      message: error.message || 'Unknown error',
+      message,
       gcsConnected: false,
       sessionCount: 0,
       latestSession: null,
