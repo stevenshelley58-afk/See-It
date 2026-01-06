@@ -2,6 +2,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const VERSION = '1.0.29'; // Gemini Files API pre-upload for faster renders
     console.log('[See It] === SEE IT MODAL LOADED ===', { VERSION, timestamp: Date.now() });
 
+    // --- DOM Elements ---
+    const $ = id => document.getElementById(id);
+
     // Helper: check if element is visible (has non-zero dimensions)
     const isVisible = (el) => el && el.offsetWidth > 0 && el.offsetHeight > 0;
 
@@ -91,17 +94,94 @@ document.addEventListener('DOMContentLoaded', function () {
             img.src = URL.createObjectURL(file);
         });
     }
-
-    // --- DOM Elements ---
-    const $ = id => document.getElementById(id);
-    const trigger = $('see-it-trigger');
-    const triggerWidget = trigger?.closest('.see-it-widget-hook');
-    const modal = $('see-it-modal');
-
-    if (!trigger || !modal) {
-        console.log('[See It] Button not rendered - product may not have a featured image');
-        return;
+    
+    // Helper to wait for elements (Shopify theme extensions may inject after DOMContentLoaded)
+    function waitForElements(callback, maxRetries = 20) {
+        const $ = id => document.getElementById(id);
+        let retries = 0;
+        const check = () => {
+            const trigger = $('see-it-trigger');
+            const modal = $('see-it-modal');
+            
+            if (trigger && modal) {
+                console.log('[See It] Elements found' + (retries > 0 ? ` after ${retries} retries` : ' immediately'));
+                callback(trigger, modal);
+            } else if (retries < maxRetries) {
+                retries++;
+                setTimeout(check, 100);
+            } else {
+                console.log('[See It] ⚠️ Button not rendered after', retries, 'retries');
+                console.log('[See It] Debug - trigger:', trigger, 'modal:', modal);
+                console.log('[See It] All see-it elements:', Array.from(document.querySelectorAll('[id*="see-it"]')).map(el => ({
+                    id: el.id,
+                    tagName: el.tagName,
+                    visible: el.offsetWidth > 0 && el.offsetHeight > 0
+                })));
+            }
+        };
+        check();
     }
+    
+    // Global fallback: also try to attach listener after a delay (in case elements appear very late)
+    setTimeout(() => {
+        const fallbackTrigger = document.getElementById('see-it-trigger');
+        const fallbackModal = document.getElementById('see-it-modal');
+        console.log('[See It] 🔄 Fallback check (3s):', {
+            trigger: !!fallbackTrigger,
+            modal: !!fallbackModal,
+            triggerVisible: fallbackTrigger ? (fallbackTrigger.offsetWidth > 0 && fallbackTrigger.offsetHeight > 0) : false
+        });
+        
+        if (fallbackTrigger && !fallbackTrigger.dataset.listenerAttached) {
+            console.log('[See It] 🔄 Fallback: Found trigger button late, attaching listener');
+            fallbackTrigger.dataset.listenerAttached = 'true';
+            
+            const fallbackHandler = function(e) {
+                console.log('[See It] 🔵 FALLBACK CLICK HANDLER FIRED');
+                e.preventDefault();
+                e.stopPropagation();
+                // Try to find modal and open it
+                const modal = document.getElementById('see-it-modal');
+                if (modal) {
+                    modal.classList.remove('hidden');
+                    modal.style.display = 'block';
+                    modal.style.position = 'fixed';
+                    modal.style.zIndex = '999999';
+                    console.log('[See It] Fallback: Modal opened');
+                } else {
+                    console.error('[See It] Fallback: Modal not found');
+                }
+            };
+            
+            fallbackTrigger.addEventListener('click', fallbackHandler);
+            fallbackTrigger.onclick = fallbackHandler;
+        }
+    }, 3000);
+    
+    // Also try delegation from document (catches clicks even if button is added later)
+    document.addEventListener('click', function(e) {
+        if (e.target && (e.target.id === 'see-it-trigger' || e.target.closest('#see-it-trigger'))) {
+            console.log('[See It] 🔵 DOCUMENT DELEGATION CLICK FIRED');
+            e.preventDefault();
+            e.stopPropagation();
+            const modal = document.getElementById('see-it-modal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                modal.style.display = 'block';
+                console.log('[See It] Document delegation: Modal opened');
+            }
+        }
+    }, true);
+    
+    // Initialize when elements are ready
+    waitForElements((trigger, modal) => {
+        console.log('[See It] ✅ Initializing modal with elements:', {
+            triggerId: trigger.id,
+            modalId: modal.id,
+            triggerVisible: trigger.offsetWidth > 0 && trigger.offsetHeight > 0
+        });
+        
+        const triggerWidget = trigger?.closest('.see-it-widget-hook');
 
     // --- Modal placement & scroll lock ---
     let savedScrollY = 0;
@@ -1337,7 +1417,28 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     // --- Modal Open/Close ---
-    trigger.addEventListener('click', async () => {
+    if (!trigger) {
+        console.error('[See It] Trigger button not found, cannot attach click listener');
+        console.error('[See It] Available elements:', Array.from(document.querySelectorAll('[id*="see-it"]')).map(el => el.id));
+        console.error('[See It] All buttons on page:', Array.from(document.querySelectorAll('button')).map(b => ({ id: b.id, classes: b.className })));
+        return;
+    }
+    
+    console.log('[See It] ✅ Trigger button found:', {
+        id: trigger.id,
+        tagName: trigger.tagName,
+        visible: trigger.offsetWidth > 0 && trigger.offsetHeight > 0,
+        disabled: trigger.disabled,
+        parentElement: trigger.parentElement?.tagName
+    });
+    
+    console.log('[See It] Attaching click listener to trigger button:', trigger.id);
+    
+    // Store the handler function
+    const handleClick = async (e) => {
+        console.log('[See It] 🔵 CLICK EVENT FIRED!', e.type);
+        e.preventDefault();
+        e.stopPropagation();
         console.log('[See It] Modal opened');
         
         // Track AR button click
@@ -1408,7 +1509,21 @@ document.addEventListener('DOMContentLoaded', function () {
             state.uploadComplete = false;
             showScreen('entry');
         }
-    });
+    };
+    
+    // Attach listener with multiple methods for maximum compatibility
+    trigger.addEventListener('click', handleClick, { capture: true });
+    trigger.addEventListener('click', handleClick, { capture: false });
+    
+    // Also set onclick as fallback (runs after addEventListener)
+    const originalOnclick = trigger.onclick;
+    trigger.onclick = function(e) {
+        console.log('[See It] 🔵 ONCLICK FIRED (fallback)');
+        if (originalOnclick) originalOnclick.call(this, e);
+        handleClick(e);
+    };
+    
+    console.log('[See It] ✅ Click listeners attached successfully');
 
     const closeModal = () => {
         // Track session end (abandoned)
@@ -2161,4 +2276,5 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     console.log('[See It] Initialization complete');
+    }); // End of waitForElements callback
 });
