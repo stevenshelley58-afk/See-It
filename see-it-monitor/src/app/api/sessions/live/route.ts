@@ -106,13 +106,13 @@ export async function GET(request: NextRequest) {
         .slice(0, 100);
 
       const recentCompletions = gcsSessions
-        .filter((s) => (s.status === 'complete' || s.status === 'completed') && new Date(s.updatedAt).getTime() > fiveMinutesAgoMs)
+        .filter((s) => s.status === 'complete' && new Date(s.updatedAt).getTime() > fiveMinutesAgoMs)
         .slice(0, 50);
 
       // Basic recent errors: sessions marked failed or any step error in the last 5 minutes (best-effort from GCS meta)
       const recentErrors = gcsSessions
         .filter((s) => new Date(s.updatedAt).getTime() > fiveMinutesAgoMs)
-        .filter((s) => s.status === 'failed' || s.status === 'error')
+        .filter((s) => s.status === 'failed')
         .slice(0, 50)
         .map((s) => ({
           id: `gcs_${s.sessionId}`,
