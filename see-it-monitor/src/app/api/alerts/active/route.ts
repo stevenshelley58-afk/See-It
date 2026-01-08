@@ -19,10 +19,8 @@ export async function GET() {
     
     return NextResponse.json(activeAlerts);
   } catch (error) {
-    console.error('[Alerts API] Error:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch alerts' },
-      { status: 500 }
-    );
+    // Avoid breaking the dashboard if alerts can't be computed (e.g., DB not ready).
+    console.warn('[Alerts API] Failed to evaluate alerts, returning empty list:', error);
+    return NextResponse.json([]);
   }
 }

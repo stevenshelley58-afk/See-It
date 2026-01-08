@@ -19,7 +19,7 @@ export async function GET() {
     const sessions = await listSessions({ limit: 1000, offset: 0 });
 
     const totalSessions = sessions.length;
-    const completedSessions = sessions.filter(s => s.status === 'complete' || s.status === 'completed').length;
+    const completedSessions = sessions.filter(s => s.status === 'complete').length;
     const successRate = totalSessions > 0 ? Math.round((completedSessions / totalSessions) * 100) : 0;
 
     const activeShops = new Set(

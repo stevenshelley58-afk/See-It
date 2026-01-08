@@ -137,7 +137,8 @@ export async function GET(request: NextRequest) {
           stepsCompleted: s.stepsCompleted,
           startedAt: s.startedAt,
           updatedAt: s.updatedAt,
-          endedAt: (s.status === 'complete' || s.status === 'completed') ? s.updatedAt : null,
+          // These are filtered as "in_progress" above, so never ended.
+          endedAt: null,
           deviceType: s.device || null,
           browser: s.browser || null,
         })),
@@ -151,6 +152,7 @@ export async function GET(request: NextRequest) {
           stepsCompleted: s.stepsCompleted,
           startedAt: s.startedAt,
           updatedAt: s.updatedAt,
+          // These are filtered as "complete" above, so endedAt is the same as updatedAt.
           endedAt: s.updatedAt,
           deviceType: s.device || null,
           browser: s.browser || null,
