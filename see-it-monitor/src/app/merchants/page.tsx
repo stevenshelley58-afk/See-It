@@ -3,7 +3,7 @@ import { shops } from '@/lib/db/schema';
 import { desc } from 'drizzle-orm';
 import Link from 'next/link';
 import { truncateShop } from '@/lib/utils';
-import { listAllShops } from '@/lib/gcs';
+import { deriveSessionsFromAnalytics, listAllShops } from '@/lib/gcs';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,25 +34,61 @@ export default async function MerchantsPage() {
     source = 'gcs';
 
     const indexes = await listAllShops();
-    allShops = indexes
-      .map((idx) => {
-        const completedSessions = idx.sessions.filter((s) => s.status === 'complete').length;
-        const lastStartedAt = idx.sessions[0]?.startedAt ? new Date(idx.sessions[0].startedAt) : null;
 
-        return {
-          id: idx.shop,
-          domain: idx.shop,
-          totalSessions: idx.totalSessions,
-          completedSessions,
-          lastSessionAt: lastStartedAt,
+    if (indexes.length > 0) {
+      allShops = indexes
+        .map((idx) => {
+          const completedSessions = idx.sessions.filter((s) => s.status === 'complete').length;
+          const lastStartedAt = idx.sessions[0]?.startedAt ? new Date(idx.sessions[0].startedAt) : null;
+
+          return {
+            id: idx.shop,
+            domain: idx.shop,
+            totalSessions: idx.totalSessions,
+            completedSessions,
+            lastSessionAt: lastStartedAt,
+            needsAttention: false,
+            installedAt: null,
+            isEmbedded: false,
+            arEnabledProducts: 0,
+            attentionReason: null,
+          };
+        })
+        .sort((a, b) => (b.lastSessionAt?.getTime() || 0) - (a.lastSessionAt?.getTime() || 0));
+    } else {
+      // If the session-meta index isn't present, fall back to analytics event logs (what the extension sends).
+      const derived = await deriveSessionsFromAnalytics({ lookbackMs: 7 * 24 * 60 * 60 * 1000 });
+
+      const byShop = new Map<
+        string,
+        { total: number; completed: number; lastAt: Date | null }
+      >();
+
+      for (const s of derived.sessions) {
+        const key = s.shopDomain;
+        const existing = byShop.get(key) || { total: 0, completed: 0, lastAt: null };
+        existing.total += 1;
+        if (s.status === 'completed') existing.completed += 1;
+        const last = new Date(s.updatedAt);
+        if (!existing.lastAt || last.getTime() > existing.lastAt.getTime()) existing.lastAt = last;
+        byShop.set(key, existing);
+      }
+
+      allShops = Array.from(byShop.entries())
+        .map(([domain, stats]) => ({
+          id: domain,
+          domain,
+          totalSessions: stats.total,
+          completedSessions: stats.completed,
+          lastSessionAt: stats.lastAt,
           needsAttention: false,
           installedAt: null,
           isEmbedded: false,
           arEnabledProducts: 0,
           attentionReason: null,
-        };
-      })
-      .sort((a, b) => (b.lastSessionAt?.getTime() || 0) - (a.lastSessionAt?.getTime() || 0));
+        }))
+        .sort((a, b) => (b.lastSessionAt?.getTime() || 0) - (a.lastSessionAt?.getTime() || 0));
+    }
   }
 
   const needsAttention = allShops.filter(

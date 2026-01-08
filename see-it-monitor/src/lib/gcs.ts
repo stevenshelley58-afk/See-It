@@ -209,6 +209,232 @@ export async function writeAnalyticsEventsToGcs(args: {
     }
 }
 
+type StoredAnalyticsBatch = {
+    serverTimestamp: string;
+    request?: {
+        origin?: string | null;
+        userAgent?: string | null;
+        ip?: string | null;
+    };
+    events: AnalyticsEventForStorage[];
+};
+
+export type AnalyticsDerivedSession = {
+    sessionId: string;
+    shopDomain: string;
+    productTitle: string | null;
+    status: 'in_progress' | 'completed' | 'abandoned' | 'failed';
+    currentStep: string | null;
+    stepsCompleted: number;
+    startedAt: string;
+    updatedAt: string;
+    endedAt: string | null;
+    deviceType: string | null;
+    browser: string | null;
+};
+
+export type AnalyticsDerivedError = {
+    id: string;
+    sessionId: string | null;
+    shopDomain: string | null;
+    errorCode: string;
+    errorMessage: string;
+    severity: string;
+    occurredAt: string;
+};
+
+async function listRecentAnalyticsBatchFiles(args: {
+    daysBack: number; // inclusive of today (0 = today only)
+    maxFilesTotal: number;
+}): Promise<string[]> {
+    const storage = getStorage();
+    const bucket = storage.bucket(SESSION_BUCKET);
+
+    const [bucketExists] = await bucket.exists();
+    if (!bucketExists) return [];
+
+    const files: string[] = [];
+    const now = new Date();
+
+    for (let i = 0; i <= args.daysBack; i++) {
+        const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        d.setUTCDate(d.getUTCDate() - i);
+        const y = d.getUTCFullYear();
+        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(d.getUTCDate()).padStart(2, '0');
+        const prefix = `analytics/events/${y}/${m}/${day}/`;
+
+        try {
+            const [dayFiles] = await bucket.getFiles({
+                prefix,
+                maxResults: Math.min(500, args.maxFilesTotal),
+                autoPaginate: false,
+            });
+            for (const f of dayFiles) {
+                if (f.name.endsWith('.json')) files.push(f.name);
+            }
+        } catch (err) {
+            console.warn('[GCS] Failed listing analytics events for prefix', prefix, err);
+        }
+    }
+
+    // Filenames include ISO timestamps, so lexicographic sort works for recency within the day prefix.
+    files.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+    return files.slice(0, args.maxFilesTotal);
+}
+
+async function readAnalyticsBatch(fileName: string): Promise<StoredAnalyticsBatch | null> {
+    const storage = getStorage();
+    const bucket = storage.bucket(SESSION_BUCKET);
+    try {
+        const [content] = await bucket.file(fileName).download();
+        const parsed: unknown = JSON.parse(content.toString());
+        const batch = parsed as Partial<StoredAnalyticsBatch>;
+        if (!batch || !Array.isArray(batch.events)) return null;
+        return {
+            serverTimestamp: typeof batch.serverTimestamp === 'string' ? batch.serverTimestamp : new Date().toISOString(),
+            request: batch.request,
+            events: batch.events,
+        };
+    } catch (err) {
+        console.warn('[GCS] Failed reading analytics batch', fileName, err);
+        return null;
+    }
+}
+
+/**
+ * Derive "sessions" from stored analytics event batches in GCS.
+ * This is a fallback path when Postgres isn't migrated and GCS session meta files aren't available.
+ */
+export async function deriveSessionsFromAnalytics(args: {
+    daysBack?: number;
+    maxFilesTotal?: number;
+    lookbackMs?: number;
+}): Promise<{ sessions: AnalyticsDerivedSession[]; recentErrors: AnalyticsDerivedError[] }> {
+    const daysBack = args.daysBack ?? 2;
+    const maxFilesTotal = args.maxFilesTotal ?? 200;
+    const lookbackMs = args.lookbackMs ?? 24 * 60 * 60 * 1000;
+
+    const cutoff = Date.now() - lookbackMs;
+
+    const files = await listRecentAnalyticsBatchFiles({ daysBack, maxFilesTotal });
+    if (files.length === 0) return { sessions: [], recentErrors: [] };
+
+    const CONCURRENCY = 10;
+    let idx = 0;
+    const batches: StoredAnalyticsBatch[] = [];
+
+    async function worker() {
+        while (idx < files.length) {
+            const myIdx = idx++;
+            const fileName = files[myIdx];
+            const batch = await readAnalyticsBatch(fileName);
+            if (batch) batches.push(batch);
+        }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, () => worker()));
+
+    type InternalSession = AnalyticsDerivedSession & {
+        completedSteps: Set<string>;
+    };
+
+    const sessionMap = new Map<string, InternalSession>();
+    const recentErrors: AnalyticsDerivedError[] = [];
+
+    for (const batch of batches) {
+        for (const e of batch.events) {
+            const ts = Date.parse(e.timestamp);
+            if (!Number.isFinite(ts) || ts < cutoff) continue;
+
+            const sessionId = e.sessionId || null;
+            const shopDomain = e.shopDomain;
+
+            if (e.type === 'error') {
+                const data = e.data as Partial<{
+                    errorCode: string;
+                    errorMessage: string;
+                    severity: string;
+                }>;
+                recentErrors.push({
+                    id: `gcs_err_${ts}_${Math.random().toString(16).slice(2)}`,
+                    sessionId,
+                    shopDomain: shopDomain || null,
+                    errorCode: data.errorCode || 'UNKNOWN_ERROR',
+                    errorMessage: data.errorMessage || 'Unknown error',
+                    severity: data.severity || 'error',
+                    occurredAt: e.timestamp,
+                });
+            }
+
+            if (!sessionId) continue;
+
+            const existing = sessionMap.get(sessionId);
+            const base: InternalSession =
+                existing ||
+                ({
+                    sessionId,
+                    shopDomain,
+                    productTitle: null,
+                    status: 'in_progress',
+                    currentStep: null,
+                    stepsCompleted: 0,
+                    startedAt: e.timestamp,
+                    updatedAt: e.timestamp,
+                    endedAt: null,
+                    deviceType: (e.deviceContext as Partial<{ deviceType?: string }> | undefined)?.deviceType || null,
+                    browser: (e.deviceContext as Partial<{ browser?: string }> | undefined)?.browser || null,
+                    completedSteps: new Set<string>(),
+                } as InternalSession);
+
+            // Keep earliest start and latest update
+            if (Date.parse(base.startedAt) > ts) base.startedAt = e.timestamp;
+            if (Date.parse(base.updatedAt) < ts) base.updatedAt = e.timestamp;
+
+            // Update optional device/browser when present
+            const deviceType = (e.deviceContext as Partial<{ deviceType?: string }> | undefined)?.deviceType;
+            const browser = (e.deviceContext as Partial<{ browser?: string }> | undefined)?.browser;
+            if (deviceType) base.deviceType = deviceType;
+            if (browser) base.browser = browser;
+
+            if (e.type === 'session_started') {
+                const data = e.data as Partial<{ productTitle?: string }>;
+                if (typeof data.productTitle === 'string') base.productTitle = data.productTitle;
+            }
+
+            if (e.type === 'step_update') {
+                const data = e.data as Partial<{ step?: string; status?: string }>;
+                if (typeof data.step === 'string') base.currentStep = data.step;
+                if (data.status === 'completed' && typeof data.step === 'string') {
+                    if (!base.completedSteps.has(data.step)) {
+                        base.completedSteps.add(data.step);
+                        base.stepsCompleted = base.completedSteps.size;
+                    }
+                }
+            }
+
+            if (e.type === 'session_ended') {
+                const data = e.data as Partial<{ status?: string }>;
+                if (data.status === 'completed') base.status = 'completed';
+                else if (data.status === 'abandoned') base.status = 'abandoned';
+                else base.status = 'failed';
+                base.endedAt = e.timestamp;
+            }
+
+            sessionMap.set(sessionId, base);
+        }
+    }
+
+    // Only keep errors within the lookback window and sort newest-first
+    recentErrors.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
+
+    const sessions: AnalyticsDerivedSession[] = Array.from(sessionMap.values())
+        .map(({ completedSteps, ...s }) => s)
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+
+    return { sessions, recentErrors };
+}
+
 /**
  * Get a single session by ID
  */
