@@ -18,6 +18,10 @@ uri = "/webhooks"
 
 # App Lifecycle Webhooks
 [[webhooks.subscriptions]]
+topics = ["app/installed"]
+uri = "/webhooks/app/installed"
+
+[[webhooks.subscriptions]]
 topics = ["app/uninstalled"]
 uri = "/webhooks/app/uninstalled"
 

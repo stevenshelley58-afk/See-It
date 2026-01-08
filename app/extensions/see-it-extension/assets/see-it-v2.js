@@ -288,10 +288,31 @@ document.addEventListener('DOMContentLoaded', function () {
   // ============================================================================
   // API Calls
   // ============================================================================
-  const startSession = async () => {
-    const res = await fetch('/apps/see-it/room/upload', { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to start session');
-    return res.json();
+  const startSession = async (contentType = 'image/jpeg') => {
+    const res = await fetch('/apps/see-it/room/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content_type: contentType }),
+    });
+
+    // Always read the body so we can surface real error messages to the user.
+    const raw = await res.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      data = { message: raw };
+    }
+
+    if (!res.ok) {
+      const msg =
+        data.message ||
+        data.error ||
+        `Failed to start session (HTTP ${res.status})`;
+      throw new Error(msg);
+    }
+
+    return data;
   };
 
   const uploadImage = async (file, url) => {
@@ -450,7 +471,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
 
       // Start upload
-      const session = await startSession();
+      const session = await startSession(normalizedFile.type || 'image/jpeg');
       state.roomSessionId = session.sessionId || session.room_session_id;
       console.log('[See It V2] Session created:', state.roomSessionId);
 
