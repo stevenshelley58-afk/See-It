@@ -1,4 +1,4 @@
-import { getSession, getSignedUrl } from '@/lib/gcs';
+import { deriveSessionsFromAnalytics, getSession, getSignedUrl } from '@/lib/gcs';
 import { formatDate, formatDuration, getStepLabel, getStatusColor, truncateShop } from '@/lib/utils';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -15,7 +15,51 @@ export default async function SessionDetailPage({ params }: PageProps) {
     const session = await getSession(id);
 
     if (!session) {
-        notFound();
+        // Fall back to analytics-derived session details when session meta logs aren't present.
+        const derived = await deriveSessionsFromAnalytics({ lookbackMs: 7 * 24 * 60 * 60 * 1000 });
+        const s = derived.sessions.find((x) => x.sessionId === id);
+        if (!s) notFound();
+
+        const statusColors = getStatusColor(s.status);
+
+        return (
+            <div className="space-y-8">
+                <div className="flex items-center gap-4">
+                    <Link href="/sessions" className="text-secondary hover:text-primary transition-colors">
+                        ← Back
+                    </Link>
+                </div>
+
+                <div className="card p-6 space-y-4">
+                    <div className="flex items-start justify-between">
+                        <div>
+                            <h1 className="text-xl font-semibold">Session {s.sessionId.slice(0, 8)}...</h1>
+                            <div className="text-secondary mt-1">
+                                <Link href={`/merchants/${encodeURIComponent(s.shopDomain)}`} className="hover:underline">
+                                    {s.shopDomain}
+                                </Link>
+                                {s.deviceType && ` · ${s.deviceType}`}
+                                {s.browser && ` · ${s.browser}`}
+                            </div>
+                            <div className="text-sm text-gray-400 mt-2">
+                                Started: {formatDate(s.startedAt)}
+                                {s.endedAt && ` · Ended: ${formatDate(s.endedAt)}`}
+                            </div>
+                        </div>
+                        <span className={`badge ${statusColors.bg} ${statusColors.text}`}>
+                            {s.status}
+                        </span>
+                    </div>
+
+                    <div className="pt-4 border-t border-gray-100 text-sm text-secondary">
+                        <div>Source: analytics events (GCS)</div>
+                        <div>Current step: {s.currentStep || '—'}</div>
+                        <div>Steps completed: {s.stepsCompleted}</div>
+                        <div>Last update: {formatDate(s.updatedAt)}</div>
+                    </div>
+                </div>
+            </div>
+        );
     }
 
     const statusColors = getStatusColor(session.status);
