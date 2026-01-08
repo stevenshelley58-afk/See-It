@@ -330,8 +330,8 @@
     const initAnalytics = () => {
         try {
             // Try to use the full SDK if available (from app/app/utils/analytics.ts)
-            if (typeof window !== 'undefined' && (window as any).SeeItAnalytics) {
-                analytics = new (window as any).SeeItAnalytics({
+            if (typeof window !== 'undefined' && window.SeeItAnalytics) {
+                analytics = new window.SeeItAnalytics({
                     shopDomain,
                     endpoint: analyticsEndpoint,
                     debug: false,
