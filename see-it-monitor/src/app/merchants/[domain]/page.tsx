@@ -12,7 +12,9 @@ type Props = {
 };
 
 export default async function MerchantDetailPage({ params }: Props) {
-  const domain = decodeURIComponent(params.domain);
+  // Next can provide params as either an object or a thenable in some runtimes.
+  const resolvedParams = await Promise.resolve(params as unknown as { domain?: string });
+  const domain = decodeURIComponent(resolvedParams?.domain || '');
 
   let source: 'db' | 'gcs' | 'gcs_analytics' = 'db';
   let recentSessions: Array<{
@@ -23,6 +25,22 @@ export default async function MerchantDetailPage({ params }: Props) {
     currentStep: string | null;
     stepsCompleted: number;
   }> = [];
+
+  if (!domain) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold">Unknown merchant</h1>
+            <div className="text-sm text-secondary mt-1">Missing merchant domain param</div>
+          </div>
+          <Link className="text-sm underline" href="/merchants">
+            Back to merchants
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   // Prefer DB when available
   try {
