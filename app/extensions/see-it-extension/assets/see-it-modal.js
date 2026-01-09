@@ -332,9 +332,8 @@
             // Try to use the full SDK if available (from app/app/utils/analytics.ts)
             // NOTE: This file is shipped directly to browsers as plain JS (no TS transpile),
             // so we must not use TypeScript-only casting syntax.
-            const SeeItAnalyticsCtor = (typeof window !== 'undefined') ? window['SeeItAnalytics'] : null;
-            if (SeeItAnalyticsCtor) {
-                analytics = new SeeItAnalyticsCtor({
+            if (typeof window !== 'undefined' && window.SeeItAnalytics) {
+                analytics = new window.SeeItAnalytics({
                     shopDomain,
                     endpoint: analyticsEndpoint,
                     debug: false,
