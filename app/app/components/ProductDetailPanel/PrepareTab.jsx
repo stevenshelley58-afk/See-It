@@ -63,6 +63,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
     const isFetcherLoading = fetcher.state !== "idle";
     const [isBusy, setIsBusy] = useState(false); // Local busy state for smooth transitions
     const timeoutRef = useRef(null); // Timeout ref for stuck requests
+    const abortControllerRef = useRef(null); // For canceling requests
 
     const isLoading = isFetcherLoading || isBusy;
     const canInteract = !isLoading;
@@ -112,16 +113,25 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                 } else {
                     setError(fetcher.data.error || 'Operation failed');
                 }
+            } else {
+                // If fetcher.state is 'idle' but no data, it might be a network error or aborted request
+                // Only show error if we were actually expecting a response (isBusy was true)
+                if (isBusy) {
+                    console.warn('[PrepareTab] Fetcher returned to idle with no data - possible network error');
+                    // Don't set error here - let the timeout handle it or user will see it on next attempt
+                }
             }
-            // If fetcher.state is 'idle' but no data, it might be a network error
-            // The error will be handled by the timeout below
         } else if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
-            // Set a timeout to detect stuck requests (60 seconds)
+            // Set a timeout to detect stuck requests (30 seconds - more reasonable)
             timeoutRef.current = setTimeout(() => {
-                console.error('[PrepareTab] Request timeout - clearing loading state');
+                console.error('[PrepareTab] Request timeout after 30s - clearing loading state');
                 setIsBusy(false);
-                setError('Request timed out. Please try again.');
-            }, 60000);
+                setError('Request timed out after 30 seconds. The image may be too large or the server is slow. Please try again.');
+                // Try to abort the fetcher if possible
+                if (fetcher.state !== 'idle') {
+                    console.warn('[PrepareTab] Fetcher still active after timeout');
+                }
+            }, 30000); // Reduced from 60s to 30s
         }
 
         // Cleanup timeout on unmount
@@ -131,7 +141,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                 timeoutRef.current = null;
             }
         };
-    }, [fetcher.data, fetcher.state, onPrepareComplete, mode, resultExists]);
+    }, [fetcher.data, fetcher.state, onPrepareComplete, mode, resultExists, isBusy]);
 
 
     // Initialize Canvas Image - update when view or image changes
@@ -186,11 +196,35 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         setView(resultExists ? "result" : "original");
     };
 
+    // Cancel current operation
+    const handleCancelOperation = () => {
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+        }
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+        }
+        setIsBusy(false);
+        setError(null);
+        // If in edit mode, stay in edit mode but clear loading
+        if (mode === 'edit') {
+            // Stay in edit mode
+        } else {
+            // If was generating, cancel and stay on original
+            setView("original");
+        }
+    };
+
     // Convert strokes to mask and submit
     const handleApplyEdits = async () => {
         if (!imageRef.current || !maskCanvasRef.current) return;
         setError(null);
         setIsBusy(true);
+
+        // Create abort controller for this request
+        abortControllerRef.current = new AbortController();
 
         try {
             // 1. Draw final mask to hidden canvas
@@ -213,6 +247,11 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             // 3. Determine source image - if editing result, use prepared image; otherwise use original
             const sourceImageUrl = (view === "result" && preparedImageUrl) ? preparedImageUrl : selectedImageUrl;
 
+            // Validate source image URL
+            if (!sourceImageUrl || !sourceImageUrl.startsWith('http')) {
+                throw new Error('Invalid image URL. Please try again.');
+            }
+
             // 4. Submit
             const formData = new FormData();
             formData.append("productId", product.id.split('/').pop());
@@ -227,6 +266,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             console.error('[PrepareTab] Error in handleApplyEdits:', err);
             setError(err instanceof Error ? err.message : 'Failed to apply edits');
             setIsBusy(false);
+            abortControllerRef.current = null;
         }
     };
 
@@ -264,10 +304,14 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                     disabled: isLoading,
                     loading: isLoading
                 },
-                secondary: {
+                secondary: isLoading ? {
+                    label: 'Cancel',
+                    onClick: handleCancelOperation,
+                    disabled: false
+                } : {
                     label: 'Cancel',
                     onClick: handleCancelEdit,
-                    disabled: isLoading
+                    disabled: false
                 }
             });
         } else {
