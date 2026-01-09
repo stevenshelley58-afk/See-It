@@ -42,6 +42,9 @@ prisma/dev.sqlite-journal
 # Shopify
 .shopify/
 
+# Vercel
+.vercel/
+
 # Artifacts (don't commit personal task tracking)
 .gemini/
 
