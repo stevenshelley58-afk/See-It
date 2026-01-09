@@ -502,8 +502,8 @@ export default function Products() {
     const [searchResults, setSearchResults] = useState({ products: [], orders: [], draftOrders: [] });
     const [searchLoading, setSearchLoading] = useState(false);
     const [activeTab, setActiveTab] = useState("products");
-    const searchInputRef = useRef<HTMLInputElement>(null);
-    const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const searchInputRef = useRef(null);
+    const searchTimeoutRef = useRef(null);
 
     const showToast = useCallback((msg, type = "info") => {
         setToast({ msg, type });
@@ -511,7 +511,7 @@ export default function Products() {
     }, []);
 
     // Search handler with debouncing
-    const handleSearchChange = useCallback((value: string) => {
+    const handleSearchChange = useCallback((value) => {
         setSearchInput(value);
         
         // Clear existing timeout
@@ -552,13 +552,12 @@ export default function Products() {
 
     // Handle clicking outside to close overlay
     useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (searchInputRef.current && !searchInputRef.current.contains(event.target as Node)) {
-                const target = event.target as HTMLElement;
-                if (!target.closest('.search-overlay')) {
-                    setSearchOverlayOpen(false);
-                }
-            }
+        const handleClickOutside = (event) => {
+            const rootEl = searchInputRef.current;
+            const target = event?.target;
+            if (rootEl && target && rootEl.contains && rootEl.contains(target)) return;
+            if (target && target.closest && target.closest('.search-overlay')) return;
+            setSearchOverlayOpen(false);
         };
 
         if (searchOverlayOpen) {
@@ -800,7 +799,7 @@ export default function Products() {
                                             </div>
                                         ) : activeTab === 'products' && searchResults.products.length > 0 ? (
                                             <div className="divide-y divide-neutral-100">
-                                                {searchResults.products.map((product: any) => {
+                                                {searchResults.products.map((product) => {
                                                     const price = product.priceRangeV2?.minVariantPrice;
                                                     return (
                                                         <button
