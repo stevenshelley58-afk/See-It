@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { analyticsEvents, sessions, sessionSteps, errors, aiRequests, shops } from '@/lib/db/schema';
+import { analyticsEvents, sessions, sessionSteps, errors, aiRequests, shops, runNodes, runSignals, artifacts, artifactEdges, modelCalls } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { writeAnalyticsEventsToGcs } from '@/lib/gcs';
 
@@ -146,6 +146,31 @@ export async function POST(request: NextRequest) {
     const insertPromises: Promise<unknown>[] = [];
 
     for (const event of processedEvents) {
+      // Inherit flow/env from session if missing (for non-session_started events)
+      if (event.type !== 'session_started' && event.sessionId) {
+        const eventData = event.data as { flow?: string; env?: string };
+        if (!eventData.flow || !eventData.env) {
+          const existingSessions = await db
+            .select()
+            .from(sessions)
+            .where(eq(sessions.sessionId, event.sessionId))
+            .limit(1);
+          
+          const session = existingSessions[0];
+          if (session) {
+            // Inherit from session if event lacks it
+            if (!eventData.flow && session.flow) {
+              eventData.flow = session.flow;
+            }
+            if (!eventData.env && session.env) {
+              eventData.env = session.env;
+            }
+            // Update event.data with inherited values
+            event.data = { ...event.data, ...eventData };
+          }
+        }
+      }
+
       // Always insert raw event
       insertPromises.push(
         db.insert(analyticsEvents).values({
@@ -185,6 +210,33 @@ export async function POST(request: NextRequest) {
           handleAIRequest(event)
         );
       }
+
+      // Flight Recorder: Process node signals for all events
+      if (event.sessionId) {
+        const nodeMappings = mapEventToNodeSignals(event);
+        for (const mapping of nodeMappings) {
+          // Upsert node
+          insertPromises.push(
+            upsertRunNode(
+              event.sessionId,
+              mapping.nodeKey,
+              mapping.lane,
+              mapping.orderIndex
+            )
+          );
+          // Insert signal
+          insertPromises.push(
+            insertRunSignal(
+              event.sessionId,
+              mapping.nodeKey,
+              mapping.signalType,
+              new Date(event.timestamp),
+              mapping.payload
+            )
+          );
+        }
+      }
+
       // Note: Other event types (user_action, post_ar_action, ar_button_click, etc.)
       // are saved to analytics_events table and can be queried from there
       // They're visible in the monitor through the analytics_events table
@@ -237,7 +289,28 @@ async function handleSessionStarted(event: AnalyticsEvent, deviceCtx: AnalyticsE
     entryPoint?: string;
     referrer?: string;
     timeOnPageBeforeArMs?: number;
+    flow?: string;
+    env?: string;
+    flow_version?: string;
+    app_version?: string;
+    worker_version?: string;
   };
+
+  // Check required fields for Flight Recorder
+  const missingFields: string[] = [];
+  if (!data.flow) missingFields.push('flow');
+  if (!data.env) missingFields.push('env');
+  if (!data.flow_version) missingFields.push('flow_version');
+  if (!data.app_version) missingFields.push('app_version');
+  if (!data.worker_version) missingFields.push('worker_version');
+
+  // Set flags for UI banner if fields are missing
+  const flags: Record<string, boolean> = {};
+  if (missingFields.length > 0) {
+    missingFields.forEach(field => {
+      flags[`missing_${field}`] = true;
+    });
+  }
 
   // Get or create shop
   const existingShops = await db
@@ -256,7 +329,8 @@ async function handleSessionStarted(event: AnalyticsEvent, deviceCtx: AnalyticsE
     shop = newShop;
   }
 
-  // Create session
+  // Create session with Flight Recorder fields
+  // If fields are missing, set to 'unknown' and set flags
   await db.insert(sessions).values({
     sessionId: event.sessionId!,
     shopId: shop.id,
@@ -281,6 +355,13 @@ async function handleSessionStarted(event: AnalyticsEvent, deviceCtx: AnalyticsE
     entryPoint: data.entryPoint || null,
     referrer: data.referrer || null,
     timeOnPageBeforeAr: data.timeOnPageBeforeArMs || null,
+    // Flight Recorder fields
+    flow: data.flow || 'unknown',
+    flowVersion: data.flow_version || null,
+    env: data.env || 'unknown',
+    appVersion: data.app_version || null,
+    workerVersion: data.worker_version || null,
+    flags: Object.keys(flags).length > 0 ? flags : null,
   });
 }
 
@@ -495,6 +576,198 @@ async function handleAIRequest(event: AnalyticsEvent) {
         updatedAt: new Date(),
       })
       .where(eq(sessions.id, session.id));
+  }
+}
+
+// ============================================
+// FLIGHT RECORDER - NODE MAPPING
+// ============================================
+
+interface NodeSignalMapping {
+  nodeKey: string;
+  lane: string;
+  orderIndex: number;
+  signalType: 'intended' | 'attempted' | 'produced' | 'observed';
+  payload?: Record<string, unknown>;
+}
+
+/**
+ * Map event to node signals based on event type
+ * Returns array of node signal mappings
+ */
+function mapEventToNodeSignals(event: AnalyticsEvent): NodeSignalMapping[] {
+  const mappings: NodeSignalMapping[] = [];
+  const data = event.data as Record<string, unknown>;
+  const flow = (data.flow as string) || 'unknown';
+
+  // Map step_update events to nodes
+  if (event.type === 'step_update') {
+    const step = data.step as string;
+    const status = data.status as string;
+
+    // Map steps to node keys based on flow
+    let nodeKey = '';
+    let lane = 'UI';
+    let orderIndex = 0;
+
+    if (step === 'room_capture') {
+      nodeKey = 'ui:upload_room';
+      lane = 'UI';
+      orderIndex = 1;
+    } else if (step === 'mask') {
+      nodeKey = 'worker:mask';
+      lane = 'Worker';
+      orderIndex = 2;
+    } else if (step === 'inpaint') {
+      nodeKey = 'model:cleanup';
+      lane = 'Model';
+      orderIndex = 3;
+    } else if (step === 'placement') {
+      nodeKey = 'ui:render_final';
+      lane = 'UI';
+      orderIndex = 4;
+    } else if (step === 'final') {
+      nodeKey = 'ui:render_final';
+      lane = 'UI';
+      orderIndex = 5;
+    }
+
+    if (nodeKey) {
+      if (status === 'started') {
+        mappings.push({
+          nodeKey,
+          lane,
+          orderIndex,
+          signalType: 'attempted',
+          payload: { step, status, ...data },
+        });
+      } else if (status === 'completed') {
+        mappings.push({
+          nodeKey,
+          lane,
+          orderIndex,
+          signalType: 'produced',
+          payload: { step, status, ...data },
+        });
+      } else if (status === 'failed') {
+        mappings.push({
+          nodeKey,
+          lane,
+          orderIndex,
+          signalType: 'attempted',
+          payload: { step, status, error: data.errorCode || data.errorMessage, ...data },
+        });
+      }
+    }
+  }
+
+  // Map session_started to ui:open_modal
+  if (event.type === 'session_started') {
+    mappings.push({
+      nodeKey: 'ui:open_modal',
+      lane: 'UI',
+      orderIndex: 0,
+      signalType: 'intended',
+      payload: data,
+    });
+  }
+
+  // Map ai_request to model call nodes
+  if (event.type === 'ai_request') {
+    const operation = data.operation as string;
+    let nodeKey = '';
+    let lane = 'Model';
+    let orderIndex = 3;
+
+    if (operation === 'inpaint' || operation === 'remove_bg') {
+      nodeKey = 'model:cleanup';
+    } else if (operation === 'segment') {
+      nodeKey = 'model:segment';
+    }
+
+    if (nodeKey) {
+      mappings.push({
+        nodeKey,
+        lane,
+        orderIndex,
+        signalType: 'attempted',
+        payload: data,
+      });
+    }
+  }
+
+  return mappings;
+}
+
+/**
+ * Upsert run_nodes - ensure node exists for session
+ */
+async function upsertRunNode(
+  sessionId: string,
+  nodeKey: string,
+  lane: string,
+  orderIndex: number,
+  contractName?: string,
+  owningFile?: string,
+  owningLine?: number
+) {
+  // Check if node already exists
+  const existingNodes = await db
+    .select()
+    .from(runNodes)
+    .where(and(
+      eq(runNodes.sessionId, sessionId as any),
+      eq(runNodes.nodeKey, nodeKey)
+    ))
+    .limit(1);
+
+  if (existingNodes.length === 0) {
+    // Get session UUID from sessionId string
+    const sessions = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.sessionId, sessionId))
+      .limit(1);
+    
+    if (sessions.length > 0) {
+      await db.insert(runNodes).values({
+        sessionId: sessions[0].id,
+        nodeKey,
+        lane,
+        orderIndex,
+        contractName: contractName || null,
+        owningFile: owningFile || null,
+        owningLine: owningLine || null,
+      });
+    }
+  }
+}
+
+/**
+ * Insert run signal
+ */
+async function insertRunSignal(
+  sessionId: string,
+  nodeKey: string,
+  signalType: 'intended' | 'attempted' | 'produced' | 'observed',
+  timestamp: Date,
+  payload?: Record<string, unknown>
+) {
+  // Get session UUID from sessionId string
+  const sessions = await db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.sessionId, sessionId))
+    .limit(1);
+  
+  if (sessions.length > 0) {
+    await db.insert(runSignals).values({
+      sessionId: sessions[0].id,
+      nodeKey,
+      signalType,
+      timestamp,
+      payload: payload || null,
+    });
   }
 }
 

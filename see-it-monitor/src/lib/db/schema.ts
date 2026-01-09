@@ -147,6 +147,18 @@ export const sessions = pgTable('sessions', {
   // GCS reference
   gcsPath: text('gcs_path'),
   
+  // Flight Recorder fields
+  flow: varchar('flow', { length: 50 }), // cleanup, placement_v2, product_prep, unknown
+  flowVersion: varchar('flow_version', { length: 50 }),
+  env: varchar('env', { length: 20 }), // prod, preview, dev, unknown
+  appVersion: varchar('app_version', { length: 100 }),
+  workerVersion: varchar('worker_version', { length: 100 }),
+  outcome: varchar('outcome', { length: 30 }), // ok, divergent, error, validator_fail, ui_mismatch, unknown
+  fingerprint: varchar('fingerprint', { length: 255 }),
+  fingerprintVersion: integer('fingerprint_version'),
+  firstDivergenceNodeKey: varchar('first_divergence_node_key', { length: 100 }),
+  flags: jsonb('flags'), // For banners like missing_flow, missing_env
+  
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 }, (table) => ({
@@ -476,6 +488,140 @@ export const dailyMetrics = pgTable('daily_metrics', {
 }, (table) => ({
   dateIdx: index('daily_metrics_date_idx').on(table.date),
   shopIdx: index('daily_metrics_shop_idx').on(table.shopId),
+}));
+
+// ============================================
+// FLIGHT RECORDER - RUN NODES
+// ============================================
+
+export const runNodes = pgTable('run_nodes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').references(() => sessions.id).notNull(),
+  nodeKey: varchar('node_key', { length: 100 }).notNull(),
+  lane: varchar('lane', { length: 50 }).notNull(), // UI, API, Worker, Model, Storage, DB
+  orderIndex: integer('order_index').notNull(),
+  contractName: text('contract_name'),
+  owningFile: text('owning_file'),
+  owningLine: integer('owning_line'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  sessionIdx: index('run_nodes_session_idx').on(table.sessionId),
+  sessionNodeIdx: index('run_nodes_session_node_idx').on(table.sessionId, table.nodeKey),
+}));
+
+// ============================================
+// FLIGHT RECORDER - RUN SIGNALS
+// ============================================
+
+export const runSignals = pgTable('run_signals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').references(() => sessions.id).notNull(),
+  nodeKey: varchar('node_key', { length: 100 }).notNull(),
+  signalType: varchar('signal_type', { length: 20 }).notNull(), // intended, attempted, produced, observed
+  timestamp: timestamp('timestamp').notNull(),
+  payload: jsonb('payload'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  sessionIdx: index('run_signals_session_idx').on(table.sessionId),
+  sessionNodeIdx: index('run_signals_session_node_idx').on(table.sessionId, table.nodeKey),
+  sessionSignalIdx: index('run_signals_session_signal_idx').on(table.sessionId, table.signalType),
+}));
+
+// ============================================
+// FLIGHT RECORDER - ARTIFACTS
+// ============================================
+
+export const artifacts = pgTable('artifacts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  artifactId: varchar('artifact_id', { length: 255 }).notNull().unique(),
+  sessionId: uuid('session_id').references(() => sessions.id).notNull(),
+  nodeKey: varchar('node_key', { length: 100 }),
+  type: varchar('type', { length: 50 }).notNull(),
+  storageKey: text('storage_key'),
+  sha256: varchar('sha256', { length: 64 }),
+  width: integer('width'),
+  height: integer('height'),
+  mime: varchar('mime', { length: 100 }),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  sessionIdx: index('artifacts_session_idx').on(table.sessionId),
+  artifactIdIdx: index('artifacts_artifact_id_idx').on(table.artifactId),
+}));
+
+// ============================================
+// FLIGHT RECORDER - ARTIFACT EDGES
+// ============================================
+
+export const artifactEdges = pgTable('artifact_edges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  parentArtifactId: varchar('parent_artifact_id', { length: 255 }).notNull(),
+  childArtifactId: varchar('child_artifact_id', { length: 255 }).notNull(),
+  edgeType: varchar('edge_type', { length: 50 }).notNull(), // derived_from, mask_of, overlay_of, etc.
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  parentIdx: index('artifact_edges_parent_idx').on(table.parentArtifactId),
+  childIdx: index('artifact_edges_child_idx').on(table.childArtifactId),
+}));
+
+// ============================================
+// FLIGHT RECORDER - MODEL CALLS
+// ============================================
+
+export const modelCalls = pgTable('model_calls', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  modelCallId: varchar('model_call_id', { length: 255 }).notNull().unique(),
+  sessionId: uuid('session_id').references(() => sessions.id).notNull(),
+  nodeKey: varchar('node_key', { length: 100 }),
+  provider: varchar('provider', { length: 50 }).notNull(),
+  model: text('model').notNull(),
+  promptArtifactId: varchar('prompt_artifact_id', { length: 255 }),
+  promptHash: varchar('prompt_hash', { length: 64 }),
+  configHash: varchar('config_hash', { length: 64 }),
+  latencyMs: integer('latency_ms'),
+  status: varchar('status', { length: 20 }).notNull(),
+  failureClass: varchar('failure_class', { length: 50 }),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  sessionIdx: index('model_calls_session_idx').on(table.sessionId),
+  modelCallIdIdx: index('model_calls_model_call_id_idx').on(table.modelCallId),
+}));
+
+// ============================================
+// FLIGHT RECORDER - ARCHETYPES
+// ============================================
+
+export const archetypes = pgTable('archetypes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  title: text('title').notNull(),
+  severity: varchar('severity', { length: 20 }), // critical, error, warning
+  tags: jsonb('tags'), // Array of tag strings
+  signatureRules: jsonb('signature_rules'), // Tokens, weights, etc.
+  fixPlaybook: text('fix_playbook'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const archetypeMatches = pgTable('archetype_matches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sessionId: uuid('session_id').references(() => sessions.id).notNull(),
+  archetypeId: uuid('archetype_id').references(() => archetypes.id).notNull(),
+  confidence: real('confidence').notNull(), // 0.0 to 1.0
+  matchedTokens: jsonb('matched_tokens'), // Array of matched token strings
+  decidedBy: varchar('decided_by', { length: 50 }), // auto, manual, etc.
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  sessionIdx: index('archetype_matches_session_idx').on(table.sessionId),
+  archetypeIdx: index('archetype_matches_archetype_idx').on(table.archetypeId),
+}));
+
+export const archetypeTests = pgTable('archetype_tests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  archetypeId: uuid('archetype_id').references(() => archetypes.id).notNull(),
+  testName: text('test_name').notNull(),
+  testDefinition: jsonb('test_definition'), // What it checks, expected outcome
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  archetypeIdx: index('archetype_tests_archetype_idx').on(table.archetypeId),
 }));
 
 // ============================================

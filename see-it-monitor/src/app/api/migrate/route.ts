@@ -140,7 +140,22 @@ export async function GET() {
     const tables = (tablesResult.rows as Array<{ table_name: string }>).map(r => r.table_name);
 
     // Check if key tables exist
-    const expectedTables = ['sessions', 'analytics_events', 'shops', 'errors', 'ai_requests'];
+    const expectedTables = [
+      'sessions', 
+      'analytics_events', 
+      'shops', 
+      'errors', 
+      'ai_requests',
+      // Flight Recorder tables
+      'run_nodes',
+      'run_signals',
+      'artifacts',
+      'artifact_edges',
+      'model_calls',
+      'archetypes',
+      'archetype_matches',
+      'archetype_tests'
+    ];
     const missingTables = expectedTables.filter(t => !tables.includes(t));
 
     return NextResponse.json({
