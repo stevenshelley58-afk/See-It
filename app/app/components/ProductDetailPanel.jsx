@@ -132,19 +132,6 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
         );
     }
 
-    const tabs = [
-        {
-            id: 'prepare',
-            content: 'Prepare Image',
-            panelID: 'prepare-panel',
-        },
-        {
-            id: 'placement',
-            content: 'Placement',
-            panelID: 'placement-panel',
-        },
-    ];
-
     const modalActions = getModalActions();
     
     return (
@@ -157,26 +144,47 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
             large
         >
             <Modal.Section>
-                <Tabs tabs={tabs} selected={activeTab === 'prepare' ? 0 : 1} onSelect={(selectedTabIndex) => {
-                    setActiveTab(tabs[selectedTabIndex].id);
-                }}>
-                    {activeTab === 'prepare' ? (
-                        <PrepareTab
-                            product={product}
-                            asset={asset}
-                            onPrepareComplete={() => { }}
-                            onRefine={() => setIsRefining(true)}
-                            setFooterConfig={setFooterConfig}
-                            onSave={onClose}
-                        />
-                    ) : (
-                        <PlacementTab
-                            product={product}
-                            asset={asset}
-                            onChange={(meta) => setPendingMetadata(meta)}
-                        />
-                    )}
-                </Tabs>
+                {/* Custom Tabs */}
+                <div className="flex border-b border-[--p-color-border-subdued] mb-4 -mx-6 px-6">
+                    <button
+                        onClick={() => setActiveTab('prepare')}
+                        className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all ${
+                            activeTab === 'prepare'
+                                ? 'border-[--p-color-border-emphasis] text-[--p-color-text]'
+                                : 'border-transparent text-[--p-color-text-subdued] hover:text-[--p-color-text]'
+                        }`}
+                    >
+                        Prepare Image
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('placement')}
+                        className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all ${
+                            activeTab === 'placement'
+                                ? 'border-[--p-color-border-emphasis] text-[--p-color-text]'
+                                : 'border-transparent text-[--p-color-text-subdued] hover:text-[--p-color-text]'
+                        }`}
+                    >
+                        Placement
+                    </button>
+                </div>
+
+                {/* Tab Content */}
+                {activeTab === 'prepare' ? (
+                    <PrepareTab
+                        product={product}
+                        asset={asset}
+                        onPrepareComplete={() => { }}
+                        onRefine={() => setIsRefining(true)}
+                        setFooterConfig={setFooterConfig}
+                        onSave={onClose}
+                    />
+                ) : (
+                    <PlacementTab
+                        product={product}
+                        asset={asset}
+                        onChange={(meta) => setPendingMetadata(meta)}
+                    />
+                )}
             </Modal.Section>
         </Modal>
     );
