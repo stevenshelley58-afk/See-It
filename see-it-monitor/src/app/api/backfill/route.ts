@@ -169,7 +169,15 @@ export async function POST(request: NextRequest) {
 
             results.analyticsSessions.imported++;
           } catch (error) {
-            console.error(`[Backfill] Failed to import analytics session ${analyticsSession.sessionId}:`, error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[Backfill] Failed to import analytics session ${analyticsSession.sessionId}:`, errorMsg);
+            // Log more details for debugging
+            console.error(`[Backfill] Session data:`, {
+              sessionId: analyticsSession.sessionId,
+              shopDomain: analyticsSession.shopDomain,
+              status: analyticsSession.status,
+              startedAt: analyticsSession.startedAt,
+            });
             results.analyticsSessions.errors++;
           }
         }
