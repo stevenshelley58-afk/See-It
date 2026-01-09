@@ -1,10 +1,10 @@
-import { useLoaderData, useSubmit, useRouteError, isRouteErrorResponse } from "@remix-run/react";
+import { useLoaderData, useSubmit, useRouteError, isRouteErrorResponse, Link } from "@remix-run/react";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { PLANS } from "../billing";
-import { StatCard, UsageBar, PageShell, Card, Button } from "../components/ui";
+import { PageShell, Card, Button } from "../components/ui";
 
 export const loader = async ({ request }) => {
   const { session, admin } = await authenticate.admin(request);
@@ -35,33 +35,10 @@ export const loader = async ({ request }) => {
     });
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const usage = await prisma.usageDaily.findUnique({
-    where: { shopId_date: { shopId: shop.id, date: today } }
-  });
-
-  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const monthlyUsageAgg = await prisma.usageDaily.aggregate({
-    where: {
-      shopId: shop.id,
-      date: { gte: startOfMonth }
-    },
-    _sum: { compositeRenders: true }
-  });
-  const monthlyUsage = monthlyUsageAgg._sum.compositeRenders || 0;
-
   // Get total completed renders (customer uses)
   const totalRenders = await prisma.renderJob.count({
     where: { shopId: shop.id, status: "completed" }
   });
-
-  // Customer uses = total completed renders (each render is a customer use)
-  const customersUsed = totalRenders;
-
-  // Get leads generated (feature not yet implemented)
-  const leadsGenerated = 0;
 
   // Get products ready
   const productsReady = await prisma.productAsset.count({
@@ -81,76 +58,42 @@ export const loader = async ({ request }) => {
   const failed = statusCounts.find(s => s.status === 'failed')?._count || 0;
   const successRate = completed + failed > 0 ? Math.round((completed / (completed + failed)) * 100) : 0;
 
-  // Get recent activity (last 10 completed/failed renders)
-  const recentJobs = await prisma.renderJob.findMany({
-    where: { shopId: shop.id, status: { in: ['completed', 'failed'] } },
-    orderBy: { createdAt: 'desc' },
-    take: 10,
-    select: {
-      id: true,
-      status: true,
-      createdAt: true,
-      productId: true,
-    }
+  // Get products needing attention (failed renders in last 7 days)
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  
+  const failedProducts = await prisma.renderJob.groupBy({
+    by: ['productId'],
+    where: {
+      shopId: shop.id,
+      status: 'failed',
+      createdAt: { gte: sevenDaysAgo }
+    },
+    _count: true
   });
+  const productsNeedingAttention = failedProducts.length;
 
-  // Map recent activity to display format
-  const recentActivity = recentJobs.map(job => {
-    const timeAgo = getTimeAgo(job.createdAt);
-    return {
-      id: job.id,
-      action: job.status === 'completed' ? 'Customer visualization' : 'Render failed',
-      product: `Product ${job.productId?.split('/').pop() || 'Unknown'}`,
-      time: timeAgo,
-      success: job.status === 'completed'
-    };
-  });
-
-  // Check if setup is complete (has at least one ready product asset)
+  // Check if setup is complete
   const setupComplete = productsReady > 0;
 
-  // Check for unlimited bypass
+  // Plan info
   const isUnlimited = shop.shopDomain === 'bohoem58.myshopify.com';
   const displayPlan = isUnlimited ? 'unlimited' : (shop.plan === PLANS.PRO.id ? 'pro' : 'free');
-  const dailyLimit = isUnlimited ? 1000000 : shop.dailyQuota;
-  const monthlyLimit = isUnlimited ? 10000000 : shop.monthlyQuota;
 
   return json({
     stats: {
-      customersUsed,
-      leadsGenerated,
+      customerUses: totalRenders,
       productsReady,
-      successRate
-    },
-    usage: {
-      daily: {
-        used: usage?.compositeRenders || 0,
-        limit: dailyLimit
-      },
-      monthly: {
-        used: monthlyUsage,
-        limit: monthlyLimit
-      }
+      successRate,
+      productsNeedingAttention
     },
     plan: displayPlan,
-    recentActivity,
     setupComplete
   });
 };
 
-function getTimeAgo(date) {
-  const seconds = Math.floor((new Date() - new Date(date)) / 1000);
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
 export default function Index() {
-  const { stats, usage, plan, recentActivity, setupComplete } = useLoaderData();
+  const { stats, plan, setupComplete } = useLoaderData();
   const submit = useSubmit();
 
   const handleUpgrade = () => submit({ plan: "PRO" }, { method: "POST", action: "/api/billing" });
@@ -159,113 +102,112 @@ export default function Index() {
     <>
       <TitleBar title="See It Dashboard" />
       <PageShell>
-        {/* Header */}
-        <div>
-          <h1 className="text-xl md:text-2xl font-semibold text-neutral-900 tracking-tight">
-            Dashboard
-          </h1>
-          <p className="text-neutral-500 text-sm mt-0.5 md:mt-1">
-            Your product visualization performance at a glance
-          </p>
-        </div>
-
-        {/* Stats Grid - 2 cols mobile, 4 cols desktop */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-          <StatCard label="Customer Uses" value={stats.customersUsed} subtitle="All time" highlight compact />
-          <StatCard label="Leads Generated" value={stats.leadsGenerated} subtitle="From visualizations" compact />
-          <StatCard label="Products Ready" value={stats.productsReady} subtitle="Available to visualize" compact />
-          <StatCard label="Success Rate" value={`${stats.successRate}%`} subtitle="Render completion" compact />
-        </div>
-
-        {/* Usage + Activity - Stacked on mobile, grid on desktop */}
-        <div className="grid md:grid-cols-3 gap-4 md:gap-6">
-          {/* Usage Card */}
-          <Card>
-            <div className="flex items-center justify-between mb-4 md:mb-6">
-              <h2 className="font-semibold text-neutral-900 text-sm md:text-base">Usage</h2>
-              <span className="text-xs px-2 py-1 bg-neutral-100 rounded-full text-neutral-600">
-                {plan === 'pro' ? 'Pro Plan' : 'Free Plan'}
-              </span>
-            </div>
-            <UsageBar used={usage.daily.used} limit={usage.daily.limit} label="Today" />
-            <UsageBar used={usage.monthly.used} limit={usage.monthly.limit} label="This month" />
-            {plan === 'free' && (
-              <Button
-                variant="secondary"
-                className="w-full mt-4 md:mt-6"
-                onClick={handleUpgrade}
-              >
-                Upgrade Plan
-              </Button>
-            )}
-          </Card>
-
-          {/* Activity Card - spans 2 columns on desktop */}
-          <div className="md:col-span-2">
-            <Card>
-              <h2 className="font-semibold text-neutral-900 mb-3 md:mb-4 text-sm md:text-base">
-                Recent Activity
-              </h2>
-              <div>
-                {recentActivity.length > 0 ? (
-                  recentActivity.map(activity => (
-                    <div key={activity.id} className="flex items-center justify-between py-3 border-b border-neutral-100 last:border-0">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${activity.success ? 'bg-emerald-500' : 'bg-red-500'
-                          }`} />
-                        <div className="min-w-0">
-                          <div className="text-sm text-neutral-900 truncate">{activity.action}</div>
-                          <div className="text-xs text-neutral-500 truncate">{activity.product}</div>
-                        </div>
-                      </div>
-                      <div className="text-xs text-neutral-400 flex-shrink-0 ml-3">{activity.time}</div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="py-4 text-sm text-neutral-500 text-center">
-                    No activity yet
-                  </div>
-                )}
+        {/* Action Cards - This IS the dashboard */}
+        <div className="space-y-3">
+          <Link 
+            to="/app/products" 
+            className="block bg-white rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow border border-transparent hover:border-neutral-200"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-neutral-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                <svg className="w-6 h-6 text-neutral-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="7" height="7"/>
+                  <rect x="14" y="3" width="7" height="7"/>
+                  <rect x="3" y="14" width="7" height="7"/>
+                  <rect x="14" y="14" width="7" height="7"/>
+                </svg>
               </div>
-              {recentActivity.length > 0 && (
-                <Button
-                  variant="secondary"
-                  className="w-full mt-4 text-neutral-500"
-                  onClick={() => window.location.href = '/app/analytics'}
-                >
-                  View all activity →
-                </Button>
-              )}
-            </Card>
-          </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-neutral-900">Products</div>
+                <div className="text-sm text-neutral-500">{stats.productsReady} enabled for AR</div>
+              </div>
+              <div className="text-2xl font-semibold text-neutral-900">{stats.productsReady}</div>
+            </div>
+          </Link>
+
+          <Link 
+            to="/app/analytics" 
+            className="block bg-white rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow border border-transparent hover:border-neutral-200"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-neutral-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                <svg className="w-6 h-6 text-neutral-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-neutral-900">Customer views</div>
+                <div className="text-sm text-neutral-500">{stats.successRate}% success rate</div>
+              </div>
+              <div className="text-2xl font-semibold text-neutral-900">{stats.customerUses}</div>
+            </div>
+          </Link>
+
+          {stats.productsNeedingAttention > 0 && (
+            <Link 
+              to="/app/products?status=failed" 
+              className="block bg-amber-50 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow border border-amber-200"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-amber-200 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <svg className="w-6 h-6 text-amber-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-neutral-900">Needs attention</div>
+                  <div className="text-sm text-neutral-500">Fix rendering issues</div>
+                </div>
+                <div className="text-2xl font-semibold text-amber-600">{stats.productsNeedingAttention}</div>
+              </div>
+            </Link>
+          )}
+
+          <Link 
+            to="/app/settings" 
+            className="block bg-white rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow border border-transparent hover:border-neutral-200"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-neutral-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                <svg className="w-6 h-6 text-neutral-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-neutral-900">Settings</div>
+                <div className="text-sm text-neutral-500">{plan === 'free' ? 'Free plan' : plan === 'pro' ? 'Pro plan' : 'Unlimited'}</div>
+              </div>
+              <svg className="w-5 h-5 text-neutral-400 flex-shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M7 4l6 6-6 6"/>
+              </svg>
+            </div>
+          </Link>
         </div>
 
-        {/* Setup Banner - only show if not complete */}
+        {/* Setup Banner - only if no products */}
         {!setupComplete && (
-          <Card className="bg-neutral-50">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div>
-                <h2 className="font-semibold text-neutral-900 text-sm md:text-base">Setup</h2>
-                <p className="text-sm text-neutral-500 mt-1">
-                  Add the See It button to your product pages to start capturing leads
-                </p>
-              </div>
-              <Button
-                variant="primary"
-                className="w-full md:w-auto"
-                onClick={() => window.location.href = 'https://admin.shopify.com/store/' + (window.location.hostname.match(/[\w-]+\.myshopify\.com/)?.[0] || '') + '/themes'}
-              >
-                Open Theme Editor
+          <div className="bg-neutral-900 text-white rounded-xl p-5">
+            <div className="font-semibold">Get started</div>
+            <p className="text-sm text-neutral-400 mt-1 mb-4">
+              Add your first product to enable AR for customers
+            </p>
+            <Link to="/app/products">
+              <Button variant="secondary" className="bg-white text-neutral-900 hover:bg-neutral-100">
+                Add product
               </Button>
-            </div>
-          </Card>
+            </Link>
+          </div>
         )}
       </PageShell>
     </>
   );
 }
 
-// Error boundary to catch and display errors gracefully
+// Error boundary
 export function ErrorBoundary() {
   const error = useRouteError();
 

@@ -96,87 +96,97 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // ============================================================================
-  // DOM Elements
+  // DOM Elements + Robust Init (themes may inject sections after DOMContentLoaded)
   // ============================================================================
   const $ = id => document.getElementById(id);
-  const trigger = $('see-it-v2-trigger');
-  const triggerWidget = trigger?.closest('.see-it-v2-widget-hook');
-  const modal = $('see-it-v2-modal');
 
-  if (!trigger || !modal) {
-    console.log('[See It V2] Button not rendered - product may not have a featured image');
-    return;
-  }
+  function initSeeItV2() {
+    // Guard: avoid double-binding if init is retried or sections re-render.
+    if (typeof window !== 'undefined' && window.__SEE_IT_V2_INITIALIZED__) return true;
 
-  // --- Modal placement & scroll lock ---
-  let savedScrollY = 0;
+    // Some themes may render the same section twice (e.g. mobile/desktop),
+    // which would produce multiple buttons with the same id. Bind all.
+    const triggers = Array.from(document.querySelectorAll('#see-it-v2-trigger'));
+    const modal = $('see-it-v2-modal');
 
-  const ensureModalPortaled = () => {
-    if (modal.parentElement !== document.body) {
-      document.body.appendChild(modal);
-    }
-    modal.style.position = 'fixed';
-    modal.style.top = '0';
-    modal.style.left = '0';
-    modal.style.right = '0';
-    modal.style.bottom = '0';
-    modal.style.width = '100%';
-    modal.style.height = '100%';
-    modal.style.transform = 'none';
-    modal.style.zIndex = '999999';
-  };
+    if (!triggers.length || !modal) return false;
 
-  const lockScroll = () => {
-    savedScrollY = window.scrollY;
-    document.documentElement.classList.add('see-it-v2-modal-open');
-    document.body.style.top = `-${savedScrollY}px`;
-    document.body.style.position = 'fixed';
-    document.body.style.width = '100%';
-  };
+    // Keep a stable reference for default dataset reads, but always use the clicked trigger when opening.
+    const trigger = triggers[0];
+    let activeTriggerWidget = null;
+    let activeTrigger = trigger;
 
-  const unlockScroll = () => {
-    document.documentElement.classList.remove('see-it-v2-modal-open');
-    document.body.style.position = '';
-    document.body.style.top = '';
-    document.body.style.width = '';
-    window.scrollTo(0, savedScrollY);
-  };
+    if (typeof window !== 'undefined') window.__SEE_IT_V2_INITIALIZED__ = true;
 
-  // Screens
-  const screenEntry = $('see-it-v2-screen-entry');
-  const screenGenerating = $('see-it-v2-screen-generating');
-  const screenSelect = $('see-it-v2-screen-select');
-  const screenResult = $('see-it-v2-screen-result');
+    // --- Modal placement & scroll lock ---
+    let savedScrollY = 0;
 
-  // Entry screen elements
-  const btnCloseEntry = $('see-it-v2-close-entry');
-  const btnTakePhoto = $('see-it-v2-btn-take-photo');
-  const btnUpload = $('see-it-v2-btn-upload');
-  const uploadInput = $('see-it-v2-upload-input');
-  const cameraInput = $('see-it-v2-camera-input');
+    const ensureModalPortaled = () => {
+      if (modal.parentElement !== document.body) {
+        document.body.appendChild(modal);
+      }
+      modal.style.position = 'fixed';
+      modal.style.top = '0';
+      modal.style.left = '0';
+      modal.style.right = '0';
+      modal.style.bottom = '0';
+      modal.style.width = '100%';
+      modal.style.height = '100%';
+      modal.style.transform = 'none';
+      modal.style.zIndex = '999999';
+    };
 
-  // Generating screen elements
-  const btnBackGenerating = $('see-it-v2-back-generating');
-  const generatingTip = $('see-it-v2-generating-tip');
+    const lockScroll = () => {
+      savedScrollY = window.scrollY;
+      document.documentElement.classList.add('see-it-v2-modal-open');
+      document.body.style.top = `-${savedScrollY}px`;
+      document.body.style.position = 'fixed';
+      document.body.style.width = '100%';
+    };
 
-  // Select screen elements
-  const btnBackSelect = $('see-it-v2-back-select');
-  const selectCells = document.querySelectorAll('.see-it-v2-select-cell');
-  const btnFallbackV1 = $('see-it-v2-fallback-v1');
+    const unlockScroll = () => {
+      document.documentElement.classList.remove('see-it-v2-modal-open');
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      window.scrollTo(0, savedScrollY);
+    };
 
-  // Result screen elements
-  const btnCloseResult = $('see-it-v2-close-result');
-  const btnBackResult = $('see-it-v2-back-result');
-  const resultImage = $('see-it-v2-result-image');
-  const btnShare = $('see-it-v2-share');
-  const btnTryAgain = $('see-it-v2-try-again');
-  const btnTryAnother = $('see-it-v2-try-another');
-  const errorDiv = $('see-it-v2-global-error');
+    // Screens
+    const screenEntry = $('see-it-v2-screen-entry');
+    const screenGenerating = $('see-it-v2-screen-generating');
+    const screenSelect = $('see-it-v2-screen-select');
+    const screenResult = $('see-it-v2-screen-result');
 
-  // ============================================================================
-  // State
-  // ============================================================================
-  let state = {
+    // Entry screen elements
+    const btnCloseEntry = $('see-it-v2-close-entry');
+    const btnTakePhoto = $('see-it-v2-btn-take-photo');
+    const btnUpload = $('see-it-v2-btn-upload');
+    const uploadInput = $('see-it-v2-upload-input');
+    const cameraInput = $('see-it-v2-camera-input');
+
+    // Generating screen elements
+    const btnBackGenerating = $('see-it-v2-back-generating');
+    const generatingTip = $('see-it-v2-generating-tip');
+
+    // Select screen elements
+    const btnBackSelect = $('see-it-v2-back-select');
+    const selectCells = document.querySelectorAll('.see-it-v2-select-cell');
+    const btnFallbackV1 = $('see-it-v2-fallback-v1');
+
+    // Result screen elements
+    const btnCloseResult = $('see-it-v2-close-result');
+    const btnBackResult = $('see-it-v2-back-result');
+    const resultImage = $('see-it-v2-result-image');
+    const btnShare = $('see-it-v2-share');
+    const btnTryAgain = $('see-it-v2-try-again');
+    const btnTryAnother = $('see-it-v2-try-another');
+    const errorDiv = $('see-it-v2-global-error');
+
+    // ============================================================================
+    // State
+    // ============================================================================
+    let state = {
     sessionId: null,
     roomSessionId: null,
     originalRoomImageUrl: null,
@@ -197,21 +207,21 @@ document.addEventListener('DOMContentLoaded', function () {
     isGenerating: false,
   };
 
-  // Rotating tips for the generating screen
-  const GENERATING_TIPS = [
+    // Rotating tips for the generating screen
+    const GENERATING_TIPS = [
     'Tip: Good lighting makes the best visualizations',
     'Tip: Clear floor space helps with placement',
     'AI is analyzing your room layout...',
     'Finding the perfect spots for your furniture...',
     'Almost there...',
   ];
-  let tipIndex = 0;
-  let tipInterval = null;
+    let tipIndex = 0;
+    let tipInterval = null;
 
-  // ============================================================================
-  // Screen Navigation
-  // ============================================================================
-  const showScreen = (screenName) => {
+    // ============================================================================
+    // Screen Navigation
+    // ============================================================================
+    const showScreen = (screenName) => {
     const screens = {
       entry: screenEntry,
       generating: screenGenerating,
@@ -397,18 +407,20 @@ document.addEventListener('DOMContentLoaded', function () {
   // ============================================================================
   // Modal Open/Close
   // ============================================================================
-  trigger.addEventListener('click', () => {
+  const openFromTrigger = (sourceTrigger) => {
     console.log('[See It V2] Modal opened');
+    activeTrigger = sourceTrigger || activeTrigger;
     ensureModalPortaled();
     lockScroll();
     modal.classList.remove('hidden');
-    if (triggerWidget) triggerWidget.style.display = 'none';
+    activeTriggerWidget = activeTrigger?.closest('.see-it-v2-widget-hook') || null;
+    if (activeTriggerWidget) activeTriggerWidget.style.display = 'none';
     resetError();
 
-    state.productId = trigger.dataset.productId || state.productId;
-    state.productTitle = trigger.dataset.productTitle || state.productTitle;
-    state.productPrice = trigger.dataset.productPrice || state.productPrice;
-    state.productImageUrl = trigger.dataset.productImage || state.productImageUrl;
+    state.productId = activeTrigger?.dataset.productId || state.productId;
+    state.productTitle = activeTrigger?.dataset.productTitle || state.productTitle;
+    state.productPrice = activeTrigger?.dataset.productPrice || state.productPrice;
+    state.productImageUrl = activeTrigger?.dataset.productImage || state.productImageUrl;
 
     // Reset state
     state.sessionId = null;
@@ -421,12 +433,14 @@ document.addEventListener('DOMContentLoaded', function () {
     state.isGenerating = false;
 
     showScreen('entry');
-  });
+  };
+
+  triggers.forEach(t => t.addEventListener('click', () => openFromTrigger(t)));
 
   const closeModal = () => {
     modal.classList.add('hidden');
     unlockScroll();
-    if (triggerWidget) triggerWidget.style.display = '';
+    if (activeTriggerWidget) activeTriggerWidget.style.display = '';
     showScreen('entry');
     stopTipRotation();
     state.isGenerating = false;
@@ -665,5 +679,27 @@ document.addEventListener('DOMContentLoaded', function () {
   uploadInput?.addEventListener('change', handleFile);
   cameraInput?.addEventListener('change', handleFile);
 
-  console.log('[See It V2] Initialization complete');
+    console.log('[See It V2] Initialization complete');
+    return true;
+  }
+
+  // First attempt (normal themes)
+  if (initSeeItV2()) return;
+
+  // Retry for themes that inject / re-render sections after DOMContentLoaded
+  let retries = 0;
+  const retryTimer = setInterval(() => {
+    retries += 1;
+    if (initSeeItV2()) {
+      clearInterval(retryTimer);
+    } else if (retries >= 40) { // ~10s max
+      clearInterval(retryTimer);
+      console.log('[See It V2] Button not found after retries - product may not have a featured image or section is not on page');
+    }
+  }, 250);
+
+  // Shopify theme editor / dynamic section reloads
+  document.addEventListener('shopify:section:load', () => {
+    initSeeItV2();
+  });
 });
