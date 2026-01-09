@@ -112,8 +112,13 @@ export class SeeItAnalytics {
   // SESSION LIFECYCLE
   // ============================================
 
-  startSession(productId: string, productTitle?: string, productPrice?: number): string {
-    this.sessionId = this.generateSessionId();
+  startSession(
+    productId: string,
+    productTitle?: string,
+    productPrice?: number,
+    sessionIdOverride?: string
+  ): string {
+    this.sessionId = sessionIdOverride || this.generateSessionId();
     this.sessionStartedAt = new Date();
     this.productId = productId;
     this.productTitle = productTitle || null;

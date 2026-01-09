@@ -350,9 +350,9 @@
             } else {
                 // Fallback: simple event tracker
                 analytics = {
-                    startSession: (productId, productTitle, productPrice) => {
+                    startSession: (productId, productTitle, productPrice, sessionIdOverride) => {
                         try {
-                            const sessionId = `sess_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;
+                            const sessionId = sessionIdOverride || `sess_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;
                             fetch(analyticsEndpoint, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
@@ -1508,18 +1508,8 @@
         state.productPrice = trigger.dataset.productPrice || state.productPrice;
         state.productImageUrl = trigger.dataset.productImage || state.productImageUrl;
         
-        // Start analytics session
-        if (analytics && !state.sessionId) {
-            try {
-                state.sessionId = analytics.startSession(
-                    state.productId,
-                    state.productTitle,
-                    state.productPrice ? parseFloat(state.productPrice) : undefined
-                );
-            } catch (err) {
-                console.warn('[See It] Analytics error:', err);
-            }
-        }
+        // Analytics session is started after we receive the backend room_session_id
+        // so that monitor correlation stays stable (avoid splitting events across IDs).
 
         // Preload the prepared product image in background (don't await)
         // This ensures the image is ready by the time we reach the position screen
@@ -1613,22 +1603,6 @@
         ctx = null;
 
         try {
-            // Track room capture started
-            if (analytics) {
-                try {
-                    if (!state.sessionId) {
-                        state.sessionId = analytics.startSession(
-                            state.productId,
-                            state.productTitle,
-                            state.productPrice ? parseFloat(state.productPrice) : undefined
-                        );
-                    }
-                    analytics.trackStep('room_capture', 'started');
-                } catch (err) {
-                    console.warn('[See It] Analytics error:', err);
-                }
-            }
-            
             // Normalize image locally (instant)
             const normalized = await normalizeRoomImage(file);
             state.normalizedWidth = normalized.width;
@@ -1663,6 +1637,21 @@
                     const session = await startSession();
                     state.sessionId = session.sessionId || session.room_session_id;
 
+                    // Start analytics *after* we have the backend session id so monitor correlation is stable.
+                    if (analytics) {
+                        try {
+                            analytics.startSession(
+                                state.productId,
+                                state.productTitle,
+                                state.productPrice ? parseFloat(state.productPrice) : undefined,
+                                state.sessionId
+                            );
+                            analytics.trackStep('room_capture', 'started');
+                        } catch (err) {
+                            console.warn('[See It] Analytics error:', err);
+                        }
+                    }
+
                     const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
                     await uploadImage(normalizedFile, session.uploadUrl || session.upload_url);
 
@@ -1670,6 +1659,18 @@
                     state.originalRoomImageUrl = confirm.roomImageUrl || confirm.room_image_url;
                     state.uploadComplete = true;
                     console.log('[See It] Background upload complete');
+
+                    // Track room capture completed only once we have a real, server-backed URL.
+                    if (analytics) {
+                        try {
+                            analytics.trackStep('room_capture', 'completed', {
+                                retakeCount: 0,
+                                roomImageUrl: state.originalRoomImageUrl || null,
+                            });
+                        } catch (err) {
+                            console.warn('[See It] Analytics error:', err);
+                        }
+                    }
                 } catch (err) {
                     console.error('[See It] Background upload error:', err);
                     state.uploadError = err.message;
@@ -1704,17 +1705,6 @@
             return;
         }
         
-        // Track room capture completed
-        if (analytics) {
-            try {
-                analytics.trackStep('room_capture', 'completed', {
-                    retakeCount: 0, // Could track this if needed
-                });
-            } catch (err) {
-                console.warn('[See It] Analytics error:', err);
-            }
-        }
-
         // Trigger Gemini pre-upload in background (non-blocking)
         if (state.sessionId) {
             fetch('/apps/see-it/room/gemini-upload', {
@@ -2073,8 +2063,20 @@
                 // Track inpaint completed and session completed
                 if (analytics) {
                     try {
-                        analytics.trackStep('inpaint', 'completed');
-                        analytics.trackStep('placement', 'completed');
+                        const finalArtifactId = `${state.sessionId}:final`;
+                        analytics.trackStep('inpaint', 'completed', {
+                            roomImageUrl: state.originalRoomImageUrl || null,
+                            cleanedRoomImageUrl: state.cleanedRoomImageUrl || null,
+                            finalImageUrl: imageUrl,
+                            artifactId: finalArtifactId,
+                        });
+                        analytics.trackStep('placement', 'completed', {
+                            roomImageUrl: state.originalRoomImageUrl || null,
+                            cleanedRoomImageUrl: state.cleanedRoomImageUrl || null,
+                            finalImageUrl: imageUrl,
+                            artifactId: finalArtifactId,
+                            renderJobId: jobId || null,
+                        });
                         analytics.endSession('completed');
                     } catch (err) {
                         console.warn('[See It] Analytics error:', err);

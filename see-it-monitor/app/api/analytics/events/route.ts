@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db/client';
+import { db, getDbInitError, isDbConfigured } from '@/lib/db/client';
 import { analyticsEvents, sessions, sessionSteps, errors, aiRequests, shops, runNodes, runSignals, artifacts, artifactEdges, modelCalls } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { writeAnalyticsEventsToGcs } from '@/lib/gcs';
@@ -142,6 +142,27 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // If DB isn't configured, do not attempt any DB writes (avoid synchronous throws).
+    if (!isDbConfigured()) {
+      return NextResponse.json(
+        {
+          success: true,
+          processed: processedEvents.length,
+          errors: errors.length > 0 ? errors : undefined,
+          dbErrors: ['DB not configured: ' + (getDbInitError() || 'Unknown DB init error')],
+          stored: {
+            gcs: gcsResult.ok,
+            gcsPath: gcsResult.ok ? gcsResult.path : null,
+            gcsError: gcsResult.ok ? null : gcsResult.error,
+            db: false,
+            dbErrorCount: 1,
+          },
+          mode: 'gcs_only',
+        },
+        { headers: corsHeaders }
+      );
+    }
+
     // Process events in batch
     const insertPromises: Promise<unknown>[] = [];
 
@@ -150,23 +171,28 @@ export async function POST(request: NextRequest) {
       if (event.type !== 'session_started' && event.sessionId) {
         const eventData = event.data as { flow?: string; env?: string };
         if (!eventData.flow || !eventData.env) {
-          const existingSessions = await db
-            .select()
-            .from(sessions)
-            .where(eq(sessions.sessionId, event.sessionId))
-            .limit(1);
-          
-          const session = existingSessions[0];
-          if (session) {
-            // Inherit from session if event lacks it
-            if (!eventData.flow && session.flow) {
-              eventData.flow = session.flow;
+          // Best-effort only — DB may be unavailable or schema may not match (GCS is the source of truth fallback).
+          try {
+            const existingSessions = await db
+              .select()
+              .from(sessions)
+              .where(eq(sessions.sessionId, event.sessionId))
+              .limit(1);
+
+            const session = existingSessions[0];
+            if (session) {
+              // Inherit from session if event lacks it
+              if (!eventData.flow && session.flow) {
+                eventData.flow = session.flow;
+              }
+              if (!eventData.env && session.env) {
+                eventData.env = session.env;
+              }
+              // Update event.data with inherited values
+              event.data = { ...event.data, ...eventData };
             }
-            if (!eventData.env && session.env) {
-              eventData.env = session.env;
-            }
-            // Update event.data with inherited values
-            event.data = { ...event.data, ...eventData };
+          } catch (err) {
+            console.warn('[Analytics API] Skipping flow/env inheritance due to DB error:', err);
           }
         }
       }
@@ -197,6 +223,7 @@ export async function POST(request: NextRequest) {
         insertPromises.push(
           handleStepUpdate(event)
         );
+        insertPromises.push(handleFlightRecorderArtifacts(event));
       } else if (event.type === 'session_ended' && event.sessionId) {
         insertPromises.push(
           handleSessionEnded(event)
@@ -363,6 +390,111 @@ async function handleSessionStarted(event: AnalyticsEvent, deviceCtx: AnalyticsE
     workerVersion: data.worker_version || null,
     flags: Object.keys(flags).length > 0 ? flags : null,
   });
+}
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+function normalizeStepToNodeKey(step: unknown): string | null {
+  if (!isNonEmptyString(step)) return null;
+  if (step === 'room_capture') return 'ui:upload_room';
+  if (step === 'mask') return 'worker:mask';
+  if (step === 'inpaint') return 'model:cleanup';
+  if (step === 'placement') return 'ui:render_final';
+  if (step === 'final') return 'ui:render_final';
+  return null;
+}
+
+async function handleFlightRecorderArtifacts(event: AnalyticsEvent): Promise<void> {
+  // Only step_update events can carry artifact URLs right now
+  if (!event.sessionId) return;
+  const data = (event.data || {}) as Record<string, unknown>;
+  const step = data.step;
+  const status = data.status;
+
+  // Only persist artifacts once a step is completed (avoid overwriting mid-flight)
+  if (!isNonEmptyString(status) || status !== 'completed') return;
+
+  const nodeKey = normalizeStepToNodeKey(step);
+  if (!nodeKey) return;
+
+  // Resolve session UUID
+  const sessionRecords = await db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(eq(sessions.sessionId, event.sessionId))
+    .limit(1);
+  if (sessionRecords.length === 0) return;
+  const sessionUuid = sessionRecords[0].id;
+
+  const finalImageUrl = isNonEmptyString(data.finalImageUrl) ? data.finalImageUrl : null;
+  const roomImageUrl = isNonEmptyString(data.roomImageUrl) ? data.roomImageUrl : null;
+  const cleanedRoomImageUrl = isNonEmptyString(data.cleanedRoomImageUrl) ? data.cleanedRoomImageUrl : null;
+
+  const explicitArtifactId = isNonEmptyString(data.artifactId) ? data.artifactId : null;
+
+  const candidates: Array<{ artifactId: string; type: string; storageKey: string; nodeKey: string }> = [];
+
+  if (finalImageUrl) {
+    candidates.push({
+      artifactId: explicitArtifactId || `${event.sessionId}:final`,
+      type: 'final_image',
+      storageKey: finalImageUrl,
+      nodeKey,
+    });
+  }
+
+  if (roomImageUrl) {
+    candidates.push({
+      artifactId: `${event.sessionId}:room`,
+      type: 'room_image',
+      storageKey: roomImageUrl,
+      nodeKey: 'ui:upload_room',
+    });
+  }
+
+  if (cleanedRoomImageUrl) {
+    candidates.push({
+      artifactId: `${event.sessionId}:cleaned_room`,
+      type: 'cleaned_room_image',
+      storageKey: cleanedRoomImageUrl,
+      nodeKey: 'model:cleanup',
+    });
+  }
+
+  if (candidates.length === 0) return;
+
+  // Upsert-ish: artifact_id is unique; update storageKey since signed URLs rotate.
+  for (const a of candidates) {
+    const existing = await db
+      .select({ id: artifacts.id })
+      .from(artifacts)
+      .where(eq(artifacts.artifactId, a.artifactId))
+      .limit(1);
+
+    if (existing.length === 0) {
+      await db.insert(artifacts).values({
+        artifactId: a.artifactId,
+        sessionId: sessionUuid,
+        nodeKey: a.nodeKey,
+        type: a.type,
+        storageKey: a.storageKey,
+        sha256: null,
+        width: null,
+        height: null,
+        mime: null,
+      });
+    } else {
+      await db.update(artifacts)
+        .set({
+          nodeKey: a.nodeKey,
+          type: a.type,
+          storageKey: a.storageKey,
+        })
+        .where(eq(artifacts.artifactId, a.artifactId));
+    }
+  }
 }
 
 async function handleStepUpdate(event: AnalyticsEvent) {

@@ -189,6 +189,17 @@ export default function NodeInspector({
                     <span className="text-xs text-gray-500">{artifact.type}</span>
                   </div>
                   {artifact.storageKey && (
+                    <div className="mb-2">
+                      <img
+                        src={artifact.storageKey}
+                        alt={artifact.artifactId}
+                        className="w-full max-h-56 object-contain bg-gray-50 rounded"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  )}
+                  {artifact.storageKey && (
                     <div className="text-xs text-gray-600 break-all">
                       {artifact.storageKey}
                     </div>
