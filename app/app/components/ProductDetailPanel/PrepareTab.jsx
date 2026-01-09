@@ -62,6 +62,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
     const [error, setError] = useState(null);
     const isFetcherLoading = fetcher.state !== "idle";
     const [isBusy, setIsBusy] = useState(false); // Local busy state for smooth transitions
+    const timeoutRef = useRef(null); // Timeout ref for stuck requests
 
     const isLoading = isFetcherLoading || isBusy;
     const canInteract = !isLoading;
@@ -81,42 +82,73 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
     // Handle Fetcher Responses
     useEffect(() => {
-        if (fetcher.data && fetcher.state === 'idle') {
-            if (fetcher.data.success) {
-                if (fetcher.data.preparedImageUrl) {
-                    setPreparedImageUrl(fetcher.data.preparedImageUrl);
-                    // If we just generated a result, switch to result view
-                    if (mode === 'normal' && !resultExists) {
-                        setView("result");
-                    }
-                }
-                setError(null);
-                if (onPrepareComplete) onPrepareComplete(fetcher.data);
-
-                // If we just finished applying a mask, switch back to normal
-                if (mode === 'edit' && fetcher.data.preparedImageUrl) {
-                    setMode("normal");
-                    setView("result");
-                    // Keep strokes in history but we are done
-                }
-            } else {
-                setError(fetcher.data.error || 'Operation failed');
-            }
-            setIsBusy(false);
+        // Clear any existing timeout
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
         }
+
+        if (fetcher.state === 'idle') {
+            setIsBusy(false);
+            
+            if (fetcher.data) {
+                if (fetcher.data.success) {
+                    if (fetcher.data.preparedImageUrl) {
+                        setPreparedImageUrl(fetcher.data.preparedImageUrl);
+                        // If we just generated a result, switch to result view
+                        if (mode === 'normal' && !resultExists) {
+                            setView("result");
+                        }
+                    }
+                    setError(null);
+                    if (onPrepareComplete) onPrepareComplete(fetcher.data);
+
+                    // If we just finished applying a mask, switch back to normal
+                    if (mode === 'edit' && fetcher.data.preparedImageUrl) {
+                        setMode("normal");
+                        setView("result");
+                        // Keep strokes in history but we are done
+                    }
+                } else {
+                    setError(fetcher.data.error || 'Operation failed');
+                }
+            }
+            // If fetcher.state is 'idle' but no data, it might be a network error
+            // The error will be handled by the timeout below
+        } else if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
+            // Set a timeout to detect stuck requests (60 seconds)
+            timeoutRef.current = setTimeout(() => {
+                console.error('[PrepareTab] Request timeout - clearing loading state');
+                setIsBusy(false);
+                setError('Request timed out. Please try again.');
+            }, 60000);
+        }
+
+        // Cleanup timeout on unmount
+        return () => {
+            if (timeoutRef.current) {
+                clearTimeout(timeoutRef.current);
+                timeoutRef.current = null;
+            }
+        };
     }, [fetcher.data, fetcher.state, onPrepareComplete, mode, resultExists]);
 
 
-    // Initialize Canvas Image
+    // Initialize Canvas Image - update when view or image changes
     useEffect(() => {
-        if (!selectedImageUrl) return;
+        const imageUrlToLoad = (mode === "edit" && view === "result" && preparedImageUrl) 
+            ? preparedImageUrl 
+            : selectedImageUrl;
+        
+        if (!imageUrlToLoad) return;
+        
         const img = new Image();
         img.crossOrigin = "anonymous";
         img.onload = () => {
             imageRef.current = img;
         };
-        img.src = selectedImageUrl;
-    }, [selectedImageUrl]);
+        img.src = imageUrlToLoad;
+    }, [selectedImageUrl, preparedImageUrl, view, mode]);
 
 
     // -- ACTIONS --
@@ -144,8 +176,8 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
     const handleEnterEdit = () => {
         setMode("edit");
-        // Always start editing on "original" so you see what you are doing
-        setView("original");
+        // Keep current view - if viewing result, edit the result; if viewing original, edit original
+        // Don't change the view - user is already looking at what they want to edit
         setBrushMode("add");
     };
 
@@ -157,35 +189,45 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
     // Convert strokes to mask and submit
     const handleApplyEdits = async () => {
         if (!imageRef.current || !maskCanvasRef.current) return;
+        setError(null);
         setIsBusy(true);
 
-        // 1. Draw final mask to hidden canvas
-        const img = imageRef.current;
-        const canvas = maskCanvasRef.current;
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext("2d");
+        try {
+            // 1. Draw final mask to hidden canvas
+            const img = imageRef.current;
+            const canvas = maskCanvasRef.current;
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext("2d");
 
-        // Default: Black (Hidden)
-        ctx.fillStyle = "black";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Default: Black (Hidden)
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Draw strokes
-        strokesToContext(ctx, strokeStore.strokes.slice(0, strokeStore.cursor), canvas.width, canvas.height);
+            // Draw strokes
+            strokesToContext(ctx, strokeStore.strokes.slice(0, strokeStore.cursor), canvas.width, canvas.height);
 
-        // 2. Get Data URL
-        const maskDataUrl = canvas.toDataURL("image/png");
+            // 2. Get Data URL
+            const maskDataUrl = canvas.toDataURL("image/png");
 
-        // 3. Submit
-        const formData = new FormData();
-        formData.append("productId", product.id.split('/').pop());
-        formData.append("maskDataUrl", maskDataUrl);
-        formData.append("imageUrl", selectedImageUrl); // Source image to apply mask to
+            // 3. Determine source image - if editing result, use prepared image; otherwise use original
+            const sourceImageUrl = (view === "result" && preparedImageUrl) ? preparedImageUrl : selectedImageUrl;
 
-        fetcher.submit(formData, {
-            method: "post",
-            action: "/api/products/apply-mask",
-        });
+            // 4. Submit
+            const formData = new FormData();
+            formData.append("productId", product.id.split('/').pop());
+            formData.append("maskDataUrl", maskDataUrl);
+            formData.append("imageUrl", sourceImageUrl); // Use prepared image if editing result
+
+            fetcher.submit(formData, {
+                method: "post",
+                action: "/api/products/apply-mask",
+            });
+        } catch (err) {
+            console.error('[PrepareTab] Error in handleApplyEdits:', err);
+            setError(err instanceof Error ? err.message : 'Failed to apply edits');
+            setIsBusy(false);
+        }
     };
 
     // Handle Save: If no result exists, auto-generate first, then show result. If result exists, save and exit.
@@ -342,19 +384,29 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                         )}
 
                         <img
-                            src={showResult ? preparedImageUrl : selectedImageUrl}
+                            src={
+                                mode === "edit" && view === "result" && preparedImageUrl
+                                    ? preparedImageUrl
+                                    : showResult
+                                    ? preparedImageUrl
+                                    : selectedImageUrl
+                            }
                             alt="Product"
                             className={cx(
                                 "max-h-full max-w-full w-auto h-auto object-contain transition-all duration-300 select-none",
-                                showResult ? "drop-shadow-sm" : ""
+                                (showResult || (mode === "edit" && view === "result")) ? "drop-shadow-sm" : ""
                             )}
                             draggable={false}
+                            onLoad={(e) => {
+                                // Update imageRef when image loads
+                                imageRef.current = e.target;
+                            }}
                         />
 
                         {/* Canvas Painter Overlay (Only in Edit Mode) */}
                         {mode === "edit" && !isLoading && (
                             <MaskPainter
-                                imageUrl={selectedImageUrl}
+                                imageUrl={view === "result" && preparedImageUrl ? preparedImageUrl : selectedImageUrl}
                                 strokes={strokeStore.strokes}
                                 cursor={strokeStore.cursor}
                                 brushMode={brushMode}
@@ -372,31 +424,6 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                     </div>
                 </div>
 
-                {/* View Toggle Pill (Normal Mode + Has Result) - Bottom Center of Canvas */}
-                {mode === "normal" && resultExists && (
-                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
-                        <div className="flex p-1 bg-white/90 backdrop-blur border border-neutral-200 rounded-full shadow-lg">
-                            <button
-                                onClick={() => setView("original")}
-                                className={cx(
-                                    "px-4 py-2 rounded-full text-xs font-bold transition-all duration-200",
-                                    view === "original" ? "bg-neutral-900 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
-                                )}
-                            >
-                                Original
-                            </button>
-                            <button
-                                onClick={() => setView("result")}
-                                className={cx(
-                                    "px-4 py-2 rounded-full text-xs font-bold transition-all duration-200",
-                                    view === "result" ? "bg-neutral-900 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
-                                )}
-                            >
-                                Result
-                            </button>
-                        </div>
-                    </div>
-                )}
 
                 {/* Edit Tools Overlay (Edit Mode) - Bottom Center of Canvas */}
                 {mode === "edit" && (
@@ -470,6 +497,35 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                     </div>
                 )}
             </div>
+
+            {/* View Toggle + Controls Bar (Normal Mode + Has Result) - Outside image area */}
+            {mode === "normal" && resultExists && (
+                <div className="bg-white border-t border-neutral-200 flex-shrink-0 px-4 lg:px-6 py-3 flex items-center justify-center">
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-neutral-500">View:</span>
+                        <div className="flex p-0.5 bg-neutral-100 rounded-lg border border-neutral-200">
+                            <button
+                                onClick={() => setView("original")}
+                                className={cx(
+                                    "px-3 py-1.5 rounded-md text-xs font-semibold transition-all duration-200",
+                                    view === "original" ? "bg-white text-neutral-900 shadow-sm border border-neutral-200" : "text-neutral-600 hover:text-neutral-900"
+                                )}
+                            >
+                                Original
+                            </button>
+                            <button
+                                onClick={() => setView("result")}
+                                className={cx(
+                                    "px-3 py-1.5 rounded-md text-xs font-semibold transition-all duration-200",
+                                    view === "result" ? "bg-white text-neutral-900 shadow-sm border border-neutral-200" : "text-neutral-600 hover:text-neutral-900"
+                                )}
+                            >
+                                Result
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Thumbnails Row (Fixed Height) */}
             {mode === "normal" && allImages.length > 1 && (
