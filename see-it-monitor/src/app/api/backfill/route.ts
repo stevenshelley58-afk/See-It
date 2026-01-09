@@ -120,6 +120,16 @@ export async function POST(request: NextRequest) {
 
         for (const analyticsSession of derived.sessions) {
           try {
+            // Validate required fields
+            if (!analyticsSession.sessionId || !analyticsSession.shopDomain) {
+              console.warn(`[Backfill] Skipping session with missing required fields:`, {
+                sessionId: analyticsSession.sessionId,
+                shopDomain: analyticsSession.shopDomain,
+              });
+              results.analyticsSessions.skipped++;
+              continue;
+            }
+
             // Check if session already exists
             const existing = await db
               .select()
@@ -151,6 +161,22 @@ export async function POST(request: NextRequest) {
               results.shops.existing++;
             }
 
+            // Validate dates
+            const startedAt = new Date(analyticsSession.startedAt);
+            const updatedAt = new Date(analyticsSession.updatedAt);
+            const endedAt = analyticsSession.endedAt ? new Date(analyticsSession.endedAt) : null;
+
+            if (isNaN(startedAt.getTime()) || isNaN(updatedAt.getTime()) || (endedAt && isNaN(endedAt.getTime()))) {
+              console.warn(`[Backfill] Skipping session with invalid dates:`, {
+                sessionId: analyticsSession.sessionId,
+                startedAt: analyticsSession.startedAt,
+                updatedAt: analyticsSession.updatedAt,
+                endedAt: analyticsSession.endedAt,
+              });
+              results.analyticsSessions.skipped++;
+              continue;
+            }
+
             // Import session
             await db.insert(sessions).values({
               sessionId: analyticsSession.sessionId,
@@ -158,9 +184,9 @@ export async function POST(request: NextRequest) {
               shopDomain: analyticsSession.shopDomain,
               productTitle: analyticsSession.productTitle || null,
               status: analyticsSession.status,
-              startedAt: new Date(analyticsSession.startedAt),
-              updatedAt: new Date(analyticsSession.updatedAt),
-              endedAt: analyticsSession.endedAt ? new Date(analyticsSession.endedAt) : null,
+              startedAt,
+              updatedAt,
+              endedAt,
               currentStep: analyticsSession.currentStep || null,
               stepsCompleted: analyticsSession.stepsCompleted || 0,
               deviceType: analyticsSession.deviceType || null,
