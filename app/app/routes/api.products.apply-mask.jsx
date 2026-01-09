@@ -167,8 +167,20 @@ export const action = async ({ request }) => {
         let finalAlpha;
         let resultBuffer;
 
-        // Try to use Prodia for clean edges
-        if (isBackgroundRemoverAvailable()) {
+        // Check if we're editing a prepared image (already has background removed)
+        // If so, skip Prodia - just use user's mask directly (much faster!)
+        const isEditingPreparedImage = customImageUrl && customImageUrl !== asset?.sourceImageUrl;
+        
+        if (isEditingPreparedImage) {
+            // Fast path: editing prepared image - skip Prodia, use user's mask directly
+            logger.info({ ...logContext, stage: "fast-path" }, "Editing prepared image - skipping Prodia for speed");
+            const smoothedMask = await sharp(userMaskGray, { raw: { width, height, channels: 1 } })
+                .blur(2)
+                .raw()
+                .toBuffer();
+            finalAlpha = smoothedMask;
+        } else if (isBackgroundRemoverAvailable()) {
+            // Full path: editing original image - use Prodia for clean edges
             logger.info({ ...logContext, stage: "prodia" }, "Running Prodia AI for clean edges...");
 
             try {
