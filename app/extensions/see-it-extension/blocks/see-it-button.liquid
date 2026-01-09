@@ -28,6 +28,8 @@
 
 {% if product != blank and product.featured_image != blank %}
   {% assign product_image_url = product.featured_image | image_url: width: 800 %}
+  {% assign product_image_width = product.featured_image.width | default: 800 %}
+  {% assign product_image_height = product.featured_image.height | default: 800 %}
   {% assign product_title = product.title | default: "Product" %}
   {% assign product_price = product.price | money %}
   {% assign product_collection = product.collections.first.handle | default: '' %}
@@ -84,7 +86,7 @@
 
         <div class="see-it-entry-content">
           <div class="see-it-product-card-compact">
-            <img src="{{ product_image_url }}" alt="">
+            <img src="{{ product_image_url }}" alt="" width="{{ product_image_width }}" height="{{ product_image_height }}" loading="lazy">
             <div class="see-it-product-info-compact">
               <p class="see-it-product-title-compact">{{ product_title }}</p>
             </div>
@@ -113,7 +115,7 @@
         </div>
 
         <div class="see-it-canvas-container">
-          <img id="see-it-room-preview" class="see-it-room-preview" src="" alt="Room">
+          <img id="see-it-room-preview" class="see-it-room-preview" src="" alt="Room" width="1" height="1">
           <canvas id="see-it-mask-canvas" class="see-it-mask-canvas"></canvas>
         </div>
 
@@ -141,9 +143,9 @@
         </div>
 
         <div class="see-it-canvas-container see-it-position-canvas" id="see-it-position-container">
-          <img id="see-it-room-image" src="" alt="Room">
+          <img id="see-it-room-image" src="" alt="Room" width="1" height="1">
           <div id="see-it-product-overlay" class="see-it-product-overlay">
-            <img id="see-it-product-image" src="" alt="Product" draggable="false">
+            <img id="see-it-product-image" src="" alt="Product" draggable="false" width="1" height="1">
             <div class="see-it-resize-handle see-it-resize-nw"></div>
             <div class="see-it-resize-handle see-it-resize-ne"></div>
             <div class="see-it-resize-handle see-it-resize-sw"></div>
@@ -184,7 +186,7 @@
         </div>
 
         <div class="see-it-result-container">
-          <img id="see-it-result-image" src="" alt="Your visualization">
+          <img id="see-it-result-image" src="" alt="Your visualization" width="1" height="1">
         </div>
 
         <div class="see-it-result-actions">
@@ -238,7 +240,7 @@
           </div>
           
           <div class="see-it-swiper-card" id="see-it-swiper-card">
-            <img id="see-it-swiper-img" src="" alt="Product">
+            <img id="see-it-swiper-img" src="" alt="Product" width="1" height="1">
             <div class="see-it-swiper-info">
               <div class="see-it-swiper-name" id="see-it-swiper-name"></div>
               <div class="see-it-swiper-collection" id="see-it-swiper-collection"></div>

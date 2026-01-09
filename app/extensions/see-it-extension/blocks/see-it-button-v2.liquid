@@ -28,6 +28,8 @@
 
 {% if product != blank and product.featured_image != blank %}
   {% assign product_image_url = product.featured_image | image_url: width: 800 %}
+  {% assign product_image_width = product.featured_image.width | default: 800 %}
+  {% assign product_image_height = product.featured_image.height | default: 800 %}
   {% assign product_title = product.title | default: "Product" %}
   {% assign product_price = product.price | money %}
   {% assign product_collection = product.collections.first.handle | default: '' %}
@@ -84,7 +86,7 @@
 
         <div class="see-it-v2-entry-content">
           <div class="see-it-v2-product-card-compact">
-            <img src="{{ product_image_url }}" alt="">
+            <img src="{{ product_image_url }}" alt="" width="{{ product_image_width }}" height="{{ product_image_height }}" loading="lazy">
             <div class="see-it-v2-product-info-compact">
               <p class="see-it-v2-product-title-compact">{{ product_title }}</p>
             </div>
@@ -114,7 +116,7 @@
 
         <div class="see-it-v2-generating-content">
           <div class="see-it-v2-generating-product">
-            <img id="see-it-v2-generating-product-img" src="{{ product_image_url }}" alt="{{ product_title }}">
+            <img id="see-it-v2-generating-product-img" src="{{ product_image_url }}" alt="{{ product_title }}" width="{{ product_image_width }}" height="{{ product_image_height }}" loading="lazy">
           </div>
 
           <h2 class="see-it-v2-generating-title">Creating 4 placements<span class="see-it-v2-loading-dots"></span></h2>
@@ -156,28 +158,28 @@
         <div class="see-it-v2-select-content">
           <div class="see-it-v2-select-grid">
             <button class="see-it-v2-select-cell" data-variant="open">
-              <img src="" alt="Open space placement" id="see-it-v2-variant-open">
+              <img src="" alt="Open space placement" id="see-it-v2-variant-open" width="1" height="1">
               <span class="see-it-v2-select-label">Open space</span>
               <div class="see-it-v2-select-check">
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
               </div>
             </button>
             <button class="see-it-v2-select-cell" data-variant="wall">
-              <img src="" alt="Wall side placement" id="see-it-v2-variant-wall">
+              <img src="" alt="Wall side placement" id="see-it-v2-variant-wall" width="1" height="1">
               <span class="see-it-v2-select-label">Wall side</span>
               <div class="see-it-v2-select-check">
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
               </div>
             </button>
             <button class="see-it-v2-select-cell" data-variant="light">
-              <img src="" alt="Near light placement" id="see-it-v2-variant-light">
+              <img src="" alt="Near light placement" id="see-it-v2-variant-light" width="1" height="1">
               <span class="see-it-v2-select-label">Near light</span>
               <div class="see-it-v2-select-check">
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
               </div>
             </button>
             <button class="see-it-v2-select-cell" data-variant="corner">
-              <img src="" alt="Corner placement" id="see-it-v2-variant-corner">
+              <img src="" alt="Corner placement" id="see-it-v2-variant-corner" width="1" height="1">
               <span class="see-it-v2-select-label">Corner</span>
               <div class="see-it-v2-select-check">
                 <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
@@ -207,7 +209,7 @@
         </div>
 
         <div class="see-it-v2-result-container">
-          <img id="see-it-v2-result-image" src="" alt="Your visualization">
+          <img id="see-it-v2-result-image" src="" alt="Your visualization" width="1" height="1">
         </div>
 
         <div class="see-it-v2-result-actions">
