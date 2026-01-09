@@ -39,7 +39,7 @@ export const loader = async ({ request }) => {
     const url = new URL(request.url);
     const cursor = url.searchParams.get("cursor");
     const direction = url.searchParams.get("direction") || "next";
-    const statusFilter = url.searchParams.get("status") || "ACTIVE";
+    const statusFilter = url.searchParams.get("status") || "all"; // Default to "all" to match Shopify
     const searchQuery = url.searchParams.get("q") || "";
     const sortField = url.searchParams.get("sort") || "manual"; // title, price, manual
     const sortDir = url.searchParams.get("sortDir") || "asc";
@@ -591,7 +591,7 @@ export default function Products() {
 
     const SortHeader = ({ label, field }) => (
         <th
-            className="px-4 py-3 font-normal cursor-pointer hover:bg-neutral-100 transition-colors select-none"
+            className="px-3 md:px-4 py-2.5 md:py-3 font-normal cursor-pointer hover:bg-neutral-100 transition-colors select-none"
             onClick={() => handleSort(field)}
         >
             <div className="flex items-center gap-1">
@@ -612,14 +612,22 @@ export default function Products() {
                 .checkerboard {
                     background: repeating-conic-gradient(#f0f0f0 0% 25%, #fff 0% 50%) 50% / 20px 20px;
                 }
+                .scrollbar-hide {
+                    -ms-overflow-style: none;
+                    scrollbar-width: none;
+                }
+                .scrollbar-hide::-webkit-scrollbar {
+                    display: none;
+                }
             `}} />
             <TitleBar title="See It Products" />
             <PageShell>
-                <div className="space-y-6">
-                    {/* Header with Search & Filter */}
-                    <div className="flex flex-col sm:flex-row gap-3">
+                <div className="space-y-4">
+                    {/* Header with Search & Status Tabs */}
+                    <div className="flex flex-col gap-3">
+                        {/* Search Bar */}
                         <form
-                            className="relative flex-1 flex gap-2"
+                            className="relative flex gap-2"
                             onSubmit={(e) => {
                                 e.preventDefault();
                                 const formData = new FormData(e.target);
@@ -653,28 +661,41 @@ export default function Products() {
                                 Search
                             </Button>
                         </form>
-                        <select
-                            defaultValue={statusFilter}
-                            className="bg-white border border-neutral-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/5 focus:border-neutral-900 transition-all cursor-pointer"
-                            onChange={(e) => {
-                                const params = new URLSearchParams(window.location.search);
-                                params.set('status', e.target.value);
-                                params.delete('cursor');
-                                navigate(`${window.location.pathname}?${params.toString()}`);
-                            }}
-                        >
-                            <option value="ACTIVE">Active</option>
-                            <option value="all">All Products</option>
-                            <option value="DRAFT">Draft</option>
-                            <option value="ARCHIVED">Archived</option>
-                        </select>
-                        <Button
-                            variant="primary"
-                            className="flex-shrink-0"
-                            onClick={() => revalidator.revalidate()}
-                        >
-                            Sync
-                        </Button>
+
+                        {/* Shopify-style Status Tabs */}
+                        <div className="border-b border-neutral-200 -mx-1 px-1">
+                            <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                                {[
+                                    { value: 'all', label: 'All' },
+                                    { value: 'ACTIVE', label: 'Active' },
+                                    { value: 'DRAFT', label: 'Draft' },
+                                    { value: 'ARCHIVED', label: 'Archived' }
+                                ].map((tab) => {
+                                    const isActive = statusFilter === tab.value;
+                                    return (
+                                        <button
+                                            key={tab.value}
+                                            onClick={() => {
+                                                const params = new URLSearchParams(window.location.search);
+                                                params.set('status', tab.value);
+                                                params.delete('cursor');
+                                                navigate(`${window.location.pathname}?${params.toString()}`);
+                                            }}
+                                            className={`
+                                                px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors
+                                                relative -mb-px
+                                                ${isActive
+                                                    ? 'text-neutral-900 border-b-2 border-neutral-900'
+                                                    : 'text-neutral-600 hover:text-neutral-900 border-b-2 border-transparent hover:border-neutral-300'
+                                                }
+                                            `}
+                                        >
+                                            {tab.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
                     </div>
 
                     {/* Bulk Actions Bar */}
@@ -741,6 +762,9 @@ export default function Products() {
                         </div>
                     )}
 
+                    {/* Divider */}
+                    <div className="border-t border-neutral-200"></div>
+
                     {/* Quota bar */}
                     <div className="bg-white rounded-xl border border-neutral-200 p-3 md:p-4 flex items-center justify-between text-sm">
                         <span className="text-neutral-600">
@@ -764,7 +788,7 @@ export default function Products() {
                                 <table className="w-full text-left text-sm">
                                     <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 font-medium">
                                         <tr>
-                                            <th className="px-4 py-3 font-normal w-12">
+                                            <th className="px-3 md:px-4 py-2.5 md:py-3 font-normal w-12">
                                                 <input
                                                     type="checkbox"
                                                     className="rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900/5 cursor-pointer"
@@ -775,7 +799,7 @@ export default function Products() {
                                                     }}
                                                 />
                                             </th>
-                                            <th className="px-4 py-3 font-normal w-24">Images</th>
+                                            <th className="px-3 md:px-4 py-2.5 md:py-3 font-normal w-24">Images</th>
                                             <SortHeader label="Product" field="title" />
                                             <SortHeader label="Price" field="price" />
                                             <SortHeader label="Status" field="status" />
@@ -807,7 +831,7 @@ export default function Products() {
                                                     onClick={() => openDetailPanel(product)}
                                                     className={`hover:bg-neutral-50/50 transition-colors cursor-pointer ${selectedIds.includes(product.id) ? 'bg-neutral-50' : ''}`}
                                                 >
-                                                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                                    <td className="px-3 md:px-4 py-2.5 md:py-3" onClick={(e) => e.stopPropagation()}>
                                                         <input
                                                             type="checkbox"
                                                             className="rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900/5 cursor-pointer"
@@ -818,7 +842,7 @@ export default function Products() {
                                                             }}
                                                         />
                                                     </td>
-                                                    <td className="px-4 py-3">
+                                                    <td className="px-3 md:px-4 py-2.5 md:py-3">
                                                         <div className="flex items-center gap-2">
                                                             {/* Original Image */}
                                                             <div className="w-12 h-12 rounded-lg border border-neutral-200 overflow-hidden bg-neutral-50 flex-shrink-0">
@@ -839,13 +863,13 @@ export default function Products() {
                                                             )}
                                                         </div>
                                                     </td>
-                                                    <td className="px-4 py-3">
+                                                    <td className="px-3 md:px-4 py-2.5 md:py-3">
                                                         <div className="font-bold text-neutral-900">{product.title}</div>
                                                         <div className="text-neutral-500 text-xs truncate max-w-[180px]">
                                                             {product.handle}
                                                         </div>
                                                     </td>
-                                                    <td className="px-4 py-3">
+                                                    <td className="px-3 md:px-4 py-2.5 md:py-3">
                                                         <div className="text-neutral-900 font-medium whitespace-nowrap">
                                                             {price ? `${parseFloat(price.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${price.currencyCode}` : '—'}
                                                         </div>
@@ -853,7 +877,7 @@ export default function Products() {
                                                             {product.totalInventory > 0 ? `${product.totalInventory} in stock` : 'Out of stock'}
                                                         </div>
                                                     </td>
-                                                    <td className="px-4 py-3">
+                                                    <td className="px-3 md:px-4 py-2.5 md:py-3">
                                                         <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                                                             status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
                                                                 status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
