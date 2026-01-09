@@ -19,7 +19,8 @@ export async function GET(request: NextRequest) {
 
     const now = new Date();
 
-    // Prefer DB if available, but fall back to GCS so "live" works even when Postgres isn't migrated yet.
+    // Database is now the primary source - all sessions are saved here in real-time
+    // GCS fallback is only used if database is unavailable (shouldn't happen in production)
     try {
       // Active sessions: updated in last 10 minutes, status = 'in_progress'
       const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);

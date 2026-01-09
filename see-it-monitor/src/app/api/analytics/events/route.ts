@@ -123,7 +123,9 @@ export async function POST(request: NextRequest) {
       processedEvents.push(event);
     }
 
-    // Always persist raw events to GCS as an append-only log so we can "store everything for now"
+    // Always persist raw events to both GCS (backup) and database (primary)
+    // Database is the primary source - all events are saved to analytics_events table
+    // GCS is kept as a backup/archive
     const gcsResult = await writeAnalyticsEventsToGcs({
       events: processedEvents.map((e) => ({
         type: e.type,
@@ -158,7 +160,9 @@ export async function POST(request: NextRequest) {
         })
       );
 
-      // Process specific event types
+      // Process specific event types to update structured tables
+      // ALL events are already saved to analytics_events table above
+      // These handlers update the structured tables (sessions, steps, errors, etc.)
       if (event.type === 'session_started' && event.sessionId) {
         const deviceCtx = event.deviceContext || {};
         insertPromises.push(
@@ -181,6 +185,9 @@ export async function POST(request: NextRequest) {
           handleAIRequest(event)
         );
       }
+      // Note: Other event types (user_action, post_ar_action, ar_button_click, etc.)
+      // are saved to analytics_events table and can be queried from there
+      // They're visible in the monitor through the analytics_events table
     }
 
     // Execute all inserts
