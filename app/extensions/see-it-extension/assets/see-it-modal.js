@@ -323,7 +323,16 @@
 
     // --- Analytics Integration ---
     let analytics = null;
-    const shopDomain = window.Shopify?.shop || window.location.hostname || 'unknown';
+    // Prefer permanent shop domain to avoid splitting merchants by custom domain vs *.myshopify.com
+    // - `data-shop-permanent-domain` comes from liquid: {{ shop.permanent_domain }}
+    // - `window.Shopify.shop` is usually the permanent domain, but isn't guaranteed to exist on all themes/pages
+    const shopDomain =
+        trigger?.dataset?.shopPermanentDomain ||
+        window.Shopify?.shop ||
+        trigger?.dataset?.shopDomain ||
+        window.location.hostname ||
+        'unknown';
+    const storefrontDomain = trigger?.dataset?.shopDomain || window.location.hostname || null;
     const analyticsEndpoint = 'https://see-it-monitor.vercel.app/api/analytics/events';
     
     // Simple analytics wrapper (fail silently - never break the app)
@@ -352,7 +361,7 @@
                                         type: 'session_started',
                                         sessionId,
                                         shopDomain,
-                                        data: { productId, productTitle, productPrice },
+                                        data: { productId, productTitle, productPrice, storefrontDomain },
                                         timestamp: new Date().toISOString(),
                                     }],
                                 }),
@@ -373,7 +382,7 @@
                                         type: 'step_update',
                                         sessionId: state.sessionId,
                                         shopDomain,
-                                        data: { step, status, ...metadata },
+                                        data: { step, status, storefrontDomain, ...metadata },
                                         timestamp: new Date().toISOString(),
                                     }],
                                 }),
@@ -391,7 +400,7 @@
                                         type: 'session_ended',
                                         sessionId: state.sessionId,
                                         shopDomain,
-                                        data: { status, ...metadata },
+                                        data: { status, storefrontDomain, ...metadata },
                                         timestamp: new Date().toISOString(),
                                     }],
                                 }),
@@ -409,7 +418,7 @@
                                         type: 'error',
                                         sessionId: state.sessionId,
                                         shopDomain,
-                                        data: { errorCode, errorMessage, severity },
+                                        data: { errorCode, errorMessage, severity, storefrontDomain },
                                         timestamp: new Date().toISOString(),
                                     }],
                                 }),
@@ -430,6 +439,7 @@
                                             productId: state.productId,
                                             productTitle: state.productTitle,
                                             productPrice: state.productPrice,
+                                            storefrontDomain,
                                         },
                                         timestamp: new Date().toISOString(),
                                     }],

@@ -139,6 +139,9 @@ export default async function MerchantsPage() {
                   {shop.totalSessions} sessions • {shop.completedSessions} completed
                   {shop.lastSessionAt && ` • Last: ${new Date(shop.lastSessionAt).toLocaleDateString()}`}
                 </div>
+                {shop.domain.includes('.myshopify.com') && (
+                  <div className="text-xs text-secondary mt-1">{shop.domain}</div>
+                )}
               </div>
               <div className="text-right">
                 <div className={`badge ${shop.isEmbedded ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
