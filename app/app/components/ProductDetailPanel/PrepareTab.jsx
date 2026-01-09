@@ -248,7 +248,6 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                     label: 'Start over',
                     onClick: handleStartOver,
                     disabled: isLoading,
-                    className: "text-red-600 hover:bg-red-50 hover:text-red-700 px-0 text-sm"
                 } : null
             });
         }
@@ -390,7 +389,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                                 onClick={() => setView("result")}
                                 className={cx(
                                     "px-4 py-2 rounded-full text-xs font-bold transition-all duration-200",
-                                    view === "result" ? "bg-emerald-500 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
+                                    view === "result" ? "bg-neutral-900 text-white shadow-sm" : "text-neutral-500 hover:bg-neutral-100"
                                 )}
                             >
                                 Result

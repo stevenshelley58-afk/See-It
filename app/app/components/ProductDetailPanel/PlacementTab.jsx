@@ -364,10 +364,10 @@ export function PlacementTab({ product, asset, onChange }) {
             {/* Divider */}
             <div className="border-t border-neutral-200"></div>
             
-            {/* SECTION: v2 Placement Rules */}
+            {/* SECTION: Placement Rules */}
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-neutral-900">v2 Placement Rules</h3>
+                    <h3 className="text-lg font-bold text-neutral-900">Placement Rules</h3>
                     <span className="text-xs text-neutral-500 bg-neutral-100 px-2 py-1 rounded-full">
                         Auto-detected • Review & adjust
                     </span>
