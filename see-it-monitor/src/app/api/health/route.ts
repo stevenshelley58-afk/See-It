@@ -1,10 +1,13 @@
 /**
  * Health check endpoint
- * Returns GCS connection status, number of sessions found, latest session timestamp
+ * Returns GCS connection status, database connection status, number of sessions found, latest session timestamp
  */
 
 import { NextResponse } from 'next/server';
 import { getStorage } from '@/lib/gcs';
+import { db } from '@/lib/db/client';
+import { sessions } from '@/lib/db/schema';
+import { sql } from 'drizzle-orm';
 
 const SESSION_BUCKET = process.env.GCS_SESSION_BUCKET || 'see-it-sessions';
 
@@ -16,6 +19,21 @@ type HealthSessionSummary = {
 };
 
 export async function GET() {
+  let gcsConnected = false;
+  let dbConnected = false;
+  let dbError: string | null = null;
+  let dbSessionCount = 0;
+
+  // Check database connection
+  try {
+    const result = await db.execute(sql`SELECT COUNT(*)::int as count FROM sessions`);
+    dbSessionCount = Number(result.rows[0]?.count || 0);
+    dbConnected = true;
+  } catch (error) {
+    dbError = error instanceof Error ? error.message : 'Unknown database error';
+    console.error('[Health] Database check failed:', error);
+  }
+
   try {
     const storage = getStorage();
     const bucket = storage.bucket(SESSION_BUCKET);
@@ -28,10 +46,15 @@ export async function GET() {
         status: 'error',
         message: `Bucket ${SESSION_BUCKET} does not exist`,
         gcsConnected: false,
+        dbConnected,
+        dbError,
+        dbSessionCount,
         sessionCount: 0,
         latestSession: null,
       }, { status: 200 }); // Return 200 so health checks can still see the status
     }
+
+    gcsConnected = true;
 
     // Try to list some sessions to verify access
     let sessionCount = 0;
@@ -85,6 +108,9 @@ export async function GET() {
     return NextResponse.json({
       status: 'ok',
       gcsConnected: true,
+      dbConnected,
+      dbError,
+      dbSessionCount,
       bucketName: SESSION_BUCKET,
       sessionCount,
       latestSession,
@@ -96,6 +122,9 @@ export async function GET() {
       status: 'error',
       message,
       gcsConnected: false,
+      dbConnected,
+      dbError,
+      dbSessionCount,
       sessionCount: 0,
       latestSession: null,
     }, { status: 500 });

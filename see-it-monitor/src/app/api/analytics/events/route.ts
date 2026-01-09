@@ -184,22 +184,39 @@ export async function POST(request: NextRequest) {
     }
 
     // Execute all inserts
-    await Promise.allSettled(insertPromises);
+    const insertResults = await Promise.allSettled(insertPromises);
+    
+    // Log any database errors
+    const dbErrors: string[] = [];
+    insertResults.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        const errorMsg = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        dbErrors.push(`Insert ${index} failed: ${errorMsg}`);
+        console.error(`[Analytics API] Database insert failed:`, result.reason);
+      }
+    });
 
     return NextResponse.json({
       success: true,
       processed: processedEvents.length,
       errors: errors.length > 0 ? errors : undefined,
+      dbErrors: dbErrors.length > 0 ? dbErrors : undefined,
       stored: {
         gcs: gcsResult.ok,
         gcsPath: gcsResult.ok ? gcsResult.path : null,
         gcsError: gcsResult.ok ? null : gcsResult.error,
+        db: dbErrors.length === 0,
+        dbErrorCount: dbErrors.length,
       },
     }, { headers: corsHeaders });
   } catch (error) {
     console.error('[Analytics API] Error processing events:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json(
-      { error: 'Failed to process events' },
+      { 
+        error: 'Failed to process events',
+        details: errorMessage,
+      },
       { status: 500, headers: corsHeaders }
     );
   }
