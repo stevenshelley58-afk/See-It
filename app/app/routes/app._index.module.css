@@ -1,0 +1,176 @@
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+header {
+  margin-bottom: 40px;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 600;
+  color: #1a1a1a;
+  letter-spacing: -0.5px;
+}
+
+.subtitle {
+  color: #6b7280;
+  font-size: 15px;
+  margin-top: 6px;
+}
+
+/* Stats row */
+.stats {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.stat {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 24px;
+  flex: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.statValue {
+  font-size: 32px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.statLabel {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+
+/* Navigation cards */
+.navCards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.navCard {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  text-decoration: none;
+  color: inherit;
+}
+
+.navCard:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.navCard:active {
+  transform: translateY(0);
+}
+
+.navCardLeft {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.navCardIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f4f6;
+}
+
+.navCardIcon svg {
+  width: 22px;
+  height: 22px;
+  color: #4b5563;
+}
+
+.navCardTitle {
+  font-size: 16px;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.navCardDesc {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.navCardArrow {
+  color: #9ca3af;
+}
+
+.navCardArrow svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Badge for counts */
+.badge {
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+/* Mobile adjustments */
+@media (max-width: 600px) {
+  .container {
+    padding: 24px 16px;
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+
+  .stats {
+    gap: 12px;
+  }
+
+  .stat {
+    padding: 16px 18px;
+  }
+
+  .statValue {
+    font-size: 26px;
+  }
+
+  .navCard {
+    padding: 18px 20px;
+  }
+
+  .navCardIcon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .navCardIcon svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* Very small screens */
+@media (max-width: 380px) {
+  .stats {
+    flex-direction: column;
+  }
+}
