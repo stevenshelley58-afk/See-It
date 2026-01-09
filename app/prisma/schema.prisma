@@ -48,6 +48,7 @@ model Shop {
   savedRoomOwners  SavedRoomOwner[]
   savedRooms       SavedRoom[]
   seeItCaptures    SeeItCapture[]
+  prepEvents       PrepEvent[]
 
   @@map("shops")
 }
@@ -74,11 +75,17 @@ model ProductAsset {
   allowSpaceCreation     Boolean?  @map("allow_space_creation") // v2: Allow minimal space creation for placement
   geminiFileUri         String?   @map("gemini_file_uri") // Pre-uploaded Gemini Files API URI
   geminiFileExpiresAt   DateTime? @map("gemini_file_expires_at") // Gemini file expiration (48h from upload)
+  // Field-level provenance (current state snapshot)
+  fieldConfidence       Json?     @map("field_confidence") // JSON: { fieldName: "high" | "medium" | "low" }
+  fieldSource           Json?     @map("field_source") // JSON: { fieldName: "auto" | "merchant" }
+  fieldOverrides        Json?     @map("field_overrides") // JSON: { fieldName: true | false }
+  fieldEvidence         Json?     @map("field_evidence") // JSON: { fieldName: "snippet/keywords/image cues" }
   createdAt             DateTime  @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
   shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
   renderJobs RenderJob[]
+  prepEvents PrepEvent[]
 
   @@index([shopId, productId])
   @@index([shopId, productId, isDefault]) // Index for finding default assets
@@ -196,4 +203,24 @@ model SeeItCapture {
   @@index([shopId, email])
   @@index([shopId, createdAt])
   @@map("see_it_captures")
+}
+
+model PrepEvent {
+  id        String   @id @default(uuid())
+  assetId   String   @map("asset_id")
+  productId String   @map("product_id")
+  shopId    String   @map("shop_id")
+  timestamp DateTime @default(now()) @map("timestamp")
+  actorType String   @map("actor_type") // "system" | "merchant"
+  actorId   String?  @map("actor_id") // nullable for system events, best-effort for merchant
+  eventType String   @map("event_type")
+  payload   Json     @map("payload") // JSON: { before, after, confidence?, source?, ... }
+
+  shop       Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productAsset ProductAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId])
+  @@index([shopId, timestamp])
+  @@index([productId])
+  @@map("prep_events")
 }

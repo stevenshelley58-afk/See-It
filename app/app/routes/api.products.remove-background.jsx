@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { removeBackgroundFast } from "../services/background-remover.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
+import { emitPrepEvent } from "../services/prep-events.server";
 
 /**
  * Extract image ID from Shopify CDN URL
@@ -140,6 +141,26 @@ export const action = async ({ request }) => {
                 errorMessage: null,
                 updatedAt: new Date(),
             },
+        });
+
+        // Emit manual_cutout_applied event
+        await emitPrepEvent(
+            {
+                assetId: asset.id,
+                productId: productId,
+                shopId: shop.id,
+                eventType: "manual_cutout_applied",
+                actorType: "merchant",
+                payload: {
+                    source: "manual",
+                    preparedImageKey,
+                    processingTimeMs: result.processingTimeMs,
+                },
+            },
+            session,
+            requestId
+        ).catch(() => {
+            // Non-critical
         });
 
         logger.info(

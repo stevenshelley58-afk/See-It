@@ -676,8 +676,8 @@ function mapEventToNodeSignals(event: AnalyticsEvent): NodeSignalMapping[] {
   if (event.type === 'ai_request') {
     const operation = data.operation as string;
     let nodeKey = '';
-    let lane = 'Model';
-    let orderIndex = 3;
+    const lane = 'Model';
+    const orderIndex = 3;
 
     if (operation === 'inpaint' || operation === 'remove_bg') {
       nodeKey = 'model:cleanup';
@@ -711,35 +711,38 @@ async function upsertRunNode(
   owningFile?: string,
   owningLine?: number
 ) {
+  // Resolve session UUID from sessionId string
+  const sessionRecords = await db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(eq(sessions.sessionId, sessionId))
+    .limit(1);
+
+  if (sessionRecords.length === 0) return;
+  const sessionUuid = sessionRecords[0].id;
+
   // Check if node already exists
   const existingNodes = await db
     .select()
     .from(runNodes)
-    .where(and(
-      eq(runNodes.sessionId, sessionId as any),
-      eq(runNodes.nodeKey, nodeKey)
-    ))
+    .where(
+      and(
+        eq(runNodes.sessionId, sessionUuid),
+        eq(runNodes.nodeKey, nodeKey)
+      )
+    )
     .limit(1);
 
   if (existingNodes.length === 0) {
-    // Get session UUID from sessionId string
-    const sessions = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.sessionId, sessionId))
-      .limit(1);
-    
-    if (sessions.length > 0) {
-      await db.insert(runNodes).values({
-        sessionId: sessions[0].id,
-        nodeKey,
-        lane,
-        orderIndex,
-        contractName: contractName || null,
-        owningFile: owningFile || null,
-        owningLine: owningLine || null,
-      });
-    }
+    await db.insert(runNodes).values({
+      sessionId: sessionUuid,
+      nodeKey,
+      lane,
+      orderIndex,
+      contractName: contractName || null,
+      owningFile: owningFile || null,
+      owningLine: owningLine || null,
+    });
   }
 }
 
@@ -753,22 +756,23 @@ async function insertRunSignal(
   timestamp: Date,
   payload?: Record<string, unknown>
 ) {
-  // Get session UUID from sessionId string
-  const sessions = await db
-    .select()
+  // Resolve session UUID from sessionId string
+  const sessionRecords = await db
+    .select({ id: sessions.id })
     .from(sessions)
     .where(eq(sessions.sessionId, sessionId))
     .limit(1);
-  
-  if (sessions.length > 0) {
-    await db.insert(runSignals).values({
-      sessionId: sessions[0].id,
-      nodeKey,
-      signalType,
-      timestamp,
-      payload: payload || null,
-    });
-  }
+
+  if (sessionRecords.length === 0) return;
+  const sessionUuid = sessionRecords[0].id;
+
+  await db.insert(runSignals).values({
+    sessionId: sessionUuid,
+    nodeKey,
+    signalType,
+    timestamp,
+    payload: payload || null,
+  });
 }
 
 // Handle OPTIONS for CORS preflight

@@ -10,10 +10,17 @@ import { eq, sql } from 'drizzle-orm';
 import { listSessions, deriveSessionsFromAnalytics } from '@/lib/gcs';
 
 // Simple auth - require a secret token
-const BACKFILL_SECRET = process.env.BACKFILL_SECRET || process.env.MIGRATE_SECRET || 'change-me-in-production';
+const BACKFILL_SECRET = process.env.BACKFILL_SECRET || process.env.MIGRATE_SECRET;
 
 export async function POST(request: NextRequest) {
   try {
+    if (!BACKFILL_SECRET) {
+      return NextResponse.json(
+        { error: 'BACKFILL_SECRET (or MIGRATE_SECRET) is not configured' },
+        { status: 500 }
+      );
+    }
+
     // Check auth token
     const authHeader = request.headers.get('authorization');
     const token = authHeader?.replace('Bearer ', '') || request.nextUrl.searchParams.get('token');

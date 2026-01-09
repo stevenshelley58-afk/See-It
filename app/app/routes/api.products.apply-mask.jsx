@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { removeBackgroundFast, isBackgroundRemoverAvailable } from "../services/background-remover.server";
+import { emitPrepEvent } from "../services/prep-events.server";
 import sharp from "sharp";
 
 /**
@@ -69,6 +70,24 @@ export const action = async ({ request }) => {
         if (!shop) {
             return json({ success: false, error: "Shop not found" }, { status: 404 });
         }
+
+        // Emit manual_cutout_started event
+        await emitPrepEvent(
+            {
+                assetId: asset?.id || "unknown",
+                productId: productId,
+                shopId: shop.id,
+                eventType: "manual_cutout_started",
+                actorType: "merchant",
+                payload: {
+                    source: "manual",
+                },
+            },
+            session,
+            requestId
+        ).catch(() => {
+            // Non-critical
+        });
 
         // Get existing asset for this product
         const asset = await prisma.productAsset.findFirst({
@@ -222,6 +241,7 @@ export const action = async ({ request }) => {
         );
 
         // Update or create asset
+        let finalAssetId = asset?.id;
         if (asset) {
             await prisma.productAsset.update({
                 where: { id: asset.id },
@@ -233,9 +253,10 @@ export const action = async ({ request }) => {
                     updatedAt: new Date(),
                 },
             });
+            finalAssetId = asset.id;
         } else {
             const sourceImageId = extractImageId(sourceImageUrl) || `img-${Date.now()}`;
-            await prisma.productAsset.create({
+            const newAsset = await prisma.productAsset.create({
                 data: {
                     shopId: shop.id,
                     productId,
@@ -248,6 +269,29 @@ export const action = async ({ request }) => {
                     promptVersion: 1,
                     createdAt: new Date(),
                 },
+            });
+            finalAssetId = newAsset.id;
+        }
+
+        // Emit manual_cutout_applied event
+        if (finalAssetId) {
+            await emitPrepEvent(
+                {
+                    assetId: finalAssetId,
+                    productId: productId,
+                    shopId: shop.id,
+                    eventType: "manual_cutout_applied",
+                    actorType: "merchant",
+                    payload: {
+                        source: "manual",
+                        preparedImageKey,
+                        processingTimeMs,
+                    },
+                },
+                session,
+                requestId
+            ).catch(() => {
+                // Non-critical
             });
         }
 

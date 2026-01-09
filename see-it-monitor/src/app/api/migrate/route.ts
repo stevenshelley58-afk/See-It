@@ -11,10 +11,17 @@ import { join } from 'path';
 import { sql } from 'drizzle-orm';
 
 // Simple auth - require a secret token
-const MIGRATE_SECRET = process.env.MIGRATE_SECRET || 'change-me-in-production';
+const MIGRATE_SECRET = process.env.MIGRATE_SECRET;
 
 export async function POST(request: NextRequest) {
   try {
+    if (!MIGRATE_SECRET) {
+      return NextResponse.json(
+        { error: 'MIGRATE_SECRET is not configured' },
+        { status: 500 }
+      );
+    }
+
     // Check auth token
     const authHeader = request.headers.get('authorization');
     const token = authHeader?.replace('Bearer ', '') || request.nextUrl.searchParams.get('token');

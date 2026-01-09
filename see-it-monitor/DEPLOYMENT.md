@@ -18,6 +18,9 @@ This tells Vercel where to find the `package.json` and Next.js app.
 
 Set these in Vercel → Settings → Environment Variables:
 
+- `DATABASE_URL` - Postgres connection string (required)
+- `MIGRATE_SECRET` - Secret token for `/api/migrate` (required)
+- `BACKFILL_SECRET` - Secret token for `/api/backfill` (optional; falls back to `MIGRATE_SECRET`)
 - `GOOGLE_CREDENTIALS_JSON` - Base64-encoded or raw JSON service account credentials
 - `GCS_SESSION_BUCKET` - (optional) Defaults to `see-it-sessions`
 - `GCS_PROJECT_ID` - (optional) GCP project ID

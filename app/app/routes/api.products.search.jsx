@@ -36,12 +36,12 @@ export const loader = async ({ request }) => {
         );
 
         const productsData = await productsResponse.json();
-        const products = productsData.data?.products?.edges?.map((edge: any) => edge.node) || [];
+        const products = productsData.data?.products?.edges?.map((edge) => edge.node) || [];
 
         // Search orders (if needed - you can add this later)
         // For now, we'll just return products
-        const orders: any[] = [];
-        const draftOrders: any[] = [];
+        const orders = [];
+        const draftOrders = [];
 
         return json({
             products,

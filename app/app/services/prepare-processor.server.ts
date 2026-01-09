@@ -4,6 +4,7 @@ import { logger, createLogContext, generateRequestId } from "../utils/logger.ser
 import { StorageService } from "./storage.server";
 import { incrementQuota } from "../quota.server";
 import { extractProductMetadata } from "./extract-metadata.server";
+import { emitPrepEvent } from "./prep-events.server";
 
 let processorInterval: NodeJS.Timeout | null = null;
 let isProcessing = false;
@@ -139,9 +140,55 @@ async function processPendingAssets(batchRequestId: string) {
                             asset.productTitle ?? undefined // Pass product title for Grounded SAM
                         );
                         success = true;
+
+                        // Emit auto_cutout_created event
+                        await emitPrepEvent(
+                            {
+                                assetId: asset.id,
+                                productId: asset.productId,
+                                shopId: asset.shopId,
+                                eventType: "auto_cutout_created",
+                                actorType: "system",
+                                payload: {
+                                    source: "auto",
+                                    preparedImageKey: extractGcsKeyFromUrl(prepareResult.url) || undefined,
+                                    geminiFileUri: prepareResult.geminiFileUri || undefined,
+                                },
+                            },
+                            null,
+                            itemRequestId
+                        ).catch((err) => {
+                            // Non-critical - log but don't fail
+                            logger.debug(
+                                createLogContext("prepare", itemRequestId, "event-emit-failed", {}),
+                                `Failed to emit auto_cutout_created: ${err instanceof Error ? err.message : String(err)}`
+                            );
+                        });
                     } catch (error) {
                         lastError = error;
                         const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+                        // Emit auto_cutout_failed on first attempt failure
+                        if (attempt === 0) {
+                            await emitPrepEvent(
+                                {
+                                    assetId: asset.id,
+                                    productId: asset.productId,
+                                    shopId: asset.shopId,
+                                    eventType: "auto_cutout_failed",
+                                    actorType: "system",
+                                    payload: {
+                                        source: "auto",
+                                        error: errorMessage,
+                                        retryable: isRetryableError(error),
+                                    },
+                                },
+                                null,
+                                itemRequestId
+                            ).catch(() => {
+                                // Non-critical
+                            });
+                        }
 
                         // Only retry for transient errors
                         if (!isRetryableError(error)) {
@@ -183,6 +230,25 @@ async function processPendingAssets(batchRequestId: string) {
                             );
                             if (metadata) {
                                 renderInstructions = JSON.stringify(metadata);
+
+                                // Emit auto_metadata_extracted event
+                                await emitPrepEvent(
+                                    {
+                                        assetId: asset.id,
+                                        productId: asset.productId,
+                                        shopId: asset.shopId,
+                                        eventType: "auto_metadata_extracted",
+                                        actorType: "system",
+                                        payload: {
+                                            source: "auto",
+                                            metadata: metadata,
+                                        },
+                                    },
+                                    null,
+                                    itemRequestId
+                                ).catch(() => {
+                                    // Non-critical
+                                });
                             }
                         } catch (metadataError) {
                             logger.warn(
@@ -209,6 +275,25 @@ async function processPendingAssets(batchRequestId: string) {
                             errorMessage: null,
                             updatedAt: new Date()
                         }
+                    });
+
+                    // Emit prep_confirmed event (system)
+                    await emitPrepEvent(
+                        {
+                            assetId: asset.id,
+                            productId: asset.productId,
+                            shopId: asset.shopId,
+                            eventType: "prep_confirmed",
+                            actorType: "system",
+                            payload: {
+                                source: "auto",
+                                status: "ready",
+                            },
+                        },
+                        null,
+                        itemRequestId
+                    ).catch(() => {
+                        // Non-critical
                     });
 
                     logger.info(

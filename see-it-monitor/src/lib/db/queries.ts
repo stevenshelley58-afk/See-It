@@ -3,7 +3,7 @@
  */
 
 import { db } from './client';
-import { sessions, shops, errors, aiRequests, sessionSteps } from './schema';
+import { sessions, shops, errors, aiRequests, sessionSteps, prepEvents } from './schema';
 import { eq, and, gte, desc, sql, count } from 'drizzle-orm';
 
 export async function getActiveSessions() {
@@ -89,4 +89,23 @@ export async function getSessionById(sessionId: string) {
     .orderBy(sessionSteps.createdAt);
   
   return { ...session[0], steps };
+}
+
+export async function getPrepEventsByAssetId(assetId: string) {
+  return await db
+    .select()
+    .from(prepEvents)
+    .where(eq(prepEvents.assetId, assetId))
+    .orderBy(desc(prepEvents.timestamp))
+    .limit(1000);
+}
+
+export async function getPrepEventsByShopDomain(shopDomain: string, limit = 100) {
+  // Note: shopId in prep_events is from app DB, not monitor DB
+  // For now, we'll filter by shopId string match (may need to join with shops table later)
+  return await db
+    .select()
+    .from(prepEvents)
+    .orderBy(desc(prepEvents.timestamp))
+    .limit(limit);
 }

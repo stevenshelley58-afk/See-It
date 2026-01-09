@@ -443,6 +443,36 @@ export const analyticsEvents = pgTable('analytics_events', {
 }));
 
 // ============================================
+// PREP EVENTS (Product preparation audit log)
+// ============================================
+
+export const prepEvents = pgTable('prep_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  
+  // Asset/product/shop identifiers (from app DB)
+  assetId: text('asset_id').notNull(),
+  productId: text('product_id').notNull(),
+  shopId: text('shop_id').notNull(),
+  
+  // Event metadata
+  timestamp: timestamp('timestamp').notNull(),
+  actorType: varchar('actor_type', { length: 20 }).notNull(), // "system" | "merchant"
+  actorId: text('actor_id'), // nullable for system, best-effort for merchant
+  eventType: varchar('event_type', { length: 50 }).notNull(),
+  
+  // Event payload (JSON)
+  payload: jsonb('payload').notNull(),
+  
+  // Server-side tracking
+  receivedAt: timestamp('received_at').defaultNow(),
+}, (table) => ({
+  assetIdx: index('prep_events_asset_idx').on(table.assetId),
+  shopTimestampIdx: index('prep_events_shop_timestamp_idx').on(table.shopId, table.timestamp),
+  productIdx: index('prep_events_product_idx').on(table.productId),
+  eventTypeIdx: index('prep_events_event_type_idx').on(table.eventType),
+}));
+
+// ============================================
 // AGGREGATED METRICS (Pre-computed for dashboard)
 // ============================================
 

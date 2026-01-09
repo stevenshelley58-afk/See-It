@@ -3,6 +3,10 @@
  * Defines rules for triggering alerts
  */
 
+import { db } from '@/lib/db/client';
+import { prepEvents } from '@/lib/db/schema';
+import { eq, and, gte, sql, or, like } from 'drizzle-orm';
+
 export interface AlertRule {
   id: string;
   name: string;
@@ -16,6 +20,13 @@ export interface AlertData {
   systemHealth: Record<string, { status: string; responseTime?: number }>;
   sessionCount: number;
   currentHour: number; // 0-23
+  prepEvents?: {
+    manualCutoutRate?: Record<string, number>; // shopId -> rate
+    overrideRate?: Record<string, number>;
+    abandonmentRate?: Record<string, number>;
+    lowConfidenceReadyCount?: number;
+    downgradeAfterConfirmRate?: Record<string, number>;
+  };
 }
 
 export interface AlertResult {
@@ -90,6 +101,132 @@ export const alertRules: AlertRule[] = [
         return {
           ruleId: 'no_sessions_business_hours',
           message: 'No sessions in the last hour during business hours (8am-10pm AWST)',
+        };
+      }
+      return null;
+    },
+  },
+  // ============================================
+  // PREP-SPECIFIC ALERTS
+  // ============================================
+  {
+    id: 'prep_high_manual_rate',
+    name: 'High Manual Cutout Rate',
+    severity: 'warning',
+    evaluate: async (data) => {
+      // Check last 24 hours for manual vs auto cutout ratio
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      
+      const [manualCount, autoCount] = await Promise.all([
+        db.select({ count: sql<number>`COUNT(*)` })
+          .from(prepEvents)
+          .where(
+            and(
+              gte(prepEvents.timestamp, oneDayAgo),
+              eq(prepEvents.eventType, 'manual_cutout_applied')
+            )
+          ),
+        db.select({ count: sql<number>`COUNT(*)` })
+          .from(prepEvents)
+          .where(
+            and(
+              gte(prepEvents.timestamp, oneDayAgo),
+              eq(prepEvents.eventType, 'auto_cutout_created')
+            )
+          ),
+      ]);
+
+      const manual = Number(manualCount[0]?.count || 0);
+      const auto = Number(autoCount[0]?.count || 0);
+      const total = manual + auto;
+
+      if (total > 0 && manual / total > 0.3) {
+        return {
+          ruleId: 'prep_high_manual_rate',
+          message: `High manual cutout rate: ${Math.round((manual / total) * 100)}% (${manual}/${total}) in last 24h`,
+          severity: 'warning',
+        };
+      }
+      return null;
+    },
+  },
+  {
+    id: 'prep_high_override_rate',
+    name: 'High Cutout Override Rate',
+    severity: 'warning',
+    evaluate: async (data) => {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      
+      const [overrideCount, approvedCount] = await Promise.all([
+        db.select({ count: sql<number>`COUNT(*)` })
+          .from(prepEvents)
+          .where(
+            and(
+              gte(prepEvents.timestamp, oneDayAgo),
+              eq(prepEvents.eventType, 'cutout_override_proceed')
+            )
+          ),
+        db.select({ count: sql<number>`COUNT(*)` })
+          .from(prepEvents)
+          .where(
+            and(
+              gte(prepEvents.timestamp, oneDayAgo),
+              eq(prepEvents.eventType, 'cutout_approved')
+            )
+          ),
+      ]);
+
+      const overrides = Number(overrideCount[0]?.count || 0);
+      const approved = Number(approvedCount[0]?.count || 0);
+      const total = overrides + approved;
+
+      if (total > 0 && overrides / total > 0.15) {
+        return {
+          ruleId: 'prep_high_override_rate',
+          message: `High cutout override rate: ${Math.round((overrides / total) * 100)}% (${overrides}/${total}) in last 24h`,
+          severity: 'warning',
+        };
+      }
+      return null;
+    },
+  },
+  {
+    id: 'prep_abandonment_rate',
+    name: 'High Prep Abandonment Rate',
+    severity: 'warning',
+    evaluate: async (data) => {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      
+      const [abandonedCount, startedCount] = await Promise.all([
+        db.select({ count: sql<number>`COUNT(*)` })
+          .from(prepEvents)
+          .where(
+            and(
+              gte(prepEvents.timestamp, oneDayAgo),
+              eq(prepEvents.eventType, 'prep_abandoned')
+            )
+          ),
+        db.select({ count: sql<number>`COUNT(*)` })
+          .from(prepEvents)
+          .where(
+            and(
+              gte(prepEvents.timestamp, oneDayAgo),
+              or(
+                eq(prepEvents.eventType, 'prep_started'),
+                eq(prepEvents.eventType, 'prep_opened')
+              )!
+            )
+          ),
+      ]);
+
+      const abandoned = Number(abandonedCount[0]?.count || 0);
+      const started = Number(startedCount[0]?.count || 0);
+
+      if (started > 0 && abandoned / started > 0.25) {
+        return {
+          ruleId: 'prep_abandonment_rate',
+          message: `High prep abandonment rate: ${Math.round((abandoned / started) * 100)}% (${abandoned}/${started}) in last 24h`,
+          severity: 'warning',
         };
       }
       return null;
