@@ -49,7 +49,11 @@ export default function DemoDashboard() {
         subtitle="Product visualization for your store"
         primaryAction={{ content: "Prepare products", url: "/app/products" }}
         secondaryActions={[
-          { content: "View docs", url: "/docs" },
+          {
+            content: "View docs",
+            url: "https://github.com/stevenshelley58-afk/See-It/blob/main/app/docs/PRODUCT_PREP_REDESIGN.md",
+            external: true,
+          },
           { content: "Open products", url: "/app/products" },
         ]}
       >
@@ -215,7 +219,7 @@ export default function DemoDashboard() {
             <RemixLink to="/demo/dashboard" style={{ textDecoration: "underline" }}>
               /demo/dashboard
             </RemixLink>{" "}
-            (hidden in production).
+            (use a trailing slash if you see a 404).
           </Text>
         </BlockStack>
       </Page>
