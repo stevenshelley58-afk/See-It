@@ -71,7 +71,15 @@ export const action = async ({ request }) => {
             return json({ success: false, error: "Shop not found" }, { status: 404 });
         }
 
-        // Emit manual_cutout_started event
+        // Get existing asset for this product
+        const asset = await prisma.productAsset.findFirst({
+            where: {
+                shopId: shop.id,
+                productId: productId,
+            },
+        });
+
+        // Emit manual_cutout_started event (best-effort; must not break flow)
         await emitPrepEvent(
             {
                 assetId: asset?.id || "unknown",
@@ -89,14 +97,6 @@ export const action = async ({ request }) => {
             // Non-critical
         });
 
-        // Get existing asset for this product
-        const asset = await prisma.productAsset.findFirst({
-            where: {
-                shopId: shop.id,
-                productId: productId,
-            },
-        });
-
         const sourceImageUrl = customImageUrl || asset?.sourceImageUrl;
         if (!sourceImageUrl) {
             return json({ success: false, error: "Product asset not found" }, { status: 404 });
@@ -104,13 +104,31 @@ export const action = async ({ request }) => {
 
         const startTime = Date.now();
 
-        // Download source image
+        // Download source image with timeout
         logger.info({ ...logContext, stage: "downloading" }, "Downloading source image...");
-        const imageResponse = await fetch(sourceImageUrl);
-        if (!imageResponse.ok) {
-            throw new Error(`Failed to download source image: ${imageResponse.status}`);
+        
+        let imageBuffer;
+        // Create AbortController for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout
+        
+        try {
+            const imageResponse = await fetch(sourceImageUrl, {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            if (!imageResponse.ok) {
+                throw new Error(`Failed to download source image: ${imageResponse.status} ${imageResponse.statusText}`);
+            }
+            imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            if (fetchError.name === 'AbortError') {
+                throw new Error('Image download timed out after 20 seconds. The image URL may be invalid or the server is slow.');
+            }
+            throw new Error(`Failed to download source image: ${fetchError.message}`);
         }
-        const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
 
         // Parse mask from data URL
         const maskBase64 = maskDataUrl.split(',')[1];
