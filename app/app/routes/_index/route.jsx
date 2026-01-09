@@ -1,6 +1,6 @@
 import { redirect } from "@remix-run/node";
 import { Form } from "@remix-run/react";
-import styles from "./styles.module.css";
+import styles from "../../styles/routes._index.module.css";
 
 export const loader = async ({ request }) => {
   const url = new URL(request.url);

@@ -4,7 +4,7 @@ import { authenticate } from "../shopify.server";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { PLANS } from "../billing";
-import styles from "./app._index.module.css";
+import styles from "../styles/routes.app._index.module.css";
 
 export const loader = async ({ request }) => {
   const { session, admin } = await authenticate.admin(request);
