@@ -5,6 +5,7 @@ import { StorageService } from "./storage.server";
 import { incrementQuota } from "../quota.server";
 import { emitPrepEvent } from "./prep-events.server";
 import { extractStructuredFields, generateProductDescription } from "./description-writer.server";
+import { GoogleGenAI } from "@google/genai";
 
 let processorInterval: NodeJS.Timeout | null = null;
 let isProcessing = false;
@@ -58,12 +59,144 @@ function isRetryableError(error: unknown): boolean {
     return retryablePatterns.some(pattern => message.includes(pattern));
 }
 
+interface PlacementConfig {
+    renderInstructions: string;
+    sceneRole: string | null;
+    replacementRule: string | null;
+    allowSpaceCreation: boolean | null;
+}
+
+/**
+ * Auto-generate placement configuration using AI vision
+ * Analyzes product image and title to create render instructions
+ */
+async function generatePlacementConfig(
+    imageUrl: string,
+    productTitle: string,
+    requestId: string
+): Promise<PlacementConfig | null> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        logger.warn(
+            createLogContext("prepare", requestId, "placement-config-skip", {}),
+            "GEMINI_API_KEY not set, skipping placement config generation"
+        );
+        return null;
+    }
+
+    const genAI = new GoogleGenAI({ apiKey });
+
+    try {
+        // Fetch the image
+        const imageResponse = await fetch(imageUrl);
+        if (!imageResponse.ok) {
+            throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+        }
+        const imageBuffer = await imageResponse.arrayBuffer();
+        const base64Image = Buffer.from(imageBuffer).toString('base64');
+        const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
+
+        const prompt = `You are analyzing a product image for an AR/visualization app that places furniture and home decor into customer room photos.
+
+Product Title: "${productTitle}"
+
+Analyze this product image and provide:
+
+1. **renderInstructions**: A detailed description for AI image generation. Include:
+   - What the product is (material, style, color)
+   - How it should be placed in a room (on floor, on wall, on table, etc.)
+   - Scale/proportion guidance
+   - Any special placement considerations
+   - Example: "A solid teak wood dining table with natural grain and tapered legs. Place on floor as main furniture piece. Scale to realistic dining table proportions (approximately 72 inches long). Ensure all four legs contact the floor naturally."
+
+2. **sceneRole**: One of:
+   - "floor_furniture" (sofas, tables, chairs, rugs)
+   - "wall_art" (paintings, mirrors, wall decor)
+   - "tabletop" (vases, lamps, small decor)
+   - "lighting" (floor lamps, pendant lights)
+   - "outdoor" (garden furniture, planters)
+
+3. **replacementRule**: One of:
+   - "replace_similar" (replace similar items in the room)
+   - "add_to_scene" (add without replacing anything)
+   - "replace_any" (can replace any blocking object)
+
+4. **allowSpaceCreation**: true if the AI can create minimal space/context around the product, false if it should only place in existing space.
+
+Respond in JSON format only, no markdown:
+{
+    "renderInstructions": "...",
+    "sceneRole": "...",
+    "replacementRule": "...",
+    "allowSpaceCreation": true
+}`;
+
+        const result = await genAI.models.generateContent({
+            model: "gemini-2.0-flash-exp",
+            contents: [
+                {
+                    role: "user",
+                    parts: [
+                        { text: prompt },
+                        {
+                            inlineData: {
+                                mimeType: mimeType,
+                                data: base64Image
+                            }
+                        }
+                    ]
+                }
+            ]
+        });
+
+        const responseText = result.text || '';
+
+        // Extract JSON from response (handle markdown code blocks)
+        let jsonStr = responseText;
+        const jsonMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+            jsonStr = jsonMatch[1];
+        } else {
+            const rawJsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (rawJsonMatch) {
+                jsonStr = rawJsonMatch[0];
+            }
+        }
+
+        const config = JSON.parse(jsonStr);
+
+        logger.info(
+            createLogContext("prepare", requestId, "placement-config-generated", {
+                sceneRole: config.sceneRole,
+                hasInstructions: !!config.renderInstructions
+            }),
+            `Auto-generated placement config: sceneRole=${config.sceneRole}`
+        );
+
+        return {
+            renderInstructions: config.renderInstructions || null,
+            sceneRole: config.sceneRole || null,
+            replacementRule: config.replacementRule || null,
+            allowSpaceCreation: config.allowSpaceCreation ?? true
+        };
+    } catch (error) {
+        logger.error(
+            createLogContext("prepare", requestId, "placement-config-error", {
+                error: error instanceof Error ? error.message : String(error)
+            }),
+            "Failed to generate placement config",
+            error
+        );
+        return null;
+    }
+}
+
 async function processPendingAssets(batchRequestId: string) {
     try {
         // Fetch pending assets that haven't exceeded retry limit
         const pendingAssets = await prisma.productAsset.findMany({
             where: {
-                status: "pending",
+                status: "preparing",
                 retryCount: { lt: MAX_RETRY_ATTEMPTS }
             },
             take: 5,
@@ -94,7 +227,7 @@ async function processPendingAssets(batchRequestId: string) {
             try {
                 // Lock the asset for processing
                 const updated = await prisma.productAsset.updateMany({
-                    where: { id: asset.id, status: "pending" },
+                    where: { id: asset.id, status: "preparing" },
                     data: { status: "processing", updatedAt: new Date() }
                 });
 
@@ -231,6 +364,45 @@ async function processPendingAssets(batchRequestId: string) {
                     let sceneRole = asset.sceneRole;
                     let replacementRule = asset.replacementRule;
                     let allowSpaceCreation = asset.allowSpaceCreation;
+
+                    // NEW: Auto-generate placement config using image analysis if not already set
+                    if (!renderInstructions && !isMerchantOwned('renderInstructions')) {
+                        try {
+                            const placementConfig = await generatePlacementConfig(
+                                asset.sourceImageUrl,
+                                asset.productTitle || '',
+                                itemRequestId
+                            );
+
+                            if (placementConfig) {
+                                renderInstructions = placementConfig.renderInstructions;
+                                sceneRole = placementConfig.sceneRole || sceneRole;
+                                replacementRule = placementConfig.replacementRule || replacementRule;
+                                allowSpaceCreation = placementConfig.allowSpaceCreation ?? allowSpaceCreation;
+
+                                // Emit event for monitor
+                                await emitPrepEvent({
+                                    assetId: asset.id,
+                                    productId: asset.productId,
+                                    shopId: asset.shopId,
+                                    eventType: "placement_config_generated",
+                                    actorType: "system",
+                                    payload: {
+                                        sceneRole: sceneRole,
+                                        replacementRule: replacementRule,
+                                        hasInstructions: !!renderInstructions,
+                                    }
+                                }, null, itemRequestId).catch(() => {});
+                            }
+                        } catch (promptError) {
+                            logger.warn(
+                                createLogContext("prepare", itemRequestId, "placement-config", {
+                                    error: promptError instanceof Error ? promptError.message : String(promptError)
+                                }),
+                                "Placement config generation failed, continuing without"
+                            );
+                        }
+                    }
 
                     // Generate placement if missing and not merchant-owned
                     // Check each field individually so we can generate missing parts even if some exist
@@ -399,6 +571,7 @@ async function processPendingAssets(batchRequestId: string) {
                     // Prepare update data (only include fields that changed or are being set)
                     const updateData: any = {
                         status: "ready",
+                        enabled: false, // Merchant must enable after reviewing
                         preparedImageUrl: prepareResult.url,
                         preparedImageKey: preparedImageKey,
                         geminiFileUri: prepareResult.geminiFileUri,
@@ -506,7 +679,7 @@ async function processPendingAssets(batchRequestId: string) {
                     await prisma.productAsset.update({
                         where: { id: asset.id },
                         data: {
-                            status: isFinalFailure ? "failed" : "pending",
+                            status: isFinalFailure ? "failed" : "preparing",
                             errorMessage: errorMessage.substring(0, 500),
                             retryCount: newRetryCount,
                             updatedAt: new Date()
@@ -989,7 +1162,7 @@ async function runProcessorCycle() {
                 retryCount: { lt: MAX_RETRY_ATTEMPTS }
             },
             data: {
-                status: "pending",
+                status: "preparing",
                 updatedAt: new Date(),
                 errorMessage: "Reset from stale processing state"
             }
