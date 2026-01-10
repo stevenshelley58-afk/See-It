@@ -69,9 +69,36 @@ export const action = async ({ request }) => {
         const inputBuffer = Buffer.from(arrayBuffer);
 
         // Convert to PNG (for consistency)
-        const pngBuffer = await sharp(inputBuffer)
+        let pngBuffer = await sharp(inputBuffer)
             .png()
             .toBuffer();
+
+        // CRITICAL: Trim transparent padding so sizing is based on visible product content
+        // Even if using original image, it may have transparent edges that cause sizing drift.
+        try {
+            const beforeMeta = await sharp(pngBuffer).metadata();
+            const trimmed = await sharp(pngBuffer)
+                .trim() // Removes transparent edges
+                .png()
+                .toBuffer();
+            const afterMeta = await sharp(trimmed).metadata();
+
+            if (afterMeta.width && afterMeta.height && beforeMeta.width && beforeMeta.height) {
+                if (afterMeta.width <= beforeMeta.width && afterMeta.height <= beforeMeta.height && trimmed.length > 0) {
+                    pngBuffer = trimmed;
+                    logger.info(
+                        { ...logContext, stage: "trim" },
+                        `Trimmed transparent padding: ${beforeMeta.width}×${beforeMeta.height} → ${afterMeta.width}×${afterMeta.height}`
+                    );
+                }
+            }
+        } catch (trimError) {
+            logger.warn(
+                { ...logContext, stage: "trim" },
+                "Failed to trim transparent padding (continuing with untrimmed PNG)",
+                trimError
+            );
+        }
 
         // Upload to GCS as the "prepared" image (even though it's unmodified)
         const preparedImageKey = `shops/${shop.id}/products/${productId}/prepared-original-${Date.now()}.png`;

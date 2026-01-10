@@ -62,8 +62,10 @@ export async function action({ request }: ActionFunctionArgs) {
             });
         }
         
-        // Determine which image to upload (cleaned > original)
-        const imageKey = roomSession.cleanedRoomImageKey || roomSession.originalRoomImageKey;
+        // Determine which image to upload: cleaned > canonical > original
+        const imageKey = roomSession.cleanedRoomImageKey || 
+                        roomSession.canonicalRoomImageKey || 
+                        roomSession.originalRoomImageKey;
         
         if (!imageKey) {
             logger.warn({ ...logContext, sessionId: room_session_id }, "No room image found");

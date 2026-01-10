@@ -53,14 +53,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const body = await request.json();
     const { product_id, variant_id, room_session_id, placement, config } = body;
 
-    // Validate required placement data (NaN check - typeof NaN === 'number')
-    if (!placement || !Number.isFinite(placement.x) || !Number.isFinite(placement.y)) {
+    // Validate placement data - accept either box_px (new) or x/y/scale (legacy)
+    let placementParams: { x: number; y: number; scale: number } | { box_px: { center_x_px: number; center_y_px: number; width_px: number } } | null = null;
+
+    if (placement?.box_px) {
+        // New format: box_px in canonical pixels
+        const { center_x_px, center_y_px, width_px } = placement.box_px;
+        if (!Number.isFinite(center_x_px) || !Number.isFinite(center_y_px) || !Number.isFinite(width_px)) {
+            logger.error(
+                { ...logContext, stage: "validation" },
+                `Invalid box_px placement data: ${JSON.stringify(placement.box_px)}`
+            );
+            return json(
+                { error: "invalid_placement", message: "Placement box_px center_x_px, center_y_px, and width_px are required" },
+                { status: 400, headers: corsHeaders }
+            );
+        }
+        placementParams = { box_px: { center_x_px, center_y_px, width_px } };
+    } else if (placement && Number.isFinite(placement.x) && Number.isFinite(placement.y)) {
+        // Legacy format: normalized x/y/scale
+        placementParams = {
+            x: placement.x,
+            y: placement.y,
+            scale: placement.scale || 1.0,
+        };
+    } else {
         logger.error(
             { ...logContext, stage: "validation" },
             `Invalid placement data: ${JSON.stringify(placement)}`
         );
         return json(
-            { error: "invalid_placement", message: "Placement x, y, and scale are required" },
+            { error: "invalid_placement", message: "Placement must include either box_px (center_x_px, center_y_px, width_px) or x, y, scale" },
             { status: 400, headers: corsHeaders }
         );
     }
@@ -222,21 +245,54 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
 
     try {
-        // Generate fresh room image URL from stored key (cleaned if available, otherwise original)
-        // For legacy sessions without keys, fall back to stored URLs
+        // Generate fresh room image URL from stored key
+        // Preference: cleaned > canonical > original (legacy fallback)
+        // For new sessions, canonical is required for deterministic sizing
         let roomImageUrl: string;
+        let roomImageKey: string | null = null;
 
         if (roomSession.cleanedRoomImageKey) {
-            // Generate fresh URL from cleaned image key
-            roomImageUrl = await StorageService.getSignedReadUrl(roomSession.cleanedRoomImageKey, 60 * 60 * 1000);
+            roomImageKey = roomSession.cleanedRoomImageKey;
+            roomImageUrl = await StorageService.getSignedReadUrl(roomImageKey, 60 * 60 * 1000);
+        } else if (roomSession.canonicalRoomImageKey) {
+            roomImageKey = roomSession.canonicalRoomImageKey;
+            roomImageUrl = await StorageService.getSignedReadUrl(roomImageKey, 60 * 60 * 1000);
         } else if (roomSession.originalRoomImageKey) {
-            // Generate fresh URL from original image key
-            roomImageUrl = await StorageService.getSignedReadUrl(roomSession.originalRoomImageKey, 60 * 60 * 1000);
+            roomImageKey = roomSession.originalRoomImageKey;
+            roomImageUrl = await StorageService.getSignedReadUrl(roomImageKey, 60 * 60 * 1000);
         } else if (roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl) {
             // Legacy: use stored URL if no keys available
             roomImageUrl = roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl;
+            logger.warn(
+                { ...shopLogContext, stage: "legacy-room-url" },
+                "Using legacy room image URL (no key available) - session may have been created before canonical support"
+            );
         } else {
             throw new Error("No room image available");
+        }
+
+        // For new sessions (created after canonical support), require canonical for deterministic sizing
+        // Check if session was created after canonical support rollout (approximate date)
+        const canonicalSupportDate = new Date('2026-02-16');
+        if (roomSession.createdAt > canonicalSupportDate && !roomSession.canonicalRoomImageKey && !roomSession.cleanedRoomImageKey) {
+            logger.error(
+                { ...shopLogContext, stage: "missing-canonical" },
+                "New session missing canonical room image - required for deterministic sizing"
+            );
+            await prisma.renderJob.update({
+                where: { id: job.id },
+                data: {
+                    status: "failed",
+                    errorCode: "MISSING_CANONICAL_ROOM",
+                    errorMessage: "Canonical room image required for this session"
+                }
+            });
+            return json({
+                job_id: job.id,
+                status: "failed",
+                error: "missing_canonical_room",
+                message: "Room image must be processed before rendering"
+            }, { headers: corsHeaders });
         }
 
         // Call Gemini directly - no more Cloud Run!
@@ -248,16 +304,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             aspectRatio: string;
             useRoomUri: boolean;
             useProductUri: boolean;
-            placement: { x: number; y: number; scale: number };
+            placement: { x: number; y: number; scale: number } | { box_px: { center_x_px: number; center_y_px: number; width_px: number } };
             stylePreset: string;
             placementPrompt?: string;
+            canonicalRoomKey?: string | null;
+            canonicalRoomWidth?: number | null;
+            canonicalRoomHeight?: number | null;
+            canonicalRoomRatio?: string | null;
+            productResizedWidth?: number;
+            productResizedHeight?: number;
         } | null = null;
-
-    const placementParams = {
-        x: placement.x,
-        y: placement.y,
-        scale: placement.scale || 1.0,
-    };
 
         // Emit render_job_started event (if we have an asset)
         if (productAsset?.id) {
@@ -281,6 +337,63 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             });
         }
 
+        // Convert placement params for compositeScene
+        // If box_px provided, convert to normalized coords using canonical room dimensions
+        let compositePlacement: { x: number; y: number; scale: number; width_px?: number; canonical_width?: number; canonical_height?: number };
+
+        if (placementParams && 'box_px' in placementParams) {
+            // Convert box_px to normalized coords using canonical room dimensions
+            const canonicalWidth = roomSession.canonicalRoomWidth || 0;
+            const canonicalHeight = roomSession.canonicalRoomHeight || 0;
+
+            if (!canonicalWidth || !canonicalHeight) {
+                logger.error(
+                    { ...shopLogContext, stage: "validation" },
+                    "box_px placement requires canonical room dimensions but they are missing"
+                );
+                await prisma.renderJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: "failed",
+                        errorCode: "MISSING_CANONICAL_DIMENSIONS",
+                        errorMessage: "Canonical room dimensions required for box_px placement"
+                    }
+                });
+                return json({
+                    job_id: job.id,
+                    status: "failed",
+                    error: "missing_canonical_dimensions",
+                    message: "Canonical room dimensions are required for this placement format"
+                }, { headers: corsHeaders });
+            }
+
+            const { center_x_px, center_y_px, width_px } = placementParams.box_px;
+            
+            // Convert pixel coords to normalized (0-1)
+            const x_norm = center_x_px / canonicalWidth;
+            const y_norm = center_y_px / canonicalHeight;
+
+            compositePlacement = {
+                x: Math.max(0, Math.min(1, x_norm)),
+                y: Math.max(0, Math.min(1, y_norm)),
+                scale: 1.0, // Will be overridden by width_px in compositeScene
+                width_px: width_px,
+                canonical_width: canonicalWidth,
+                canonical_height: canonicalHeight,
+                canonicalRoomKey: roomSession.canonicalRoomImageKey || null
+            };
+
+            logger.info(
+                { ...shopLogContext, stage: "placement-conversion" },
+                `Converted box_px to normalized: (${center_x_px}, ${center_y_px}, ${width_px}px) -> (${compositePlacement.x.toFixed(3)}, ${compositePlacement.y.toFixed(3)}) in ${canonicalWidth}x${canonicalHeight}`
+            );
+        } else if (placementParams && 'x' in placementParams) {
+            // Legacy format: use normalized coords directly
+            compositePlacement = placementParams;
+        } else {
+            throw new Error("Invalid placement params");
+        }
+
         const compositeOptions: CompositeOptions = {
             roomGeminiUri: roomSession.geminiFileUri,
             roomGeminiExpiresAt: roomSession.geminiFileExpiresAt,
@@ -294,7 +407,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const result = await compositeScene(
             productImageUrl,
             roomImageUrl,
-            placementParams,
+            compositePlacement,
             config?.style_preset || "neutral",
             requestId,
             productAsset?.renderInstructions || undefined,
@@ -344,6 +457,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                         placementPrompt: capturedTelemetry.placementPrompt || undefined,
                         useRoomUri: capturedTelemetry.useRoomUri,
                         useProductUri: capturedTelemetry.useProductUri,
+                        // Canonical room telemetry
+                        canonicalRoomKey: capturedTelemetry.canonicalRoomKey || undefined,
+                        canonicalRoomWidth: capturedTelemetry.canonicalRoomWidth || undefined,
+                        canonicalRoomHeight: capturedTelemetry.canonicalRoomHeight || undefined,
+                        canonicalRoomRatio: capturedTelemetry.canonicalRoomRatio || undefined,
+                        // Product resize telemetry
+                        productResizedWidth: capturedTelemetry.productResizedWidth || undefined,
+                        productResizedHeight: capturedTelemetry.productResizedHeight || undefined,
                     },
                 },
                 null,

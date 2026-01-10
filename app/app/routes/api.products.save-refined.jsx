@@ -63,7 +63,35 @@ export const action = async ({ request }) => {
         if (!base64Data) {
             return json({ success: false, error: "Invalid image data URL format" }, { status: 400 });
         }
-        const imageBuffer = Buffer.from(base64Data, 'base64');
+        let imageBuffer = Buffer.from(base64Data, 'base64');
+
+        // CRITICAL: Trim transparent padding so sizing is based on visible product content
+        // Without this, a user-refined cutout can include transparent edges,
+        // causing the product to appear too small during placement and in final renders.
+        try {
+            const beforeMeta = await sharp(imageBuffer).metadata();
+            const trimmed = await sharp(imageBuffer)
+                .trim() // Removes transparent edges
+                .png()
+                .toBuffer();
+            const afterMeta = await sharp(trimmed).metadata();
+
+            if (afterMeta.width && afterMeta.height && beforeMeta.width && beforeMeta.height) {
+                if (afterMeta.width <= beforeMeta.width && afterMeta.height <= beforeMeta.height && trimmed.length > 0) {
+                    imageBuffer = trimmed;
+                    logger.info(
+                        { ...logContext, stage: "trim" },
+                        `Trimmed transparent padding: ${beforeMeta.width}×${beforeMeta.height} → ${afterMeta.width}×${afterMeta.height}`
+                    );
+                }
+            }
+        } catch (trimError) {
+            logger.warn(
+                { ...logContext, stage: "trim" },
+                "Failed to trim transparent padding (continuing with untrimmed PNG)",
+                trimError
+            );
+        }
 
         // Upload to GCS
         logger.info({ ...logContext, stage: "uploading" }, "Uploading refined image...");

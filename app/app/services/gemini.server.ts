@@ -683,16 +683,22 @@ export interface CompositeOptions {
         aspectRatio: string;
         useRoomUri: boolean;
         useProductUri: boolean;
-        placement: { x: number; y: number; scale: number };
+        placement: { x: number; y: number; scale: number } | { box_px: { center_x_px: number; center_y_px: number; width_px: number } };
         stylePreset: string;
         placementPrompt?: string;
+        canonicalRoomKey?: string | null;
+        canonicalRoomWidth?: number | null;
+        canonicalRoomHeight?: number | null;
+        canonicalRoomRatio?: string | null;
+        productResizedWidth?: number;
+        productResizedHeight?: number;
     }) => void;
 }
 
 export async function compositeScene(
     preparedProductImageUrl: string,
     roomImageUrl: string,
-    placement: { x: number; y: number; scale: number },
+    placement: { x: number; y: number; scale: number; width_px?: number; canonical_width?: number; canonical_height?: number },
     stylePreset: string = 'neutral',
     requestId: string = "composite",
     placementPrompt?: string,
@@ -736,11 +742,30 @@ export async function compositeScene(
         const roomWidth = roomMetadata.width;
         const roomHeight = roomMetadata.height;
 
-        // STEP 3: Resize product to intended scale
-        const widthFromScale = Math.round(productMetadata.width * (placement.scale || 1));
-        const targetWidth = widthFromScale;
-        // Clamp to reasonable size (min 32px, max room width)
-        const clampedWidth = Math.max(32, Math.min(roomWidth, targetWidth));
+        // STEP 3: Resize product to intended size
+        // If width_px is provided (new format), use that exact pixel size
+        // Otherwise use legacy scale-based sizing
+        let clampedWidth: number;
+        
+        if (placement.width_px && Number.isFinite(placement.width_px)) {
+            // New format: resize to exact pixel width from canonical coordinates
+            clampedWidth = Math.max(32, Math.min(roomWidth, placement.width_px));
+            
+            logger.info(
+                { ...logContext, stage: "resize" },
+                `Resizing product to exact pixel width: ${placement.width_px}px (clamped to ${clampedWidth}px) in room ${roomWidth}x${roomHeight}`
+            );
+        } else {
+            // Legacy format: use scale-based sizing
+            const widthFromScale = Math.round(productMetadata.width * (placement.scale || 1));
+            const targetWidth = widthFromScale;
+            clampedWidth = Math.max(32, Math.min(roomWidth, targetWidth));
+            
+            logger.info(
+                { ...logContext, stage: "resize" },
+                `Resizing product using scale: ${placement.scale} -> ${clampedWidth}px (legacy format)`
+            );
+        }
 
         resizedProduct = await sharp(productBuffer)
             .resize({ width: clampedWidth })
@@ -773,6 +798,11 @@ export async function compositeScene(
             `Sending to Gemini: room=${roomWidth}×${roomHeight}, ratio=${closestRatio.label}, placement=(${placement.x.toFixed(2)}, ${placement.y.toFixed(2)})`
         );
 
+        // Get canonical room info for telemetry (if available from placement)
+        const canonicalRoomKey = (placement as any).canonicalRoomKey || null;
+        const canonicalRoomWidth = (placement as any).canonical_width || null;
+        const canonicalRoomHeight = (placement as any).canonical_height || null;
+
         // Invoke telemetry callback if provided (right before API call)
         if (options?.onPromptBuilt) {
             try {
@@ -785,6 +815,12 @@ export async function compositeScene(
                     placement,
                     stylePreset,
                     placementPrompt: placementPrompt || undefined,
+                    canonicalRoomKey: canonicalRoomKey,
+                    canonicalRoomWidth: canonicalRoomWidth,
+                    canonicalRoomHeight: canonicalRoomHeight,
+                    canonicalRoomRatio: closestRatio.label,
+                    productResizedWidth: resizedWidth,
+                    productResizedHeight: resizedHeight,
                 });
             } catch (telemetryError) {
                 // Telemetry callback should never break the render flow

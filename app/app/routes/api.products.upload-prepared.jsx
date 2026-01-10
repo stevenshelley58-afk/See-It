@@ -77,7 +77,7 @@ export const action = async ({ request }) => {
         // Convert to PNG with alpha channel (ensure transparency is preserved)
         // IMPORTANT: .rotate() with no args auto-orients based on EXIF and removes the tag
         // This fixes rotation issues with phone photos that have EXIF orientation metadata
-        const processedBuffer = await sharp(inputBuffer)
+        let processedBuffer = await sharp(inputBuffer)
             .rotate() // Auto-orient based on EXIF, then strip EXIF orientation tag
             .ensureAlpha()
             .png()
@@ -90,6 +90,33 @@ export const action = async ({ request }) => {
         }
 
         logger.info({ ...logContext, stage: "process" }, `Image processed: ${metadata.width}x${metadata.height}`);
+
+        // CRITICAL: Trim transparent padding so sizing is based on visible product content
+        // User-uploaded prepared images may include transparent edges that cause sizing drift.
+        try {
+            const beforeMeta = await sharp(processedBuffer).metadata();
+            const trimmed = await sharp(processedBuffer)
+                .trim() // Removes transparent edges
+                .png()
+                .toBuffer();
+            const afterMeta = await sharp(trimmed).metadata();
+
+            if (afterMeta.width && afterMeta.height && beforeMeta.width && beforeMeta.height) {
+                if (afterMeta.width <= beforeMeta.width && afterMeta.height <= beforeMeta.height && trimmed.length > 0) {
+                    processedBuffer = trimmed;
+                    logger.info(
+                        { ...logContext, stage: "trim" },
+                        `Trimmed transparent padding: ${beforeMeta.width}×${beforeMeta.height} → ${afterMeta.width}×${afterMeta.height}`
+                    );
+                }
+            }
+        } catch (trimError) {
+            logger.warn(
+                { ...logContext, stage: "trim" },
+                "Failed to trim transparent padding (continuing with untrimmed PNG)",
+                trimError
+            );
+        }
 
         // Upload to GCS
         const preparedImageKey = `shops/${shop.id}/products/${productId}/prepared-custom-${Date.now()}.png`;

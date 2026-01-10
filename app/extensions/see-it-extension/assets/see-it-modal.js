@@ -253,6 +253,7 @@
 
     // Screens
     const screenEntry = $('see-it-screen-entry');
+    const screenCrop = $('see-it-screen-crop');
     const screenPrepare = $('see-it-screen-prepare');
     const screenPosition = $('see-it-screen-position');
     const screenResult = $('see-it-screen-result');
@@ -265,6 +266,16 @@
     const btnSaved = $('see-it-btn-saved');
     const uploadInput = $('see-it-upload-input');
     const cameraInput = $('see-it-camera-input');
+
+    // Crop screen elements
+    const btnBackCrop = $('see-it-back-crop');
+    const btnCropCancel = $('see-it-crop-cancel');
+    const btnCropConfirm = $('see-it-crop-confirm');
+    const cropSource = $('see-it-crop-source');
+    const cropCanvas = $('see-it-crop-canvas');
+    const cropOverlay = $('see-it-crop-overlay');
+    const cropBox = $('see-it-crop-box');
+    const cropZoomSlider = $('see-it-crop-zoom-slider');
 
     // Prepare screen elements
     const btnBackPrepare = $('see-it-back-prepare');
@@ -491,7 +502,24 @@
         swiperIndex: 0,
         // Preloaded prepared product image
         preparedProductImageUrl: null,
-        preparedProductImagePreloaded: null  // Image object for instant display
+        preparedProductImagePreloaded: null,  // Image object for instant display
+        // Crop state
+        cropState: {
+            originalFile: null,
+            originalImage: null,
+            originalWidth: 0,
+            originalHeight: 0,
+            closestRatio: null,
+            cropRectNorm: { x: 0, y: 0, w: 1, h: 1 },
+            zoom: 1.0,
+            panX: 0,
+            panY: 0
+        },
+        // Canonical room state
+        canonicalRoomUrl: null,
+        canonicalRoomWidth: 0,
+        canonicalRoomHeight: 0,
+        canonicalRoomRatio: null
     };
 
     // Canvas state - DUAL CANVAS ARCHITECTURE (like cleanup-ai reference)
@@ -524,6 +552,7 @@
     const showScreen = (screenName) => {
         const screens = {
             entry: screenEntry,
+            crop: screenCrop,
             prepare: screenPrepare,
             position: screenPosition,
             loading: screenLoading,
@@ -545,13 +574,303 @@
         targetScreen.classList.add('active');
         state.currentScreen = screenName;
 
-        if (screenName === 'prepare') {
+        if (screenName === 'crop') {
+            initCropScreen();
+        } else if (screenName === 'prepare') {
             initCanvas();
             setupCanvasListenersOnce(); // Only attach once!
             updatePaintButtons();
         } else if (screenName === 'position') {
             initPosition();
         }
+    };
+
+    // --- Crop Screen Logic ---
+    let cropCtx = null;
+    let cropImageLoaded = false;
+    let cropIsDragging = false;
+    let cropDragStart = { x: 0, y: 0 };
+    let cropPanStart = { x: 0, y: 0 };
+    let cropPinchStartDistance = 0;
+    let cropPinchStartZoom = 1;
+
+    const initCropScreen = () => {
+        console.log('[See It] Initializing crop screen');
+        if (!cropSource || !cropCanvas || !cropBox) {
+            console.error('[See It] Crop elements not found');
+            return;
+        }
+
+        // Wait for image to load
+        if (!cropImageLoaded) {
+            cropSource.onload = () => {
+                cropImageLoaded = true;
+                setupCropCanvas();
+            };
+            return;
+        }
+
+        setupCropCanvas();
+    };
+
+    const setupCropCanvas = () => {
+        if (!cropSource || !cropCanvas || !cropBox) return;
+
+        const img = cropSource;
+        const imgW = img.naturalWidth || img.width;
+        const imgH = img.naturalHeight || img.height;
+
+        if (!imgW || !imgH) {
+            console.error('[See It] Crop image dimensions not available');
+            return;
+        }
+
+        // Calculate canvas size to fit container
+        const container = cropCanvas.parentElement;
+        if (!container) return;
+
+        const containerRect = container.getBoundingClientRect();
+        const maxW = containerRect.width;
+        const maxH = containerRect.height;
+
+        // Calculate scale to fit image in container
+        const scaleW = maxW / imgW;
+        const scaleH = maxH / imgH;
+        const scale = Math.min(scaleW, scaleH, 1.0); // Don't scale up
+
+        const canvasW = Math.floor(imgW * scale);
+        const canvasH = Math.floor(imgH * scale);
+
+        cropCanvas.width = canvasW;
+        cropCanvas.height = canvasH;
+        cropCanvas.style.width = canvasW + 'px';
+        cropCanvas.style.height = canvasH + 'px';
+
+        cropCtx = cropCanvas.getContext('2d');
+        if (!cropCtx) {
+            console.error('[See It] Failed to get crop canvas context');
+            return;
+        }
+
+        // Draw image to canvas
+        cropCtx.drawImage(img, 0, 0, canvasW, canvasH);
+
+        // Initialize crop box to locked ratio
+        const closest = state.cropState.closestRatio;
+        if (closest) {
+            const targetRatio = closest.value;
+            const containerAspect = canvasW / canvasH;
+
+            let boxW, boxH;
+            if (targetRatio > containerAspect) {
+                boxW = canvasW * 0.9;
+                boxH = boxW / targetRatio;
+            } else {
+                boxH = canvasH * 0.9;
+                boxW = boxH * targetRatio;
+            }
+
+            // Center the crop box
+            const boxX = (canvasW - boxW) / 2;
+            const boxY = (canvasH - boxH) / 2;
+
+            updateCropBox(boxX, boxY, boxW, boxH);
+            updateCropRectNorm(boxX, boxY, boxW, boxH, canvasW, canvasH);
+        }
+
+        setupCropListeners();
+    };
+
+    const updateCropBox = (x, y, w, h) => {
+        if (!cropBox) return;
+        cropBox.style.left = x + 'px';
+        cropBox.style.top = y + 'px';
+        cropBox.style.width = w + 'px';
+        cropBox.style.height = h + 'px';
+    };
+
+    const updateCropRectNorm = (x, y, w, h, canvasW, canvasH) => {
+        state.cropState.cropRectNorm = {
+            x: x / canvasW,
+            y: y / canvasH,
+            w: w / canvasW,
+            h: h / canvasH
+        };
+    };
+
+    const getCropBoxBounds = () => {
+        if (!cropBox || !cropCanvas) return null;
+        const rect = cropBox.getBoundingClientRect();
+        const canvasRect = cropCanvas.getBoundingClientRect();
+        return {
+            x: rect.left - canvasRect.left,
+            y: rect.top - canvasRect.top,
+            width: rect.width,
+            height: rect.height
+        };
+    };
+
+    const constrainCropBox = (x, y, w, h, canvasW, canvasH) => {
+        const closest = state.cropState.closestRatio;
+        if (!closest) return { x, y, w, h };
+
+        const targetRatio = closest.value;
+        h = w / targetRatio; // Maintain aspect ratio
+
+        // Clamp to canvas bounds
+        x = Math.max(0, Math.min(x, canvasW - w));
+        y = Math.max(0, Math.min(y, canvasH - h));
+        w = Math.max(100, Math.min(w, canvasW - x));
+        h = Math.max(100 / targetRatio, Math.min(h, canvasH - y));
+
+        // Re-adjust to maintain ratio
+        h = w / targetRatio;
+        if (y + h > canvasH) {
+            h = canvasH - y;
+            w = h * targetRatio;
+        }
+        if (x + w > canvasW) {
+            w = canvasW - x;
+            h = w / targetRatio;
+        }
+
+        return { x, y, w, h };
+    };
+
+    const handleCropPanStart = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        cropIsDragging = true;
+        cropBox?.classList.add('dragging');
+
+        const touch = e.touches?.[0] || null;
+        const clientX = touch ? touch.clientX : e.clientX;
+        const clientY = touch ? touch.clientY : e.clientY;
+
+        cropDragStart = { x: clientX, y: clientY };
+
+        const bounds = getCropBoxBounds();
+        if (bounds) {
+            cropPanStart = { x: bounds.x, y: bounds.y };
+        }
+
+        // Check for pinch start
+        if (e.touches && e.touches.length >= 2) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            cropPinchStartDistance = Math.sqrt(dx * dx + dy * dy);
+            cropPinchStartZoom = state.cropState.zoom;
+        }
+    };
+
+    const handleCropPanMove = (e) => {
+        if (!cropIsDragging || !cropCanvas || !cropBox) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Handle pinch-to-zoom
+        if (e.touches && e.touches.length >= 2) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const currentDistance = Math.sqrt(dx * dx + dy * dy);
+
+            if (cropPinchStartDistance > 0) {
+                const scaleFactor = currentDistance / cropPinchStartDistance;
+                const newZoom = Math.max(1, Math.min(3, cropPinchStartZoom * scaleFactor));
+                state.cropState.zoom = newZoom;
+                if (cropZoomSlider) cropZoomSlider.value = newZoom;
+                updateCropZoom();
+            }
+            return;
+        }
+
+        const touch = e.touches?.[0] || null;
+        const clientX = touch ? touch.clientX : e.clientX;
+        const clientY = touch ? touch.clientY : e.clientY;
+
+        const deltaX = clientX - cropDragStart.x;
+        const deltaY = clientY - cropDragStart.y;
+
+        const canvasRect = cropCanvas.getBoundingClientRect();
+        const canvasW = cropCanvas.width;
+        const canvasH = cropCanvas.height;
+
+        const newX = cropPanStart.x + deltaX * (canvasW / canvasRect.width);
+        const newY = cropPanStart.y + deltaY * (canvasH / canvasRect.height);
+
+        const bounds = getCropBoxBounds();
+        if (!bounds) return;
+
+        const constrained = constrainCropBox(newX, newY, bounds.width, bounds.height, canvasW, canvasH);
+        updateCropBox(constrained.x, constrained.y, constrained.w, constrained.h);
+        updateCropRectNorm(constrained.x, constrained.y, constrained.w, constrained.h, canvasW, canvasH);
+    };
+
+    const handleCropPanEnd = (e) => {
+        if (cropIsDragging) {
+            cropIsDragging = false;
+            cropBox?.classList.remove('dragging');
+            cropPinchStartDistance = 0;
+        }
+    };
+
+    const updateCropZoom = () => {
+        const zoom = state.cropState.zoom;
+        if (!cropSource || !cropCanvas || !cropCtx) return;
+
+        const img = cropSource;
+        const imgW = img.naturalWidth || img.width;
+        const imgH = img.naturalHeight || img.height;
+
+        const container = cropCanvas.parentElement;
+        if (!container) return;
+
+        const containerRect = container.getBoundingClientRect();
+        const maxW = containerRect.width;
+        const maxH = containerRect.height;
+
+        const baseScaleW = maxW / imgW;
+        const baseScaleH = maxH / imgH;
+        const baseScale = Math.min(baseScaleW, baseScaleH, 1.0);
+
+        const scaledW = Math.floor(imgW * baseScale * zoom);
+        const scaledH = Math.floor(imgH * baseScale * zoom);
+
+        cropCanvas.width = scaledW;
+        cropCanvas.height = scaledH;
+        cropCanvas.style.width = scaledW + 'px';
+        cropCanvas.style.height = scaledH + 'px';
+
+        cropCtx.drawImage(img, 0, 0, scaledW, scaledH);
+
+        // Adjust crop box to maintain position
+        const bounds = getCropBoxBounds();
+        if (bounds) {
+            const canvasW = cropCanvas.width;
+            const canvasH = cropCanvas.height;
+            const constrained = constrainCropBox(bounds.x, bounds.y, bounds.width, bounds.height, canvasW, canvasH);
+            updateCropBox(constrained.x, constrained.y, constrained.w, constrained.h);
+            updateCropRectNorm(constrained.x, constrained.y, constrained.w, constrained.h, canvasW, canvasH);
+        }
+    };
+
+    const setupCropListeners = () => {
+        if (!cropBox || !cropCanvas) return;
+
+        // Attach listeners (only once - use a flag or check if already attached)
+        if (cropBox.dataset.listenersAttached) return;
+        cropBox.dataset.listenersAttached = 'true';
+
+        cropBox.addEventListener('pointerdown', handleCropPanStart);
+        cropBox.addEventListener('touchstart', handleCropPanStart, { passive: false });
+
+        // Use document for move/end to track drag even when mouse leaves crop box
+        document.addEventListener('pointermove', handleCropPanMove);
+        document.addEventListener('touchmove', handleCropPanMove, { passive: false });
+        document.addEventListener('pointerup', handleCropPanEnd);
+        document.addEventListener('touchend', handleCropPanEnd);
+        document.addEventListener('pointercancel', handleCropPanEnd);
+        document.addEventListener('touchcancel', handleCropPanEnd);
     };
 
     // FIX: Show error by removing BOTH possible hidden classes
@@ -1441,8 +1760,16 @@
     };
 
     // --- API Calls ---
-    const startSession = async () => {
-        const res = await fetch('/apps/see-it/room/upload', { method: 'POST' });
+    const startSession = async (contentType) => {
+        const body = {};
+        if (contentType) {
+            body.content_type = contentType;
+        }
+        const res = await fetch('/apps/see-it/room/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
         if (!res.ok) throw new Error('Failed to start session');
         return res.json();
     };
@@ -1457,11 +1784,15 @@
         if (!res.ok) throw new Error('Upload failed');
     };
 
-    const confirmRoom = async (sessionId) => {
+    const confirmRoom = async (sessionId, cropParams) => {
+        const body = { room_session_id: sessionId };
+        if (cropParams) {
+            body.crop_params = cropParams;
+        }
         const res = await fetch('/apps/see-it/room/confirm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ room_session_id: sessionId })
+            body: JSON.stringify(body)
         });
         if (!res.ok) throw new Error('Failed to confirm');
         return res.json();
@@ -1726,6 +2057,7 @@
         // Reset state
         state.cleanedRoomImageUrl = null;
         state.originalRoomImageUrl = null;
+        state.canonicalRoomUrl = null;
         state.sessionId = null;
         state.uploadComplete = false;
         state.uploadPromise = null;
@@ -1734,24 +2066,189 @@
         strokes = [];
         currentStroke = [];
         ctx = null;
+        cropImageLoaded = false;
 
         try {
-            // Normalize image locally (instant)
-            const normalized = await normalizeRoomImage(file);
-            state.normalizedWidth = normalized.width;
-            state.normalizedHeight = normalized.height;
+            // Load original image for crop screen
+            const dataUrl = URL.createObjectURL(file);
+            if (cropSource) {
+                cropSource.src = dataUrl;
+                cropSource.onload = () => {
+                    const img = cropSource;
+                    const imgW = img.naturalWidth || img.width;
+                    const imgH = img.naturalHeight || img.height;
 
-            // Set preview immediately (instant - local data)
-            const dataUrl = URL.createObjectURL(normalized.blob);
-            state.localImageDataUrl = dataUrl;
+                    // Compute closest Gemini ratio
+                    const closest = findClosestGeminiRatio(imgW, imgH);
+                    state.cropState.originalFile = file;
+                    state.cropState.originalImage = img;
+                    state.cropState.originalWidth = imgW;
+                    state.cropState.originalHeight = imgH;
+                    state.cropState.closestRatio = closest;
+                    state.cropState.zoom = 1.0;
+                    state.cropState.panX = 0;
+                    state.cropState.panY = 0;
 
-            if (roomPreview) roomPreview.src = dataUrl;
-            if (roomImage) roomImage.src = dataUrl;
+                    cropImageLoaded = true;
+                    console.log('[See It] Crop image loaded:', imgW, 'x', imgH, 'ratio:', closest.label);
 
-            // Show prepare screen immediately
+                    // Show crop screen
+                    showScreen('crop');
+
+                    // Start upload of original bytes in background
+                    state.uploadPromise = (async () => {
+                        try {
+                            // Start session with original content type
+                            const session = await startSession(file.type || 'image/jpeg');
+                            state.sessionId = session.sessionId || session.room_session_id;
+
+                            // Start analytics *after* we have the backend session id so monitor correlation is stable.
+                            if (analytics) {
+                                try {
+                                    analytics.startSession(
+                                        state.productId,
+                                        state.productTitle,
+                                        state.productPrice ? parseFloat(state.productPrice) : undefined,
+                                        state.sessionId
+                                    );
+                                    analytics.trackStep('room_capture', 'started');
+                                } catch (err) {
+                                    console.warn('[See It] Analytics error:', err);
+                                }
+                            }
+
+                            // Upload ORIGINAL bytes (not normalized)
+                            await uploadImage(file, session.uploadUrl || session.upload_url);
+
+                            state.uploadComplete = true;
+                            console.log('[See It] Original upload complete, waiting for crop confirmation');
+
+                        } catch (err) {
+                            console.error('[See It] Background upload error:', err);
+                            state.uploadError = err.message;
+                            showError('Upload failed: ' + err.message + '. Please try again.');
+                        }
+                    })();
+
+                };
+                cropSource.onerror = () => {
+                    console.error('[See It] Failed to load crop image');
+                    showError('Failed to load image. Please try again.');
+                };
+            } else {
+                showError('Crop screen not available');
+            }
+
+        } catch (err) {
+            console.error('[See It] File processing error:', err);
+            showError('Failed to process image: ' + err.message);
+        }
+    };
+
+    btnTakePhoto?.addEventListener('click', () => cameraInput?.click());
+    btnUpload?.addEventListener('click', () => uploadInput?.click());
+    uploadInput?.addEventListener('change', handleFile);
+    cameraInput?.addEventListener('change', handleFile);
+
+    // --- Crop Screen Handlers ---
+    btnBackCrop?.addEventListener('click', () => {
+        // Clean up crop state
+        cropImageLoaded = false;
+        if (cropSource) cropSource.src = '';
+        showScreen('entry');
+    });
+
+    btnCropCancel?.addEventListener('click', () => {
+        // Clean up crop state
+        cropImageLoaded = false;
+        if (cropSource) cropSource.src = '';
+        showScreen('entry');
+    });
+
+    btnCropConfirm?.addEventListener('click', async () => {
+        if (!state.cropState.originalFile) {
+            showError('No image selected');
+            return;
+        }
+
+        // Wait for upload to complete if still in progress
+        if (state.uploadPromise && !state.uploadComplete) {
+            console.log('[See It] Waiting for upload to complete...');
+            try {
+                await state.uploadPromise;
+            } catch (err) {
+                showError('Upload failed: ' + (err.message || 'Unknown error') + '. Please try again.');
+                return;
+            }
+        }
+
+        if (!state.sessionId) {
+            showError('Upload failed. Please try again.');
+            return;
+        }
+
+        try {
+            resetError();
+
+            // Prepare crop params
+            const closest = state.cropState.closestRatio;
+            const cropParams = {
+                ratio_label: closest.label,
+                ratio_value: closest.value,
+                crop_rect_norm: state.cropState.cropRectNorm
+            };
+
+            console.log('[See It] Confirming room with crop params:', cropParams);
+
+            // Confirm room with crop params (will generate canonical image)
+            const confirm = await confirmRoom(state.sessionId, cropParams);
+
+            // Store canonical room info
+            state.canonicalRoomUrl = confirm.canonical_room_image_url || confirm.roomImageUrl || confirm.room_image_url;
+            state.canonicalRoomWidth = confirm.canonical_width || confirm.canonicalWidth || 0;
+            state.canonicalRoomHeight = confirm.canonical_height || confirm.canonicalHeight || 0;
+            state.canonicalRoomRatio = confirm.ratio_label || closest.label;
+
+            // Also set original for backward compatibility
+            state.originalRoomImageUrl = state.canonicalRoomUrl;
+
+            // Store normalized dimensions from canonical
+            state.normalizedWidth = state.canonicalRoomWidth;
+            state.normalizedHeight = state.canonicalRoomHeight;
+
+            console.log('[See It] Canonical room confirmed:', {
+                url: state.canonicalRoomUrl?.substring(0, 80),
+                width: state.canonicalRoomWidth,
+                height: state.canonicalRoomHeight,
+                ratio: state.canonicalRoomRatio
+            });
+
+            // Track room capture completed
+            if (analytics) {
+                try {
+                    analytics.trackStep('room_capture', 'completed', {
+                        retakeCount: 0,
+                        roomImageUrl: state.canonicalRoomUrl || null,
+                        canonicalDimensions: `${state.canonicalRoomWidth}x${state.canonicalRoomHeight}`,
+                        ratio: state.canonicalRoomRatio
+                    });
+                } catch (err) {
+                    console.warn('[See It] Analytics error:', err);
+                }
+            }
+
+            // Update preview images to use canonical
+            if (roomPreview) roomPreview.src = state.canonicalRoomUrl;
+            if (roomImage) roomImage.src = state.canonicalRoomUrl;
+
+            // Clean up crop state
+            cropImageLoaded = false;
+            if (cropSource) cropSource.src = '';
+
+            // Show prepare screen
             showScreen('prepare');
 
-            // Wait for image element to render
+            // Wait for image to load
             await new Promise(resolve => {
                 if (roomPreview) {
                     roomPreview.onload = resolve;
@@ -1764,62 +2261,18 @@
             initCanvas();
             updatePaintButtons();
 
-            // Start upload SILENTLY in background - user doesn't see this
-            state.uploadPromise = (async () => {
-                try {
-                    const session = await startSession();
-                    state.sessionId = session.sessionId || session.room_session_id;
-
-                    // Start analytics *after* we have the backend session id so monitor correlation is stable.
-                    if (analytics) {
-                        try {
-                            analytics.startSession(
-                                state.productId,
-                                state.productTitle,
-                                state.productPrice ? parseFloat(state.productPrice) : undefined,
-                                state.sessionId
-                            );
-                            analytics.trackStep('room_capture', 'started');
-                        } catch (err) {
-                            console.warn('[See It] Analytics error:', err);
-                        }
-                    }
-
-                    const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
-                    await uploadImage(normalizedFile, session.uploadUrl || session.upload_url);
-
-                    const confirm = await confirmRoom(state.sessionId);
-                    state.originalRoomImageUrl = confirm.roomImageUrl || confirm.room_image_url;
-                    state.uploadComplete = true;
-                    console.log('[See It] Background upload complete');
-
-                    // Track room capture completed only once we have a real, server-backed URL.
-                    if (analytics) {
-                        try {
-                            analytics.trackStep('room_capture', 'completed', {
-                                retakeCount: 0,
-                                roomImageUrl: state.originalRoomImageUrl || null,
-                            });
-                        } catch (err) {
-                            console.warn('[See It] Analytics error:', err);
-                        }
-                    }
-                } catch (err) {
-                    console.error('[See It] Background upload error:', err);
-                    state.uploadError = err.message;
-                }
-            })();
-
         } catch (err) {
-            console.error('[See It] File processing error:', err);
-            showError('Failed to process image: ' + err.message);
+            console.error('[See It] Crop confirm error:', err);
+            showError('Failed to process crop: ' + err.message);
         }
-    };
+    });
 
-    btnTakePhoto?.addEventListener('click', () => cameraInput?.click());
-    btnUpload?.addEventListener('click', () => uploadInput?.click());
-    uploadInput?.addEventListener('change', handleFile);
-    cameraInput?.addEventListener('change', handleFile);
+    // Crop zoom slider
+    cropZoomSlider?.addEventListener('input', (e) => {
+        const zoom = parseFloat(e.target.value);
+        state.cropState.zoom = zoom;
+        updateCropZoom();
+    });
 
     // --- Navigation ---
     btnBackPrepare?.addEventListener('click', () => showScreen('entry'));
@@ -2108,46 +2561,97 @@
         try {
             const containerRect = positionContainer?.getBoundingClientRect();
             
-            // NOTE: product_width_fraction has been removed intentionally.
-
-            // Also fix x/y coordinates to be relative to room image, not container
-            let finalX = state.x;
-            let finalY = state.y;
+            // Calculate placement in canonical room pixel space
+            let boxPx = null;
             
-            const roomDims = getRenderedRoomImageDimensions();
-            if (roomDims && containerRect) {
-                // Convert from container-relative to room-image-relative coordinates
-                // state.x/y are normalized 0-1 relative to container
-                // We need to convert them to be relative to the actual room image
-                const containerPixelX = state.x * containerRect.width;
-                const containerPixelY = state.y * containerRect.height;
+            // Use canonical room dimensions if available, otherwise fallback to normalized dimensions
+            const canonicalWidth = state.canonicalRoomWidth || state.normalizedWidth;
+            const canonicalHeight = state.canonicalRoomHeight || state.normalizedHeight;
+
+            if (canonicalWidth && canonicalHeight && containerRect) {
+                const roomDims = getRenderedRoomImageDimensions();
+                if (roomDims) {
+                    // Convert container-relative coordinates to room-image-relative
+                    const containerPixelX = state.x * containerRect.width;
+                    const containerPixelY = state.y * containerRect.height;
+                    
+                    const roomImagePixelX = containerPixelX - roomDims.offsetX;
+                    const roomImagePixelY = containerPixelY - roomDims.offsetY;
+                    
+                    // Normalize to 0-1 relative to rendered room image
+                    const normalizedX = roomImagePixelX / roomDims.width;
+                    const normalizedY = roomImagePixelY / roomDims.height;
+                    
+                    // Clamp to 0-1
+                    const clampedX = Math.max(0, Math.min(1, normalizedX));
+                    const clampedY = Math.max(0, Math.min(1, normalizedY));
+                    
+                    // Convert to canonical room pixel coordinates
+                    const centerX = Math.round(clampedX * canonicalWidth);
+                    const centerY = Math.round(clampedY * canonicalHeight);
+                    
+                    // Calculate product width in canonical pixels
+                    // Product overlay width in rendered space
+                    const overlayWidthPx = state.productWidth * state.scale;
+                    
+                    // Convert to canonical pixels (scale by canonical / rendered ratio)
+                    const scaleToCanonical = canonicalWidth / roomDims.width;
+                    const widthPx = Math.round(overlayWidthPx * scaleToCanonical);
+                    
+                    // Clamp to reasonable bounds (32px min, canonicalWidth max)
+                    const clampedWidthPx = Math.max(32, Math.min(canonicalWidth, widthPx));
+                    
+                    boxPx = {
+                        center_x_px: centerX,
+                        center_y_px: centerY,
+                        width_px: clampedWidthPx
+                    };
+                    
+                    console.log('[See It] Placement in canonical pixels:', {
+                        containerX: state.x.toFixed(3),
+                        containerY: state.y.toFixed(3),
+                        roomImageX: normalizedX.toFixed(3),
+                        roomImageY: normalizedY.toFixed(3),
+                        canonical: `${canonicalWidth}x${canonicalHeight}`,
+                        boxPx: boxPx,
+                        scale: state.scale.toFixed(2),
+                        overlayWidthPx: overlayWidthPx.toFixed(0)
+                    });
+                }
+            }
+
+            // Fallback: if canonical dimensions not available, use normalized coords (legacy)
+            let legacyPlacement = null;
+            if (!boxPx) {
+                console.warn('[See It] Canonical dimensions not available, using legacy normalized placement');
+                let finalX = state.x;
+                let finalY = state.y;
                 
-                // Subtract the offset and normalize to room image dimensions
-                finalX = (containerPixelX - roomDims.offsetX) / roomDims.width;
-                finalY = (containerPixelY - roomDims.offsetY) / roomDims.height;
+                const roomDims = getRenderedRoomImageDimensions();
+                if (roomDims && containerRect) {
+                    const containerPixelX = state.x * containerRect.width;
+                    const containerPixelY = state.y * containerRect.height;
+                    
+                    finalX = (containerPixelX - roomDims.offsetX) / roomDims.width;
+                    finalY = (containerPixelY - roomDims.offsetY) / roomDims.height;
+                    
+                    finalX = Math.max(0, Math.min(1, finalX));
+                    finalY = Math.max(0, Math.min(1, finalY));
+                }
                 
-                // Clamp to 0-1 range (product might be partially outside room image)
-                finalX = Math.max(0, Math.min(1, finalX));
-                finalY = Math.max(0, Math.min(1, finalY));
-                
-                console.log('[See It] Position conversion:', {
-                    containerX: state.x.toFixed(3),
-                    containerY: state.y.toFixed(3),
-                    roomX: finalX.toFixed(3),
-                    roomY: finalY.toFixed(3),
-                    offsetX: roomDims.offsetX.toFixed(0),
-                    offsetY: roomDims.offsetY.toFixed(0)
-                });
+                legacyPlacement = {
+                    x: finalX,
+                    y: finalY,
+                    scale: state.scale || 1
+                };
             }
             
             const payload = {
                 room_session_id: state.sessionId,
                 product_id: state.productId,
-                placement: {
-                    x: finalX,
-                    y: finalY,
-                    scale: state.scale || 1,
-                },
+                placement: boxPx ? {
+                    box_px: boxPx
+                } : legacyPlacement,
                 config: {
                     style_preset: 'neutral',
                     quality: 'standard',

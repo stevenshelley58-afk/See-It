@@ -137,13 +137,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
     }
 
-    // Get original room image
+    // Get room image - preference: cleaned > canonical > original
+    // For new sessions, canonical is required (will be checked later)
     let roomImageUrl: string;
-    if (roomSession.originalRoomImageKey) {
-        roomImageUrl = await StorageService.getSignedReadUrl(
-            roomSession.originalRoomImageKey,
-            60 * 60 * 1000
-        );
+    let roomImageKey: string | null = null;
+
+    if (roomSession.cleanedRoomImageKey) {
+        roomImageKey = roomSession.cleanedRoomImageKey;
+        roomImageUrl = await StorageService.getSignedReadUrl(roomImageKey, 60 * 60 * 1000);
+    } else if (roomSession.canonicalRoomImageKey) {
+        roomImageKey = roomSession.canonicalRoomImageKey;
+        roomImageUrl = await StorageService.getSignedReadUrl(roomImageKey, 60 * 60 * 1000);
+    } else if (roomSession.originalRoomImageKey) {
+        roomImageKey = roomSession.originalRoomImageKey;
+        roomImageUrl = await StorageService.getSignedReadUrl(roomImageKey, 60 * 60 * 1000);
+    } else if (roomSession.cleanedRoomImageUrl) {
+        roomImageUrl = roomSession.cleanedRoomImageUrl;
     } else if (roomSession.originalRoomImageUrl) {
         roomImageUrl = roomSession.originalRoomImageUrl;
     } else {

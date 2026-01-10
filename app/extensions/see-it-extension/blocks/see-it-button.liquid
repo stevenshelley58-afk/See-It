@@ -105,6 +105,47 @@
         </div>
       </div>
 
+      <!-- CROP SCREEN -->
+      <div id="see-it-screen-crop" class="see-it-screen see-it-screen-crop">
+        <div class="see-it-header">
+          <button class="see-it-btn-icon" id="see-it-back-crop" aria-label="Back">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <div class="see-it-header-spacer"></div>
+        </div>
+
+        <div class="see-it-crop-content">
+          <h2 class="see-it-crop-title">Crop your photo</h2>
+          <p class="see-it-crop-description">Adjust the crop to focus on the area you want</p>
+          
+          <div class="see-it-crop-container" id="see-it-crop-container">
+            <img id="see-it-crop-source" src="" alt="Room photo" style="display: none;">
+            <canvas id="see-it-crop-canvas" class="see-it-crop-canvas"></canvas>
+            <div class="see-it-crop-overlay" id="see-it-crop-overlay">
+              <div class="see-it-crop-box" id="see-it-crop-box">
+                <div class="see-it-crop-handle see-it-crop-handle-nw"></div>
+                <div class="see-it-crop-handle see-it-crop-handle-ne"></div>
+                <div class="see-it-crop-handle see-it-crop-handle-sw"></div>
+                <div class="see-it-crop-handle see-it-crop-handle-se"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="see-it-crop-controls">
+            <div class="see-it-crop-zoom-control">
+              <span>Zoom</span>
+              <input type="range" id="see-it-crop-zoom-slider" class="see-it-crop-zoom-slider" min="1" max="3" step="0.01" value="1">
+            </div>
+            <p class="see-it-crop-hint">Drag to move • Adjust zoom to crop</p>
+          </div>
+
+          <div class="see-it-crop-actions">
+            <button class="see-it-btn-outline-pill" id="see-it-crop-cancel">Cancel</button>
+            <button class="see-it-btn-primary-pill" id="see-it-crop-confirm">Use this crop</button>
+          </div>
+        </div>
+      </div>
+
       <!-- PREPARE SCREEN -->
       <div id="see-it-screen-prepare" class="see-it-screen see-it-screen-prepare">
         <div class="see-it-header">

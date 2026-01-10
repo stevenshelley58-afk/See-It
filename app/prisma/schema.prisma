@@ -103,6 +103,13 @@ model RoomSession {
   cleanedRoomImageUrl   String?   @map("cleaned_room_image_url")  // Legacy: Signed URL (expires in 24h)
   originalRoomImageKey  String?   @map("original_room_image_key") // Stable GCS key (e.g. rooms/{shopId}/{sessionId}/room.jpg)
   cleanedRoomImageKey   String?   @map("cleaned_room_image_key")  // Stable GCS key for cleaned image
+  canonicalRoomImageKey String?   @map("canonical_room_image_key") // Stable GCS key for canonical (authoritative) room image
+  canonicalRoomWidth    Int?      @map("canonical_room_width")     // Canonical room image width in pixels
+  canonicalRoomHeight   Int?      @map("canonical_room_height")    // Canonical room image height in pixels
+  canonicalRoomRatioLabel String? @map("canonical_room_ratio_label") // Gemini ratio label (e.g. "16:9")
+  canonicalRoomRatioValue Float?  @map("canonical_room_ratio_value") // Gemini ratio value (e.g. 16/9)
+  canonicalRoomCrop     Json?     @map("canonical_room_crop")      // JSON: { ratio_label, ratio_value, crop_rect_norm: { x, y, w, h } }
+  canonicalCreatedAt    DateTime? @map("canonical_created_at")     // Timestamp when canonical image was generated
   geminiFileUri         String?   @map("gemini_file_uri")
   geminiFileExpiresAt   DateTime? @map("gemini_file_expires_at")
   createdAt             DateTime  @map("created_at")
