@@ -16,6 +16,7 @@ import { emitPrepEvent } from "../services/prep-events.server";
  * - sceneRole: (optional) "Dominant" | "Integrated"
  * - replacementRule: (optional) "Same Role Only" | "Similar Size or Position" | "Any Blocking Object" | "None"
  * - allowSpaceCreation: (optional) "true" | "false"
+ * - enabled: (optional) "true" | "false" - Controls ready ↔ live status transitions
  */
 export const action = async ({ request }) => {
     const requestId = `update-instructions-${Date.now()}`;
@@ -50,6 +51,10 @@ export const action = async ({ request }) => {
         const allowSpaceCreationRaw = formData.get("allowSpaceCreation")?.toString();
         const allowSpaceCreation = allowSpaceCreationRaw === 'true' ? true : allowSpaceCreationRaw === 'false' ? false : null;
 
+        // Extract enabled field for ready ↔ live transitions
+        const enabledRaw = formData.get("enabled")?.toString();
+        const enabled = enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : null;
+
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
         }
@@ -65,7 +70,7 @@ export const action = async ({ request }) => {
             return json({ success: false, error: `Invalid replacementRule. Must be one of: ${validReplacementRules.join(', ')}` }, { status: 400 });
         }
 
-        logger.info(logContext, `Update instructions: productId=${productId}, length=${instructions.length}, hasPlacementFields=${!!placementFields}, sceneRole=${sceneRole}, replacementRule=${replacementRule}, allowSpaceCreation=${allowSpaceCreation}`);
+        logger.info(logContext, `Update instructions: productId=${productId}, length=${instructions.length}, hasPlacementFields=${!!placementFields}, sceneRole=${sceneRole}, replacementRule=${replacementRule}, allowSpaceCreation=${allowSpaceCreation}, enabled=${enabled}`);
 
         // Get shop record
         const shop = await prisma.shop.findUnique({
@@ -128,6 +133,42 @@ export const action = async ({ request }) => {
             updateData.fieldSource = updatedFieldSource;
         }
 
+        // Handle enabled toggle and status transitions
+        if (enabled !== null && asset) {
+            const currentStatus = asset.status;
+            updateData.enabled = enabled;
+
+            // Status transitions based on enabled flag
+            if (enabled && currentStatus === "ready") {
+                // Enabling: ready → live
+                updateData.status = "live";
+            } else if (!enabled && currentStatus === "live") {
+                // Disabling: live → ready
+                updateData.status = "ready";
+            }
+            // If status is not ready/live, don't change it (e.g., preparing, failed, pending)
+
+            // Emit event for monitor
+            await emitPrepEvent(
+                {
+                    assetId: asset.id,
+                    productId: productId,
+                    shopId: shop.id,
+                    eventType: enabled ? "product_enabled" : "product_disabled",
+                    actorType: "merchant",
+                    payload: {
+                        enabled: enabled,
+                        previousStatus: currentStatus,
+                        newStatus: updateData.status || currentStatus,
+                    },
+                },
+                session,
+                requestId
+            ).catch((err) => {
+                console.error("Failed to emit prep event:", err);
+            });
+        }
+
         if (!asset) {
             // No asset exists yet - create a minimal one to store instructions
             // This allows setting instructions before background removal
@@ -177,6 +218,8 @@ export const action = async ({ request }) => {
                 success: true,
                 message: "Instructions saved (new asset created)",
                 assetId: asset.id,
+                status: asset.status,
+                enabled: asset.enabled || false,
             });
         }
 
@@ -190,7 +233,7 @@ export const action = async ({ request }) => {
         };
 
         // Update existing asset
-        await prisma.productAsset.update({
+        const updatedAsset = await prisma.productAsset.update({
             where: { id: asset.id },
             data: updateData,
         });
@@ -235,6 +278,8 @@ export const action = async ({ request }) => {
             success: true,
             message: "Instructions saved",
             assetId: asset.id,
+            status: updatedAsset.status,
+            enabled: updatedAsset.enabled,
         });
 
     } catch (error) {

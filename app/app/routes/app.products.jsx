@@ -368,7 +368,8 @@ export const loader = async ({ request }) => {
                 assetsMap[`gid://shopify/Product/${a.productId}`] = {
                     ...a,
                     preparedImageUrlFresh,
-                    renderInstructions: a.renderInstructions || ""
+                    renderInstructions: a.renderInstructions || "",
+                    enabled: a.enabled || false,
                 };
             }
         }
