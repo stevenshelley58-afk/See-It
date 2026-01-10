@@ -14,19 +14,63 @@ Shopify merchants prepare product images (background removal + placement metadat
 Redesigning Products page. See `docs/PRODUCT_PREP_REDESIGN.md` for spec.
 
 ## Key Data Flow
+
+### Prepare Phase (Merchant-time, Background Processing)
 ```
-ProductAsset.preparedImageUrl  →  compositeScene()  →  Gemini
-ProductAsset.renderInstructions (JSON)  →  compositeScene(productInstructions)  →  Gemini prompt
+Shopify Product (title, description, metafields, image)
+  ↓
+Background Processor (prepare-processor.server.ts)
+  ├─→ Background removal → preparedImageUrl (transparent PNG)
+  ├─→ Extract structured fields (surface, material, orientation, shadow, dimensions)
+  ├─→ Generate prose placement prompt → renderInstructions
+  └─→ Set v2 placement rules (sceneRole, replacementRule, allowSpaceCreation)
+  ↓
+ProductAsset saved with:
+  - preparedImageUrl / preparedImageKey
+  - placementFields (JSON: structured fields)
+  - renderInstructions (prose: natural-language placement prompt)
+  - sceneRole, replacementRule, allowSpaceCreation (v2 columns)
+  - fieldSource (JSON: provenance tracking, 'auto' vs 'merchant')
+```
+
+### Placement Tab (Merchant Review/Confirm)
+```
+Merchant opens Placement tab
+  ↓
+Loads saved placementFields → Toggles show saved values (or auto-detected if not saved)
+  ↓
+Merchant adjusts toggles → Confirms/corrects extraction
+  ↓
+Merchant clicks "Generate Prompt" → Creates prose from structured fields
+  ↓
+Merchant saves → All fields marked as 'merchant' in fieldSource (never overwritten by bulk prepare)
+```
+
+### Final Render (Customer-time, V1)
+```
+ProductAsset.preparedImageUrl (transparent PNG)
+  +
+Room photo (from RoomSession)
+  +
+Customer placement coords + scale
+  +
+ProductAsset.renderInstructions (prose placement prompt)
+  ↓
+compositeScene() → Gemini API
+  ↓
+Composited room photo with product placed realistically
 ```
 
 ## Critical Files
 | Purpose | File |
 |---------|------|
-| Schema | `prisma/schema.prisma` |
+| Schema | `prisma/schema.prisma` (ProductAsset has placementFields JSON, renderInstructions prose, v2 columns) |
 | Products page | `app/routes/app.products.jsx` |
-| Background removal API | `app/routes/api.products.remove-background.jsx` |
-| Save instructions API | `app/routes/api.products.update-instructions.jsx` |
-| Compositing | `app/services/gemini.server.ts` → `compositeScene()` |
+| Background processor | `app/services/prepare-processor.server.ts` (generates placement during bulk prepare) |
+| Placement prompt generator | `app/services/description-writer.server.ts` (structured fields → prose) |
+| Placement UI | `app/components/ProductDetailPanel/PlacementTab.jsx` (confirms/corrects extraction) |
+| Save placement API | `app/routes/api.products.update-instructions.jsx` (saves with merchant provenance) |
+| Compositing | `app/services/gemini.server.ts` → `compositeScene()` (uses renderInstructions prose prompt) |
 
 ## Commands
 ```bash

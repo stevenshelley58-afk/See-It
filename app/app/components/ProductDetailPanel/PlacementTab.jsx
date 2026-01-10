@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '../ui';
 
@@ -262,18 +262,51 @@ export function PlacementTab({ product, asset, onChange }) {
         return asset.renderInstructions;
     }, [asset]);
     
-    // Auto-detect initial fields
+    // Auto-detect initial fields (fallback if no saved data)
     const detectedFields = useMemo(() => autoDetectFields(product), [product]);
     
+    // Load saved placementFields from asset, or use auto-detected defaults
+    const initialFields = useMemo(() => {
+        if (asset?.placementFields && typeof asset.placementFields === 'object') {
+            // Use saved placementFields if available
+            const saved = asset.placementFields;
+            return {
+                surface: saved.surface || detectedFields.surface,
+                material: saved.material || detectedFields.material,
+                orientation: saved.orientation || detectedFields.orientation,
+                shadow: saved.shadow || (detectedFields.surface === 'ceiling' ? 'none' : 'contact'),
+                dimensions: saved.dimensions || detectedFields.dimensions || { height: null, width: null },
+                additionalNotes: saved.additionalNotes || '',
+            };
+        }
+        // Fallback to auto-detection
+        return {
+            surface: detectedFields.surface,
+            material: detectedFields.material,
+            orientation: detectedFields.orientation,
+            shadow: detectedFields.surface === 'ceiling' ? 'none' : 'contact',
+            dimensions: detectedFields.dimensions || { height: null, width: null },
+            additionalNotes: '',
+        };
+    }, [asset?.placementFields, detectedFields]);
+    
     // State
-    const [fields, setFields] = useState({
-        surface: detectedFields.surface,
-        material: detectedFields.material,
-        orientation: detectedFields.orientation,
-        shadow: detectedFields.surface === 'ceiling' ? 'none' : 'contact',
-        dimensions: detectedFields.dimensions,
-        additionalNotes: '',
-    });
+    const [fields, setFields] = useState(initialFields);
+    
+    // Update state when asset.placementFields changes (e.g., asset loads async)
+    useEffect(() => {
+        if (asset?.placementFields && typeof asset.placementFields === 'object') {
+            const saved = asset.placementFields;
+            setFields(prev => ({
+                surface: saved.surface || prev.surface,
+                material: saved.material || prev.material,
+                orientation: saved.orientation || prev.orientation,
+                shadow: saved.shadow || prev.shadow,
+                dimensions: saved.dimensions || prev.dimensions || { height: null, width: null },
+                additionalNotes: saved.additionalNotes !== undefined ? saved.additionalNotes : prev.additionalNotes,
+            }));
+        }
+    }, [asset?.placementFields]);
     
     // v2 fields state - use existing asset values or auto-detected defaults
     const [v2Fields, setV2Fields] = useState({
@@ -282,11 +315,21 @@ export function PlacementTab({ product, asset, onChange }) {
         allowSpaceCreation: asset?.allowSpaceCreation !== undefined ? asset.allowSpaceCreation : detectedFields.allowSpaceCreation,
     });
     
+    // Update v2Fields when asset loads async
+    useEffect(() => {
+        if (asset) {
+            setV2Fields({
+                sceneRole: asset.sceneRole || detectedFields.sceneRole || null,
+                replacementRule: asset.replacementRule || detectedFields.replacementRule || null,
+                allowSpaceCreation: asset.allowSpaceCreation !== undefined ? asset.allowSpaceCreation : detectedFields.allowSpaceCreation,
+            });
+        }
+    }, [asset?.sceneRole, asset?.replacementRule, asset?.allowSpaceCreation, detectedFields]);
+    
     const [description, setDescription] = useState(existingDescription || '');
     const [isGenerating, setIsGenerating] = useState(false);
     const [hasEdited, setHasEdited] = useState(false);
     const [showEditWarning, setShowEditWarning] = useState(false);
-    const autoGenerateRef = useRef({ key: null, fired: false });
 
     // Hydrate missing dimensions from server-side extraction (Shopify descriptionHtml + metafields).
     // This runs once per product open and only fills dims if the current dims are empty.
@@ -342,12 +385,20 @@ export function PlacementTab({ product, asset, onChange }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [existingDescription]);
     
-    // Notify parent when description or v2 fields change
+    // Notify parent when description, placementFields, or v2 fields change
     useEffect(() => {
         if (onChange) {
-            // Pass both renderInstructions and v2 config
+            // Pass renderInstructions (placement prompt), placementFields, and v2 config
             onChange({
                 renderInstructions: description || null,
+                placementFields: {
+                    surface: fields.surface,
+                    material: fields.material,
+                    orientation: fields.orientation,
+                    shadow: fields.shadow,
+                    dimensions: fields.dimensions || { height: null, width: null },
+                    additionalNotes: fields.additionalNotes || '',
+                },
                 v2Config: {
                     sceneRole: v2Fields.sceneRole || null,
                     replacementRule: v2Fields.replacementRule || null,
@@ -355,7 +406,7 @@ export function PlacementTab({ product, asset, onChange }) {
                 }
             });
         }
-    }, [description, v2Fields, onChange]);
+    }, [description, fields, v2Fields, onChange]);
     
     // Update a field
     const updateField = useCallback((field, value) => {
@@ -410,25 +461,6 @@ export function PlacementTab({ product, asset, onChange }) {
         }
     }, [product, fields]);
 
-    // Always generate a best-guess description automatically (once per product) if it's blank.
-    // Merchants can still regenerate or edit after reviewing.
-    useEffect(() => {
-        const key = product?.id || product?.title || null;
-        if (!key) return;
-
-        if (autoGenerateRef.current.key !== key) {
-            autoGenerateRef.current = { key, fired: false };
-        }
-
-        if (autoGenerateRef.current.fired) return;
-        if (existingDescription) return;
-        if ((description || '').toString().trim()) return;
-        if (hasEdited) return;
-
-        autoGenerateRef.current.fired = true;
-        handleGenerate();
-    }, [product?.id, product?.title, existingDescription, description, hasEdited, handleGenerate]);
-    
     // Handle manual edit of description
     const handleDescriptionEdit = useCallback((newValue) => {
         if (!hasEdited && description && newValue !== description) {
@@ -684,13 +716,13 @@ export function PlacementTab({ product, asset, onChange }) {
             {/* Divider */}
             <div className="border-t border-neutral-200"></div>
             
-            {/* SECTION 2: AI Description */}
+            {/* SECTION 2: Placement Prompt */}
             <div className="space-y-4">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h3 className="text-lg font-bold text-neutral-900">AI Render Description</h3>
+                        <h3 className="text-lg font-bold text-neutral-900">Placement Prompt</h3>
                         <p className="text-sm text-neutral-500 mt-1">
-                            This description tells the AI how to render your product in room photos.
+                            Natural language prompt that helps the AI place your product realistically in room photos.
                         </p>
                     </div>
                     <Button
@@ -699,7 +731,7 @@ export function PlacementTab({ product, asset, onChange }) {
                         loading={isGenerating}
                         disabled={isGenerating}
                     >
-                        {description ? 'Regenerate' : 'Generate Description'}
+                        {description ? 'Regenerate Prompt' : 'Generate Prompt'}
                     </Button>
                 </div>
                 
@@ -735,12 +767,12 @@ export function PlacementTab({ product, asset, onChange }) {
                                 value={description}
                                 onChange={(e) => handleDescriptionEdit(e.target.value)}
                                 className="w-full bg-transparent text-neutral-100 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]"
-                                placeholder="Click 'Generate Description' to create an optimised description..."
+                                placeholder="Click 'Generate Prompt' to create a placement prompt..."
                             />
                         ) : (
                             <div className="text-neutral-400 text-sm py-8 text-center">
-                                <p>No description yet.</p>
-                                <p className="mt-1">Review the fields above, then click <strong>Generate Description</strong>.</p>
+                                <p>No placement prompt yet.</p>
+                                <p className="mt-1">Review the fields above, then click <strong>Generate Prompt</strong>.</p>
                             </div>
                         )}
                     </div>
@@ -772,7 +804,7 @@ export function PlacementTab({ product, asset, onChange }) {
                     <div>
                         <p className="text-sm font-semibold text-emerald-800">Ready to save</p>
                         <p className="text-xs text-emerald-700 mt-1">
-                            This description will be used for all AR renders of this product.
+                            This placement prompt will be used for all AR renders of this product.
                         </p>
                     </div>
                 </div>

@@ -58,13 +58,19 @@ Look at ManualSegmentModal.jsx for patterns to reuse.
 Create app/components/ProductDetailPanel/PlacementTab.jsx
 
 Features:
-- detectMetadata(title) function for auto-detection hint
+- Auto-detect structured fields from product data (title, description, metafields)
 - Button groups: surface, orientation, material, shadow
 - Number inputs: height (cm), width (cm)
-- Textarea: custom instructions
-- Preview box showing generated prompt
+- Textarea: additional notes
+- v2 Placement Rules: Scene Role, Replacement Rule, Allow Space Creation
+- "Generate Prompt" button → Creates prose placement prompt from structured fields
+- Editable placement prompt textarea (with edit warning)
 
-The metadata saves as JSON to renderInstructions field.
+Data saved:
+- placementFields (JSON): { surface, material, orientation, shadow, dimensions, additionalNotes, fieldSource }
+- renderInstructions (prose string): Natural-language placement prompt
+- v2 columns: sceneRole, replacementRule, allowSpaceCreation
+- All marked as 'merchant' in fieldSource when saved (never overwritten by bulk prepare)
 ```
 
 ---

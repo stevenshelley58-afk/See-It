@@ -53,6 +53,13 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
             formData.append("instructions", pendingMetadata);
         } else if (pendingMetadata && typeof pendingMetadata === 'object') {
             formData.append("instructions", pendingMetadata.renderInstructions || '');
+            
+            // Add placementFields if present
+            if (pendingMetadata.placementFields) {
+                formData.append("placementFields", JSON.stringify(pendingMetadata.placementFields));
+            }
+            
+            // Add v2 config
             if (pendingMetadata.v2Config) {
                 if (pendingMetadata.v2Config.sceneRole) {
                     formData.append("sceneRole", pendingMetadata.v2Config.sceneRole);

@@ -6,11 +6,12 @@ import { logger, createLogContext } from "../utils/logger.server";
 /**
  * POST /api/products/update-instructions
  *
- * Update custom render instructions and v2 config for a product asset
+ * Update custom render instructions, placement fields, and v2 config for a product asset
  *
  * Body (FormData):
  * - productId: Shopify product ID (numeric)
- * - instructions: Custom AI instructions for final render (can be empty string to clear)
+ * - instructions: Placement prompt (prose text for AI render, can be empty string to clear)
+ * - placementFields: (optional) JSON string with structured fields: { surface, material, orientation, shadow, dimensions: { height, width }, additionalNotes }
  * - sceneRole: (optional) "Dominant" | "Integrated"
  * - replacementRule: (optional) "Same Role Only" | "Similar Size or Position" | "Any Blocking Object" | "None"
  * - allowSpaceCreation: (optional) "true" | "false"
@@ -26,6 +27,21 @@ export const action = async ({ request }) => {
         const formData = await request.formData();
         const productId = formData.get("productId")?.toString();
         const instructions = formData.get("instructions")?.toString() ?? "";
+        
+        // Extract placementFields (JSON)
+        let placementFields = null;
+        const placementFieldsRaw = formData.get("placementFields")?.toString();
+        if (placementFieldsRaw) {
+            try {
+                placementFields = JSON.parse(placementFieldsRaw);
+                // Validate structure
+                if (typeof placementFields !== 'object' || placementFields === null) {
+                    return json({ success: false, error: "placementFields must be a valid JSON object" }, { status: 400 });
+                }
+            } catch (e) {
+                return json({ success: false, error: "Invalid placementFields JSON format" }, { status: 400 });
+            }
+        }
         
         // Extract v2 fields
         const sceneRole = formData.get("sceneRole")?.toString() || null;
@@ -48,7 +64,7 @@ export const action = async ({ request }) => {
             return json({ success: false, error: `Invalid replacementRule. Must be one of: ${validReplacementRules.join(', ')}` }, { status: 400 });
         }
 
-        logger.info(logContext, `Update instructions: productId=${productId}, length=${instructions.length}, sceneRole=${sceneRole}, replacementRule=${replacementRule}, allowSpaceCreation=${allowSpaceCreation}`);
+        logger.info(logContext, `Update instructions: productId=${productId}, length=${instructions.length}, hasPlacementFields=${!!placementFields}, sceneRole=${sceneRole}, replacementRule=${replacementRule}, allowSpaceCreation=${allowSpaceCreation}`);
 
         // Get shop record
         const shop = await prisma.shop.findUnique({
@@ -73,7 +89,24 @@ export const action = async ({ request }) => {
             updatedAt: new Date(),
         };
         
-        // Add v2 fields if provided
+        // Add placementFields if provided (mark all fields as merchant-owned when saved)
+        if (placementFields !== null) {
+            // Mark all fields in placementFields as merchant-owned
+            const placementFieldsWithSource = {
+                ...placementFields,
+                fieldSource: {}
+            };
+            // Mark each field as merchant-owned
+            const fieldsToMark = ['surface', 'material', 'orientation', 'shadow', 'dimensions', 'additionalNotes'];
+            fieldsToMark.forEach(field => {
+                if (placementFields.hasOwnProperty(field)) {
+                    placementFieldsWithSource.fieldSource[field] = 'merchant';
+                }
+            });
+            updateData.placementFields = placementFieldsWithSource;
+        }
+        
+        // Add v2 fields if provided (also mark as merchant-owned when explicitly set)
         if (sceneRole !== null) {
             updateData.sceneRole = sceneRole;
         }
@@ -82,6 +115,16 @@ export const action = async ({ request }) => {
         }
         if (allowSpaceCreation !== null) {
             updateData.allowSpaceCreation = allowSpaceCreation;
+        }
+        
+        // Mark v2 fields as merchant-owned in fieldSource when explicitly set
+        if (sceneRole !== null || replacementRule !== null || allowSpaceCreation !== null) {
+            const existingFieldSource = asset?.fieldSource ? (typeof asset.fieldSource === 'object' ? asset.fieldSource : {}) : {};
+            const updatedFieldSource = { ...existingFieldSource };
+            if (sceneRole !== null) updatedFieldSource.sceneRole = 'merchant';
+            if (replacementRule !== null) updatedFieldSource.replacementRule = 'merchant';
+            if (allowSpaceCreation !== null) updatedFieldSource.allowSpaceCreation = 'merchant';
+            updateData.fieldSource = updatedFieldSource;
         }
 
         if (!asset) {

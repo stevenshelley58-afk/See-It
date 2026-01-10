@@ -3,8 +3,8 @@ import { prepareProduct, compositeScene, type PrepareProductResult } from "./gem
 import { logger, createLogContext, generateRequestId } from "../utils/logger.server";
 import { StorageService } from "./storage.server";
 import { incrementQuota } from "../quota.server";
-import { extractProductMetadata } from "./extract-metadata.server";
 import { emitPrepEvent } from "./prep-events.server";
+import { extractStructuredFields, generateProductDescription } from "./description-writer.server";
 
 let processorInterval: NodeJS.Timeout | null = null;
 let isProcessing = false;
@@ -215,45 +215,155 @@ async function processPendingAssets(batchRequestId: string) {
                 }
 
                 if (success && prepareResult) {
-                    // Extract metadata with AI (non-blocking - failures don't stop prepare)
+                    // Generate placement fields and prose prompt (only if not merchant-owned)
+                    // Check fieldSource to avoid overwriting merchant edits
+                    const existingFieldSource = asset.fieldSource && typeof asset.fieldSource === 'object' 
+                        ? asset.fieldSource as Record<string, string>
+                        : {};
+                    
+                    const isMerchantOwned = (field: string) => existingFieldSource[field] === 'merchant';
+                    
+                    // Only generate if renderInstructions is missing or if it's not merchant-owned
                     let renderInstructions = asset.renderInstructions;
-                    if (!renderInstructions) {
-                        try {
-                            const metadata = await extractProductMetadata(
-                                asset.sourceImageUrl,
-                                asset.productTitle || '',
-                                '', // We don't have description here yet - AI will use image + title
-                                [],
-                                [],
-                                itemRequestId
-                            );
-                            if (metadata) {
-                                renderInstructions = JSON.stringify(metadata);
+                    let placementFields = asset.placementFields && typeof asset.placementFields === 'object'
+                        ? asset.placementFields as Record<string, any>
+                        : null;
+                    let sceneRole = asset.sceneRole;
+                    let replacementRule = asset.replacementRule;
+                    let allowSpaceCreation = asset.allowSpaceCreation;
 
-                                // Emit auto_metadata_extracted event
-                                await emitPrepEvent(
-                                    {
-                                        assetId: asset.id,
-                                        productId: asset.productId,
-                                        shopId: asset.shopId,
-                                        eventType: "auto_metadata_extracted",
-                                        actorType: "system",
-                                        payload: {
-                                            source: "auto",
-                                            metadata: metadata,
-                                        },
-                                    },
-                                    null,
-                                    itemRequestId
-                                ).catch(() => {
-                                    // Non-critical
-                                });
+                    // Generate placement if missing and not merchant-owned
+                    // Check each field individually so we can generate missing parts even if some exist
+                    const shouldGeneratePrompt = !renderInstructions && !isMerchantOwned('renderInstructions');
+                    
+                    // For placementFields, check if it exists and if any field is merchant-owned
+                    const placementFieldsSource = placementFields?.fieldSource && typeof placementFields.fieldSource === 'object'
+                        ? placementFields.fieldSource as Record<string, string>
+                        : {};
+                    const hasMerchantOwnedPlacementField = Object.values(placementFieldsSource).some(src => src === 'merchant');
+                    const shouldGenerateFields = (!placementFields || Object.keys(placementFields).filter(k => k !== 'fieldSource').length === 0) && !hasMerchantOwnedPlacementField;
+                    
+                    const shouldGenerateV2Rules = (!sceneRole || !replacementRule || allowSpaceCreation === null) && 
+                        (!isMerchantOwned('sceneRole') && !isMerchantOwned('replacementRule') && !isMerchantOwned('allowSpaceCreation'));
+                    
+                    const shouldGeneratePlacement = (shouldGeneratePrompt || shouldGenerateFields || shouldGenerateV2Rules);
+
+                    if (shouldGeneratePlacement && asset.productTitle) {
+                        try {
+                            // Extract structured fields from product title (best effort without full product data)
+                            // TODO: Enhance this by fetching full product data from Shopify Admin API
+                            const productData = {
+                                title: asset.productTitle,
+                                description: '', // Not available in background processor yet
+                                productType: null,
+                                tags: [],
+                            };
+                            
+                            const extractedFields = extractStructuredFields(productData);
+                            
+                            // Auto-detect v2 placement rules (same logic as PlacementTab)
+                            const largeItemKeywords = ['sofa', 'couch', 'sectional', 'mirror', 'cabinet', 'dresser', 'bookshelf', 'bed', 'table', 'desk', 'console', 'credenza', 'sideboard'];
+                            const titleLower = (asset.productTitle || '').toLowerCase();
+                            const isLargeItem = largeItemKeywords.some(k => titleLower.includes(k));
+                            
+                            const autoSceneRole = isLargeItem ? 'Dominant' : 'Integrated';
+                            const autoReplacementRule = isLargeItem ? 'Similar Size or Position' : 'None';
+                            const autoAllowSpaceCreation = isLargeItem;
+
+                            // Generate prose placement prompt (only if missing and not merchant-owned)
+                            if (shouldGeneratePrompt) {
+                                try {
+                                    const promptResult = await generateProductDescription(
+                                        productData,
+                                        extractedFields,
+                                        itemRequestId
+                                    );
+                                    renderInstructions = promptResult.description;
+                                    
+                                    logger.info(
+                                        createLogContext("prepare", itemRequestId, "placement-prompt-generated", {
+                                            assetId: asset.id,
+                                            productId: asset.productId,
+                                            length: renderInstructions.length
+                                        }),
+                                        `Generated placement prompt: ${renderInstructions.substring(0, 100)}...`
+                                    );
+                                } catch (promptError) {
+                                    logger.warn(
+                                        createLogContext("prepare", itemRequestId, "placement-prompt-failed", {
+                                            error: promptError instanceof Error ? promptError.message : String(promptError)
+                                        }),
+                                        "Placement prompt generation failed, continuing without",
+                                        promptError
+                                    );
+                                    // Fallback: use a basic description
+                                    const article = /^[aeiou]/i.test(asset.productTitle) ? 'An' : 'A';
+                                    renderInstructions = `${article} ${asset.productTitle.toLowerCase()}, described for realistic interior photography with accurate proportions and natural lighting.`;
+                                }
                             }
-                        } catch (metadataError) {
+
+                            // Set placementFields if not already set and not merchant-owned
+                            if (shouldGenerateFields) {
+                                placementFields = {
+                                    surface: extractedFields.surface,
+                                    material: extractedFields.material,
+                                    orientation: extractedFields.orientation,
+                                    shadow: extractedFields.shadow || (extractedFields.surface === 'ceiling' ? 'none' : 'contact'),
+                                    dimensions: extractedFields.dimensions || { height: null, width: null },
+                                    additionalNotes: '',
+                                    fieldSource: {
+                                        surface: 'auto',
+                                        material: 'auto',
+                                        orientation: 'auto',
+                                        shadow: 'auto',
+                                        dimensions: 'auto',
+                                        additionalNotes: 'auto',
+                                    }
+                                };
+                            }
+
+                            // Set v2 fields if not already set and not merchant-owned
+                            if (shouldGenerateV2Rules) {
+                                if (!sceneRole && !isMerchantOwned('sceneRole')) {
+                                    sceneRole = autoSceneRole;
+                                }
+                                if (!replacementRule && !isMerchantOwned('replacementRule')) {
+                                    replacementRule = autoReplacementRule;
+                                }
+                                if (allowSpaceCreation === null && !isMerchantOwned('allowSpaceCreation')) {
+                                    allowSpaceCreation = autoAllowSpaceCreation;
+                                }
+                            }
+
+                            // Emit auto_placement_generated event
+                            await emitPrepEvent(
+                                {
+                                    assetId: asset.id,
+                                    productId: asset.productId,
+                                    shopId: asset.shopId,
+                                    eventType: "auto_placement_generated",
+                                    actorType: "system",
+                                    payload: {
+                                        source: "auto",
+                                        hasPrompt: !!renderInstructions,
+                                        hasPlacementFields: !!placementFields,
+                                        sceneRole: sceneRole,
+                                        replacementRule: replacementRule,
+                                    },
+                                },
+                                null,
+                                itemRequestId
+                            ).catch(() => {
+                                // Non-critical
+                            });
+
+                        } catch (placementError) {
                             logger.warn(
-                                createLogContext("prepare", itemRequestId, "metadata-extract", { error: metadataError instanceof Error ? metadataError.message : String(metadataError) }),
-                                "Metadata extraction failed, continuing without",
-                                metadataError
+                                createLogContext("prepare", itemRequestId, "placement-generation", { 
+                                    error: placementError instanceof Error ? placementError.message : String(placementError) 
+                                }),
+                                "Placement generation failed, continuing without",
+                                placementError
                             );
                         }
                     }
@@ -261,19 +371,63 @@ async function processPendingAssets(batchRequestId: string) {
                     // Extract GCS key from the signed URL for on-demand URL generation
                     const preparedImageKey = extractGcsKeyFromUrl(prepareResult.url);
 
+                    // Prepare update data (only include fields that changed or are being set)
+                    const updateData: any = {
+                        status: "ready",
+                        preparedImageUrl: prepareResult.url,
+                        preparedImageKey: preparedImageKey,
+                        geminiFileUri: prepareResult.geminiFileUri,
+                        geminiFileExpiresAt: prepareResult.geminiFileExpiresAt,
+                        retryCount: 0, // Reset retry count on success
+                        errorMessage: null,
+                        updatedAt: new Date()
+                    };
+
+                    // Only update renderInstructions if we generated one or if it was already set
+                    if (renderInstructions) {
+                        updateData.renderInstructions = renderInstructions;
+                    }
+
+                    // Only update placementFields if we generated one
+                    if (placementFields) {
+                        updateData.placementFields = placementFields;
+                    }
+
+                    // Only update v2 fields if we have values
+                    if (sceneRole) {
+                        updateData.sceneRole = sceneRole;
+                    }
+                    if (replacementRule) {
+                        updateData.replacementRule = replacementRule;
+                    }
+                    if (allowSpaceCreation !== null && allowSpaceCreation !== undefined) {
+                        updateData.allowSpaceCreation = allowSpaceCreation;
+                    }
+
+                    // Update fieldSource to mark auto-generated fields
+                    const updatedFieldSource = { ...existingFieldSource };
+                    if (renderInstructions && !isMerchantOwned('renderInstructions')) {
+                        updatedFieldSource.renderInstructions = 'auto';
+                    }
+                    if (placementFields && !isMerchantOwned('placementFields')) {
+                        updatedFieldSource.placementFields = 'auto';
+                    }
+                    if (sceneRole && !isMerchantOwned('sceneRole')) {
+                        updatedFieldSource.sceneRole = 'auto';
+                    }
+                    if (replacementRule && !isMerchantOwned('replacementRule')) {
+                        updatedFieldSource.replacementRule = 'auto';
+                    }
+                    if (allowSpaceCreation !== null && !isMerchantOwned('allowSpaceCreation')) {
+                        updatedFieldSource.allowSpaceCreation = 'auto';
+                    }
+                    if (Object.keys(updatedFieldSource).length > 0) {
+                        updateData.fieldSource = updatedFieldSource;
+                    }
+
                     await prisma.productAsset.update({
                         where: { id: asset.id },
-                        data: {
-                            status: "ready",
-                            preparedImageUrl: prepareResult.url,
-                            preparedImageKey: preparedImageKey,
-                            renderInstructions: renderInstructions,
-                            geminiFileUri: prepareResult.geminiFileUri,
-                            geminiFileExpiresAt: prepareResult.geminiFileExpiresAt,
-                            retryCount: 0, // Reset retry count on success
-                            errorMessage: null,
-                            updatedAt: new Date()
-                        }
+                        data: updateData
                     });
 
                     // Emit prep_confirmed event (system)
