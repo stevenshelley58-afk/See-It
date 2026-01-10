@@ -11,6 +11,7 @@ import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId, addRequestIdHeader } from "../utils/request-context.server";
 import { getShopFromSession } from "../utils/shop.server";
 import { validateShopifyUrl } from "../utils/validate-shopify-url.server";
+import { emitPrepEvent } from "../services/prep-events.server";
 
 export const action = async ({ request }) => {
     const requestId = getRequestId(request);
@@ -137,7 +138,7 @@ export const action = async ({ request }) => {
         }
 
         // Create or Update asset to "pending" - use transaction for atomicity
-        await prisma.$transaction(async (tx) => {
+        const { asset, previousStatus } = await prisma.$transaction(async (tx) => {
             const existing = await tx.productAsset.findFirst({
                 where: {
                     shopId,
@@ -146,7 +147,8 @@ export const action = async ({ request }) => {
             });
 
             if (existing) {
-                await tx.productAsset.update({
+                const prevStatus = existing.status;
+                const updated = await tx.productAsset.update({
                     where: { id: existing.id },
                     data: {
                         status: "preparing",
@@ -161,8 +163,9 @@ export const action = async ({ request }) => {
                         updatedAt: new Date()
                     }
                 });
+                return { asset: updated, previousStatus: prevStatus };
             } else {
-                await tx.productAsset.create({
+                const created = await tx.productAsset.create({
                     data: {
                         shopId,
                         productId: String(productId),
@@ -177,8 +180,23 @@ export const action = async ({ request }) => {
                         createdAt: new Date()
                     }
                 });
+                return { asset: created, previousStatus: "unprepared" };
             }
         });
+
+        // Emit status_changed event when merchant initiates prepare
+        await emitPrepEvent({
+            assetId: asset.id,
+            productId: String(productId),
+            shopId: shopId,
+            eventType: "status_changed",
+            actorType: "merchant",
+            payload: {
+                from: previousStatus,
+                to: "preparing",
+                trigger: "user_click_prepare"
+            }
+        }, session, requestId).catch(() => {});
 
         logger.info(
             createLogContext("prepare", requestId, "queued", { shopId, productId }),

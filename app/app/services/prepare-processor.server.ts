@@ -628,6 +628,21 @@ async function processPendingAssets(batchRequestId: string) {
                         data: updateData
                     });
 
+                    // Emit status_changed event for preparing → ready transition
+                    await emitPrepEvent({
+                        assetId: asset.id,
+                        productId: asset.productId,
+                        shopId: asset.shopId,
+                        eventType: "status_changed",
+                        actorType: "system",
+                        payload: {
+                            from: "preparing",
+                            to: "ready",
+                            trigger: "prep_complete",
+                            hasPlacementConfig: !!renderInstructions
+                        }
+                    }, null, itemRequestId).catch(() => {});
+
                     // Emit prep_confirmed event (system)
                     await emitPrepEvent(
                         {
@@ -685,6 +700,24 @@ async function processPendingAssets(batchRequestId: string) {
                             updatedAt: new Date()
                         }
                     });
+
+                    // Emit status_changed event only for final failures (preparing → failed)
+                    if (isFinalFailure) {
+                        await emitPrepEvent({
+                            assetId: asset.id,
+                            productId: asset.productId,
+                            shopId: asset.shopId,
+                            eventType: "status_changed",
+                            actorType: "system",
+                            payload: {
+                                from: "preparing",
+                                to: "failed",
+                                trigger: "prep_failed",
+                                error: errorMessage.substring(0, 200),
+                                retryCount: newRetryCount
+                            }
+                        }, null, itemRequestId).catch(() => {});
+                    }
                 }
             } catch (error) {
                 // Outer error handler for unexpected errors (DB errors, etc.)
@@ -712,6 +745,21 @@ async function processPendingAssets(batchRequestId: string) {
                             updatedAt: new Date()
                         }
                     });
+
+                    // Emit status_changed event for critical failure
+                    await emitPrepEvent({
+                        assetId: asset.id,
+                        productId: asset.productId,
+                        shopId: asset.shopId,
+                        eventType: "status_changed",
+                        actorType: "system",
+                        payload: {
+                            from: "preparing",
+                            to: "failed",
+                            trigger: "critical_error",
+                            error: errorMessage.substring(0, 200)
+                        }
+                    }, null, itemRequestId).catch(() => {});
                 } catch (updateError) {
                     logger.error(
                         createLogContext("prepare", itemRequestId, "asset-update-failed", {
