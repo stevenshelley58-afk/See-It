@@ -33,22 +33,45 @@ function getDatabaseUrl(): string {
   return `postgresql://${user}:${password}@${host}:${port}/${database}?sslmode=require`;
 }
 
-const connectionString = getDatabaseUrl();
+let dbInitError: string | null = null;
+let pool: Pool | null = null;
+export let db: ReturnType<typeof drizzle> | null = null;
 
-// Create connection pool with SSL for production
-// Railway requires SSL but uses self-signed certs, so we don't reject unauthorized
-const pool = new Pool({
-  connectionString,
-  ssl: connectionString.includes('railway') || process.env.NODE_ENV === 'production' 
-    ? { rejectUnauthorized: false } 
-    : false,
-  max: 20, // Maximum number of clients in the pool
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
+function initDbIfNeeded() {
+  if (db || dbInitError) return;
+  try {
+    const connectionString = getDatabaseUrl();
 
-// Create Drizzle instance
-export const db = drizzle(pool, { schema });
+    // Create connection pool with SSL for production
+    // Railway requires SSL but uses self-signed certs, so we don't reject unauthorized
+    pool = new Pool({
+      connectionString,
+      ssl:
+        connectionString.includes('railway') || process.env.NODE_ENV === 'production'
+          ? { rejectUnauthorized: false }
+          : false,
+      max: 20, // Maximum number of clients in the pool
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
+
+    db = drizzle(pool, { schema });
+  } catch (err) {
+    dbInitError = err instanceof Error ? err.message : String(err);
+    db = null;
+    pool = null;
+  }
+}
+
+export function isDbConfigured(): boolean {
+  initDbIfNeeded();
+  return !!db;
+}
+
+export function getDbInitError(): string | null {
+  initDbIfNeeded();
+  return dbInitError;
+}
 
 // Export schema for use in other files
 export * from './schema';
