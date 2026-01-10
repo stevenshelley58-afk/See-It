@@ -20,7 +20,7 @@ function clamp(n, a, b) {
  * - Manual Refine (Add/Remove brush) with Undo/Redo
  * - Mobile-first responsive layout (Global Footer controlled via props)
  */
-export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFooterConfig, onSave }) {
+export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFooterConfig, onSave, editRequestId }) {
     const fetcher = useFetcher();
 
     // -- STATE --
@@ -191,6 +191,15 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         setBrushMode("add");
     };
 
+    // Allow parent to request entering edit mode (so Edit is usable even before footerConfig arrives)
+    useEffect(() => {
+        if (!editRequestId) return;
+        if (mode !== "normal") return;
+        if (!resultExists) return;
+        if (isLoading) return;
+        handleEnterEdit();
+    }, [editRequestId, isLoading, mode, resultExists]);
+
     const handleCancelEdit = () => {
         setMode("normal");
         setView(resultExists ? "result" : "original");
@@ -292,7 +301,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         }
     }, [resultExists, product.id, selectedImageUrl, fetcher, onSave]);
 
-    // -- FOOTER INTEGRATION --
+    // -- FOOTER INTEGRATION -- (Always set immediately to ensure Edit is always visible)
     useEffect(() => {
         if (!setFooterConfig) return;
 
@@ -312,12 +321,14 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                     label: 'Cancel',
                     onClick: handleCancelEdit,
                     disabled: false
-                }
+                },
+                tertiary: null
             });
         } else {
             // Normal Mode
             // Primary: Save (auto-generates if no result, saves and exits if result exists)
-            // Secondary: Edit
+            // Secondary: Edit (always visible, disabled if no result)
+            // Tertiary: Start over (only if result exists)
             setFooterConfig({
                 primary: {
                     label: 'Save',
@@ -337,7 +348,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                 } : null
             });
         }
-    }, [mode, resultExists, isLoading, setFooterConfig, handleSave, handleApplyEdits, handleCancelEdit, handleEnterEdit, handleStartOver]);
+    }, [mode, resultExists, isLoading, setFooterConfig, handleSave, handleApplyEdits, handleCancelEdit, handleCancelOperation, handleEnterEdit, handleStartOver]);
 
 
     // -- HELPER: Draw strokes to a context --
@@ -479,22 +490,22 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                                     onClick={() => setBrushMode("add")}
                                     className={cx(
                                         "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                                        brushMode === "add" ? "bg-white text-blue-600 shadow-sm ring-1 ring-black/5" : "text-neutral-500 hover:text-neutral-700"
+                                        brushMode === "add" ? "bg-[#171717] text-white shadow-sm ring-1 ring-black/5" : "bg-transparent text-neutral-600 hover:text-neutral-900"
                                     )}
                                 >
                                     <span className="flex items-center justify-center gap-1.5">
-                                        <span className="w-2 h-2 rounded-full bg-blue-500" /> Add
+                                        <span className="w-2 h-2 rounded-full bg-white" /> Add
                                     </span>
                                 </button>
                                 <button
                                     onClick={() => setBrushMode("remove")}
                                     className={cx(
                                         "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                                        brushMode === "remove" ? "bg-white text-red-600 shadow-sm ring-1 ring-black/5" : "text-neutral-500 hover:text-neutral-700"
+                                        brushMode === "remove" ? "bg-[#171717] text-white shadow-sm ring-1 ring-black/5" : "bg-transparent text-neutral-600 hover:text-neutral-900"
                                     )}
                                 >
                                     <span className="flex items-center justify-center gap-1.5">
-                                        <span className="w-2 h-2 rounded-full bg-red-500" /> Remove
+                                        <span className="w-2 h-2 rounded-full bg-white" /> Remove
                                     </span>
                                 </button>
                             </div>
@@ -544,25 +555,31 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
             {/* View Toggle + Controls Bar (Normal Mode + Has Result) - Outside image area */}
             {mode === "normal" && resultExists && (
-                <div className="bg-white border-t border-neutral-200 flex-shrink-0 px-4 lg:px-6 py-3 flex items-center justify-center">
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-neutral-500">View:</span>
-                        <div className="flex p-0.5 bg-neutral-100 rounded-lg border border-neutral-200">
+                <div className="bg-white border-t border-[#E5E5E5] flex-shrink-0 px-4 lg:px-6 py-4 flex items-center justify-center">
+                    <div className="flex items-center gap-3">
+                        <span className="text-xs font-semibold text-[#737373]">View:</span>
+                        <div className="flex p-1 bg-[#F0F0F0] rounded-2xl border border-[#E5E5E5] shadow-sm">
                             <button
                                 onClick={() => setView("original")}
                                 className={cx(
-                                    "px-3 py-1.5 rounded-md text-xs font-semibold transition-all duration-200",
-                                    view === "original" ? "bg-white text-neutral-900 shadow-sm border border-neutral-200" : "text-neutral-600 hover:text-neutral-900"
+                                    "px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 border",
+                                    view === "original"
+                                        ? "bg-[#171717] text-white shadow-md border-[#171717]"
+                                        : "bg-white text-[#1A1A1A] border-[#E5E5E5] hover:border-[#A3A3A3] hover:shadow-sm"
                                 )}
+                                aria-pressed={view === "original"}
                             >
                                 Original
                             </button>
                             <button
                                 onClick={() => setView("result")}
                                 className={cx(
-                                    "px-3 py-1.5 rounded-md text-xs font-semibold transition-all duration-200",
-                                    view === "result" ? "bg-white text-neutral-900 shadow-sm border border-neutral-200" : "text-neutral-600 hover:text-neutral-900"
+                                    "px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 border",
+                                    view === "result"
+                                        ? "bg-[#171717] text-white shadow-md border-[#171717]"
+                                        : "bg-white text-[#1A1A1A] border-[#E5E5E5] hover:border-[#A3A3A3] hover:shadow-sm"
                                 )}
+                                aria-pressed={view === "result"}
                             >
                                 Result
                             </button>
@@ -679,7 +696,8 @@ function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled
         const { mode, size, points } = stroke;
         if (points.length === 0) return;
 
-        ctx.strokeStyle = mode === "add" ? "rgba(59, 130, 246, 0.6)" : "rgba(239, 68, 68, 0.6)";
+        // No red/blue in controls: neutral in-canvas highlight only
+        ctx.strokeStyle = mode === "add" ? "rgba(23, 23, 23, 0.55)" : "rgba(115, 115, 115, 0.55)";
         // Adjust brush size from 'screen pixels' (30) to current canvas context
         // Since we already set up 1:1 logical pixels with scale, 'size' 30 means 30 logical pixels.
         ctx.lineWidth = size;
