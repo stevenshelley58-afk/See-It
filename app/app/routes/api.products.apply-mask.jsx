@@ -258,6 +258,36 @@ export const action = async ({ request }) => {
             .png()
             .toBuffer();
 
+        // CRITICAL: Trim transparent padding so sizing is based on visible product content.
+        // Without this, a user-selected cutout (e.g. mirror) can occupy only a small area
+        // inside a full-size source image canvas, causing the product to appear too small
+        // during placement and in final renders.
+        try {
+            const beforeMeta = await sharp(resultBuffer).metadata();
+            const trimmed = await sharp(resultBuffer)
+                .trim() // removes fully-transparent edges (top-left is transparent)
+                .png()
+                .toBuffer();
+            const afterMeta = await sharp(trimmed).metadata();
+
+            if (afterMeta.width && afterMeta.height && beforeMeta.width && beforeMeta.height) {
+                // Only accept the trimmed result if it is valid and smaller (or equal) dimensions.
+                if (afterMeta.width <= beforeMeta.width && afterMeta.height <= beforeMeta.height && trimmed.length > 0) {
+                    resultBuffer = trimmed;
+                    logger.info(
+                        { ...logContext, stage: "trim" },
+                        `Trimmed transparent padding: ${beforeMeta.width}×${beforeMeta.height} → ${afterMeta.width}×${afterMeta.height}`
+                    );
+                }
+            }
+        } catch (trimError) {
+            logger.warn(
+                { ...logContext, stage: "trim" },
+                "Failed to trim transparent padding (continuing with untrimmed PNG)",
+                trimError
+            );
+        }
+
         const processingTimeMs = Date.now() - startTime;
 
         // Upload to GCS

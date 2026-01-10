@@ -76,7 +76,7 @@ function buildCompositePrompt(
 Composite the product image into the room photo so they can see how it would look in their space.
 
 The product image is already scaled to the correct size. Do not resize it.
-Position the product center at approximately x=${placement.x.toFixed(2)}, y=${placement.y.toFixed(2)} (normalized 0-1 coordinates where 0,0 is top-left).
+Position the product center at approximately x=${placement.x.toFixed(3)}, y=${placement.y.toFixed(3)} (normalized 0-1 coordinates where 0,0 is top-left).
 
 ${placementPrompt ? `${placementPrompt}\n\n` : ''}Do not modify anything else in the room.`;
 }

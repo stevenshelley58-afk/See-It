@@ -46,7 +46,7 @@
 })();
 
 (function() {
-    const VERSION = '1.0.29'; // Gemini Files API pre-upload for faster renders
+    const VERSION = '1.0.30'; // Fix sizing bug - use actual room image dimensions, not container
     
     // Function to initialize - runs when DOM is ready
     function initSeeIt() {
@@ -1022,6 +1022,49 @@
     };
 
     // --- Product Positioning ---
+    
+    // Helper: Calculate actual rendered room image dimensions (accounting for object-fit: contain)
+    // The room image uses object-fit: contain, so it may be smaller than the container
+    // Returns { width, height, offsetX, offsetY } of the actual image within the container
+    const getRenderedRoomImageDimensions = () => {
+        if (!roomImage || !positionContainer) return null;
+        
+        const containerRect = positionContainer.getBoundingClientRect();
+        const imgNatW = roomImage.naturalWidth || state.normalizedWidth;
+        const imgNatH = roomImage.naturalHeight || state.normalizedHeight;
+        
+        if (!imgNatW || !imgNatH || !containerRect.width || !containerRect.height) return null;
+        
+        // Calculate where image renders (object-fit: contain)
+        const containerAspect = containerRect.width / containerRect.height;
+        const imageAspect = imgNatW / imgNatH;
+        
+        let imgRenderW, imgRenderH, imgOffsetX, imgOffsetY;
+        
+        if (imageAspect > containerAspect) {
+            // Image wider than container - letterboxed top/bottom
+            imgRenderW = containerRect.width;
+            imgRenderH = containerRect.width / imageAspect;
+            imgOffsetX = 0;
+            imgOffsetY = (containerRect.height - imgRenderH) / 2;
+        } else {
+            // Image taller than container - pillarboxed left/right  
+            imgRenderH = containerRect.height;
+            imgRenderW = containerRect.height * imageAspect;
+            imgOffsetX = (containerRect.width - imgRenderW) / 2;
+            imgOffsetY = 0;
+        }
+        
+        return {
+            width: imgRenderW,
+            height: imgRenderH,
+            offsetX: imgOffsetX,
+            offsetY: imgOffsetY,
+            containerWidth: containerRect.width,
+            containerHeight: containerRect.height
+        };
+    };
+    
     let positionListenersAttached = false;
     let isDragging = false;
     let isResizing = false;
@@ -1239,9 +1282,44 @@
             const newPixelX = productStart.x + deltaX;
             const newPixelY = productStart.y + deltaY;
 
-            // Convert back to normalized coordinates
-            state.x = Math.max(0, Math.min(1, newPixelX / containerRect.width));
-            state.y = Math.max(0, Math.min(1, newPixelY / containerRect.height));
+            // Convert back to normalized coordinates (container-relative)
+            const nextX = newPixelX / containerRect.width;
+            const nextY = newPixelY / containerRect.height;
+
+            // CRITICAL: Constrain drag to the ACTUAL rendered room image area (object-fit: contain)
+            // If users drag into the letterboxed/pillarboxed "blank" bars, the later conversion step
+            // will clamp and cause big jumps in the rendered output. Prevent that here.
+            const roomDims = getRenderedRoomImageDimensions();
+            if (roomDims) {
+                const minX = roomDims.offsetX / containerRect.width;
+                const maxX = (roomDims.offsetX + roomDims.width) / containerRect.width;
+                const minY = roomDims.offsetY / containerRect.height;
+                const maxY = (roomDims.offsetY + roomDims.height) / containerRect.height;
+
+                const clampedX = Math.max(minX, Math.min(maxX, nextX));
+                const clampedY = Math.max(minY, Math.min(maxY, nextY));
+
+                // Optional debug visibility when we clamp (helps diagnose "why did it move?")
+                if (clampedX !== nextX || clampedY !== nextY) {
+                    console.log('[See It] Drag clamped to room image bounds:', {
+                        nextX: nextX.toFixed(3),
+                        nextY: nextY.toFixed(3),
+                        clampedX: clampedX.toFixed(3),
+                        clampedY: clampedY.toFixed(3),
+                        minX: minX.toFixed(3),
+                        maxX: maxX.toFixed(3),
+                        minY: minY.toFixed(3),
+                        maxY: maxY.toFixed(3),
+                    });
+                }
+
+                state.x = clampedX;
+                state.y = clampedY;
+            } else {
+                // Fallback: clamp to container bounds
+                state.x = Math.max(0, Math.min(1, nextX));
+                state.y = Math.max(0, Math.min(1, nextY));
+            }
 
             updateProductOverlay();
         }
@@ -2030,33 +2108,92 @@
         try {
             const containerRect = positionContainer?.getBoundingClientRect();
             let productWidthFraction = undefined;
+            
+            // CRITICAL FIX: Use actual rendered room image dimensions, not container dimensions
+            // The room image uses object-fit: contain, so it may be smaller than the container
+            const roomDims = getRenderedRoomImageDimensions();
 
-            if (containerRect && containerRect.width > 0) {
+            if (roomDims && roomDims.width > 0) {
                 // Calculate the visual width of the product as displayed
-                // state.productWidth is CSS pixels, state.scale is user's resize multiplier
-                const visualProductWidth = state.productWidth * (state.scale || 1);
+                // Prefer measuring the actual <img> (excludes dashed border + overlay chrome).
+                // Falls back to overlay/state if element isn't available for any reason.
+                const imgRect = productImage?.getBoundingClientRect?.();
+                const overlayRect = productOverlay?.getBoundingClientRect?.();
+                const visualProductWidth =
+                    imgRect?.width && imgRect.width > 0
+                        ? imgRect.width
+                        : (overlayRect?.width && overlayRect.width > 0
+                            ? overlayRect.width
+                            : (state.productWidth * (state.scale || 1)));
                 
-                // Calculate fraction of container (which maps to room image)
-                productWidthFraction = visualProductWidth / containerRect.width;
+                // Calculate fraction of ACTUAL ROOM IMAGE (not container!)
+                productWidthFraction = visualProductWidth / roomDims.width;
                 
                 // Log details for debugging
-                console.log('[See It] Size calculation:', {
+                console.log('[See It] Size calculation (FIXED):', {
                     productNaturalWidth: state.productNaturalWidth,
                     productNaturalHeight: state.productNaturalHeight,
                     cssProductWidth: state.productWidth,
                     scale: state.scale,
+                    visualProductWidth: visualProductWidth.toFixed(0),
+                    containerWidth: containerRect?.width?.toFixed(0),
+                    roomImageWidth: roomDims.width.toFixed(0),
+                    roomImageHeight: roomDims.height.toFixed(0),
+                    productWidthFraction: productWidthFraction.toFixed(3)
+                });
+            } else if (containerRect && containerRect.width > 0) {
+                // Fallback to container dimensions if room dimensions unavailable
+                const imgRect = productImage?.getBoundingClientRect?.();
+                const overlayRect = productOverlay?.getBoundingClientRect?.();
+                const visualProductWidth =
+                    imgRect?.width && imgRect.width > 0
+                        ? imgRect.width
+                        : (overlayRect?.width && overlayRect.width > 0
+                            ? overlayRect.width
+                            : (state.productWidth * (state.scale || 1)));
+                productWidthFraction = visualProductWidth / containerRect.width;
+                console.warn('[See It] Size calculation (FALLBACK - room dims unavailable):', {
                     visualProductWidth: visualProductWidth.toFixed(0),
                     containerWidth: containerRect.width.toFixed(0),
                     productWidthFraction: productWidthFraction.toFixed(3)
                 });
             }
 
+            // Also fix x/y coordinates to be relative to room image, not container
+            let finalX = state.x;
+            let finalY = state.y;
+            
+            if (roomDims && containerRect) {
+                // Convert from container-relative to room-image-relative coordinates
+                // state.x/y are normalized 0-1 relative to container
+                // We need to convert them to be relative to the actual room image
+                const containerPixelX = state.x * containerRect.width;
+                const containerPixelY = state.y * containerRect.height;
+                
+                // Subtract the offset and normalize to room image dimensions
+                finalX = (containerPixelX - roomDims.offsetX) / roomDims.width;
+                finalY = (containerPixelY - roomDims.offsetY) / roomDims.height;
+                
+                // Clamp to 0-1 range (product might be partially outside room image)
+                finalX = Math.max(0, Math.min(1, finalX));
+                finalY = Math.max(0, Math.min(1, finalY));
+                
+                console.log('[See It] Position conversion:', {
+                    containerX: state.x.toFixed(3),
+                    containerY: state.y.toFixed(3),
+                    roomX: finalX.toFixed(3),
+                    roomY: finalY.toFixed(3),
+                    offsetX: roomDims.offsetX.toFixed(0),
+                    offsetY: roomDims.offsetY.toFixed(0)
+                });
+            }
+            
             const payload = {
                 room_session_id: state.sessionId,
                 product_id: state.productId,
                 placement: {
-                    x: state.x,
-                    y: state.y,
+                    x: finalX,
+                    y: finalY,
                     scale: state.scale || 1,
                     product_width_fraction: productWidthFraction
                 },

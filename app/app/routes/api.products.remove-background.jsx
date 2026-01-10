@@ -5,6 +5,7 @@ import { removeBackgroundFast } from "../services/background-remover.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { emitPrepEvent } from "../services/prep-events.server";
+import sharp from "sharp";
 
 /**
  * Extract image ID from Shopify CDN URL
@@ -122,11 +123,40 @@ export const action = async ({ request }) => {
 
         const result = await removeBackgroundFast(sourceImageUrl, requestId);
 
+        // CRITICAL: Trim transparent padding from the prepared PNG.
+        // Some background removal outputs keep the original canvas size with large transparent margins.
+        // That causes "scale is off" because we size/measure based on the PNG bounding box.
+        let preparedBuffer = result.imageBuffer;
+        try {
+            const beforeMeta = await sharp(preparedBuffer).metadata();
+            const trimmed = await sharp(preparedBuffer)
+                .trim()
+                .png()
+                .toBuffer();
+            const afterMeta = await sharp(trimmed).metadata();
+
+            if (afterMeta.width && afterMeta.height && beforeMeta.width && beforeMeta.height) {
+                if (afterMeta.width <= beforeMeta.width && afterMeta.height <= beforeMeta.height && trimmed.length > 0) {
+                    preparedBuffer = trimmed;
+                    logger.info(
+                        { ...logContext, stage: "trim" },
+                        `Trimmed transparent padding: ${beforeMeta.width}×${beforeMeta.height} → ${afterMeta.width}×${afterMeta.height}`
+                    );
+                }
+            }
+        } catch (trimError) {
+            logger.warn(
+                { ...logContext, stage: "trim" },
+                "Failed to trim transparent padding (continuing with untrimmed PNG)",
+                trimError
+            );
+        }
+
         // Upload to GCS
         const preparedImageKey = `shops/${shop.id}/products/${productId}/prepared-${Date.now()}.png`;
 
         const preparedImageUrl = await StorageService.uploadBuffer(
-            result.imageBuffer,
+            preparedBuffer,
             preparedImageKey,
             'image/png'
         );

@@ -146,10 +146,16 @@
           <img id="see-it-room-image" src="" alt="Room" width="1" height="1">
           <div id="see-it-product-overlay" class="see-it-product-overlay">
             <img id="see-it-product-image" src="" alt="Product" draggable="false" width="1" height="1">
-            <div class="see-it-resize-handle see-it-resize-nw"></div>
-            <div class="see-it-resize-handle see-it-resize-ne"></div>
-            <div class="see-it-resize-handle see-it-resize-sw"></div>
-            <div class="see-it-resize-handle see-it-resize-se"></div>
+            <!--
+              NOTE (Theme compatibility):
+              Some themes (e.g. Dawn) ship global CSS like `div:empty { display: none; }`.
+              Our resize handles are divs, so if they're empty they can get hidden and resizing breaks.
+              The non-breaking space ensures these elements are not :empty, and CSS sets font-size to 0.
+            -->
+            <div class="see-it-resize-handle see-it-resize-nw" aria-hidden="true">&nbsp;</div>
+            <div class="see-it-resize-handle see-it-resize-ne" aria-hidden="true">&nbsp;</div>
+            <div class="see-it-resize-handle see-it-resize-sw" aria-hidden="true">&nbsp;</div>
+            <div class="see-it-resize-handle see-it-resize-se" aria-hidden="true">&nbsp;</div>
           </div>
           <div id="see-it-position-hint" class="see-it-position-hint">Drag to move • Drag corners to resize</div>
         </div>

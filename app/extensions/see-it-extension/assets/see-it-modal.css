@@ -1141,11 +1141,16 @@
 /* Resize handles - corner circles */
 .see-it-resize-handle {
   position: absolute;
+  /* Defensive: some themes (e.g. Dawn) hide empty divs via `div:empty { display:none }` */
+  display: block !important;
   width: 20px;
   height: 20px;
   background: #ffffff;
   border: 2px solid #171717;
   border-radius: 50%;
+  /* Keep the &nbsp; from affecting layout/appearance */
+  font-size: 0;
+  line-height: 0;
   z-index: 20;
   touch-action: none;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
