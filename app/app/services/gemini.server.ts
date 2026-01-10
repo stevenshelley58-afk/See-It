@@ -66,31 +66,19 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
  * 
  * Uses exact normalized coordinates (0-1) for precise placement.
  * Includes explicit sizing information so Gemini preserves user's intended scale.
- * Product description assists with rendering (lighting, shadows, materials).
+ * The placementPrompt provides product-specific rendering guidance (lighting, shadows, materials).
  */
 function buildCompositePrompt(
-    productDescription: string,
+    placementPrompt: string,
     placement: { x: number; y: number; productWidthFraction?: number }
 ): string {
-    const widthHint =
-        Number.isFinite(placement.productWidthFraction) && (placement.productWidthFraction as number) > 0
-            ? `The product should take up approximately ${(placement.productWidthFraction as number * 100).toFixed(0)}% of the room image width.`
-            : '';
+    return `You are helping an online furniture store customer visualize a product in their home. 
+Composite the product image into the room photo so they can see how it would look in their space.
 
-    return `You are compositing a product into a room photo for an AR furniture visualization app.
+The product image is already scaled to the correct size. Do not resize it.
+Position the product center at approximately x=${placement.x.toFixed(2)}, y=${placement.y.toFixed(2)} (normalized 0-1 coordinates where 0,0 is top-left).
 
-SIZING:
-The user has already sized this product for this location. Minor adjustments for realism are fine, but respect the user's intended size.
-${widthHint ? `\n${widthHint}` : ''}
-
-PLACEMENT:
-Position the product center at approximately x=${placement.x.toFixed(2)}, y=${placement.y.toFixed(2)} (normalized 0-1 coordinates).
-
-${productDescription ? `PRODUCT:\n${productDescription}\n` : ''}
-RULES:
-- Match the room's existing lighting and color temperature
-- Add natural contact shadow where product meets surface
-- Do not modify, add, or remove anything else in the room`;
+${placementPrompt ? `${placementPrompt}\n\n` : ''}Do not modify anything else in the room.`;
 }
 
 /**
@@ -697,7 +685,7 @@ export interface CompositeOptions {
         useProductUri: boolean;
         placement: { x: number; y: number; scale: number; productWidthFraction?: number };
         stylePreset: string;
-        productInstructions?: string;
+        placementPrompt?: string;
     }) => void;
 }
 
@@ -707,7 +695,7 @@ export async function compositeScene(
     placement: { x: number; y: number; scale: number; productWidthFraction?: number },
     stylePreset: string = 'neutral',
     requestId: string = "composite",
-    productInstructions?: string,
+    placementPrompt?: string,
     options?: CompositeOptions
 ): Promise<CompositeResult> {
     const logContext = createLogContext("render", requestId, "start", {});
@@ -716,7 +704,7 @@ export async function compositeScene(
     const useRoomUri = options?.roomGeminiUri && isGeminiFileValid(options.roomGeminiExpiresAt);
     const useProductUri = options?.productGeminiUri && isGeminiFileValid(options.productGeminiExpiresAt);
 
-    logger.info(logContext, `Processing scene composite with Gemini (direct fusion)${productInstructions ? ' - with custom instructions' : ''}${useRoomUri ? ' [room: Gemini URI]' : ''}${useProductUri ? ' [product: Gemini URI]' : ''}`);
+    logger.info(logContext, `Processing scene composite with Gemini (direct fusion)${placementPrompt ? ' - with placement prompt' : ''}${useRoomUri ? ' [room: Gemini URI]' : ''}${useProductUri ? ' [product: Gemini URI]' : ''}`);
 
     // Track buffers for explicit cleanup
     let productBuffer: Buffer | null = null;
@@ -781,9 +769,9 @@ export async function compositeScene(
         );
 
         // STEP 4: Build the narrative prompt with explicit sizing
-        // Pass actual dimensions so Gemini knows the product is already correctly sized
-        const productDescription = productInstructions?.trim() || '';
-        const prompt = buildCompositePrompt(productDescription, placement);
+        // Pass the placementPrompt which contains product-specific rendering guidance
+        const promptText = placementPrompt?.trim() || '';
+        const prompt = buildCompositePrompt(promptText, placement);
 
         // Compute closest Gemini-supported aspect ratio
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
@@ -804,7 +792,7 @@ export async function compositeScene(
                     useProductUri: useProductUri,
                     placement,
                     stylePreset,
-                    productInstructions: productInstructions || undefined,
+                    placementPrompt: placementPrompt || undefined,
                 });
             } catch (telemetryError) {
                 // Telemetry callback should never break the render flow

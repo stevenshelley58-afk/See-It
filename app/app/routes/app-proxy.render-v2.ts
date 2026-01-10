@@ -120,7 +120,7 @@ async function downloadToBuffer(
 // Build Hero Shot Prompt (v2 spec)
 // ============================================================================
 function buildHeroShotPrompt(
-  productInstructions: string | null,
+  placementPrompt: string | null,
   variant: { id: string; hint: string; variation: string },
   v2Config: {
     sceneRole: string | null;
@@ -133,7 +133,7 @@ function buildHeroShotPrompt(
     return `Place this furniture naturally into this room photograph.
 
 PRODUCT:
-${productInstructions || 'Furniture piece'}
+${placementPrompt || 'Furniture piece'}
 
 PLACEMENT GUIDANCE:
 ${variant.hint}
@@ -152,7 +152,7 @@ RULES:
   const parts: string[] = [];
 
   parts.push(`PRODUCT:`);
-  parts.push(`${productInstructions || 'Furniture piece'}`);
+  parts.push(`${placementPrompt || 'Furniture piece'}`);
   parts.push(``);
 
   // Scene Role placement rules
@@ -212,7 +212,7 @@ async function generateVariant(
   roomBuffer: Buffer,
   productBuffer: Buffer,
   variant: { id: string; hint: string; variation: string },
-  productInstructions: string | null,
+  placementPrompt: string | null,
   v2Config: {
     sceneRole: string | null;
     replacementRule: string | null;
@@ -228,7 +228,7 @@ async function generateVariant(
   );
 
   const startTime = Date.now();
-  const prompt = buildHeroShotPrompt(productInstructions, variant, v2Config);
+  const prompt = buildHeroShotPrompt(placementPrompt, variant, v2Config);
 
   const client = getGeminiClient();
 

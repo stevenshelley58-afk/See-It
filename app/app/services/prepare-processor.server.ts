@@ -350,12 +350,12 @@ async function processPendingAssets(batchRequestId: string) {
                 if (success && prepareResult) {
                     // Generate placement fields and prose prompt (only if not merchant-owned)
                     // Check fieldSource to avoid overwriting merchant edits
-                    const existingFieldSource = asset.fieldSource && typeof asset.fieldSource === 'object' 
+                    const existingFieldSource = asset.fieldSource && typeof asset.fieldSource === 'object'
                         ? asset.fieldSource as Record<string, string>
                         : {};
-                    
+
                     const isMerchantOwned = (field: string) => existingFieldSource[field] === 'merchant';
-                    
+
                     // Only generate if renderInstructions is missing or if it's not merchant-owned
                     let renderInstructions = asset.renderInstructions;
                     let placementFields = asset.placementFields && typeof asset.placementFields === 'object'
@@ -392,7 +392,7 @@ async function processPendingAssets(batchRequestId: string) {
                                         replacementRule: replacementRule,
                                         hasInstructions: !!renderInstructions,
                                     }
-                                }, null, itemRequestId).catch(() => {});
+                                }, null, itemRequestId).catch(() => { });
                             }
                         } catch (promptError) {
                             logger.warn(
@@ -407,17 +407,17 @@ async function processPendingAssets(batchRequestId: string) {
                     // Generate placement if missing and not merchant-owned
                     // Check each field individually so we can generate missing parts even if some exist
                     const shouldGeneratePrompt = !renderInstructions && !isMerchantOwned('renderInstructions');
-                    
+
                     // For placementFields, check if it exists and if any field is merchant-owned
                     const placementFieldsSource = placementFields?.fieldSource && typeof placementFields.fieldSource === 'object'
                         ? placementFields.fieldSource as Record<string, string>
                         : {};
                     const hasMerchantOwnedPlacementField = Object.values(placementFieldsSource).some(src => src === 'merchant');
                     const shouldGenerateFields = (!placementFields || Object.keys(placementFields).filter(k => k !== 'fieldSource').length === 0) && !hasMerchantOwnedPlacementField;
-                    
-                    const shouldGenerateV2Rules = (!sceneRole || !replacementRule || allowSpaceCreation === null) && 
+
+                    const shouldGenerateV2Rules = (!sceneRole || !replacementRule || allowSpaceCreation === null) &&
                         (!isMerchantOwned('sceneRole') && !isMerchantOwned('replacementRule') && !isMerchantOwned('allowSpaceCreation'));
-                    
+
                     const shouldGeneratePlacement = (shouldGeneratePrompt || shouldGenerateFields || shouldGenerateV2Rules);
 
                     if (shouldGeneratePlacement && asset.productTitle) {
@@ -430,14 +430,14 @@ async function processPendingAssets(batchRequestId: string) {
                                 productType: null,
                                 tags: [],
                             };
-                            
+
                             const extractedFields = extractStructuredFields(productData);
-                            
+
                             // Auto-detect v2 placement rules (same logic as PlacementTab)
                             const largeItemKeywords = ['sofa', 'couch', 'sectional', 'mirror', 'cabinet', 'dresser', 'bookshelf', 'bed', 'table', 'desk', 'console', 'credenza', 'sideboard'];
                             const titleLower = (asset.productTitle || '').toLowerCase();
                             const isLargeItem = largeItemKeywords.some(k => titleLower.includes(k));
-                            
+
                             const autoSceneRole = isLargeItem ? 'Dominant' : 'Integrated';
                             const autoReplacementRule = isLargeItem ? 'Similar Size or Position' : 'None';
                             const autoAllowSpaceCreation = isLargeItem;
@@ -451,7 +451,7 @@ async function processPendingAssets(batchRequestId: string) {
                                         itemRequestId
                                     );
                                     renderInstructions = promptResult.description;
-                                    
+
                                     logger.info(
                                         createLogContext("prepare", itemRequestId, "placement-prompt-generated", {
                                             assetId: asset.id,
@@ -556,8 +556,8 @@ async function processPendingAssets(batchRequestId: string) {
 
                         } catch (placementError) {
                             logger.warn(
-                                createLogContext("prepare", itemRequestId, "placement-generation", { 
-                                    error: placementError instanceof Error ? placementError.message : String(placementError) 
+                                createLogContext("prepare", itemRequestId, "placement-generation", {
+                                    error: placementError instanceof Error ? placementError.message : String(placementError)
                                 }),
                                 "Placement generation failed, continuing without",
                                 placementError
@@ -893,7 +893,7 @@ async function processPendingRenderJobs(batchRequestId: string) {
                         useProductUri: boolean;
                         placement: { x: number; y: number; scale: number; productWidthFraction?: number };
                         stylePreset: string;
-                        productInstructions?: string;
+                        placementPrompt?: string;
                     } | null = null;
 
                     for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !success; attempt++) {
@@ -1014,7 +1014,7 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                         promptHash,
                                         placement: capturedTelemetry.placement,
                                         stylePreset: capturedTelemetry.stylePreset,
-                                        productInstructions: capturedTelemetry.productInstructions || undefined,
+                                        placementPrompt: capturedTelemetry.placementPrompt || undefined,
                                         useRoomUri: capturedTelemetry.useRoomUri,
                                         useProductUri: capturedTelemetry.useProductUri,
                                     },

@@ -256,7 +256,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             useProductUri: boolean;
             placement: { x: number; y: number; scale: number; productWidthFraction?: number };
             stylePreset: string;
-            productInstructions?: string;
+            placementPrompt?: string;
         } | null = null;
 
         const placementParams = {
@@ -297,7 +297,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 capturedTelemetry = telemetry;
             },
         };
-        
+
         const result = await compositeScene(
             productImageUrl,
             roomImageUrl,
@@ -348,7 +348,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                         promptHash,
                         placement: capturedTelemetry.placement,
                         stylePreset: capturedTelemetry.stylePreset,
-                        productInstructions: capturedTelemetry.productInstructions || undefined,
+                        placementPrompt: capturedTelemetry.placementPrompt || undefined,
                         useRoomUri: capturedTelemetry.useRoomUri,
                         useProductUri: capturedTelemetry.useProductUri,
                     },
