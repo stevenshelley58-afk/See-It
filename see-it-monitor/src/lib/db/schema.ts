@@ -462,9 +462,6 @@ export const prepEvents = pgTable('prep_events', {
   
   // Event payload (JSON)
   payload: jsonb('payload').notNull(),
-  
-  // Server-side tracking
-  receivedAt: timestamp('received_at').defaultNow(),
 }, (table) => ({
   assetIdx: index('prep_events_asset_idx').on(table.assetId),
   shopTimestampIdx: index('prep_events_shop_timestamp_idx').on(table.shopId, table.timestamp),

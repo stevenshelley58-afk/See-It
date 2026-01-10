@@ -100,7 +100,6 @@ export async function POST(request: NextRequest) {
         actorId: event.actorId || null,
         eventType: event.eventType,
         payload: event.payload,
-        receivedAt: new Date(),
       })
     );
 
