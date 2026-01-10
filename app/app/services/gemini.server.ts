@@ -688,6 +688,17 @@ export interface CompositeOptions {
     productGeminiUri?: string | null;
     /** Expiration time for product Gemini file */
     productGeminiExpiresAt?: Date | null;
+    /** Optional telemetry callback - called with raw prompt and config right before API call */
+    onPromptBuilt?: (telemetry: {
+        prompt: string;
+        model: string;
+        aspectRatio: string;
+        useRoomUri: boolean;
+        useProductUri: boolean;
+        placement: { x: number; y: number; scale: number; productWidthFraction?: number };
+        stylePreset: string;
+        productInstructions?: string;
+    }) => void;
 }
 
 export async function compositeScene(
@@ -781,6 +792,28 @@ export async function compositeScene(
             { ...logContext, stage: "pre-gemini" },
             `Sending to Gemini: room=${roomWidth}×${roomHeight}, ratio=${closestRatio.label}, placement=(${placement.x.toFixed(2)}, ${placement.y.toFixed(2)})`
         );
+
+        // Invoke telemetry callback if provided (right before API call)
+        if (options?.onPromptBuilt) {
+            try {
+                options.onPromptBuilt({
+                    prompt,
+                    model: IMAGE_MODEL_PRO,
+                    aspectRatio: closestRatio.label,
+                    useRoomUri: useRoomUri,
+                    useProductUri: useProductUri,
+                    placement,
+                    stylePreset,
+                    productInstructions: productInstructions || undefined,
+                });
+            } catch (telemetryError) {
+                // Telemetry callback should never break the render flow
+                logger.debug(
+                    { ...logContext, stage: "telemetry-error" },
+                    `Telemetry callback failed (non-critical): ${telemetryError instanceof Error ? telemetryError.message : String(telemetryError)}`
+                );
+            }
+        }
 
         // STEP 5: Send labeled images to Gemini for compositing
         // When Gemini URIs are available, use createPartFromUri for faster requests

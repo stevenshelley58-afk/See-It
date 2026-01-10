@@ -8,6 +8,7 @@ import { compositeScene, type CompositeOptions } from "../services/gemini.server
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
+import { emitPrepEvent } from "../services/prep-events.server";
 
 function getCorsHeaders(shopDomain: string | null): Record<string, string> {
     // Only set CORS origin if we have a valid shop domain
@@ -223,22 +224,60 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Call Gemini directly - no more Cloud Run!
         // Pass custom product instructions if available
         // Include Gemini file URIs if available for faster renders
+        let capturedTelemetry: {
+            prompt: string;
+            model: string;
+            aspectRatio: string;
+            useRoomUri: boolean;
+            useProductUri: boolean;
+            placement: { x: number; y: number; scale: number; productWidthFraction?: number };
+            stylePreset: string;
+            productInstructions?: string;
+        } | null = null;
+
+        const placementParams = {
+            x: placement.x,
+            y: placement.y,
+            scale: placement.scale || 1.0,
+            productWidthFraction,
+        };
+
+        // Emit render_job_started event (if we have an asset)
+        if (productAsset?.id) {
+            emitPrepEvent(
+                {
+                    assetId: productAsset.id,
+                    productId: product_id,
+                    shopId: shop.id,
+                    eventType: "render_job_started",
+                    actorType: "system",
+                    payload: {
+                        renderJobId: job.id,
+                        roomSessionId: room_session_id || undefined,
+                        isLiveRender: true,
+                    },
+                },
+                null,
+                requestId
+            ).catch(() => {
+                // Non-critical
+            });
+        }
+
         const compositeOptions: CompositeOptions = {
             roomGeminiUri: roomSession.geminiFileUri,
             roomGeminiExpiresAt: roomSession.geminiFileExpiresAt,
             productGeminiUri: productAsset?.geminiFileUri ?? null,
             productGeminiExpiresAt: productAsset?.geminiFileExpiresAt ?? null,
+            onPromptBuilt: (telemetry) => {
+                capturedTelemetry = telemetry;
+            },
         };
         
         const result = await compositeScene(
             productImageUrl,
             roomImageUrl,
-            {
-                x: placement.x,
-                y: placement.y,
-                scale: placement.scale || 1.0,
-                productWidthFraction,
-            },
+            placementParams,
             config?.style_preset || "neutral",
             requestId,
             productAsset?.renderInstructions || undefined,
@@ -258,6 +297,72 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         // Increment quota only after successful render
         await incrementQuota(shop.id, "render", 1);
+
+        // Emit render_prompt_built event (if we captured telemetry)
+        if (productAsset?.id && capturedTelemetry) {
+            // Simple hash function for prompt grouping (non-cryptographic)
+            const promptHash = capturedTelemetry.prompt.split('').reduce((acc, char) => {
+                const hash = ((acc << 5) - acc) + char.charCodeAt(0);
+                return hash & hash;
+            }, 0).toString(36);
+
+            emitPrepEvent(
+                {
+                    assetId: productAsset.id,
+                    productId: product_id,
+                    shopId: shop.id,
+                    eventType: "render_prompt_built",
+                    actorType: "system",
+                    payload: {
+                        renderJobId: job.id,
+                        roomSessionId: room_session_id || undefined,
+                        isLiveRender: true,
+                        provider: "gemini",
+                        model: capturedTelemetry.model,
+                        aspectRatio: capturedTelemetry.aspectRatio,
+                        prompt: capturedTelemetry.prompt,
+                        promptHash,
+                        placement: capturedTelemetry.placement,
+                        stylePreset: capturedTelemetry.stylePreset,
+                        productInstructions: capturedTelemetry.productInstructions || undefined,
+                        useRoomUri: capturedTelemetry.useRoomUri,
+                        useProductUri: capturedTelemetry.useProductUri,
+                    },
+                },
+                null,
+                requestId
+            ).catch(() => {
+                // Non-critical
+            });
+        }
+
+        // Emit render_job_completed event
+        if (productAsset?.id) {
+            emitPrepEvent(
+                {
+                    assetId: productAsset.id,
+                    productId: product_id,
+                    shopId: shop.id,
+                    eventType: "render_job_completed",
+                    actorType: "system",
+                    payload: {
+                        renderJobId: job.id,
+                        roomSessionId: room_session_id || undefined,
+                        isLiveRender: true,
+                        outputImageKey: result.imageKey,
+                        outputImageUrl: result.imageUrl,
+                        promptHash: capturedTelemetry ? (capturedTelemetry.prompt.split('').reduce((acc, char) => {
+                            const hash = ((acc << 5) - acc) + char.charCodeAt(0);
+                            return hash & hash;
+                        }, 0).toString(36)) : undefined,
+                    },
+                },
+                null,
+                requestId
+            ).catch(() => {
+                // Non-critical
+            });
+        }
 
         logger.info(
             { ...shopLogContext, stage: "complete" },
@@ -286,6 +391,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 errorMessage: errorMessage
             }
         });
+
+        // Emit render_job_failed event
+        if (productAsset?.id) {
+            emitPrepEvent(
+                {
+                    assetId: productAsset.id,
+                    productId: product_id,
+                    shopId: shop.id,
+                    eventType: "render_job_failed",
+                    actorType: "system",
+                    payload: {
+                        renderJobId: job.id,
+                        roomSessionId: room_session_id || undefined,
+                        isLiveRender: true,
+                        errorMessage: errorMessage.substring(0, 500),
+                        errorCode: "GEMINI_ERROR",
+                    },
+                },
+                null,
+                requestId
+            ).catch(() => {
+                // Non-critical
+            });
+        }
 
         // Return error message to frontend for debugging
         return json({

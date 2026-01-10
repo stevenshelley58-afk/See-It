@@ -2,6 +2,7 @@ import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { generateProductDescription, extractStructuredFields } from "../services/description-writer.server";
+import { emitPrepEvent } from "../services/prep-events.server";
 
 /**
  * POST /api/products/generate-description

@@ -288,6 +288,31 @@ async function processPendingAssets(batchRequestId: string) {
                                         }),
                                         `Generated placement prompt: ${renderInstructions.substring(0, 100)}...`
                                     );
+
+                                    // Emit placement_prompt_generated event with raw text-model prompt for lineage
+                                    if (promptResult.rawPrompt) {
+                                        emitPrepEvent(
+                                            {
+                                                assetId: asset.id,
+                                                productId: asset.productId,
+                                                shopId: asset.shopId,
+                                                eventType: "placement_prompt_generated",
+                                                actorType: "system",
+                                                payload: {
+                                                    source: "auto",
+                                                    model: promptResult.model,
+                                                    confidence: promptResult.confidence,
+                                                    description: promptResult.description,
+                                                    rawPrompt: promptResult.rawPrompt, // Full prompt sent to text model
+                                                    descriptionLength: promptResult.description.length,
+                                                },
+                                            },
+                                            null,
+                                            itemRequestId
+                                        ).catch(() => {
+                                            // Non-critical
+                                        });
+                                    }
                                 } catch (promptError) {
                                     logger.warn(
                                         createLogContext("prepare", itemRequestId, "placement-prompt-failed", {
@@ -599,6 +624,29 @@ async function processPendingRenderJobs(batchRequestId: string) {
                         `Starting render job (attempt ${currentRetryCount + 1}/${MAX_RETRY_ATTEMPTS})`
                     );
 
+                    // Emit render_job_started event
+                    if (productAsset?.id) {
+                        emitPrepEvent(
+                            {
+                                assetId: productAsset.id,
+                                productId: job.productId,
+                                shopId: job.shopId,
+                                eventType: "render_job_started",
+                                actorType: "system",
+                                payload: {
+                                    renderJobId: job.id,
+                                    roomSessionId: job.roomSessionId || undefined,
+                                    attempt: currentRetryCount + 1,
+                                    maxAttempts: MAX_RETRY_ATTEMPTS,
+                                },
+                            },
+                            null,
+                            itemRequestId
+                        ).catch(() => {
+                            // Non-critical
+                        });
+                    }
+
                     // 1. Get Product Image URL (generate fresh URL if key is available)
                     const productAsset = await prisma.productAsset.findFirst({
                         where: { shopId: job.shopId, productId: job.productId }
@@ -664,6 +712,16 @@ async function processPendingRenderJobs(batchRequestId: string) {
                     let lastError: unknown = null;
                     let success = false;
                     let compositeResult: { imageUrl: string; imageKey: string } | null = null;
+                    let capturedTelemetry: {
+                        prompt: string;
+                        model: string;
+                        aspectRatio: string;
+                        useRoomUri: boolean;
+                        useProductUri: boolean;
+                        placement: { x: number; y: number; scale: number; productWidthFraction?: number };
+                        stylePreset: string;
+                        productInstructions?: string;
+                    } | null = null;
 
                     for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !success; attempt++) {
                         try {
@@ -689,19 +747,33 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                 // Ignore malformed configJson; fall back to legacy placementScale behavior
                             }
 
+                            const placement = {
+                                x: job.placementX,
+                                y: job.placementY,
+                                scale: job.placementScale,
+                                productWidthFraction,
+                            };
+
+                            // Reset captured telemetry for this attempt
+                            capturedTelemetry = null;
+
                             // compositeScene now returns { imageUrl, imageKey }
                             compositeResult = await compositeScene(
                                 productImageUrl,
                                 roomImageUrl,
-                                {
-                                    x: job.placementX,
-                                    y: job.placementY,
-                                    scale: job.placementScale,
-                                    productWidthFraction,
-                                },
+                                placement,
                                 job.stylePreset ?? "neutral",
                                 itemRequestId,
-                                productAsset?.renderInstructions ?? undefined
+                                productAsset?.renderInstructions ?? undefined,
+                                {
+                                    roomGeminiUri: roomSession.geminiFileUri,
+                                    roomGeminiExpiresAt: roomSession.geminiFileExpiresAt,
+                                    productGeminiUri: productAsset?.geminiFileUri ?? null,
+                                    productGeminiExpiresAt: productAsset?.geminiFileExpiresAt ?? null,
+                                    onPromptBuilt: (telemetry) => {
+                                        capturedTelemetry = telemetry;
+                                    },
+                                }
                             );
                             success = true;
                         } catch (error) {
@@ -744,6 +816,70 @@ async function processPendingRenderJobs(batchRequestId: string) {
 
                         await incrementQuota(job.shopId, "render", 1);
 
+                        // Emit render_prompt_built event (if we captured telemetry)
+                        if (productAsset?.id && capturedTelemetry) {
+                            // Simple hash function for prompt grouping (non-cryptographic)
+                            const promptHash = capturedTelemetry.prompt.split('').reduce((acc, char) => {
+                                const hash = ((acc << 5) - acc) + char.charCodeAt(0);
+                                return hash & hash;
+                            }, 0).toString(36);
+
+                            emitPrepEvent(
+                                {
+                                    assetId: productAsset.id,
+                                    productId: job.productId,
+                                    shopId: job.shopId,
+                                    eventType: "render_prompt_built",
+                                    actorType: "system",
+                                    payload: {
+                                        renderJobId: job.id,
+                                        roomSessionId: job.roomSessionId || undefined,
+                                        provider: "gemini",
+                                        model: capturedTelemetry.model,
+                                        aspectRatio: capturedTelemetry.aspectRatio,
+                                        prompt: capturedTelemetry.prompt,
+                                        promptHash,
+                                        placement: capturedTelemetry.placement,
+                                        stylePreset: capturedTelemetry.stylePreset,
+                                        productInstructions: capturedTelemetry.productInstructions || undefined,
+                                        useRoomUri: capturedTelemetry.useRoomUri,
+                                        useProductUri: capturedTelemetry.useProductUri,
+                                    },
+                                },
+                                null,
+                                itemRequestId
+                            ).catch(() => {
+                                // Non-critical
+                            });
+                        }
+
+                        // Emit render_job_completed event
+                        if (productAsset?.id) {
+                            emitPrepEvent(
+                                {
+                                    assetId: productAsset.id,
+                                    productId: job.productId,
+                                    shopId: job.shopId,
+                                    eventType: "render_job_completed",
+                                    actorType: "system",
+                                    payload: {
+                                        renderJobId: job.id,
+                                        roomSessionId: job.roomSessionId || undefined,
+                                        outputImageKey: compositeResult.imageKey,
+                                        outputImageUrl: compositeResult.imageUrl,
+                                        promptHash: capturedTelemetry ? (capturedTelemetry.prompt.split('').reduce((acc, char) => {
+                                            const hash = ((acc << 5) - acc) + char.charCodeAt(0);
+                                            return hash & hash;
+                                        }, 0).toString(36)) : undefined,
+                                    },
+                                },
+                                null,
+                                itemRequestId
+                            ).catch(() => {
+                                // Non-critical
+                            });
+                        }
+
                         logger.info(
                             createLogContext("prepare", itemRequestId, "job-complete", { jobId: job.id }),
                             "Render job completed successfully"
@@ -773,6 +909,32 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                 retryCount: newRetryCount
                             }
                         });
+
+                        // Emit render_job_failed event
+                        if (productAsset?.id) {
+                            emitPrepEvent(
+                                {
+                                    assetId: productAsset.id,
+                                    productId: job.productId,
+                                    shopId: job.shopId,
+                                    eventType: "render_job_failed",
+                                    actorType: "system",
+                                    payload: {
+                                        renderJobId: job.id,
+                                        roomSessionId: job.roomSessionId || undefined,
+                                        attempt: newRetryCount,
+                                        isFinalFailure,
+                                        errorMessage: errorMessage.substring(0, 500),
+                                        errorCode: "PROCESSING_ERROR",
+                                        isRetryable: isRetryableError(lastError),
+                                    },
+                                },
+                                null,
+                                itemRequestId
+                            ).catch(() => {
+                                // Non-critical
+                            });
+                        }
                     }
                 } catch (error) {
                     // Outer error handler for unexpected errors

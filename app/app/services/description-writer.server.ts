@@ -41,6 +41,7 @@ export interface GeneratedDescription {
     confidence: 'high' | 'medium' | 'low';
     model: string;
     generatedAt: string;
+    rawPrompt?: string; // Optional: full prompt sent to text model for lineage tracking
 }
 
 // ============================================================================
@@ -166,7 +167,8 @@ Write the description now (one paragraph, 3-5 sentences):`;
             description: cleanDescription,
             confidence: 'high',
             model: DESCRIPTION_MODEL,
-            generatedAt: new Date().toISOString()
+            generatedAt: new Date().toISOString(),
+            rawPrompt: fullPrompt, // Include full prompt for telemetry/lineage
         };
         
     } catch (error: any) {
@@ -179,7 +181,8 @@ Write the description now (one paragraph, 3-5 sentences):`;
             description: fallback,
             confidence: 'low',
             model: 'fallback',
-            generatedAt: new Date().toISOString()
+            generatedAt: new Date().toISOString(),
+            // No rawPrompt for fallback (not from API call)
         };
     }
 }

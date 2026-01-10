@@ -2,6 +2,7 @@ import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { logger, createLogContext } from "../utils/logger.server";
+import { emitPrepEvent } from "../services/prep-events.server";
 
 /**
  * POST /api/products/update-instructions
@@ -149,12 +150,44 @@ export const action = async ({ request }) => {
                 `Created new asset with instructions for product ${productId}`
             );
 
+            // Emit merchant_placement_saved event for newly created asset
+            await emitPrepEvent(
+                {
+                    assetId: asset.id,
+                    productId: productId,
+                    shopId: shop.id,
+                    eventType: "merchant_placement_saved",
+                    actorType: "merchant",
+                    payload: {
+                        renderInstructions: instructions.trim() || undefined,
+                        placementFields: placementFields || undefined,
+                        sceneRole: sceneRole || undefined,
+                        replacementRule: replacementRule || undefined,
+                        allowSpaceCreation: allowSpaceCreation !== null ? allowSpaceCreation : undefined,
+                        isNewAsset: true,
+                    },
+                },
+                session,
+                requestId
+            ).catch(() => {
+                // Non-critical
+            });
+
             return json({
                 success: true,
                 message: "Instructions saved (new asset created)",
                 assetId: asset.id,
             });
         }
+
+        // Capture before state for diff (if needed)
+        const beforeState = {
+            renderInstructions: asset.renderInstructions,
+            placementFields: asset.placementFields,
+            sceneRole: asset.sceneRole,
+            replacementRule: asset.replacementRule,
+            allowSpaceCreation: asset.allowSpaceCreation,
+        };
 
         // Update existing asset
         await prisma.productAsset.update({
@@ -166,6 +199,37 @@ export const action = async ({ request }) => {
             { ...logContext, stage: "updated" },
             `Updated instructions for asset ${asset.id}`
         );
+
+        // Emit merchant_placement_saved event
+        await emitPrepEvent(
+            {
+                assetId: asset.id,
+                productId: productId,
+                shopId: shop.id,
+                eventType: "merchant_placement_saved",
+                actorType: "merchant",
+                payload: {
+                    renderInstructions: instructions.trim() || undefined,
+                    placementFields: placementFields || undefined,
+                    sceneRole: sceneRole || undefined,
+                    replacementRule: replacementRule || undefined,
+                    allowSpaceCreation: allowSpaceCreation !== null ? allowSpaceCreation : undefined,
+                    before: beforeState.renderInstructions !== instructions.trim() || placementFields !== null || sceneRole !== null || replacementRule !== null || allowSpaceCreation !== null
+                        ? {
+                            renderInstructions: beforeState.renderInstructions || undefined,
+                            placementFields: beforeState.placementFields ? (typeof beforeState.placementFields === 'object' ? beforeState.placementFields : undefined) : undefined,
+                            sceneRole: beforeState.sceneRole || undefined,
+                            replacementRule: beforeState.replacementRule || undefined,
+                            allowSpaceCreation: beforeState.allowSpaceCreation !== null ? beforeState.allowSpaceCreation : undefined,
+                        }
+                        : undefined,
+                },
+            },
+            session,
+            requestId
+        ).catch(() => {
+            // Non-critical
+        });
 
         return json({
             success: true,
