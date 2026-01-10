@@ -35,10 +35,11 @@ function getDatabaseUrl(): string {
 
 let dbInitError: string | null = null;
 let pool: Pool | null = null;
-export let db: ReturnType<typeof drizzle> | null = null;
+let dbReady = false;
+export let db = undefined as unknown as ReturnType<typeof drizzle>;
 
 function initDbIfNeeded() {
-  if (db || dbInitError) return;
+  if (dbReady || dbInitError) return;
   try {
     const connectionString = getDatabaseUrl();
 
@@ -56,16 +57,17 @@ function initDbIfNeeded() {
     });
 
     db = drizzle(pool, { schema });
+    dbReady = true;
   } catch (err) {
     dbInitError = err instanceof Error ? err.message : String(err);
-    db = null;
+    dbReady = false;
     pool = null;
   }
 }
 
 export function isDbConfigured(): boolean {
   initDbIfNeeded();
-  return !!db;
+  return dbReady;
 }
 
 export function getDbInitError(): string | null {
