@@ -2107,62 +2107,14 @@
 
         try {
             const containerRect = positionContainer?.getBoundingClientRect();
-            let productWidthFraction = undefined;
             
-            // CRITICAL FIX: Use actual rendered room image dimensions, not container dimensions
-            // The room image uses object-fit: contain, so it may be smaller than the container
-            const roomDims = getRenderedRoomImageDimensions();
-
-            if (roomDims && roomDims.width > 0) {
-                // Calculate the visual width of the product as displayed
-                // Prefer measuring the actual <img> (excludes dashed border + overlay chrome).
-                // Falls back to overlay/state if element isn't available for any reason.
-                const imgRect = productImage?.getBoundingClientRect?.();
-                const overlayRect = productOverlay?.getBoundingClientRect?.();
-                const visualProductWidth =
-                    imgRect?.width && imgRect.width > 0
-                        ? imgRect.width
-                        : (overlayRect?.width && overlayRect.width > 0
-                            ? overlayRect.width
-                            : (state.productWidth * (state.scale || 1)));
-                
-                // Calculate fraction of ACTUAL ROOM IMAGE (not container!)
-                productWidthFraction = visualProductWidth / roomDims.width;
-                
-                // Log details for debugging
-                console.log('[See It] Size calculation (FIXED):', {
-                    productNaturalWidth: state.productNaturalWidth,
-                    productNaturalHeight: state.productNaturalHeight,
-                    cssProductWidth: state.productWidth,
-                    scale: state.scale,
-                    visualProductWidth: visualProductWidth.toFixed(0),
-                    containerWidth: containerRect?.width?.toFixed(0),
-                    roomImageWidth: roomDims.width.toFixed(0),
-                    roomImageHeight: roomDims.height.toFixed(0),
-                    productWidthFraction: productWidthFraction.toFixed(3)
-                });
-            } else if (containerRect && containerRect.width > 0) {
-                // Fallback to container dimensions if room dimensions unavailable
-                const imgRect = productImage?.getBoundingClientRect?.();
-                const overlayRect = productOverlay?.getBoundingClientRect?.();
-                const visualProductWidth =
-                    imgRect?.width && imgRect.width > 0
-                        ? imgRect.width
-                        : (overlayRect?.width && overlayRect.width > 0
-                            ? overlayRect.width
-                            : (state.productWidth * (state.scale || 1)));
-                productWidthFraction = visualProductWidth / containerRect.width;
-                console.warn('[See It] Size calculation (FALLBACK - room dims unavailable):', {
-                    visualProductWidth: visualProductWidth.toFixed(0),
-                    containerWidth: containerRect.width.toFixed(0),
-                    productWidthFraction: productWidthFraction.toFixed(3)
-                });
-            }
+            // NOTE: product_width_fraction has been removed intentionally.
 
             // Also fix x/y coordinates to be relative to room image, not container
             let finalX = state.x;
             let finalY = state.y;
             
+            const roomDims = getRenderedRoomImageDimensions();
             if (roomDims && containerRect) {
                 // Convert from container-relative to room-image-relative coordinates
                 // state.x/y are normalized 0-1 relative to container
@@ -2195,7 +2147,6 @@
                     x: finalX,
                     y: finalY,
                     scale: state.scale || 1,
-                    product_width_fraction: productWidthFraction
                 },
                 config: {
                     style_preset: 'neutral',

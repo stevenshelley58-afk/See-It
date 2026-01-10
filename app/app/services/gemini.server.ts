@@ -70,7 +70,7 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
  */
 function buildCompositePrompt(
     placementPrompt: string,
-    placement: { x: number; y: number; productWidthFraction?: number }
+    placement: { x: number; y: number }
 ): string {
     return `You are helping an online furniture store customer visualize a product in their home. 
 Composite the product image into the room photo so they can see how it would look in their space.
@@ -683,7 +683,7 @@ export interface CompositeOptions {
         aspectRatio: string;
         useRoomUri: boolean;
         useProductUri: boolean;
-        placement: { x: number; y: number; scale: number; productWidthFraction?: number };
+        placement: { x: number; y: number; scale: number };
         stylePreset: string;
         placementPrompt?: string;
     }) => void;
@@ -692,7 +692,7 @@ export interface CompositeOptions {
 export async function compositeScene(
     preparedProductImageUrl: string,
     roomImageUrl: string,
-    placement: { x: number; y: number; scale: number; productWidthFraction?: number },
+    placement: { x: number; y: number; scale: number },
     stylePreset: string = 'neutral',
     requestId: string = "composite",
     placementPrompt?: string,
@@ -737,16 +737,8 @@ export async function compositeScene(
         const roomHeight = roomMetadata.height;
 
         // STEP 3: Resize product to intended scale
-        // Two sizing modes (backwards-compatible):
-        // - Legacy: placement.scale is a multiplier on product pixels
-        // - Preferred: placement.productWidthFraction maps UI size -> server pixels
-        const widthFromFraction =
-            Number.isFinite(placement.productWidthFraction) && (placement.productWidthFraction as number) > 0
-                ? Math.round(roomWidth * (placement.productWidthFraction as number))
-                : null;
-
         const widthFromScale = Math.round(productMetadata.width * (placement.scale || 1));
-        const targetWidth = widthFromFraction ?? widthFromScale;
+        const targetWidth = widthFromScale;
         // Clamp to reasonable size (min 32px, max room width)
         const clampedWidth = Math.max(32, Math.min(roomWidth, targetWidth));
 
@@ -771,7 +763,7 @@ export async function compositeScene(
         // STEP 4: Build the narrative prompt with explicit sizing
         // Pass the placementPrompt which contains product-specific rendering guidance
         const promptText = placementPrompt?.trim() || '';
-        const prompt = buildCompositePrompt(promptText, placement);
+        const prompt = buildCompositePrompt(promptText, { x: placement.x, y: placement.y });
 
         // Compute closest Gemini-supported aspect ratio
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);

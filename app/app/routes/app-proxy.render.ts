@@ -65,11 +65,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
     }
 
-    const productWidthFraction =
-        placement && Number.isFinite(placement.product_width_fraction)
-            ? placement.product_width_fraction
-            : undefined;
-
     // Validate room_session_id
     if (!room_session_id) {
         return json(
@@ -125,7 +120,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 ...(config || {}),
                 placement_meta: {
                     ...(config?.placement_meta || {}),
-                    product_width_fraction: productWidthFraction,
                 },
             }),
             status: "queued",
@@ -254,17 +248,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             aspectRatio: string;
             useRoomUri: boolean;
             useProductUri: boolean;
-            placement: { x: number; y: number; scale: number; productWidthFraction?: number };
+            placement: { x: number; y: number; scale: number };
             stylePreset: string;
             placementPrompt?: string;
         } | null = null;
 
-        const placementParams = {
-            x: placement.x,
-            y: placement.y,
-            scale: placement.scale || 1.0,
-            productWidthFraction,
-        };
+    const placementParams = {
+        x: placement.x,
+        y: placement.y,
+        scale: placement.scale || 1.0,
+    };
 
         // Emit render_job_started event (if we have an asset)
         if (productAsset?.id) {

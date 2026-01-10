@@ -891,7 +891,7 @@ async function processPendingRenderJobs(batchRequestId: string) {
                         aspectRatio: string;
                         useRoomUri: boolean;
                         useProductUri: boolean;
-                        placement: { x: number; y: number; scale: number; productWidthFraction?: number };
+                        placement: { x: number; y: number; scale: number };
                         stylePreset: string;
                         placementPrompt?: string;
                     } | null = null;
@@ -911,20 +911,10 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                 await sleep(delay);
                             }
 
-                            let productWidthFraction: number | undefined = undefined;
-                            try {
-                                const cfg = job.configJson ? JSON.parse(job.configJson) : {};
-                                const v = cfg?.placement_meta?.product_width_fraction;
-                                if (Number.isFinite(v)) productWidthFraction = v;
-                            } catch {
-                                // Ignore malformed configJson; fall back to legacy placementScale behavior
-                            }
-
                             const placement = {
                                 x: job.placementX,
                                 y: job.placementY,
                                 scale: job.placementScale,
-                                productWidthFraction,
                             };
 
                             // Reset captured telemetry for this attempt
