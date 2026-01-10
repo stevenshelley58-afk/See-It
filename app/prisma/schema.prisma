@@ -62,8 +62,8 @@ model ProductAsset {
   variantId          String?  @map("variant_id")
   sourceImageId      String   @map("source_image_id")
   sourceImageUrl     String   @map("source_image_url")
-  preparedImageUrl   String?  @map("prepared_image_url")
-  preparedImageKey   String?  @map("prepared_image_key") // GCS key for on-demand URL generation
+  preparedImageUrl   String?  @map("prepared_image_url") // Cached signed URL (expires in 1hr) - legacy/fallback only. Prefer preparedImageKey for fresh URLs.
+  preparedImageKey   String?  @map("prepared_image_key") // Source of truth: Permanent GCS path (e.g., "shops/.../prepared-123.png"). Use this to generate fresh signed URLs on-demand via StorageService.getSignedReadUrl()
   status             String // "unprepared" | "preparing" | "ready" | "live" | "failed"
   enabled            Boolean  @default(false) @map("enabled")
   prepStrategy       String   @map("prep_strategy") // "batch" | "fallback" | "manual"

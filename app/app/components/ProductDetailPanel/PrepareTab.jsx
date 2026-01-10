@@ -68,18 +68,24 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
     const isLoading = isFetcherLoading || isBusy;
     const canInteract = !isLoading;
 
-    // Sync prop changes
+    // Track previous asset.id to detect when a different product is selected
+    const prevAssetIdRef = useRef(asset?.id);
+
+    // Sync prop changes - ONLY when a different asset is loaded (product selection changed)
+    // This prevents overwriting fresh URLs returned from fetcher with stale prop values
     useEffect(() => {
-        if (asset?.preparedImageUrlFresh || asset?.preparedImageUrl) {
+        const assetChanged = asset?.id !== prevAssetIdRef.current;
+        prevAssetIdRef.current = asset?.id;
+
+        if (assetChanged && (asset?.preparedImageUrlFresh || asset?.preparedImageUrl)) {
             const newUrl = asset.preparedImageUrlFresh || asset.preparedImageUrl;
-            const hadResult = !!preparedImageUrl;
             setPreparedImageUrl(newUrl);
-            // Update view if result now exists and we didn't have one before
-            if (newUrl && !hadResult && mode === "normal") {
+            // Update view if result now exists and we're in normal mode
+            if (newUrl && mode === "normal") {
                 setView("result");
             }
         }
-    }, [asset, preparedImageUrl, mode]);
+    }, [asset?.id, asset?.preparedImageUrlFresh, asset?.preparedImageUrl, mode]);
 
     // Handle Fetcher Responses
     useEffect(() => {
