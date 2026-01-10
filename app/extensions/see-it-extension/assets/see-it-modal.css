@@ -542,9 +542,10 @@
   background: #1a1a1a;
   overflow: hidden;
   border-radius: var(--si-radius-card);
-  overflow: hidden;
-  display: flex;
-  align-items: center;
+  /* Don't let it get wider than tall - keeps crop area reasonable */
+  aspect-ratio: 4/3;
+  max-height: 100%;
+  margin: 0 auto;
   justify-content: center;
   min-height: 0;
   margin-bottom: 20px;
