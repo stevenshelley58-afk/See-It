@@ -536,7 +536,9 @@
 
 .see-it-crop-container {
   flex: 1;
-  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: #000;
   border-radius: var(--si-radius-card);
   overflow: hidden;
@@ -547,10 +549,17 @@
   margin-bottom: 20px;
 }
 
-.see-it-crop-canvas {
+.see-it-crop-canvas-wrapper {
+  position: relative;
+  display: inline-block;
   max-width: 100%;
   max-height: 100%;
-  object-fit: contain;
+}
+
+.see-it-crop-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
   touch-action: none;
   user-select: none;
 }
