@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '../ui';
 
@@ -117,22 +117,61 @@ function autoDetectFields(product) {
     const descriptionText = stripHtml(product.description || product.descriptionHtml || '');
     const metafieldText = flattenMetafields(product).map(m => stripHtml(m.value || '')).join(' ');
     const tagsText = Array.isArray(product.tags) ? product.tags.join(' ') : (product.tags || '');
-    const allText = `${product.title} ${tagsText} ${descriptionText} ${metafieldText} ${product.productType || ''} ${product.vendor || ''}`.toLowerCase();
+    // Important: split "label" vs "context" so we don't misclassify placement based on
+    // sentences like "style it on a table" inside the description.
+    const labelText = `${product.title} ${tagsText} ${product.productType || ''} ${product.vendor || ''}`.toLowerCase();
+    const contextText = `${descriptionText} ${metafieldText}`.toLowerCase();
+    const allText = `${labelText} ${contextText}`.toLowerCase();
     
     // Surface detection
     const surfaceKeywords = {
-        floor: ['sofa', 'couch', 'chair', 'bed', 'dresser', 'cabinet', 'bookshelf', 'rug', 'carpet', 'bench', 'ottoman', 'table', 'desk', 'console'],
-        wall: ['mirror', 'art', 'painting', 'print', 'poster', 'frame', 'canvas', 'clock', 'sconce', 'shelf'],
-        table: ['lamp', 'vase', 'planter', 'candle', 'sculpture', 'figurine', 'bowl', 'tray', 'ornament'],
-        ceiling: ['pendant', 'chandelier', 'hanging'],
+        // NOTE: do NOT include ambiguous words like "table" here because descriptions
+        // frequently mention a surface the item can be styled on.
+        floor: ['sofa', 'couch', 'chair', 'bed', 'dresser', 'cabinet', 'bookshelf', 'rug', 'carpet', 'bench', 'ottoman'],
+        wall: ['mirror', 'art', 'painting', 'print', 'poster', 'frame', 'canvas', 'clock', 'sconce', 'wall', 'wall-mounted', 'wall mount', 'wall hung', 'wall-hung'],
+        table: ['lamp', 'vase', 'planter', 'pot', 'candle', 'sculpture', 'figurine', 'bowl', 'tray', 'ornament', 'caddy'],
+        ceiling: ['pendant', 'chandelier', 'hanging', 'ceiling'],
+        shelf: ['shelf', 'bookcase shelf', 'floating shelf'],
     };
-    
+
+    const mentionsTableSurface =
+        /\btabletop\b/i.test(contextText) ||
+        /\btable-top\b/i.test(contextText) ||
+        /\bon (a|the) table\b/i.test(contextText) ||
+        /\bon (a|the) side table\b/i.test(contextText) ||
+        /\bon (a|the) coffee table\b/i.test(contextText) ||
+        /\bon (a|the) console table\b/i.test(contextText) ||
+        /\bconsole table\b/i.test(contextText) ||
+        // last-resort: "table" in context text (common on Shopify PDPs)
+        /\btable\b/i.test(contextText);
+
+    // If the PRODUCT itself is a table/desk/console, that's a floor item.
+    const isFloorFurnitureByLabel =
+        /\btable\b/i.test(labelText) ||
+        /\bdesk\b/i.test(labelText) ||
+        /\bconsole\b/i.test(labelText) ||
+        /\bcredenza\b/i.test(labelText) ||
+        /\bsideboard\b/i.test(labelText);
+
     let surface = 'floor';
-    for (const [surf, keywords] of Object.entries(surfaceKeywords)) {
-        if (keywords.some(k => allText.includes(k))) {
-            surface = surf;
-            break;
-        }
+
+    // Prefer explicit categories first
+    if (surfaceKeywords.ceiling.some(k => allText.includes(k))) {
+        surface = 'ceiling';
+    } else if (surfaceKeywords.wall.some(k => allText.includes(k))) {
+        surface = 'wall';
+    } else if (surfaceKeywords.table.some(k => allText.includes(k))) {
+        surface = 'table';
+    } else if (surfaceKeywords.shelf.some(k => allText.includes(k))) {
+        surface = 'shelf';
+    } else if (isFloorFurnitureByLabel) {
+        surface = 'floor';
+    } else if (mentionsTableSurface) {
+        // If the description says "on a table"/"tabletop", treat as a tabletop item
+        // unless the label indicates it's actually a table/desk/console itself.
+        surface = 'table';
+    } else if (surfaceKeywords.floor.some(k => allText.includes(k))) {
+        surface = 'floor';
     }
     
     // Material detection
@@ -176,14 +215,36 @@ function autoDetectFields(product) {
     // v2 fields: Auto-detect defaults
     // Large items (sofas, mirrors, cabinets) → Dominant + Similar Size or Position + Yes
     // Small items (lamps, decor) → Integrated + None + No
-    const largeItemKeywords = ['sofa', 'couch', 'sectional', 'mirror', 'cabinet', 'dresser', 'bookshelf', 'bed', 'table', 'desk', 'console'];
-    const isLargeItem = largeItemKeywords.some(k => allText.includes(k));
+    // Use labelText to avoid false positives from descriptions like "style it on a console table".
+    const largeItemKeywords = ['sofa', 'couch', 'sectional', 'mirror', 'cabinet', 'dresser', 'bookshelf', 'bed', 'table', 'desk', 'console', 'credenza', 'sideboard'];
+    const isLargeItem = largeItemKeywords.some(k => labelText.includes(k));
     
     const sceneRole = isLargeItem ? 'Dominant' : 'Integrated';
     const replacementRule = isLargeItem ? 'Similar Size or Position' : 'None';
     const allowSpaceCreation = isLargeItem;
     
     return { surface, material, orientation, dimensions, sceneRole, replacementRule, allowSpaceCreation };
+}
+
+function createBestGuessDescription(product, fields) {
+    const title = (product?.title || '').toString().trim() || 'product';
+    const article = /^[aeiou]/i.test(title) ? 'An' : 'A';
+
+    const material =
+        fields?.material && fields.material !== 'other' ? fields.material : null;
+
+    const height = fields?.dimensions?.height;
+    const width = fields?.dimensions?.width;
+    const sizeBits = [];
+    if (height) sizeBits.push(`${height}cm tall`);
+    if (width) sizeBits.push(`${width}cm wide`);
+    const sizeSentence = sizeBits.length ? ` It measures approximately ${sizeBits.join(' and ')}.` : '';
+
+    const notes = (fields?.additionalNotes || '').toString().trim();
+    const notesSentence = notes ? ` Notable details: ${notes}.` : '';
+
+    // Keep it usable for AI/photography without forcing placement instructions.
+    return `${article} ${title}${material ? ` primarily in ${material}` : ''}, described for realistic interior photography with accurate proportions and natural lighting.${sizeSentence}${notesSentence}`.trim();
 }
 
 // ============================================================================
@@ -225,6 +286,7 @@ export function PlacementTab({ product, asset, onChange }) {
     const [isGenerating, setIsGenerating] = useState(false);
     const [hasEdited, setHasEdited] = useState(false);
     const [showEditWarning, setShowEditWarning] = useState(false);
+    const autoGenerateRef = useRef({ key: null, fired: false });
 
     // Hydrate missing dimensions from server-side extraction (Shopify descriptionHtml + metafields).
     // This runs once per product open and only fills dims if the current dims are empty.
@@ -268,6 +330,17 @@ export function PlacementTab({ product, asset, onChange }) {
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [product?.id]);
+
+    // If the asset loads async and contains a saved description, hydrate it into local state.
+    useEffect(() => {
+        if (!existingDescription) return;
+        setDescription((prev) => {
+            const prevTrim = (prev || '').toString().trim();
+            if (prevTrim) return prev;
+            return existingDescription;
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [existingDescription]);
     
     // Notify parent when description or v2 fields change
     useEffect(() => {
@@ -301,6 +374,7 @@ export function PlacementTab({ product, asset, onChange }) {
     // Generate description via API
     const handleGenerate = useCallback(async () => {
         setIsGenerating(true);
+        setShowEditWarning(false);
         
         try {
             const response = await fetch('/api/products/generate-description', {
@@ -323,14 +397,37 @@ export function PlacementTab({ product, asset, onChange }) {
                 setDescription(data.description);
                 setHasEdited(false);
             } else {
-                console.error('Failed to generate description:', data.error);
+                console.error('Failed to generate description:', data?.error);
+                setDescription(createBestGuessDescription(product, fields));
+                setHasEdited(false);
             }
         } catch (error) {
             console.error('Error generating description:', error);
+            setDescription(createBestGuessDescription(product, fields));
+            setHasEdited(false);
         } finally {
             setIsGenerating(false);
         }
     }, [product, fields]);
+
+    // Always generate a best-guess description automatically (once per product) if it's blank.
+    // Merchants can still regenerate or edit after reviewing.
+    useEffect(() => {
+        const key = product?.id || product?.title || null;
+        if (!key) return;
+
+        if (autoGenerateRef.current.key !== key) {
+            autoGenerateRef.current = { key, fired: false };
+        }
+
+        if (autoGenerateRef.current.fired) return;
+        if (existingDescription) return;
+        if ((description || '').toString().trim()) return;
+        if (hasEdited) return;
+
+        autoGenerateRef.current.fired = true;
+        handleGenerate();
+    }, [product?.id, product?.title, existingDescription, description, hasEdited, handleGenerate]);
     
     // Handle manual edit of description
     const handleDescriptionEdit = useCallback((newValue) => {
