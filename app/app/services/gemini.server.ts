@@ -70,15 +70,25 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
  */
 function buildCompositePrompt(
     placementPrompt: string,
-    placement: { x: number; y: number }
+    placement: { x: number; y: number; width_px?: number; canonical_width?: number; canonical_height?: number }
 ): string {
+    // Build detailed placement instructions
+    let placementInstructions = `Position the product center at approximately x=${placement.x.toFixed(3)}, y=${placement.y.toFixed(3)} (normalized 0-1 coordinates where 0,0 is top-left).`;
+    
+    if (placement.width_px && placement.canonical_width && placement.canonical_height) {
+        // If we have pixel-accurate placement, include it in the prompt
+        const centerX_px = Math.round(placement.x * placement.canonical_width);
+        const centerY_px = Math.round(placement.y * placement.canonical_height);
+        placementInstructions += `\nExact placement: center at pixel (${centerX_px}, ${centerY_px}) in room ${placement.canonical_width}×${placement.canonical_height}px. Product width: ${placement.width_px}px.`;
+    }
+    
     return `You are helping an online furniture store customer visualize a product in their home. 
 Composite the product image into the room photo so they can see how it would look in their space.
 
-The product image is already scaled to the correct size. Do not resize it.
-Position the product center at approximately x=${placement.x.toFixed(3)}, y=${placement.y.toFixed(3)} (normalized 0-1 coordinates where 0,0 is top-left).
+The product image is already scaled to the correct pixel size. Do not resize, scale, or distort the product image.
+${placementInstructions}
 
-${placementPrompt ? `${placementPrompt}\n\n` : ''}Do not modify anything else in the room.`;
+${placementPrompt ? `${placementPrompt}\n\n` : ''}Do not modify anything else in the room. Keep the product at the exact specified size and position.`;
 }
 
 /**
