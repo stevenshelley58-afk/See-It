@@ -425,12 +425,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       preparedImageUrl: true,
       preparedImageKey: true,
       sourceImageUrl: true,
+      status: true,
       renderInstructions: true,
       sceneRole: true,
       replacementRule: true,
       allowSpaceCreation: true,
     }
   });
+
+  // Verify product is enabled for See It
+  if (!productAsset || productAsset.status !== "live") {
+    logger.warn(
+      { ...shopLogContext, stage: "product-check" },
+      `[v2] Product ${product_id} not enabled for See It (status: ${productAsset?.status || 'no asset'})`
+    );
+
+    return json({
+      success: false,
+      error: "product_not_enabled",
+      message: "This product is not enabled for See It visualization"
+    }, { headers: corsHeaders });
+  }
 
   // Get room image URL
   let roomImageUrl: string;

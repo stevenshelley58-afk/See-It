@@ -63,18 +63,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: {
             shopId: shop.id,
             productId: productId,
-            status: "ready"  // Only return ready (prepared) assets
+            status: "live",     // CHANGED: Only return live (enabled) assets
+            enabled: true       // ADDED: Double-check enabled flag
         },
         orderBy: { updatedAt: 'desc' }  // Get the most recent one
     });
 
     if (!productAsset) {
-        // No prepared image available - return null so frontend can fallback
+        // Product not enabled for See It
         return json(
             {
                 prepared_image_url: null,
                 source_image_url: null,
-                status: "not_found"
+                status: "not_enabled",  // CHANGED: More descriptive
+                message: "Product not enabled for See It visualization"
             },
             { headers: corsHeaders }
         );
