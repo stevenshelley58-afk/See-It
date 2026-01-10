@@ -1417,6 +1417,61 @@
         throw new Error('Timeout waiting for job to complete');
     };
 
+    // Robust result image setter:
+    // - Some storage providers return short-lived signed URLs.
+    // - If the <img> fails to load (403/expired), refetch job status to regenerate a fresh URL and retry once.
+    const setResultImageWithRetry = async (imageUrl, jobId) => {
+        if (!resultImage) return;
+        if (!imageUrl) return;
+
+        const jobIdStr = jobId !== null && jobId !== undefined ? String(jobId) : null;
+        let hasRetried = false;
+
+        const attemptSet = async (url) => {
+            // Reset handlers to avoid multiple firings across attempts
+            resultImage.onload = null;
+            resultImage.onerror = null;
+
+            resultImage.onload = () => {
+                console.log('[See It] ✅ Result image loaded', {
+                    naturalWidth: resultImage.naturalWidth,
+                    naturalHeight: resultImage.naturalHeight,
+                });
+            };
+
+            resultImage.onerror = async () => {
+                console.warn('[See It] ❌ Result image failed to load', { url, jobId: jobIdStr, hasRetried });
+
+                if (!hasRetried && jobIdStr) {
+                    hasRetried = true;
+                    try {
+                        const res = await fetch(`/apps/see-it/render/${jobIdStr}`);
+                        if (!res.ok) throw new Error(`Failed to refresh render URL: ${res.status}`);
+                        const data = await res.json();
+                        const refreshedUrl = data.imageUrl || data.image_url || null;
+
+                        if (refreshedUrl) {
+                            console.log('[See It] 🔄 Retrying result image with refreshed URL');
+                            // Keep state in sync for share/email
+                            state.lastResultUrl = refreshedUrl;
+                            return attemptSet(refreshedUrl);
+                        }
+                    } catch (err) {
+                        console.warn('[See It] Failed to refresh result image URL:', err);
+                    }
+                }
+
+                showError('Final image failed to load. Please try again.');
+            };
+
+            // Force a reload even if URL is identical
+            resultImage.src = '';
+            resultImage.src = url;
+        };
+
+        await attemptSet(imageUrl);
+    };
+
     const cleanupWithMask = async (maskDataUrl) => {
         console.log('[See It] Cleanup request:', { sessionId: state.sessionId });
 
@@ -2036,8 +2091,8 @@
             let imageUrl = null;
             let jobId = null;
 
-            if (data.status === 'completed' && data.imageUrl) {
-                imageUrl = data.imageUrl;
+            if (data.status === 'completed' && (data.imageUrl || data.image_url)) {
+                imageUrl = data.imageUrl || data.image_url;
                 jobId = data.job_id;
             } else if (data.job_id) {
                 const result = await pollJobStatus(data.job_id);
@@ -2056,7 +2111,7 @@
                 if (emailInput) emailInput.value = '';
 
                 // Set image and show result
-                if (resultImage) resultImage.src = imageUrl;
+                await setResultImageWithRetry(imageUrl, jobId);
                 clearInterval(messageInterval);
                 showScreen('result');
                 
