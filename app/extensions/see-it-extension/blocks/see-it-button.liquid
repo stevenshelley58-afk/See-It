@@ -119,7 +119,7 @@
           <p class="see-it-crop-description">Drag to reposition, pinch or scroll to zoom</p>
           
           <div class="see-it-crop-container" id="see-it-crop-container">
-            <img id="see-it-crop-image" src="" alt="Room photo" crossorigin="anonymous">
+            <img id="see-it-crop-image" src="" alt="Room photo" crossorigin="anonymous" width="1" height="1">
           </div>
 
           <div class="see-it-crop-actions">
@@ -299,7 +299,7 @@
     </div>
   </div>
   
-  <!-- Cropper.js CDN -->
+  <!-- Cropper.js CDN (sync load required - our JS needs it immediately) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
 {% endif %}
