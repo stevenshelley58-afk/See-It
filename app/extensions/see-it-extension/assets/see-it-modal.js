@@ -633,14 +633,15 @@
         const maxW = containerRect.width;
         const maxH = containerRect.height;
 
-        // Calculate scale to fit image in container
+        // Calculate scale to fit image in container (scale up to fill space)
         const scaleW = maxW / imgW;
         const scaleH = maxH / imgH;
-        const scale = Math.min(scaleW, scaleH, 1.0); // Don't scale up
+        const scale = Math.min(scaleW, scaleH); // Allow scaling up to fill
 
         const canvasW = Math.floor(imgW * scale);
         const canvasH = Math.floor(imgH * scale);
 
+        // Set canvas resolution to actual size for crisp rendering
         cropCanvas.width = canvasW;
         cropCanvas.height = canvasH;
         cropCanvas.style.width = canvasW + 'px';
