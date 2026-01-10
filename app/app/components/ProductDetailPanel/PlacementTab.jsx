@@ -331,6 +331,14 @@ export function PlacementTab({ product, asset, onChange }) {
     const [hasEdited, setHasEdited] = useState(false);
     const [showEditWarning, setShowEditWarning] = useState(false);
 
+    // Enable toggle state
+    const [enabled, setEnabled] = useState(asset?.enabled || false);
+
+    // Sync enabled state with asset prop changes
+    useEffect(() => {
+        setEnabled(asset?.enabled || false);
+    }, [asset?.enabled]);
+
     // Hydrate missing dimensions from server-side extraction (Shopify descriptionHtml + metafields).
     // This runs once per product open and only fills dims if the current dims are empty.
     useEffect(() => {
@@ -385,10 +393,10 @@ export function PlacementTab({ product, asset, onChange }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [existingDescription]);
     
-    // Notify parent when description, placementFields, or v2 fields change
+    // Notify parent when description, placementFields, v2 fields, or enabled change
     useEffect(() => {
         if (onChange) {
-            // Pass renderInstructions (placement prompt), placementFields, and v2 config
+            // Pass renderInstructions (placement prompt), placementFields, v2 config, and enabled
             onChange({
                 renderInstructions: description || null,
                 placementFields: {
@@ -403,10 +411,11 @@ export function PlacementTab({ product, asset, onChange }) {
                     sceneRole: v2Fields.sceneRole || null,
                     replacementRule: v2Fields.replacementRule || null,
                     allowSpaceCreation: v2Fields.allowSpaceCreation !== undefined ? v2Fields.allowSpaceCreation : null,
-                }
+                },
+                enabled: enabled
             });
         }
-    }, [description, fields, v2Fields, onChange]);
+    }, [description, fields, v2Fields, enabled, onChange]);
     
     // Update a field
     const updateField = useCallback((field, value) => {
@@ -809,6 +818,75 @@ export function PlacementTab({ product, asset, onChange }) {
                     </div>
                 </div>
             )}
+
+            {/* Enable Toggle Section */}
+            <div className="mt-8 pt-6 border-t border-neutral-200">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h3 className="text-sm font-semibold text-neutral-900">
+                            Enable for customers
+                        </h3>
+                        <p className="text-xs text-neutral-500 mt-0.5">
+                            Show "See It In Your Space" button on your store
+                        </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={enabled}
+                            onChange={(e) => setEnabled(e.target.checked)}
+                            disabled={asset?.status !== 'ready' && asset?.status !== 'live'}
+                            className="sr-only peer"
+                        />
+                        <div className={`
+                            w-11 h-6 rounded-full peer
+                            peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500/20
+                            after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                            after:bg-white after:border-neutral-300 after:border after:rounded-full
+                            after:h-5 after:w-5 after:transition-all
+                            peer-checked:after:translate-x-full peer-checked:after:border-white
+                            ${enabled
+                                ? 'bg-emerald-500'
+                                : 'bg-neutral-200'
+                            }
+                            ${(asset?.status !== 'ready' && asset?.status !== 'live')
+                                ? 'opacity-50 cursor-not-allowed'
+                                : ''
+                            }
+                        `}></div>
+                    </label>
+                </div>
+
+                {/* Status indicator */}
+                <div className="mt-3">
+                    {asset?.status === 'preparing' || asset?.status === 'pending' || asset?.status === 'processing' ? (
+                        <div className="flex items-center gap-2 text-sm text-amber-600">
+                            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                            Product is being prepared...
+                        </div>
+                    ) : asset?.status === 'failed' ? (
+                        <div className="flex items-center gap-2 text-sm text-red-600">
+                            <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                            Preparation failed. Please retry.
+                        </div>
+                    ) : !asset || asset?.status === 'unprepared' ? (
+                        <div className="flex items-center gap-2 text-sm text-neutral-500">
+                            <span className="w-2 h-2 rounded-full bg-neutral-300"></span>
+                            Prepare the product first to enable
+                        </div>
+                    ) : enabled ? (
+                        <div className="flex items-center gap-2 text-sm text-emerald-600">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            Customers can see this product in their space
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-2 text-sm text-neutral-500">
+                            <span className="w-2 h-2 rounded-full bg-neutral-300"></span>
+                            Enable to show on your store
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }

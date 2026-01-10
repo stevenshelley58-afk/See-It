@@ -421,8 +421,18 @@ export const loader = async ({ request }) => {
         // #endregion
         throw error;
     }
-    const statusCounts = { ready: 0, pending: 0, failed: 0, processing: 0 };
-    statusGroups.forEach(g => { statusCounts[g.status] = g._count.status; });
+    const statusCounts = {
+        unprepared: 0,
+        preparing: 0,
+        ready: 0,
+        live: 0,
+        failed: 0
+    };
+    statusGroups.forEach(g => {
+        if (statusCounts.hasOwnProperty(g.status)) {
+            statusCounts[g.status] = g._count.status;
+        }
+    });
 
     // #region agent log
     process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:212',message:'Before return json',data:{productCount:products.length,assetCount:Object.keys(assetsMap).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
@@ -485,6 +495,61 @@ export default function Products() {
     const singleFetcher = useFetcher();
     const revalidator = useRevalidator();
     const navigate = useNavigate();
+
+    // Helper function to render status badges
+    const getStatusBadge = (status) => {
+        const badges = {
+            unprepared: {
+                label: 'Not Prepared',
+                bg: 'bg-neutral-100',
+                text: 'text-neutral-600',
+                border: 'border-neutral-200',
+                dot: 'bg-neutral-400'
+            },
+            preparing: {
+                label: 'Preparing...',
+                bg: 'bg-amber-50',
+                text: 'text-amber-700',
+                border: 'border-amber-200',
+                dot: 'bg-amber-500 animate-pulse'
+            },
+            ready: {
+                label: 'Ready',
+                bg: 'bg-blue-50',
+                text: 'text-blue-700',
+                border: 'border-blue-200',
+                dot: 'bg-blue-500'
+            },
+            live: {
+                label: 'Live',
+                bg: 'bg-emerald-50',
+                text: 'text-emerald-700',
+                border: 'border-emerald-200',
+                dot: 'bg-emerald-500'
+            },
+            failed: {
+                label: 'Failed',
+                bg: 'bg-red-50',
+                text: 'text-red-700',
+                border: 'border-red-200',
+                dot: 'bg-red-500'
+            }
+        };
+
+        // Handle legacy statuses during migration
+        const normalizedStatus = status === 'pending' || status === 'processing'
+            ? 'preparing'
+            : (badges[status] ? status : 'unprepared');
+
+        const badge = badges[normalizedStatus];
+
+        return (
+            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${badge.bg} ${badge.text} ${badge.border}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`}></span>
+                {badge.label}
+            </span>
+        );
+    };
 
     // UI state
     const [toast, setToast] = useState(null);
@@ -1031,6 +1096,7 @@ export default function Products() {
                                             <SortHeader label="Product" field="title" />
                                             <SortHeader label="Price" field="price" />
                                             <SortHeader label="Status" field="status" />
+                                            <th className="px-3 md:px-4 py-2.5 md:py-3 font-normal">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-neutral-100">
@@ -1106,20 +1172,32 @@ export default function Products() {
                                                         </div>
                                                     </td>
                                                     <td className="px-3 md:px-4 py-2.5 md:py-3">
-                                                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ${status === 'ready' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                                            status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
-                                                                status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                                                    'bg-neutral-100 text-neutral-600 border-neutral-200'
-                                                            }`}>
-                                                            <span className={`w-1.5 h-1.5 rounded-full ${status === 'ready' ? 'bg-emerald-500' :
-                                                                status === 'failed' ? 'bg-red-500' :
-                                                                    status === 'processing' ? 'bg-blue-500 animate-pulse' :
-                                                                        'bg-neutral-400'
-                                                                }`}></span>
-                                                            {status === 'ready' && hasPrepared ? 'Ready' :
-                                                                status === 'ready' ? 'Original' :
-                                                                    status.charAt(0).toUpperCase() + status.slice(1)}
-                                                        </span>
+                                                        {getStatusBadge(asset?.status || 'unprepared')}
+                                                    </td>
+                                                    <td className="px-3 md:px-4 py-2.5 md:py-3" onClick={(e) => e.stopPropagation()}>
+                                                        {(!asset || asset.status === 'unprepared' || asset.status === 'failed') ? (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    openDetailPanel(product);
+                                                                }}
+                                                                className="text-blue-600 hover:text-blue-800 text-xs font-medium"
+                                                            >
+                                                                {asset?.status === 'failed' ? 'Retry' : 'Prepare'}
+                                                            </button>
+                                                        ) : asset.status === 'preparing' || asset.status === 'pending' || asset.status === 'processing' ? (
+                                                            <span className="text-neutral-400 text-xs">Processing...</span>
+                                                        ) : (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    openDetailPanel(product);
+                                                                }}
+                                                                className="text-neutral-600 hover:text-neutral-800 text-xs font-medium"
+                                                            >
+                                                                Edit
+                                                            </button>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             );

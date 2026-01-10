@@ -53,12 +53,12 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
             formData.append("instructions", pendingMetadata);
         } else if (pendingMetadata && typeof pendingMetadata === 'object') {
             formData.append("instructions", pendingMetadata.renderInstructions || '');
-            
+
             // Add placementFields if present
             if (pendingMetadata.placementFields) {
                 formData.append("placementFields", JSON.stringify(pendingMetadata.placementFields));
             }
-            
+
             // Add v2 config
             if (pendingMetadata.v2Config) {
                 if (pendingMetadata.v2Config.sceneRole) {
@@ -70,6 +70,11 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                 if (pendingMetadata.v2Config.allowSpaceCreation !== undefined && pendingMetadata.v2Config.allowSpaceCreation !== null) {
                     formData.append("allowSpaceCreation", pendingMetadata.v2Config.allowSpaceCreation ? 'true' : 'false');
                 }
+            }
+
+            // Add enabled flag
+            if (pendingMetadata.enabled !== undefined) {
+                formData.append("enabled", pendingMetadata.enabled ? 'true' : 'false');
             }
         } else {
             formData.append("instructions", JSON.stringify(pendingMetadata));

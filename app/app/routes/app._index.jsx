@@ -46,12 +46,33 @@ export const loader = async ({ request }) => {
     where: { shopId: shop.id },
     _count: { status: true },
   });
-  const productsReady = assetGroups.find((g) => g.status === "ready")?._count?.status || 0;
-  const productsFailed = assetGroups.find((g) => g.status === "failed")?._count?.status || 0;
-  const productsPending = assetGroups.find((g) => g.status === "pending")?._count?.status || 0;
+
+  // Build status counts object with new statuses
+  const statusCounts = {
+    unprepared: 0,
+    preparing: 0,
+    ready: 0,
+    live: 0,
+    failed: 0
+  };
+
+  assetGroups.forEach(g => {
+    if (statusCounts.hasOwnProperty(g.status)) {
+      statusCounts[g.status] = g._count.status;
+    }
+    // Handle legacy statuses during migration
+    if (g.status === 'pending' || g.status === 'processing') {
+      statusCounts.preparing += g._count.status;
+    }
+  });
+
+  // Keep old variables for backwards compatibility
+  const productsReady = statusCounts.ready;
+  const productsFailed = statusCounts.failed;
+  const productsPending = statusCounts.preparing;
 
   // Calculate success rate (completed vs failed)
-  const statusCounts = await prisma.renderJob.groupBy({
+  const renderJobStatusCounts = await prisma.renderJob.groupBy({
     by: ['status'],
     where: {
       shopId: shop.id,
@@ -59,8 +80,8 @@ export const loader = async ({ request }) => {
     },
     _count: true
   });
-  const completed = statusCounts.find(s => s.status === 'completed')?._count || 0;
-  const failed = statusCounts.find(s => s.status === 'failed')?._count || 0;
+  const completed = renderJobStatusCounts.find(s => s.status === 'completed')?._count || 0;
+  const failed = renderJobStatusCounts.find(s => s.status === 'failed')?._count || 0;
   const successRate = completed + failed > 0 ? Math.round((completed / (completed + failed)) * 100) : 0;
 
   return json({
@@ -69,11 +90,12 @@ export const loader = async ({ request }) => {
     enabledProductsCount: productsReady,
     productsFailed,
     productsPending,
+    statusCounts,
   });
 };
 
 export default function Index() {
-  const { customerViews, successRate, enabledProductsCount, productsFailed, productsPending } = useLoaderData();
+  const { customerViews, successRate, enabledProductsCount, productsFailed, productsPending, statusCounts } = useLoaderData();
 
   return (
     <>
@@ -85,6 +107,26 @@ export default function Index() {
         secondaryActions={[{ content: "Settings", url: "/app/settings" }]}
       >
         <BlockStack gap="500">
+          {/* New Status Metrics Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-emerald-600">{statusCounts?.live || 0}</div>
+              <div className="text-emerald-700 text-sm mt-1">Live</div>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-blue-600">{statusCounts?.ready || 0}</div>
+              <div className="text-blue-700 text-sm mt-1">Ready</div>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-amber-600">{statusCounts?.preparing || 0}</div>
+              <div className="text-amber-700 text-sm mt-1">Preparing</div>
+            </div>
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+              <div className="text-3xl font-bold text-red-600">{statusCounts?.failed || 0}</div>
+              <div className="text-red-700 text-sm mt-1">Failed</div>
+            </div>
+          </div>
+
           <InlineGrid columns={{ xs: 1, md: 3 }} gap="400">
             <Card roundedAbove="sm">
               <BlockStack gap="200">
