@@ -1,0 +1,2 @@
+{"kind":"migrate-statuses-report","createdAt":"2026-01-10T08:48:18.519Z","phase":7}
+{"model":"ProductAsset","id":"7f4cf3c6-429e-4e74-ba63-93f787d5c3bf","fromStatus":"live","fromEnabled":true}

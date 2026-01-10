@@ -13,30 +13,30 @@ function getDatabaseUrl(): string {
   if (process.env.DATABASE_URL) {
     return process.env.DATABASE_URL;
   }
-  
+
   // Use DATABASE_PUBLIC_URL if available (Railway provides this)
   if (process.env.DATABASE_PUBLIC_URL) {
     return process.env.DATABASE_PUBLIC_URL;
   }
-  
+
   // Construct from Railway's individual Postgres variables
   const host = process.env.PGHOST || process.env.POSTGRES_HOST;
   const port = process.env.PGPORT || process.env.POSTGRES_PORT || '5432';
   const user = process.env.PGUSER || process.env.POSTGRES_USER || 'postgres';
   const password = process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD;
   const database = process.env.PGDATABASE || process.env.POSTGRES_DB || 'railway';
-  
+
   if (!host || !password) {
     throw new Error('Database connection details are required. Set DATABASE_URL, DATABASE_PUBLIC_URL, or Railway Postgres variables.');
   }
-  
+
   return `postgresql://${user}:${password}@${host}:${port}/${database}?sslmode=require`;
 }
 
 let dbInitError: string | null = null;
 let pool: Pool | null = null;
 let dbReady = false;
-export let db = undefined as unknown as ReturnType<typeof drizzle>;
+let _db: ReturnType<typeof drizzle> | undefined = undefined;
 
 function initDbIfNeeded() {
   if (dbReady || dbInitError) return;
@@ -56,7 +56,7 @@ function initDbIfNeeded() {
       connectionTimeoutMillis: 2000,
     });
 
-    db = drizzle(pool, { schema });
+    _db = drizzle(pool, { schema });
     dbReady = true;
   } catch (err) {
     dbInitError = err instanceof Error ? err.message : String(err);
@@ -64,6 +64,20 @@ function initDbIfNeeded() {
     pool = null;
   }
 }
+
+// Initialize immediately on module load
+initDbIfNeeded();
+
+// Export a getter that ensures initialization
+export const db = new Proxy({} as ReturnType<typeof drizzle>, {
+  get(target, prop) {
+    initDbIfNeeded();
+    if (!_db) {
+      throw new Error(`Database not initialized: ${dbInitError || 'Unknown error'}`);
+    }
+    return (_db as any)[prop];
+  }
+});
 
 export function isDbConfigured(): boolean {
   initDbIfNeeded();
