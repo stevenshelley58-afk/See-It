@@ -70,25 +70,30 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
  */
 function buildCompositePrompt(
     placementPrompt: string,
-    placement: { x: number; y: number; width_px?: number; canonical_width?: number; canonical_height?: number }
+    placement: { x: number; y: number; width_px?: number; height_px?: number; canonical_width?: number; canonical_height?: number }
 ): string {
     // Build detailed placement instructions
     let placementInstructions = `Position the product center at approximately x=${placement.x.toFixed(3)}, y=${placement.y.toFixed(3)} (normalized 0-1 coordinates where 0,0 is top-left).`;
     
-    if (placement.width_px && placement.canonical_width && placement.canonical_height) {
-        // If we have pixel-accurate placement, include it in the prompt
+    if (placement.canonical_width && placement.canonical_height) {
         const centerX_px = Math.round(placement.x * placement.canonical_width);
         const centerY_px = Math.round(placement.y * placement.canonical_height);
-        placementInstructions += `\nExact placement: center at pixel (${centerX_px}, ${centerY_px}) in room ${placement.canonical_width}×${placement.canonical_height}px. Product width: ${placement.width_px}px.`;
+        placementInstructions += `\nExact placement: center the product at pixel (${centerX_px}, ${centerY_px}) in room ${placement.canonical_width}×${placement.canonical_height}px.`;
     }
     
-    return `You are helping an online furniture store customer visualize a product in their home. 
-Composite the product image into the room photo so they can see how it would look in their space.
+    return `You are compositing a product image into a room photo for an online furniture store.
 
-The product image is already scaled to the correct pixel size. Do not resize, scale, or distort the product image.
+CRITICAL SIZING RULE: The product image has ALREADY been resized to the exact correct pixel dimensions. DO NOT resize, scale, stretch, shrink, or distort the product in any way. Use the product image EXACTLY as provided at its current pixel dimensions.
+
 ${placementInstructions}
 
-${placementPrompt ? `${placementPrompt}\n\n` : ''}Do not modify anything else in the room. Keep the product at the exact specified size and position.`;
+Your task:
+1. Place the product at the specified position
+2. Blend the product naturally into the scene (lighting, shadows, reflections)
+3. DO NOT change the product's size - it is already the correct size
+4. DO NOT modify the room except where the product is placed
+
+${placementPrompt ? `Additional guidance: ${placementPrompt}\n\n` : ''}The product size is FINAL and CORRECT. Only blend it into the scene.`;
 }
 
 /**
@@ -775,35 +780,58 @@ export async function compositeScene(
         const roomWidth = roomMetadata.width;
         const roomHeight = roomMetadata.height;
 
-        // STEP 3: Resize product to intended size
-        // If width_px is provided (new format), use that exact pixel size
-        // Otherwise use legacy scale-based sizing
-        let clampedWidth: number;
+        // STEP 3: Resize product to fit within bounding box
+        // Product maintains aspect ratio while fitting inside the specified box
+        const boxWidth = (placement as any).width_px;
+        const boxHeight = (placement as any).height_px;
         
-        if (placement.width_px && Number.isFinite(placement.width_px)) {
-            // New format: resize to exact pixel width from canonical coordinates
-            clampedWidth = Math.max(32, Math.min(roomWidth, placement.width_px));
+        if (Number.isFinite(boxWidth) && Number.isFinite(boxHeight) && boxWidth > 0 && boxHeight > 0) {
+            // New format: fit product within bounding box (maintains aspect ratio)
+            const clampedBoxWidth = Math.max(32, Math.min(roomWidth, boxWidth));
+            const clampedBoxHeight = Math.max(32, Math.min(roomHeight, boxHeight));
             
             logger.info(
                 { ...logContext, stage: "resize" },
-                `Resizing product to exact pixel width: ${placement.width_px}px (clamped to ${clampedWidth}px) in room ${roomWidth}x${roomHeight}`
+                `Fitting product within bounding box: ${clampedBoxWidth}x${clampedBoxHeight}px (product original: ${productMetadata.width}x${productMetadata.height})`
             );
+            
+            // Use 'inside' fit - product fits within box, maintains aspect ratio
+            resizedProduct = await sharp(productBuffer)
+                .resize({ 
+                    width: clampedBoxWidth, 
+                    height: clampedBoxHeight, 
+                    fit: 'inside'  // CRITICAL: fit inside bounding box, maintain aspect ratio
+                })
+                .png()
+                .toBuffer();
+        } else if (Number.isFinite(boxWidth) && boxWidth > 0) {
+            // Fallback: width only (legacy format)
+            const clampedWidth = Math.max(32, Math.min(roomWidth, boxWidth));
+            
+            logger.info(
+                { ...logContext, stage: "resize" },
+                `Resizing product to width only (legacy): ${clampedWidth}px`
+            );
+            
+            resizedProduct = await sharp(productBuffer)
+                .resize({ width: clampedWidth })
+                .png()
+                .toBuffer();
         } else {
-            // Legacy format: use scale-based sizing
+            // Ultimate fallback: use scale-based sizing
             const widthFromScale = Math.round(productMetadata.width * (placement.scale || 1));
-            const targetWidth = widthFromScale;
-            clampedWidth = Math.max(32, Math.min(roomWidth, targetWidth));
+            const clampedWidth = Math.max(32, Math.min(roomWidth, widthFromScale));
             
             logger.info(
                 { ...logContext, stage: "resize" },
-                `Resizing product using scale: ${placement.scale} -> ${clampedWidth}px (legacy format)`
+                `Resizing product using scale (legacy): ${placement.scale} -> ${clampedWidth}px`
             );
+            
+            resizedProduct = await sharp(productBuffer)
+                .resize({ width: clampedWidth })
+                .png()
+                .toBuffer();
         }
-
-        resizedProduct = await sharp(productBuffer)
-            .resize({ width: clampedWidth })
-            .png() // Keep as PNG to preserve transparency
-            .toBuffer();
 
         // Clean up original product buffer
         productBuffer = null;

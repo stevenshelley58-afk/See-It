@@ -60,27 +60,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             `Missing box_px placement. Received: ${JSON.stringify(placement)}`
         );
         return json(
-            { error: "invalid_placement", message: "Placement must include box_px with center_x_px, center_y_px, and width_px" },
+            { error: "invalid_placement", message: "Placement must include box_px with center_x_px, center_y_px, width_px, and height_px" },
             { status: 400, headers: corsHeaders }
         );
     }
 
-    const { center_x_px, center_y_px, width_px } = placement.box_px;
-    if (!Number.isFinite(center_x_px) || !Number.isFinite(center_y_px) || !Number.isFinite(width_px)) {
+    const { center_x_px, center_y_px, width_px, height_px } = placement.box_px;
+    if (!Number.isFinite(center_x_px) || !Number.isFinite(center_y_px) || !Number.isFinite(width_px) || !Number.isFinite(height_px)) {
         logger.error(
             { ...logContext, stage: "validation" },
             `Invalid box_px values: ${JSON.stringify(placement.box_px)}`
         );
         return json(
-            { error: "invalid_placement", message: "box_px must have valid center_x_px, center_y_px, and width_px numbers" },
+            { error: "invalid_placement", message: "box_px must have valid center_x_px, center_y_px, width_px, and height_px numbers" },
             { status: 400, headers: corsHeaders }
         );
     }
 
-    const placementParams = { box_px: { center_x_px, center_y_px, width_px } };
+    const placementParams = { box_px: { center_x_px, center_y_px, width_px, height_px } };
     logger.info(
         { ...logContext, stage: "placement" },
-        `Placement: center=(${center_x_px}, ${center_y_px}), width=${width_px}px`
+        `Placement: center=(${center_x_px}, ${center_y_px}), bounding box=${width_px}x${height_px}px`
     );
 
     // Validate room_session_id
@@ -139,8 +139,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             quality: config?.quality || "standard",
             configJson: JSON.stringify({
                 ...(config || {}),
-                // Store box_px placement for debugging/telemetry
-                box_px: placementParams.box_px,
+                // Store full box_px placement (includes both width and height)
+                box_px: placementParams.box_px,  // { center_x_px, center_y_px, width_px, height_px }
             }),
             status: "queued",
             createdAt: new Date(),
@@ -358,7 +358,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }, { headers: corsHeaders });
         }
 
-        const { center_x_px, center_y_px, width_px } = placementParams.box_px;
+        const { center_x_px, center_y_px, width_px, height_px } = placementParams.box_px;
         
         // Convert pixel coords to normalized (0-1)
         const x_norm = center_x_px / canonicalWidth;
@@ -367,8 +367,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const compositePlacement = {
             x: Math.max(0, Math.min(1, x_norm)),
             y: Math.max(0, Math.min(1, y_norm)),
-            scale: 1.0, // Ignored - width_px is used
+            scale: 1.0, // Ignored - bounding box is used
             width_px: width_px,
+            height_px: height_px,  // Include height for proper bounding box
             canonical_width: canonicalWidth,
             canonical_height: canonicalHeight,
             canonicalRoomKey: roomSession.canonicalRoomImageKey || null
@@ -376,7 +377,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         logger.info(
             { ...shopLogContext, stage: "placement" },
-            `box_px (${center_x_px}, ${center_y_px}, ${width_px}px) → normalized (${compositePlacement.x.toFixed(3)}, ${compositePlacement.y.toFixed(3)}) in ${canonicalWidth}x${canonicalHeight}`
+            `box_px (${center_x_px}, ${center_y_px}, ${width_px}x${height_px}px) → normalized (${compositePlacement.x.toFixed(3)}, ${compositePlacement.y.toFixed(3)}) in ${canonicalWidth}x${canonicalHeight}`
         );
 
         const compositeOptions: CompositeOptions = {

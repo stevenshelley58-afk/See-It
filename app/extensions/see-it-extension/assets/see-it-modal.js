@@ -2451,21 +2451,25 @@
             const centerX = Math.round(clampedX * canonicalWidth);
             const centerY = Math.round(clampedY * canonicalHeight);
             
-            // Calculate product width in canonical pixels
-            // Product overlay width in rendered space
+            // Calculate product dimensions in canonical pixels
+            // Product overlay size in rendered space
             const overlayWidthPx = state.productWidth * state.scale;
+            const overlayHeightPx = state.productHeight * state.scale;
             
             // Convert to canonical pixels (scale by canonical / rendered ratio)
             const scaleToCanonical = canonicalWidth / roomDims.width;
             const widthPx = Math.round(overlayWidthPx * scaleToCanonical);
+            const heightPx = Math.round(overlayHeightPx * scaleToCanonical);
             
-            // Clamp to reasonable bounds (32px min, canonicalWidth max)
+            // Clamp to reasonable bounds (32px min, room dimension max)
             const clampedWidthPx = Math.max(32, Math.min(canonicalWidth, widthPx));
+            const clampedHeightPx = Math.max(32, Math.min(canonicalHeight, heightPx));
             
             const boxPx = {
                 center_x_px: centerX,
                 center_y_px: centerY,
-                width_px: clampedWidthPx
+                width_px: clampedWidthPx,
+                height_px: clampedHeightPx  // Now includes both dimensions!
             };
             
             console.log('[See It] Placement in canonical pixels:', {
