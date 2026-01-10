@@ -279,6 +279,12 @@ async function callGemini(
         // Check if it's a LabeledImage (has label and buffer properties)
         if (typeof item === 'object' && 'label' in item && 'buffer' in item) {
             const labeled = item as LabeledImage;
+            // Get image metadata for logging
+            const imgMeta = await sharp(labeled.buffer).metadata();
+            logger.info(
+                { ...context, stage: "gemini-image" },
+                `${labeled.label}: ${imgMeta.width}×${imgMeta.height}px, ${labeled.buffer.length} bytes (${(labeled.buffer.length / 1024).toFixed(1)}KB)`
+            );
             // Add label text before the image
             parts.push({ text: `${labeled.label}:` });
             parts.push({
@@ -289,6 +295,11 @@ async function callGemini(
             });
         } else if (Buffer.isBuffer(item)) {
             // Legacy: plain Buffer without label
+            const imgMeta = await sharp(item).metadata();
+            logger.info(
+                { ...context, stage: "gemini-image" },
+                `Image: ${imgMeta.width}×${imgMeta.height}px, ${item.length} bytes (${(item.length / 1024).toFixed(1)}KB)`
+            );
             parts.push({
                 inlineData: {
                     mimeType: 'image/png',
@@ -297,6 +308,18 @@ async function callGemini(
             });
         }
     }
+    
+    // Log the complete parts array structure (without base64 data)
+    const partsSummary = parts.map(p => {
+        if (p.text) return { type: 'text', content: p.text.substring(0, 200) };
+        if (p.inlineData) return { type: 'image', mimeType: p.inlineData.mimeType, dataSize: p.inlineData.data.length };
+        if (p.fileUri) return { type: 'fileUri', uri: p.fileUri.substring(0, 100) };
+        return { type: 'unknown', keys: Object.keys(p) };
+    });
+    logger.info(
+        { ...context, stage: "gemini-parts" },
+        `Gemini request parts: ${JSON.stringify(partsSummary, null, 2)}`
+    );
 
     // Per Gemini docs: include TEXT alongside IMAGE for better results
     const config: any = { responseModalities: ['TEXT', 'IMAGE'] };
@@ -795,7 +818,21 @@ export async function compositeScene(
 
         logger.info(
             { ...logContext, stage: "pre-gemini" },
-            `Sending to Gemini: room=${roomWidth}×${roomHeight}, ratio=${closestRatio.label}, placement=(${placement.x.toFixed(2)}, ${placement.y.toFixed(2)})`
+            `Sending to Gemini: room=${roomWidth}×${roomHeight}, ratio=${closestRatio.label}, placement=(${placement.x.toFixed(2)}, ${placement.y.toFixed(2)}), product_resized=${resizedWidth}×${resizedHeight}px`
+        );
+        
+        // Log the actual prompt being sent
+        logger.info(
+            { ...logContext, stage: "prompt" },
+            `Gemini prompt: ${prompt.substring(0, 500)}${prompt.length > 500 ? '...' : ''}`
+        );
+        
+        // Log image dimensions being sent
+        const roomMeta = await sharp(roomBuffer!).metadata();
+        const productMeta = await sharp(resizedProduct!).metadata();
+        logger.info(
+            { ...logContext, stage: "images" },
+            `Image dimensions: ROOM=${roomMeta.width}×${roomMeta.height} (${(roomBuffer!.length / 1024).toFixed(1)}KB), PRODUCT=${productMeta.width}×${productMeta.height} (${(resizedProduct!.length / 1024).toFixed(1)}KB)`
         );
 
         // Get canonical room info for telemetry (if available from placement)
