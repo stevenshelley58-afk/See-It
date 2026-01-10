@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Spinner } from '@shopify/polaris';
 import { Button } from '../ui';
@@ -197,7 +197,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         });
     }, [product.id, selectedImageUrl, fetcher]);
 
-    const handleStartOver = () => {
+    const handleStartOver = useCallback(() => {
         // Clear all edit state and stroke history
         setStrokeStore({ strokes: [], cursor: 0 });
         setMode("normal");
@@ -222,16 +222,16 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             method: 'post',
             action: '/api/products/remove-background'
         });
-    };
+    }, [asset?.sourceImageUrl, selectedImageUrl, product.id, fetcher]);
 
-    const handleEnterEdit = () => {
+    const handleEnterEdit = useCallback(() => {
         setMode("edit");
         // Keep current view - if viewing result, edit the result; if viewing original, edit original
         // Don't change the view - user is already looking at what they want to edit
         // When editing prepared image, default to eraser mode (remove)
         const isEditingPrepared = view === "result" && preparedImageUrl;
         setBrushMode(isEditingPrepared ? "remove" : "add");
-    };
+    }, [view, preparedImageUrl]);
 
     // Allow parent to request entering edit mode (so Edit is usable even before footerConfig arrives)
     useEffect(() => {
@@ -242,13 +242,13 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         handleEnterEdit();
     }, [editRequestId, isLoading, mode, resultExists]);
 
-    const handleCancelEdit = () => {
+    const handleCancelEdit = useCallback(() => {
         setMode("normal");
         setView(resultExists ? "result" : "original");
-    };
+    }, [resultExists]);
 
     // Cancel current operation
-    const handleCancelOperation = () => {
+    const handleCancelOperation = useCallback(() => {
         if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
             timeoutRef.current = null;
@@ -266,7 +266,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             // If was generating, cancel and stay on original
             setView("original");
         }
-    };
+    }, [mode]);
 
     // Ensure error state is cleared when starting new operations
     useEffect(() => {
@@ -356,12 +356,9 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         }
     }, [resultExists, product.id, selectedImageUrl, fetcher, onSave]);
 
-    // -- FOOTER INTEGRATION -- (Always set immediately to ensure Edit is always visible)
-    useEffect(() => {
-        if (!setFooterConfig) return;
-
+    const footerConfigValue = useMemo(() => {
         if (mode === 'edit') {
-            setFooterConfig({
+            return {
                 primary: {
                     label: 'Apply',
                     onClick: handleApplyEdits,
@@ -378,32 +375,62 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                     disabled: false
                 },
                 tertiary: null
-            });
-        } else {
-            // Normal Mode
-            // Primary: Save (auto-generates if no result, saves and exits if result exists)
-            // Secondary: Edit (always visible, disabled if no result)
-            // Tertiary: Start over (only if result exists)
-            setFooterConfig({
-                primary: {
-                    label: 'Save',
-                    onClick: handleSave,
-                    disabled: isLoading,
-                    loading: isLoading && !resultExists // Show loading when auto-generating
-                },
-                secondary: {
-                    label: 'Edit',
-                    onClick: handleEnterEdit,
-                    disabled: isLoading || !resultExists // Disable edit if no result exists
-                },
-                tertiary: resultExists ? {
-                    label: 'Start over',
-                    onClick: handleStartOver,
-                    disabled: isLoading,
-                } : null
-            });
+            };
         }
-    }, [mode, resultExists, isLoading, setFooterConfig, handleSave, handleApplyEdits, handleCancelEdit, handleCancelOperation, handleEnterEdit, handleStartOver]);
+
+        // Normal Mode
+        // Primary: Save (auto-generates if no result, saves and exits if result exists)
+        // Secondary: Edit (always visible, disabled if no result)
+        // Tertiary: Start over (only if result exists)
+        return {
+            primary: {
+                label: 'Save',
+                onClick: handleSave,
+                disabled: isLoading,
+                loading: isLoading && !resultExists // Show loading when auto-generating
+            },
+            secondary: {
+                label: 'Edit',
+                onClick: handleEnterEdit,
+                disabled: isLoading || !resultExists // Disable edit if no result exists
+            },
+            tertiary: resultExists ? {
+                label: 'Start over',
+                onClick: handleStartOver,
+                disabled: isLoading,
+            } : null
+        };
+    }, [
+        mode,
+        resultExists,
+        isLoading,
+        handleSave,
+        handleApplyEdits,
+        handleCancelEdit,
+        handleCancelOperation,
+        handleEnterEdit,
+        handleStartOver
+    ]);
+
+    // -- FOOTER INTEGRATION -- (Always set immediately to ensure Edit is always visible)
+    useEffect(() => {
+        if (!setFooterConfig) return;
+
+        // Avoid infinite update loops: only update footer config if it meaningfully changed.
+        setFooterConfig((prev) => {
+            const next = footerConfigValue;
+            const same =
+                prev?.primary?.label === next.primary.label &&
+                prev?.primary?.disabled === next.primary.disabled &&
+                prev?.primary?.loading === next.primary.loading &&
+                prev?.secondary?.label === next.secondary.label &&
+                prev?.secondary?.disabled === next.secondary.disabled &&
+                prev?.tertiary?.label === next.tertiary?.label &&
+                prev?.tertiary?.disabled === next.tertiary?.disabled;
+
+            return same ? prev : next;
+        });
+    }, [setFooterConfig, footerConfigValue]);
 
 
     // -- HELPER: Draw strokes to a context --
