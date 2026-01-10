@@ -72,28 +72,21 @@ function buildCompositePrompt(
     placementPrompt: string,
     placement: { x: number; y: number; width_px?: number; height_px?: number; canonical_width?: number; canonical_height?: number }
 ): string {
-    // Build detailed placement instructions
-    let placementInstructions = `Position the product center at approximately x=${placement.x.toFixed(3)}, y=${placement.y.toFixed(3)} (normalized 0-1 coordinates where 0,0 is top-left).`;
-    
+    // Build coordinates text
+    let coordsText = `(${placement.x.toFixed(2)}, ${placement.y.toFixed(2)})`;
     if (placement.canonical_width && placement.canonical_height) {
         const centerX_px = Math.round(placement.x * placement.canonical_width);
         const centerY_px = Math.round(placement.y * placement.canonical_height);
-        placementInstructions += `\nExact placement: center the product at pixel (${centerX_px}, ${centerY_px}) in room ${placement.canonical_width}×${placement.canonical_height}px.`;
+        coordsText = `(${centerX_px}, ${centerY_px}) pixels`;
     }
-    
-    return `You are compositing a product image into a room photo for an online furniture store.
 
-CRITICAL SIZING RULE: The product image has ALREADY been resized to the exact correct pixel dimensions. DO NOT resize, scale, stretch, shrink, or distort the product in any way. Use the product image EXACTLY as provided at its current pixel dimensions.
+    return `You are helping an online furniture store customer visualize a product in their home.
+Composite the product image into the room photo so they can see how it would look in their space.
 
-${placementInstructions}
+The product image is already scaled to the correct size. Do not resize it.
+Position the product center at approximately ${coordsText}.
 
-Your task:
-1. Place the product at the specified position
-2. Blend the product naturally into the scene (lighting, shadows, reflections)
-3. DO NOT change the product's size - it is already the correct size
-4. DO NOT modify the room except where the product is placed
-
-${placementPrompt ? `Additional guidance: ${placementPrompt}\n\n` : ''}The product size is FINAL and CORRECT. Only blend it into the scene.`;
+${placementPrompt || ''}`;
 }
 
 /**
@@ -611,25 +604,64 @@ export async function prepareProduct(
             throw error;
         }
 
-        // TRIM TRANSPARENT PADDING
+        // TRIM TRANSPARENT PADDING - Find tightest bounding box around non-transparent pixels
         // This ensures PNG dimensions match the actual visible product content.
-        // Without this, the CSS bounding box is larger than the visible product,
-        // causing size calculations to be inaccurate.
         try {
             const beforeMeta = await sharp(outputBuffer).metadata();
-            const trimmedBuffer = await sharp(outputBuffer)
-                .trim() // Removes transparent edges
-                .png()
-                .toBuffer();
-
-            const afterMeta = await sharp(trimmedBuffer).metadata();
-
-            // Only use trimmed version if it's valid and meaningfully smaller
-            if (trimmedBuffer.length > 0 && afterMeta.width && afterMeta.height) {
-                outputBuffer = trimmedBuffer;
-                logger.info(
+            
+            // Get raw RGBA pixel data to find actual content bounds
+            const { data, info } = await sharp(outputBuffer)
+                .ensureAlpha()
+                .raw()
+                .toBuffer({ resolveWithObject: true });
+            
+            const { width, height, channels } = info;
+            
+            // Find bounding box of non-transparent pixels (alpha > 0)
+            let minX = width, minY = height, maxX = 0, maxY = 0;
+            let foundContent = false;
+            
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = (y * width + x) * channels;
+                    const alpha = data[idx + 3]; // Alpha channel is 4th byte (RGBA)
+                    
+                    if (alpha > 0) {
+                        foundContent = true;
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+            
+            if (foundContent && maxX >= minX && maxY >= minY) {
+                const cropWidth = maxX - minX + 1;
+                const cropHeight = maxY - minY + 1;
+                
+                // Only crop if we're actually reducing size
+                if (cropWidth < width || cropHeight < height) {
+                    const trimmedBuffer = await sharp(outputBuffer)
+                        .extract({ left: minX, top: minY, width: cropWidth, height: cropHeight })
+                        .png()
+                        .toBuffer();
+                    
+                    outputBuffer = trimmedBuffer;
+                    logger.info(
+                        { ...logContext, stage: "trim" },
+                        `Trimmed to content bounds: ${beforeMeta.width}×${beforeMeta.height} → ${cropWidth}×${cropHeight} (crop: x=${minX}, y=${minY})`
+                    );
+                } else {
+                    logger.info(
+                        { ...logContext, stage: "trim" },
+                        `No trim needed - content fills image: ${width}×${height}`
+                    );
+                }
+            } else {
+                logger.warn(
                     { ...logContext, stage: "trim" },
-                    `Trimmed transparent padding: ${beforeMeta.width}×${beforeMeta.height} → ${afterMeta.width}×${afterMeta.height}`
+                    `No non-transparent content found in image ${width}×${height}`
                 );
             }
         } catch (trimError) {

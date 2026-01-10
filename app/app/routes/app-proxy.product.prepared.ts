@@ -66,6 +66,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             status: "live",     // CHANGED: Only return live (enabled) assets
             enabled: true       // ADDED: Double-check enabled flag
         },
+        select: {
+            id: true,
+            preparedImageUrl: true,
+            preparedImageKey: true,
+            sourceImageUrl: true,
+            status: true,
+            placementFields: true,  // Include dimensions for correct aspect ratio
+            updatedAt: true,
+        },
         orderBy: { updatedAt: 'desc' }  // Get the most recent one
     });
 
@@ -126,11 +135,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         );
     }
 
+    // Extract dimensions from placementFields if available
+    const placementFields = productAsset.placementFields as { dimensions?: { width?: number; height?: number } } | null;
+    const dimensions = placementFields?.dimensions || null;
+
     return json(
         {
             prepared_image_url: preparedImageUrl,
             source_image_url: productAsset.sourceImageUrl,
-            status: productAsset.status
+            status: productAsset.status,
+            dimensions: dimensions,  // Real product dimensions (cm) for correct aspect ratio
         },
         { headers: corsHeaders }
     );

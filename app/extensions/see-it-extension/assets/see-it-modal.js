@@ -483,6 +483,8 @@
         productHeight: 150,
         productNaturalWidth: 0,
         productNaturalHeight: 0,
+        realProductWidth: 0,   // Real product dimensions in cm (from API)
+        realProductHeight: 0,
         isUploading: false,
         isCleaningUp: false,
         uploadComplete: false,
@@ -1196,7 +1198,7 @@
     let pinchStartDistance = 0;
     let pinchStartScale = 1;
 
-    // Fetch prepared product image (background removed)
+    // Fetch prepared product image (background removed) and real dimensions
     const fetchPreparedProductImage = async (productId) => {
         try {
             const res = await fetch(`/apps/see-it/product/prepared?product_id=${productId}`);
@@ -1204,6 +1206,12 @@
             const data = await res.json();
             if (data.prepared_image_url) {
                 console.log('[See It] Got prepared image:', data.prepared_image_url.substring(0, 80));
+                // Store real product dimensions if available (cm from placementFields)
+                if (data.dimensions && data.dimensions.width && data.dimensions.height) {
+                    state.realProductWidth = data.dimensions.width;
+                    state.realProductHeight = data.dimensions.height;
+                    console.log('[See It] Got real product dimensions:', state.realProductWidth, 'x', state.realProductHeight, 'cm');
+                }
                 return data.prepared_image_url;
             }
             return null;
