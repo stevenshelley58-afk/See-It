@@ -31,7 +31,8 @@
       "Bash(railway shell:*)",
       "Bash(git ls-tree:*)",
       "Bash(git fetch:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []
