@@ -73,6 +73,7 @@ export const action = async ({ request }) => {
                     ... on Product {
                         id
                         title
+                        productType
                         featuredImage {
                             id
                             url
@@ -137,6 +138,7 @@ export const action = async ({ request }) => {
                     const imageId = product.featuredImage.id;
                     const imageUrl = product.featuredImage.url;
                     const productTitle = product.title;
+                    const productType = product.productType || null;
 
                     // Validate image URL
                     try {
@@ -164,11 +166,13 @@ export const action = async ({ request }) => {
                             await tx.productAsset.update({
                                 where: { id: existing.id },
                                 data: {
-                                    status: "pending",
+                                    status: "preparing",
+                                    enabled: false,
                                     prepStrategy: "batch",
                                     sourceImageUrl: String(imageUrl),
                                     sourceImageId: String(imageId),
                                     productTitle: productTitle,
+                                    productType: productType,
                                     retryCount: 0, // Reset retry count so processor picks it up
                                     errorMessage: null, // Clear previous error
                                     updatedAt: new Date()
@@ -180,9 +184,11 @@ export const action = async ({ request }) => {
                                     shopId,
                                     productId: String(productId),
                                     productTitle: productTitle,
+                                    productType: productType,
                                     sourceImageId: String(imageId),
                                     sourceImageUrl: String(imageUrl),
-                                    status: "pending",
+                                    status: "preparing",
+                                    enabled: false,
                                     prepStrategy: "batch",
                                     promptVersion: 1,
                                     createdAt: new Date()

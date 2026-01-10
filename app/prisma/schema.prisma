@@ -58,6 +58,7 @@ model ProductAsset {
   shopId             String   @map("shop_id")
   productId          String   @map("product_id")
   productTitle       String?  @map("product_title")
+  productType        String?  @map("product_type") // Shopify Product Type for grouping similar items
   variantId          String?  @map("variant_id")
   sourceImageId      String   @map("source_image_id")
   sourceImageUrl     String   @map("source_image_url")
@@ -90,6 +91,7 @@ model ProductAsset {
 
   @@index([shopId, productId])
   @@index([shopId, productId, isDefault]) // Index for finding default assets
+  @@index([shopId, productType]) // Index for grouping by product type
   @@map("product_assets")
 }
 

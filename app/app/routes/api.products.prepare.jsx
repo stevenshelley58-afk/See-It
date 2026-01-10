@@ -45,6 +45,7 @@ export const action = async ({ request }) => {
               product(id: $id) {
                 id
                 title
+                productType
                 featuredImage {
                   id
                   url
@@ -98,10 +99,11 @@ export const action = async ({ request }) => {
         const imageId = product.featuredImage.id;
         const imageUrl = product.featuredImage.url;
         const productTitle = product.title || null;
+        const productType = product.productType || null;
 
         logger.info(
             createLogContext("prepare", requestId, "fetch-title", { shopId, productId }),
-            `Fetched product title: "${productTitle}"`
+            `Fetched product title: "${productTitle}", productType: "${productType}"`
         );
 
         // Validate image URL to prevent SSRF attacks
@@ -147,11 +149,13 @@ export const action = async ({ request }) => {
                 await tx.productAsset.update({
                     where: { id: existing.id },
                     data: {
-                        status: "pending",
+                        status: "preparing",
+                        enabled: false,
                         prepStrategy: "manual",
                         sourceImageUrl: String(imageUrl),
                         sourceImageId: String(imageId),
                         productTitle: productTitle,
+                        productType: productType,
                         retryCount: 0, // Reset retry count so processor picks it up
                         errorMessage: null, // Clear previous error
                         updatedAt: new Date()
@@ -163,9 +167,11 @@ export const action = async ({ request }) => {
                         shopId,
                         productId: String(productId),
                         productTitle: productTitle,
+                        productType: productType,
                         sourceImageId: String(imageId),
                         sourceImageUrl: String(imageUrl),
-                        status: "pending",
+                        status: "preparing",
+                        enabled: false,
                         prepStrategy: "manual",
                         promptVersion: 1,
                         createdAt: new Date()
