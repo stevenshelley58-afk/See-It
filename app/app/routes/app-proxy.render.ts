@@ -53,40 +53,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const body = await request.json();
     const { product_id, variant_id, room_session_id, placement, config } = body;
 
-    // Validate placement data - accept either box_px (new) or x/y/scale (legacy)
-    let placementParams: { x: number; y: number; scale: number } | { box_px: { center_x_px: number; center_y_px: number; width_px: number } } | null = null;
-
-    if (placement?.box_px) {
-        // New format: box_px in canonical pixels
-        const { center_x_px, center_y_px, width_px } = placement.box_px;
-        if (!Number.isFinite(center_x_px) || !Number.isFinite(center_y_px) || !Number.isFinite(width_px)) {
-            logger.error(
-                { ...logContext, stage: "validation" },
-                `Invalid box_px placement data: ${JSON.stringify(placement.box_px)}`
-            );
-            return json(
-                { error: "invalid_placement", message: "Placement box_px center_x_px, center_y_px, and width_px are required" },
-                { status: 400, headers: corsHeaders }
-            );
-        }
-        placementParams = { box_px: { center_x_px, center_y_px, width_px } };
-    } else if (placement && Number.isFinite(placement.x) && Number.isFinite(placement.y)) {
-        // Legacy format: normalized x/y/scale
-        placementParams = {
-            x: placement.x,
-            y: placement.y,
-            scale: placement.scale || 1.0,
-        };
-    } else {
+    // Validate placement data - REQUIRE box_px format for deterministic sizing
+    if (!placement?.box_px) {
         logger.error(
             { ...logContext, stage: "validation" },
-            `Invalid placement data: ${JSON.stringify(placement)}`
+            `Missing box_px placement. Received: ${JSON.stringify(placement)}`
         );
         return json(
-            { error: "invalid_placement", message: "Placement must include either box_px (center_x_px, center_y_px, width_px) or x, y, scale" },
+            { error: "invalid_placement", message: "Placement must include box_px with center_x_px, center_y_px, and width_px" },
             { status: 400, headers: corsHeaders }
         );
     }
+
+    const { center_x_px, center_y_px, width_px } = placement.box_px;
+    if (!Number.isFinite(center_x_px) || !Number.isFinite(center_y_px) || !Number.isFinite(width_px)) {
+        logger.error(
+            { ...logContext, stage: "validation" },
+            `Invalid box_px values: ${JSON.stringify(placement.box_px)}`
+        );
+        return json(
+            { error: "invalid_placement", message: "box_px must have valid center_x_px, center_y_px, and width_px numbers" },
+            { status: 400, headers: corsHeaders }
+        );
+    }
+
+    const placementParams = { box_px: { center_x_px, center_y_px, width_px } };
+    logger.info(
+        { ...logContext, stage: "placement" },
+        `Placement: center=(${center_x_px}, ${center_y_px}), width=${width_px}px`
+    );
 
     // Validate room_session_id
     if (!room_session_id) {
@@ -128,22 +123,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         throw error;
     }
 
+    // Store placement in configJson (box_px format)
+    // Legacy placementX/Y/Scale fields are kept null - we use box_px now
     const job = await prisma.renderJob.create({
         data: {
             shop: { connect: { id: shop.id } },
             productId: product_id,
             variantId: variant_id || null,
             roomSession: room_session_id ? { connect: { id: room_session_id } } : undefined,
-            placementX: placement.x,
-            placementY: placement.y,
-            placementScale: placement.scale || 1.0,
+            placementX: null,
+            placementY: null,
+            placementScale: null,
             stylePreset: config?.style_preset || "neutral",
             quality: config?.quality || "standard",
             configJson: JSON.stringify({
                 ...(config || {}),
-                placement_meta: {
-                    ...(config?.placement_meta || {}),
-                },
+                // Store box_px placement for debugging/telemetry
+                box_px: placementParams.box_px,
             }),
             status: "queued",
             createdAt: new Date(),
@@ -271,27 +267,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             throw new Error("No room image available");
         }
 
-        // For new sessions (created after canonical support), require canonical for deterministic sizing
-        // Check if session was created after canonical support rollout (approximate date)
-        const canonicalSupportDate = new Date('2026-02-16');
-        if (roomSession.createdAt > canonicalSupportDate && !roomSession.canonicalRoomImageKey && !roomSession.cleanedRoomImageKey) {
+        // REQUIRE canonical room for deterministic sizing - no legacy fallback
+        // cleanedRoomImageKey is also acceptable (post-cleanup canonical)
+        if (!roomSession.canonicalRoomImageKey && !roomSession.cleanedRoomImageKey) {
             logger.error(
                 { ...shopLogContext, stage: "missing-canonical" },
-                "New session missing canonical room image - required for deterministic sizing"
+                `Session ${room_session_id} missing canonical room image - required for deterministic sizing`
             );
             await prisma.renderJob.update({
                 where: { id: job.id },
                 data: {
                     status: "failed",
                     errorCode: "MISSING_CANONICAL_ROOM",
-                    errorMessage: "Canonical room image required for this session"
+                    errorMessage: "Canonical room image required - please re-upload room photo"
                 }
             });
             return json({
                 job_id: job.id,
                 status: "failed",
                 error: "missing_canonical_room",
-                message: "Room image must be processed before rendering"
+                message: "Please re-upload your room photo to continue"
             }, { headers: corsHeaders });
         }
 
@@ -304,7 +299,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             aspectRatio: string;
             useRoomUri: boolean;
             useProductUri: boolean;
-            placement: { x: number; y: number; scale: number } | { box_px: { center_x_px: number; center_y_px: number; width_px: number } };
+            placement: { box_px: { center_x_px: number; center_y_px: number; width_px: number } };
             stylePreset: string;
             placementPrompt?: string;
             canonicalRoomKey?: string | null;
@@ -337,62 +332,51 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             });
         }
 
-        // Convert placement params for compositeScene
-        // If box_px provided, convert to normalized coords using canonical room dimensions
-        let compositePlacement: { x: number; y: number; scale: number; width_px?: number; canonical_width?: number; canonical_height?: number };
+        // Convert box_px to compositeScene format
+        const canonicalWidth = roomSession.canonicalRoomWidth || 0;
+        const canonicalHeight = roomSession.canonicalRoomHeight || 0;
 
-        if (placementParams && 'box_px' in placementParams) {
-            // Convert box_px to normalized coords using canonical room dimensions
-            const canonicalWidth = roomSession.canonicalRoomWidth || 0;
-            const canonicalHeight = roomSession.canonicalRoomHeight || 0;
-
-            if (!canonicalWidth || !canonicalHeight) {
-                logger.error(
-                    { ...shopLogContext, stage: "validation" },
-                    "box_px placement requires canonical room dimensions but they are missing"
-                );
-                await prisma.renderJob.update({
-                    where: { id: job.id },
-                    data: {
-                        status: "failed",
-                        errorCode: "MISSING_CANONICAL_DIMENSIONS",
-                        errorMessage: "Canonical room dimensions required for box_px placement"
-                    }
-                });
-                return json({
-                    job_id: job.id,
-                    status: "failed",
-                    error: "missing_canonical_dimensions",
-                    message: "Canonical room dimensions are required for this placement format"
-                }, { headers: corsHeaders });
-            }
-
-            const { center_x_px, center_y_px, width_px } = placementParams.box_px;
-            
-            // Convert pixel coords to normalized (0-1)
-            const x_norm = center_x_px / canonicalWidth;
-            const y_norm = center_y_px / canonicalHeight;
-
-            compositePlacement = {
-                x: Math.max(0, Math.min(1, x_norm)),
-                y: Math.max(0, Math.min(1, y_norm)),
-                scale: 1.0, // Will be overridden by width_px in compositeScene
-                width_px: width_px,
-                canonical_width: canonicalWidth,
-                canonical_height: canonicalHeight,
-                canonicalRoomKey: roomSession.canonicalRoomImageKey || null
-            };
-
-            logger.info(
-                { ...shopLogContext, stage: "placement-conversion" },
-                `Converted box_px to normalized: (${center_x_px}, ${center_y_px}, ${width_px}px) -> (${compositePlacement.x.toFixed(3)}, ${compositePlacement.y.toFixed(3)}) in ${canonicalWidth}x${canonicalHeight}`
+        if (!canonicalWidth || !canonicalHeight) {
+            logger.error(
+                { ...shopLogContext, stage: "validation" },
+                `Canonical room dimensions missing: ${canonicalWidth}x${canonicalHeight}`
             );
-        } else if (placementParams && 'x' in placementParams) {
-            // Legacy format: use normalized coords directly
-            compositePlacement = placementParams;
-        } else {
-            throw new Error("Invalid placement params");
+            await prisma.renderJob.update({
+                where: { id: job.id },
+                data: {
+                    status: "failed",
+                    errorCode: "MISSING_CANONICAL_DIMENSIONS",
+                    errorMessage: "Canonical room dimensions required"
+                }
+            });
+            return json({
+                job_id: job.id,
+                status: "failed",
+                error: "missing_canonical_dimensions",
+                message: "Please re-upload your room photo"
+            }, { headers: corsHeaders });
         }
+
+        const { center_x_px, center_y_px, width_px } = placementParams.box_px;
+        
+        // Convert pixel coords to normalized (0-1)
+        const x_norm = center_x_px / canonicalWidth;
+        const y_norm = center_y_px / canonicalHeight;
+
+        const compositePlacement = {
+            x: Math.max(0, Math.min(1, x_norm)),
+            y: Math.max(0, Math.min(1, y_norm)),
+            scale: 1.0, // Ignored - width_px is used
+            width_px: width_px,
+            canonical_width: canonicalWidth,
+            canonical_height: canonicalHeight,
+            canonicalRoomKey: roomSession.canonicalRoomImageKey || null
+        };
+
+        logger.info(
+            { ...shopLogContext, stage: "placement" },
+            `box_px (${center_x_px}, ${center_y_px}, ${width_px}px) → normalized (${compositePlacement.x.toFixed(3)}, ${compositePlacement.y.toFixed(3)}) in ${canonicalWidth}x${canonicalHeight}`
+        );
 
         const compositeOptions: CompositeOptions = {
             roomGeminiUri: roomSession.geminiFileUri,

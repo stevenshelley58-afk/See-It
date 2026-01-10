@@ -2198,15 +2198,37 @@
                 crop_rect_norm: state.cropState.cropRectNorm
             };
 
-            console.log('[See It] Confirming room with crop params:', cropParams);
+            console.log('[See It] Confirming room with crop params:', JSON.stringify(cropParams));
 
             // Confirm room with crop params (will generate canonical image)
             const confirm = await confirmRoom(state.sessionId, cropParams);
+            
+            console.log('[See It] Room confirm response:', JSON.stringify(confirm));
+
+            // CRITICAL: Canonical dimensions are REQUIRED for deterministic rendering
+            // Do not silently fall back to 0 - this causes the legacy path to be used
+            const canonicalUrl = confirm.canonical_room_image_url || confirm.roomImageUrl || confirm.room_image_url;
+            const canonicalWidth = confirm.canonical_width || confirm.canonicalWidth;
+            const canonicalHeight = confirm.canonical_height || confirm.canonicalHeight;
+            
+            if (!canonicalUrl) {
+                throw new Error('Server did not return canonical room URL');
+            }
+            if (!canonicalWidth || !canonicalHeight) {
+                console.error('[See It] CRITICAL: Canonical dimensions missing!', {
+                    canonical_width: confirm.canonical_width,
+                    canonicalWidth: confirm.canonicalWidth,
+                    canonical_height: confirm.canonical_height,
+                    canonicalHeight: confirm.canonicalHeight,
+                    fullResponse: confirm
+                });
+                throw new Error(`Server returned invalid canonical dimensions: ${canonicalWidth}x${canonicalHeight}`);
+            }
 
             // Store canonical room info
-            state.canonicalRoomUrl = confirm.canonical_room_image_url || confirm.roomImageUrl || confirm.room_image_url;
-            state.canonicalRoomWidth = confirm.canonical_width || confirm.canonicalWidth || 0;
-            state.canonicalRoomHeight = confirm.canonical_height || confirm.canonicalHeight || 0;
+            state.canonicalRoomUrl = canonicalUrl;
+            state.canonicalRoomWidth = canonicalWidth;
+            state.canonicalRoomHeight = canonicalHeight;
             state.canonicalRoomRatio = confirm.ratio_label || closest.label;
 
             // Also set original for backward compatibility
@@ -2561,97 +2583,94 @@
         try {
             const containerRect = positionContainer?.getBoundingClientRect();
             
-            // Calculate placement in canonical room pixel space
-            let boxPx = null;
+            // CRITICAL: Canonical room dimensions are REQUIRED for deterministic rendering
+            // Do NOT silently fall back to legacy normalized placement
+            const canonicalWidth = state.canonicalRoomWidth;
+            const canonicalHeight = state.canonicalRoomHeight;
+
+            console.log('[See It] Checking canonical room state:', {
+                canonicalWidth,
+                canonicalHeight,
+                canonicalRoomUrl: state.canonicalRoomUrl?.substring(0, 50),
+                normalizedWidth: state.normalizedWidth,
+                normalizedHeight: state.normalizedHeight
+            });
+
+            if (!canonicalWidth || !canonicalHeight) {
+                console.error('[See It] CRITICAL: Canonical room dimensions not available!', {
+                    canonicalRoomWidth: state.canonicalRoomWidth,
+                    canonicalRoomHeight: state.canonicalRoomHeight,
+                    canonicalRoomUrl: state.canonicalRoomUrl,
+                    normalizedWidth: state.normalizedWidth,
+                    normalizedHeight: state.normalizedHeight,
+                    sessionId: state.sessionId
+                });
+                throw new Error('Canonical room dimensions not available. Please re-upload the room photo.');
+            }
+
+            if (!containerRect) {
+                throw new Error('Position container not found');
+            }
+
+            const roomDims = getRenderedRoomImageDimensions();
+            if (!roomDims) {
+                console.error('[See It] Could not get rendered room dimensions');
+                throw new Error('Could not calculate room image dimensions');
+            }
+
+            // Convert container-relative coordinates to room-image-relative
+            const containerPixelX = state.x * containerRect.width;
+            const containerPixelY = state.y * containerRect.height;
             
-            // Use canonical room dimensions if available, otherwise fallback to normalized dimensions
-            const canonicalWidth = state.canonicalRoomWidth || state.normalizedWidth;
-            const canonicalHeight = state.canonicalRoomHeight || state.normalizedHeight;
-
-            if (canonicalWidth && canonicalHeight && containerRect) {
-                const roomDims = getRenderedRoomImageDimensions();
-                if (roomDims) {
-                    // Convert container-relative coordinates to room-image-relative
-                    const containerPixelX = state.x * containerRect.width;
-                    const containerPixelY = state.y * containerRect.height;
-                    
-                    const roomImagePixelX = containerPixelX - roomDims.offsetX;
-                    const roomImagePixelY = containerPixelY - roomDims.offsetY;
-                    
-                    // Normalize to 0-1 relative to rendered room image
-                    const normalizedX = roomImagePixelX / roomDims.width;
-                    const normalizedY = roomImagePixelY / roomDims.height;
-                    
-                    // Clamp to 0-1
-                    const clampedX = Math.max(0, Math.min(1, normalizedX));
-                    const clampedY = Math.max(0, Math.min(1, normalizedY));
-                    
-                    // Convert to canonical room pixel coordinates
-                    const centerX = Math.round(clampedX * canonicalWidth);
-                    const centerY = Math.round(clampedY * canonicalHeight);
-                    
-                    // Calculate product width in canonical pixels
-                    // Product overlay width in rendered space
-                    const overlayWidthPx = state.productWidth * state.scale;
-                    
-                    // Convert to canonical pixels (scale by canonical / rendered ratio)
-                    const scaleToCanonical = canonicalWidth / roomDims.width;
-                    const widthPx = Math.round(overlayWidthPx * scaleToCanonical);
-                    
-                    // Clamp to reasonable bounds (32px min, canonicalWidth max)
-                    const clampedWidthPx = Math.max(32, Math.min(canonicalWidth, widthPx));
-                    
-                    boxPx = {
-                        center_x_px: centerX,
-                        center_y_px: centerY,
-                        width_px: clampedWidthPx
-                    };
-                    
-                    console.log('[See It] Placement in canonical pixels:', {
-                        containerX: state.x.toFixed(3),
-                        containerY: state.y.toFixed(3),
-                        roomImageX: normalizedX.toFixed(3),
-                        roomImageY: normalizedY.toFixed(3),
-                        canonical: `${canonicalWidth}x${canonicalHeight}`,
-                        boxPx: boxPx,
-                        scale: state.scale.toFixed(2),
-                        overlayWidthPx: overlayWidthPx.toFixed(0)
-                    });
-                }
-            }
-
-            // Fallback: if canonical dimensions not available, use normalized coords (legacy)
-            let legacyPlacement = null;
-            if (!boxPx) {
-                console.warn('[See It] Canonical dimensions not available, using legacy normalized placement');
-                let finalX = state.x;
-                let finalY = state.y;
-                
-                const roomDims = getRenderedRoomImageDimensions();
-                if (roomDims && containerRect) {
-                    const containerPixelX = state.x * containerRect.width;
-                    const containerPixelY = state.y * containerRect.height;
-                    
-                    finalX = (containerPixelX - roomDims.offsetX) / roomDims.width;
-                    finalY = (containerPixelY - roomDims.offsetY) / roomDims.height;
-                    
-                    finalX = Math.max(0, Math.min(1, finalX));
-                    finalY = Math.max(0, Math.min(1, finalY));
-                }
-                
-                legacyPlacement = {
-                    x: finalX,
-                    y: finalY,
-                    scale: state.scale || 1
-                };
-            }
+            const roomImagePixelX = containerPixelX - roomDims.offsetX;
+            const roomImagePixelY = containerPixelY - roomDims.offsetY;
+            
+            // Normalize to 0-1 relative to rendered room image
+            const normalizedX = roomImagePixelX / roomDims.width;
+            const normalizedY = roomImagePixelY / roomDims.height;
+            
+            // Clamp to 0-1
+            const clampedX = Math.max(0, Math.min(1, normalizedX));
+            const clampedY = Math.max(0, Math.min(1, normalizedY));
+            
+            // Convert to canonical room pixel coordinates
+            const centerX = Math.round(clampedX * canonicalWidth);
+            const centerY = Math.round(clampedY * canonicalHeight);
+            
+            // Calculate product width in canonical pixels
+            // Product overlay width in rendered space
+            const overlayWidthPx = state.productWidth * state.scale;
+            
+            // Convert to canonical pixels (scale by canonical / rendered ratio)
+            const scaleToCanonical = canonicalWidth / roomDims.width;
+            const widthPx = Math.round(overlayWidthPx * scaleToCanonical);
+            
+            // Clamp to reasonable bounds (32px min, canonicalWidth max)
+            const clampedWidthPx = Math.max(32, Math.min(canonicalWidth, widthPx));
+            
+            const boxPx = {
+                center_x_px: centerX,
+                center_y_px: centerY,
+                width_px: clampedWidthPx
+            };
+            
+            console.log('[See It] Placement in canonical pixels:', {
+                containerX: state.x.toFixed(3),
+                containerY: state.y.toFixed(3),
+                roomImageX: normalizedX.toFixed(3),
+                roomImageY: normalizedY.toFixed(3),
+                canonical: `${canonicalWidth}x${canonicalHeight}`,
+                boxPx: boxPx,
+                scale: state.scale.toFixed(2),
+                overlayWidthPx: overlayWidthPx.toFixed(0)
+            });
             
             const payload = {
                 room_session_id: state.sessionId,
                 product_id: state.productId,
-                placement: boxPx ? {
+                placement: {
                     box_px: boxPx
-                } : legacyPlacement,
+                },
                 config: {
                     style_preset: 'neutral',
                     quality: 'standard',
