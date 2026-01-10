@@ -15,24 +15,24 @@ import { join } from "path";
 export const loader = async ({ request }) => {
     try {
         // #region agent log
-        console.error('[DEBUG] Loader entry', request.url);
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:13',message:'Loader entry',data:{url:request.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch((e)=>console.error('[DEBUG] Log fetch failed:',e));
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Loader entry', request.url);
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:13',message:'Loader entry',data:{url:request.url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch((e)=>process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Log fetch failed:',e));
         // #endregion
         let admin, session, billing;
     try {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:14',message:'Before authenticate',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:14',message:'Before authenticate',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
         // #endregion
         const authResult = await authenticate.admin(request);
         admin = authResult.admin;
         session = authResult.session;
         billing = authResult.billing;
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:14',message:'After authenticate',data:{shop:session?.shop,hasAdmin:!!admin,hasBilling:!!billing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:14',message:'After authenticate',data:{shop:session?.shop,hasAdmin:!!admin,hasBilling:!!billing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
         // #endregion
     } catch (error) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:14',message:'Authenticate error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:14',message:'Authenticate error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
         // #endregion
         throw error;
     }
@@ -69,7 +69,7 @@ export const loader = async ({ request }) => {
     const finalQuery = queryParts.join(" AND ");
 
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'Before GraphQL query',data:{queryArgs,query:finalQuery,sortKey,reverse},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'Before GraphQL query',data:{queryArgs,query:finalQuery,sortKey,reverse},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
     // #endregion
     let response;
     try {
@@ -111,55 +111,55 @@ export const loader = async ({ request }) => {
         { variables: { ...queryArgs, query: finalQuery, sortKey, reverse } }
     );
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:83',message:'After GraphQL query',data:{hasResponse:!!response,status:response?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:83',message:'After GraphQL query',data:{hasResponse:!!response,status:response?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
     } catch (error) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'GraphQL query error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'GraphQL query error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
         // #endregion
         throw error;
     }
 
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'Before response.json',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'Before response.json',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
     // #endregion
     let responseJson;
     try {
         responseJson = await response.json();
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'After response.json',data:{hasData:!!responseJson?.data,hasProducts:!!responseJson?.data?.products,hasErrors:!!responseJson?.errors,errors:responseJson?.errors?.map(e=>e?.message)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'After response.json',data:{hasData:!!responseJson?.data,hasProducts:!!responseJson?.data?.products,hasErrors:!!responseJson?.errors,errors:responseJson?.errors?.map(e=>e?.message)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
         // #endregion
     } catch (error) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'response.json error',data:{error:error?.message,errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'response.json error',data:{error:error?.message,errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
         // #endregion
         throw error;
     }
     // #region agent log
-    console.error('[DEBUG] GraphQL response received, has data:', !!responseJson?.data, 'has products:', !!responseJson?.data?.products, 'has errors:', !!responseJson?.errors);
+    process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL response received, has data:', !!responseJson?.data, 'has products:', !!responseJson?.data?.products, 'has errors:', !!responseJson?.errors);
     if (responseJson?.errors) {
-        console.error('[DEBUG] GraphQL errors:', responseJson.errors);
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL errors:', responseJson.errors);
     }
     // #endregion
     if (!responseJson?.data?.products) {
         // #region agent log
         const errorMsg = responseJson?.errors?.[0]?.message || 'Unknown error';
         const fullResponse = JSON.stringify(responseJson, null, 2).substring(0, 1000);
-        console.error('[DEBUG] GraphQL response missing products data. Full response:', fullResponse);
-        console.error('[DEBUG] GraphQL errors:', responseJson?.errors);
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL response missing products data. Full response:', fullResponse);
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL errors:', responseJson?.errors);
         // #endregion
         throw new Error(`GraphQL query failed: ${errorMsg}. Response: ${fullResponse.substring(0, 200)}`);
     }
     const { edges, pageInfo } = responseJson.data.products;
     if (!edges || !Array.isArray(edges)) {
         // #region agent log
-        console.error('[DEBUG] GraphQL response missing edges array. edges:', edges, 'pageInfo:', pageInfo);
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL response missing edges array. edges:', edges, 'pageInfo:', pageInfo);
         // #endregion
         throw new Error(`GraphQL query returned invalid data: edges is not an array. Got: ${typeof edges}`);
     }
     let products = edges.map((edge) => {
         if (!edge?.node) {
-            console.error('[DEBUG] Edge missing node:', edge);
+            process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Edge missing node:', edge);
             return null;
         }
         return edge.node;
@@ -206,8 +206,8 @@ export const loader = async ({ request }) => {
     let monthlyQuota = PLANS.FREE.monthlyQuota;
 
     // #region agent log
-    console.error('[DEBUG] Before billing check, hasBilling:', !!billing, 'billing type:', typeof billing);
-    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:203',message:'Before billing check',data:{hasBilling:!!billing,billingType:typeof billing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Before billing check, hasBilling:', !!billing, 'billing type:', typeof billing);
+    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:203',message:'Before billing check',data:{hasBilling:!!billing,billingType:typeof billing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
     // #endregion
     
     // Safely check billing - if it fails, just use free plan
@@ -219,8 +219,8 @@ export const loader = async ({ request }) => {
                     isTest: process.env.SHOPIFY_BILLING_TEST_MODE !== 'false'
                 });
                 // #region agent log
-                console.error('[DEBUG] After billing check, result:', billingResult);
-                fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:214',message:'After billing check',data:{hasActivePayment:billingResult?.hasActivePayment},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                process.env.DEBUG_INGEST_URL && console.error('[DEBUG] After billing check, result:', billingResult);
+                process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:214',message:'After billing check',data:{hasActivePayment:billingResult?.hasActivePayment},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
                 // #endregion
                 if (billingResult?.hasActivePayment) {
                     planId = PLANS.PRO.id;
@@ -229,21 +229,21 @@ export const loader = async ({ request }) => {
                 }
             } catch (billingError) {
                 // #region agent log
-                console.error('[DEBUG] Billing check error:', billingError);
-                fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:214',message:'Billing check error',data:{error:billingError?.message,errorName:billingError?.name,stack:billingError?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Billing check error:', billingError);
+                process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:214',message:'Billing check error',data:{error:billingError?.message,errorName:billingError?.name,stack:billingError?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
                 // #endregion
                 console.error("Billing check failed, using free plan", billingError);
                 // Continue with free plan - don't throw
             }
         } else {
             // #region agent log
-            console.error('[DEBUG] Billing is not available or check method missing, skipping check');
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:203',message:'Billing not available',data:{hasBilling:!!billing,hasCheckMethod:!!(billing && typeof billing.check === 'function')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Billing is not available or check method missing, skipping check');
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:203',message:'Billing not available',data:{hasBilling:!!billing,hasCheckMethod:!!(billing && typeof billing.check === 'function')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
             // #endregion
         }
     } catch (outerBillingError) {
         // #region agent log
-        console.error('[DEBUG] Outer billing check error:', outerBillingError);
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Outer billing check error:', outerBillingError);
         // #endregion
         console.error("Billing check outer error, using free plan", outerBillingError);
         // Continue with free plan - don't throw
@@ -251,23 +251,23 @@ export const loader = async ({ request }) => {
 
     // Shop sync
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:144',message:'Before shop lookup',data:{shopDomain:session?.shop},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:144',message:'Before shop lookup',data:{shopDomain:session?.shop},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
     // #endregion
     let shop;
     try {
         shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:144',message:'After shop lookup',data:{found:!!shop,shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:144',message:'After shop lookup',data:{found:!!shop,shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
     } catch (error) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:144',message:'Shop lookup error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:144',message:'Shop lookup error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
         throw error;
     }
     if (!shop) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:146',message:'Creating new shop',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:146',message:'Creating new shop',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
         try {
             const shopResponse = await admin.graphql(`#graphql query { shop { id } }`);
@@ -284,17 +284,17 @@ export const loader = async ({ request }) => {
                 }
             });
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:149',message:'Shop created',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:149',message:'Shop created',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
             // #endregion
         } catch (error) {
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:146',message:'Shop create error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:146',message:'Shop create error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
             // #endregion
             throw error;
         }
     } else if (shop.plan !== planId) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:159',message:'Updating shop plan',data:{oldPlan:shop.plan,newPlan:planId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:159',message:'Updating shop plan',data:{oldPlan:shop.plan,newPlan:planId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
         try {
             shop = await prisma.shop.update({
@@ -302,11 +302,11 @@ export const loader = async ({ request }) => {
                 data: { plan: planId, dailyQuota, monthlyQuota }
             });
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:160',message:'Shop updated',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:160',message:'Shop updated',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
             // #endregion
         } catch (error) {
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:159',message:'Shop update error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:159',message:'Shop update error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
             // #endregion
             throw error;
         }
@@ -316,14 +316,14 @@ export const loader = async ({ request }) => {
     let assetsMap = {};
     if (!shop) {
         // #region agent log
-        console.error('[DEBUG] Shop is undefined after shop sync!');
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Shop is undefined after shop sync!');
         // #endregion
         throw new Error('Shop not found or could not be created');
     }
     if (products.length > 0) {
         // #region agent log
-        console.error('[DEBUG] Before assets query, productCount:', products.length, 'shopId:', shop.id);
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:168',message:'Before assets query',data:{productCount:products.length,shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Before assets query, productCount:', products.length, 'shopId:', shop.id);
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:168',message:'Before assets query',data:{productCount:products.length,shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
         const normalizedIds = products.map(p => p.id.split('/').pop());
         let assets;
@@ -332,11 +332,11 @@ export const loader = async ({ request }) => {
                 where: { shopId: shop.id, productId: { in: normalizedIds } }
             });
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:170',message:'After assets query',data:{assetCount:assets?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:170',message:'After assets query',data:{assetCount:assets?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
             // #endregion
         } catch (error) {
             // #region agent log
-            fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:170',message:'Assets query error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:170',message:'Assets query error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
             // #endregion
             throw error;
         }
@@ -345,19 +345,19 @@ export const loader = async ({ request }) => {
             let preparedImageUrlFresh = a.preparedImageUrl;
             if (a.status === "ready" && a.preparedImageKey) {
                 // #region agent log
-                console.error('[DEBUG] Before storage URL, assetId:', a.id, 'key:', a.preparedImageKey);
-                fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:177',message:'Before storage URL',data:{assetId:a.id,key:a.preparedImageKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Before storage URL, assetId:', a.id, 'key:', a.preparedImageKey);
+                process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:177',message:'Before storage URL',data:{assetId:a.id,key:a.preparedImageKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
                 // #endregion
                 try {
                     preparedImageUrlFresh = await StorageService.getSignedReadUrl(a.preparedImageKey, 60 * 60 * 1000);
                     // #region agent log
-                    console.error('[DEBUG] After storage URL, assetId:', a.id, 'hasUrl:', !!preparedImageUrlFresh);
-                    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:178',message:'After storage URL',data:{assetId:a.id,hasUrl:!!preparedImageUrlFresh},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                    process.env.DEBUG_INGEST_URL && console.error('[DEBUG] After storage URL, assetId:', a.id, 'hasUrl:', !!preparedImageUrlFresh);
+                    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:178',message:'After storage URL',data:{assetId:a.id,hasUrl:!!preparedImageUrlFresh},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
                     // #endregion
                 } catch (err) {
                     // #region agent log
-                    console.error('[DEBUG] Storage URL error, assetId:', a.id, 'error:', err);
-                    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:177',message:'Storage URL error',data:{assetId:a.id,error:err?.message,errorName:err?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                    process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Storage URL error, assetId:', a.id, 'error:', err);
+                    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:177',message:'Storage URL error',data:{assetId:a.id,error:err?.message,errorName:err?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
                     // #endregion
                     console.error(`Failed to sign URL for asset ${a.id}`, err);
                 }
@@ -379,7 +379,7 @@ export const loader = async ({ request }) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:197',message:'Before usage aggregate',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:197',message:'Before usage aggregate',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
     // #endregion
     let monthlyUsageAgg;
     try {
@@ -388,11 +388,11 @@ export const loader = async ({ request }) => {
             _sum: { compositeRenders: true }
         });
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:197',message:'After usage aggregate',data:{usage:monthlyUsageAgg?._sum?.compositeRenders},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:197',message:'After usage aggregate',data:{usage:monthlyUsageAgg?._sum?.compositeRenders},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
     } catch (error) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:197',message:'Usage aggregate error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:197',message:'Usage aggregate error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
         throw error;
     }
@@ -400,7 +400,7 @@ export const loader = async ({ request }) => {
 
     // Status counts
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:204',message:'Before status groupBy',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:204',message:'Before status groupBy',data:{shopId:shop?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
     // #endregion
     let statusGroups;
     try {
@@ -410,11 +410,11 @@ export const loader = async ({ request }) => {
             _count: { status: true }
         });
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:204',message:'After status groupBy',data:{groupCount:statusGroups?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:204',message:'After status groupBy',data:{groupCount:statusGroups?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
     } catch (error) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:204',message:'Status groupBy error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:204',message:'Status groupBy error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
         // #endregion
         throw error;
     }
@@ -422,7 +422,7 @@ export const loader = async ({ request }) => {
     statusGroups.forEach(g => { statusCounts[g.status] = g._count.status; });
 
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:212',message:'Before return json',data:{productCount:products.length,assetCount:Object.keys(assetsMap).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:212',message:'Before return json',data:{productCount:products.length,assetCount:Object.keys(assetsMap).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
     // #endregion
     try {
         return json({
@@ -440,7 +440,7 @@ export const loader = async ({ request }) => {
         });
     } catch (error) {
         // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:212',message:'Return json error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:212',message:'Return json error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
         // #endregion
         throw error;
     }
@@ -453,7 +453,7 @@ export const loader = async ({ request }) => {
             cause: topLevelError?.cause
         };
         console.error('========================================');
-        console.error('[DEBUG] TOP-LEVEL LOADER ERROR');
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] TOP-LEVEL LOADER ERROR');
         console.error('========================================');
         console.error('Error Message:', errorDetails.message);
         console.error('Error Name:', errorDetails.name);
@@ -461,12 +461,12 @@ export const loader = async ({ request }) => {
         console.error('Full Error Object:', topLevelError);
         console.error('========================================');
         const logEntry = JSON.stringify({location:'app.products.jsx:13',message:'Top-level loader error',data:errorDetails,timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'}) + '\n';
-        fetch('http://127.0.0.1:7242/ingest/43512e6b-5e64-468d-9c1d-7f1af7167e38',{method:'POST',headers:{'Content-Type':'application/json'},body:logEntry.trim()}).catch(async (e)=>{
-            console.error('[DEBUG] Log fetch failed:',e);
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:logEntry.trim()}).catch(async (e)=>{
+            process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Log fetch failed:',e);
             try {
                 await writeFile(join(process.cwd(), '.cursor', 'debug.log'), logEntry, { flag: 'a' });
             } catch (fileErr) {
-                console.error('[DEBUG] File log also failed:', fileErr);
+                process.env.DEBUG_INGEST_URL && console.error('[DEBUG] File log also failed:', fileErr);
             }
         });
         // #endregion
