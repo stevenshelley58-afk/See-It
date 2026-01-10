@@ -821,7 +821,13 @@ export async function compositeScene(
         // STEP 4: Build the narrative prompt with explicit sizing
         // Pass the placementPrompt which contains product-specific rendering guidance
         const promptText = placementPrompt?.trim() || '';
-        const prompt = buildCompositePrompt(promptText, { x: placement.x, y: placement.y });
+        const prompt = buildCompositePrompt(promptText, {
+            x: placement.x,
+            y: placement.y,
+            width_px: (placement as any).width_px,
+            canonical_width: (placement as any).canonical_width,
+            canonical_height: (placement as any).canonical_height
+        });
 
         // Compute closest Gemini-supported aspect ratio
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
