@@ -108,40 +108,53 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                     if (mode === 'edit' && fetcher.data.preparedImageUrl) {
                         setMode("normal");
                         setView("result");
-                        // Keep strokes in history but we are done
+                        // Clear strokes after successful apply (user can undo via Start Over)
+                        setStrokeStore({ strokes: [], cursor: 0 });
                     }
                 } else {
-                    setError(fetcher.data.error || 'Operation failed');
+                    const errorMsg = fetcher.data.error || fetcher.data.message || 'Operation failed';
+                    setError(errorMsg);
+                    console.error('[PrepareTab] Operation failed:', errorMsg);
                 }
-            } else {
-                // If fetcher.state is 'idle' but no data, it might be a network error or aborted request
+            } else if (isBusy) {
+                // Fetcher returned to idle with no data - this indicates a network error, abort, or timeout
                 // Only show error if we were actually expecting a response (isBusy was true)
-                if (isBusy) {
-                    console.warn('[PrepareTab] Fetcher returned to idle with no data - possible network error');
-                    // Don't set error here - let the timeout handle it or user will see it on next attempt
+                // Don't show error if timeout already handled it
+                console.warn('[PrepareTab] Fetcher returned to idle with no data - possible network error or timeout');
+                // Only set error if we don't already have one (timeout handler may have set it)
+                if (!error) {
+                    setError('Network error or request was cancelled. Please try again.');
                 }
             }
         } else if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
-            // Set a timeout to detect stuck requests (30 seconds - more reasonable)
+            // Set a timeout to detect stuck requests (30 seconds)
             timeoutRef.current = setTimeout(() => {
                 console.error('[PrepareTab] Request timeout after 30s - clearing loading state');
                 setIsBusy(false);
-                setError('Request timed out after 30 seconds. The image may be too large or the server is slow. Please try again.');
-                // Try to abort the fetcher if possible
-                if (fetcher.state !== 'idle') {
-                    console.warn('[PrepareTab] Fetcher still active after timeout');
+                const timeoutError = 'Request timed out after 30 seconds. The image may be too large or the server is slow. Please try again or use a smaller image.';
+                setError(timeoutError);
+                
+                // Try to abort the request if abort controller exists
+                if (abortControllerRef.current) {
+                    abortControllerRef.current.abort();
+                    abortControllerRef.current = null;
                 }
-            }, 30000); // Reduced from 60s to 30s
+                
+                // Warn if fetcher is still active after timeout
+                if (fetcher.state !== 'idle') {
+                    console.warn('[PrepareTab] Fetcher still active after timeout - may be stuck');
+                }
+            }, 30000);
         }
 
-        // Cleanup timeout on unmount
+        // Cleanup timeout on unmount or when fetcher state changes
         return () => {
             if (timeoutRef.current) {
                 clearTimeout(timeoutRef.current);
                 timeoutRef.current = null;
             }
         };
-    }, [fetcher.data, fetcher.state, onPrepareComplete, mode, resultExists, isBusy]);
+    }, [fetcher.data, fetcher.state, onPrepareComplete, mode, resultExists, isBusy, error]);
 
 
     // Initialize Canvas Image - update when view or image changes
@@ -178,17 +191,39 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
     }, [product.id, selectedImageUrl, fetcher]);
 
     const handleStartOver = () => {
-        // Re-run auto remove
-        setStrokeStore({ strokes: [], cursor: 0 }); // Clear history
+        // Clear all edit state and stroke history
+        setStrokeStore({ strokes: [], cursor: 0 });
         setMode("normal");
-        handleRemoveBackground();
+        setView("original"); // Reset to original view
+        setError(null);
+        setIsBusy(true);
+
+        // Use original Shopify image URL (from asset if available, otherwise selected image)
+        const originalImageUrl = asset?.sourceImageUrl || selectedImageUrl;
+        
+        if (!originalImageUrl) {
+            setError("No original image available. Please select an image.");
+            setIsBusy(false);
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('productId', product.id.split('/').pop());
+        formData.append('imageUrl', originalImageUrl);
+
+        fetcher.submit(formData, {
+            method: 'post',
+            action: '/api/products/remove-background'
+        });
     };
 
     const handleEnterEdit = () => {
         setMode("edit");
         // Keep current view - if viewing result, edit the result; if viewing original, edit original
         // Don't change the view - user is already looking at what they want to edit
-        setBrushMode("add");
+        // When editing prepared image, default to eraser mode (remove)
+        const isEditingPrepared = view === "result" && preparedImageUrl;
+        setBrushMode(isEditingPrepared ? "remove" : "add");
     };
 
     // Allow parent to request entering edit mode (so Edit is usable even before footerConfig arrives)
@@ -226,6 +261,14 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         }
     };
 
+    // Ensure error state is cleared when starting new operations
+    useEffect(() => {
+        if (isBusy && error) {
+            // Clear error when a new operation starts
+            setError(null);
+        }
+    }, [isBusy, error]);
+
     // Convert strokes to mask and submit
     const handleApplyEdits = async () => {
         if (!imageRef.current || !maskCanvasRef.current) return;
@@ -243,12 +286,17 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             canvas.height = img.naturalHeight;
             const ctx = canvas.getContext("2d");
 
-            // Default: Black (Hidden)
-            ctx.fillStyle = "black";
+            // Check if we're editing a prepared image (eraser mode: start white, paint black)
+            const isEditingPrepared = view === "result" && preparedImageUrl;
+            
+            // Initialize mask: white = keep everything, black = remove
+            // For prepared images (eraser): start white (keep all), strokes paint black (erase)
+            // For original images (refinement): start black (remove all), strokes paint white (keep)
+            ctx.fillStyle = isEditingPrepared ? "white" : "black";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             // Draw strokes
-            strokesToContext(ctx, strokeStore.strokes.slice(0, strokeStore.cursor), canvas.width, canvas.height);
+            strokesToContext(ctx, strokeStore.strokes.slice(0, strokeStore.cursor), canvas.width, canvas.height, isEditingPrepared);
 
             // 2. Get Data URL
             const maskDataUrl = canvas.toDataURL("image/png");
@@ -352,7 +400,9 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
 
     // -- HELPER: Draw strokes to a context --
-    const strokesToContext = (ctx, strokes, w, h) => {
+    // isEraserMode: true when editing prepared image (mask starts white, paint black to erase)
+    //              false when editing original (mask starts black, paint white to keep)
+    const strokesToContext = (ctx, strokes, w, h, isEraserMode = false) => {
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
 
@@ -366,13 +416,25 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                 ctx.lineTo(points[i].x * w, points[i].y * h);
             }
 
-            // Add = White (Keep), Remove = Black (Delete/Hide)
-            if (mode === "add") {
-                ctx.globalCompositeOperation = "source-over"; // Paint color
-                ctx.strokeStyle = "white";
-            } else {
-                ctx.globalCompositeOperation = "source-over"; // Paint black to remove 'keep' area
+            // In eraser mode (editing prepared image):
+            //   - mask starts white (keep everything)
+            //   - all strokes paint black (erase/remove)
+            // In refinement mode (editing original):
+            //   - mask starts black (remove everything)
+            //   - "add" mode paints white (keep), "remove" mode paints black (remove)
+            if (isEraserMode) {
+                // Always paint black to erase in eraser mode
+                ctx.globalCompositeOperation = "source-over";
                 ctx.strokeStyle = "black";
+            } else {
+                // Original refinement behavior: add = white (keep), remove = black (remove)
+                if (mode === "add") {
+                    ctx.globalCompositeOperation = "source-over";
+                    ctx.strokeStyle = "white";
+                } else {
+                    ctx.globalCompositeOperation = "source-over";
+                    ctx.strokeStyle = "black";
+                }
             }
 
             const scale = w / 500; // rough approximation
@@ -467,10 +529,15 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                                 brushMode={brushMode}
                                 brushSize={brushSize}
                                 disabled={!canInteract}
+                                isEraserMode={view === "result" && preparedImageUrl}
                                 onCommitStroke={(stroke) => {
+                                    // In eraser mode, always commit as "remove" mode (will paint black)
+                                    const effectiveStroke = (view === "result" && preparedImageUrl) 
+                                        ? { ...stroke, mode: "remove" } 
+                                        : stroke;
                                     setStrokeStore(prev => {
                                         const newStrokes = prev.strokes.slice(0, prev.cursor);
-                                        newStrokes.push(stroke);
+                                        newStrokes.push(effectiveStroke);
                                         return { strokes: newStrokes, cursor: newStrokes.length };
                                     });
                                 }}
@@ -484,34 +551,44 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                 {mode === "edit" && (
                     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 w-[90%] max-w-[400px]">
                         <div className="bg-white/95 backdrop-blur-md border border-neutral-200 shadow-xl rounded-2xl p-3 flex flex-col gap-3 md:flex-row md:items-center">
-                            {/* Brush Mode */}
-                            <div className="flex bg-neutral-100 p-1 rounded-xl shrink-0">
-                                <button
-                                    onClick={() => setBrushMode("add")}
-                                    className={cx(
-                                        "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                                        brushMode === "add" ? "bg-[#171717] text-white shadow-sm ring-1 ring-black/5" : "bg-transparent text-neutral-600 hover:text-neutral-900"
-                                    )}
-                                >
-                                    <span className="flex items-center justify-center gap-1.5">
-                                        <span className="w-2 h-2 rounded-full bg-white" /> Add
-                                    </span>
-                                </button>
-                                <button
-                                    onClick={() => setBrushMode("remove")}
-                                    className={cx(
-                                        "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
-                                        brushMode === "remove" ? "bg-[#171717] text-white shadow-sm ring-1 ring-black/5" : "bg-transparent text-neutral-600 hover:text-neutral-900"
-                                    )}
-                                >
-                                    <span className="flex items-center justify-center gap-1.5">
-                                        <span className="w-2 h-2 rounded-full bg-white" /> Remove
-                                    </span>
-                                </button>
-                            </div>
+                            {/* Brush Mode - Hide toggle when editing prepared image (eraser-only mode) */}
+                            {(view !== "result" || !preparedImageUrl) && (
+                                <div className="flex bg-neutral-100 p-1 rounded-xl shrink-0">
+                                    <button
+                                        onClick={() => setBrushMode("add")}
+                                        className={cx(
+                                            "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                                            brushMode === "add" ? "bg-[#171717] text-white shadow-sm ring-1 ring-black/5" : "bg-transparent text-neutral-600 hover:text-neutral-900"
+                                        )}
+                                    >
+                                        <span className="flex items-center justify-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-white" /> Add
+                                        </span>
+                                    </button>
+                                    <button
+                                        onClick={() => setBrushMode("remove")}
+                                        className={cx(
+                                            "flex-1 md:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all",
+                                            brushMode === "remove" ? "bg-[#171717] text-white shadow-sm ring-1 ring-black/5" : "bg-transparent text-neutral-600 hover:text-neutral-900"
+                                        )}
+                                    >
+                                        <span className="flex items-center justify-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-white" /> Remove
+                                        </span>
+                                    </button>
+                                </div>
+                            )}
+                            {/* Show eraser indicator when editing prepared image */}
+                            {(view === "result" && preparedImageUrl) && (
+                                <div className="px-3 py-2 text-xs font-bold text-neutral-600 shrink-0">
+                                    Eraser Mode
+                                </div>
+                            )}
 
-                            {/* Divider */}
-                            <div className="hidden md:block w-px h-8 bg-neutral-200"></div>
+                            {/* Divider - only show if brush mode toggle is visible */}
+                            {(view !== "result" || !preparedImageUrl) && (
+                                <div className="hidden md:block w-px h-8 bg-neutral-200"></div>
+                            )}
 
                             {/* Size Slider */}
                             <div className="flex items-center gap-3 px-2 flex-1">
@@ -633,7 +710,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
  * Sub-component: Handle the specific Canvas Drawing logic
  * We use a transparent canvas overlaid on the image.
  */
-function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled, onCommitStroke }) {
+function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled, isEraserMode = false, onCommitStroke }) {
     const wrapRef = useRef(null);
     const canvasRef = useRef(null);
     const drawingRef = useRef(false);
@@ -690,14 +767,22 @@ function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled
             drawStrokeVisually(ctx, currentRef.current, w, h);
         }
 
-    }, [strokes, cursor]);
+    }, [strokes, cursor, isEraserMode]);
 
     const drawStrokeVisually = (ctx, stroke, w, h) => {
         const { mode, size, points } = stroke;
         if (points.length === 0) return;
 
-        // No red/blue in controls: neutral in-canvas highlight only
-        ctx.strokeStyle = mode === "add" ? "rgba(23, 23, 23, 0.55)" : "rgba(115, 115, 115, 0.55)";
+        // Visual overlay: show erased regions with a subtle highlight
+        // In eraser mode, all strokes are "remove" (erase), so show them consistently
+        // For refinement mode, show different colors for add vs remove
+        if (isEraserMode) {
+            // Eraser mode: highlight erased areas with a subtle red/orange tint
+            ctx.strokeStyle = "rgba(239, 68, 68, 0.4)"; // Red with transparency
+        } else {
+            // Refinement mode: different colors for add (keep) vs remove (delete)
+            ctx.strokeStyle = mode === "add" ? "rgba(34, 197, 94, 0.4)" : "rgba(239, 68, 68, 0.4)"; // Green for keep, red for remove
+        }
         // Adjust brush size from 'screen pixels' (30) to current canvas context
         // Since we already set up 1:1 logical pixels with scale, 'size' 30 means 30 logical pixels.
         ctx.lineWidth = size;
@@ -737,7 +822,9 @@ function MaskPainter({ imageUrl, strokes, cursor, brushMode, brushSize, disabled
         if (!p) return;
 
         drawingRef.current = true;
-        currentRef.current = { mode: brushMode, size: brushSize, points: [p] };
+        // In eraser mode, always use "remove" mode (will paint black to erase)
+        const effectiveMode = isEraserMode ? "remove" : brushMode;
+        currentRef.current = { mode: effectiveMode, size: brushSize, points: [p] };
         redraw();
     };
 
