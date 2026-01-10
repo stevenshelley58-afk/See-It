@@ -345,7 +345,9 @@ export const loader = async ({ request }) => {
 
         for (const a of assets) {
             let preparedImageUrlFresh = a.preparedImageUrl;
-            if (a.status === "ready" && a.preparedImageKey) {
+            // preparedImageUrl is a short-lived signed URL (often stale in DB).
+            // preparedImageKey is the source of truth, so generate a fresh signed URL whenever we have a key.
+            if (a.preparedImageKey) {
                 // #region agent log
                 process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Before storage URL, assetId:', a.id, 'key:', a.preparedImageKey);
                 process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:177',message:'Before storage URL',data:{assetId:a.id,key:a.preparedImageKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});

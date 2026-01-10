@@ -108,7 +108,8 @@ export const action = async ({ request }) => {
             data: {
                 preparedImageKey,
                 preparedImageUrl,
-                status: "ready",
+                // If this product is already enabled/live, do not regress it back to "ready"
+                status: asset.enabled || asset.status === "live" ? "live" : "ready",
                 errorMessage: null,
                 updatedAt: new Date(),
             },

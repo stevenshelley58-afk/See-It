@@ -273,12 +273,14 @@ export const action = async ({ request }) => {
         // Update or create asset
         let finalAssetId = asset?.id;
         if (asset) {
+            // If this product is already enabled/live, do not regress it back to "ready"
+            const nextStatus = asset.enabled || asset.status === "live" ? "live" : "ready";
             await prisma.productAsset.update({
                 where: { id: asset.id },
                 data: {
                     preparedImageKey,
                     preparedImageUrl,
-                    status: "ready",
+                    status: nextStatus,
                     errorMessage: null,
                     updatedAt: new Date(),
                 },
