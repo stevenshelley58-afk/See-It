@@ -105,7 +105,7 @@
         </div>
       </div>
 
-      <!-- CROP SCREEN -->
+      <!-- CROP SCREEN - Uses Cropper.js -->
       <div id="see-it-screen-crop" class="see-it-screen see-it-screen-crop">
         <div class="see-it-header">
           <button class="see-it-btn-icon" id="see-it-back-crop" aria-label="Back">
@@ -116,29 +116,10 @@
 
         <div class="see-it-crop-content">
           <h2 class="see-it-crop-title">Crop your photo</h2>
-          <p class="see-it-crop-description">Adjust the crop to focus on the area you want</p>
+          <p class="see-it-crop-description">Drag to reposition, pinch or scroll to zoom</p>
           
           <div class="see-it-crop-container" id="see-it-crop-container">
-            <img id="see-it-crop-source" src="" alt="Room photo" width="1" height="1" style="display: none;">
-            <div class="see-it-crop-canvas-wrapper" id="see-it-crop-canvas-wrapper">
-              <canvas id="see-it-crop-canvas" class="see-it-crop-canvas"></canvas>
-              <div class="see-it-crop-overlay" id="see-it-crop-overlay">
-                <div class="see-it-crop-box" id="see-it-crop-box">
-                  <div class="see-it-crop-handle see-it-crop-handle-nw"></div>
-                  <div class="see-it-crop-handle see-it-crop-handle-ne"></div>
-                  <div class="see-it-crop-handle see-it-crop-handle-sw"></div>
-                  <div class="see-it-crop-handle see-it-crop-handle-se"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="see-it-crop-controls">
-            <div class="see-it-crop-zoom-control">
-              <span>Zoom</span>
-              <input type="range" id="see-it-crop-zoom-slider" class="see-it-crop-zoom-slider" min="1" max="3" step="0.01" value="1">
-            </div>
-            <p class="see-it-crop-hint">Drag to move • Adjust zoom to crop</p>
+            <img id="see-it-crop-image" src="" alt="Room photo" crossorigin="anonymous">
           </div>
 
           <div class="see-it-crop-actions">
@@ -317,4 +298,8 @@
       <input type="file" id="see-it-camera-input" accept="image/*" capture="environment" style="display: none;">
     </div>
   </div>
+  
+  <!-- Cropper.js CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
 {% endif %}

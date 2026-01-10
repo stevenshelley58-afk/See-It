@@ -271,11 +271,8 @@
     const btnBackCrop = $('see-it-back-crop');
     const btnCropCancel = $('see-it-crop-cancel');
     const btnCropConfirm = $('see-it-crop-confirm');
-    const cropSource = $('see-it-crop-source');
-    const cropCanvas = $('see-it-crop-canvas');
-    const cropOverlay = $('see-it-crop-overlay');
-    const cropBox = $('see-it-crop-box');
-    const cropZoomSlider = $('see-it-crop-zoom-slider');
+    const cropImage = $('see-it-crop-image');
+    let cropperInstance = null; // Cropper.js instance
 
     // Prepare screen elements
     const btnBackPrepare = $('see-it-back-prepare');
@@ -575,7 +572,10 @@
         state.currentScreen = screenName;
 
         if (screenName === 'crop') {
-            initCropScreen();
+            // Wait for DOM to render before initializing Cropper
+            requestAnimationFrame(() => {
+                initCropScreen();
+            });
         } else if (screenName === 'prepare') {
             initCanvas();
             setupCanvasListenersOnce(); // Only attach once!
@@ -585,294 +585,96 @@
         }
     };
 
-    // --- Crop Screen Logic ---
-    let cropCtx = null;
+    // --- Crop Screen Logic (Cropper.js) ---
     let cropImageLoaded = false;
-    let cropIsDragging = false;
-    let cropDragStart = { x: 0, y: 0 };
-    let cropPanStart = { x: 0, y: 0 };
-    let cropPinchStartDistance = 0;
-    let cropPinchStartZoom = 1;
-
+    
     const initCropScreen = () => {
-        console.log('[See It] Initializing crop screen');
-        if (!cropSource || !cropCanvas || !cropBox) {
-            console.error('[See It] Crop elements not found');
+        console.log('[See It] Initializing crop screen with Cropper.js');
+        if (!cropImage) {
+            console.error('[See It] Crop image element not found');
             return;
         }
 
-        // Wait for image to load
-        if (!cropImageLoaded) {
-            cropSource.onload = () => {
+        // Destroy existing cropper if any
+        if (cropperInstance) {
+            cropperInstance.destroy();
+            cropperInstance = null;
+        }
+
+        // Wait for image to be ready
+        if (!cropImage.complete || !cropImage.naturalWidth) {
+            cropImage.onload = () => {
                 cropImageLoaded = true;
-                setupCropCanvas();
+                setupCropper();
             };
             return;
         }
 
-        setupCropCanvas();
+        setupCropper();
     };
 
-    const setupCropCanvas = () => {
-        if (!cropSource || !cropCanvas || !cropBox) return;
-
-        const img = cropSource;
-        const imgW = img.naturalWidth || img.width;
-        const imgH = img.naturalHeight || img.height;
-
-        if (!imgW || !imgH) {
-            console.error('[See It] Crop image dimensions not available');
+    const setupCropper = () => {
+        if (!cropImage || typeof Cropper === 'undefined') {
+            console.error('[See It] Cropper.js not loaded or image not found');
             return;
         }
 
-        // Calculate canvas size to fit container
-        const container = cropCanvas.parentElement;
-        if (!container) return;
-
-        const containerRect = container.getBoundingClientRect();
-        const maxW = containerRect.width;
-        const maxH = containerRect.height;
-
-        // Calculate scale to fit image in container (scale up to fill space)
-        const scaleW = maxW / imgW;
-        const scaleH = maxH / imgH;
-        const scale = Math.min(scaleW, scaleH); // Allow scaling up to fill
-
-        const canvasW = Math.floor(imgW * scale);
-        const canvasH = Math.floor(imgH * scale);
-
-        // Set canvas resolution to actual size for crisp rendering
-        cropCanvas.width = canvasW;
-        cropCanvas.height = canvasH;
-        cropCanvas.style.width = canvasW + 'px';
-        cropCanvas.style.height = canvasH + 'px';
-
-        cropCtx = cropCanvas.getContext('2d');
-        if (!cropCtx) {
-            console.error('[See It] Failed to get crop canvas context');
-            return;
-        }
-
-        // Draw image to canvas
-        cropCtx.drawImage(img, 0, 0, canvasW, canvasH);
-
-        // Initialize crop box to locked ratio
+        // Get the closest Gemini ratio
         const closest = state.cropState.closestRatio;
-        if (closest) {
-            const targetRatio = closest.value;
-            const containerAspect = canvasW / canvasH;
+        const aspectRatio = closest ? closest.value : 4/3;
+        
+        console.log('[See It] Setting up Cropper with aspect ratio:', aspectRatio);
 
-            let boxW, boxH;
-            if (targetRatio > containerAspect) {
-                boxW = canvasW * 0.9;
-                boxH = boxW / targetRatio;
-            } else {
-                boxH = canvasH * 0.9;
-                boxW = boxH * targetRatio;
+        cropperInstance = new Cropper(cropImage, {
+            aspectRatio: aspectRatio,
+            viewMode: 1, // Restrict crop box to image
+            dragMode: 'move', // Move the image, not the crop box
+            autoCropArea: 0.9, // Start with 90% of image selected
+            responsive: true,
+            restore: false,
+            guides: true,
+            center: true,
+            highlight: true,
+            cropBoxMovable: true,
+            cropBoxResizable: true,
+            toggleDragModeOnDblclick: false,
+            minContainerWidth: 200,
+            minContainerHeight: 200,
+            ready: function() {
+                console.log('[See It] Cropper ready');
             }
+        });
+    };
 
-            // Center the crop box
-            const boxX = (canvasW - boxW) / 2;
-            const boxY = (canvasH - boxH) / 2;
-
-            updateCropBox(boxX, boxY, boxW, boxH);
-            updateCropRectNorm(boxX, boxY, boxW, boxH, canvasW, canvasH);
+    const destroyCropper = () => {
+        if (cropperInstance) {
+            cropperInstance.destroy();
+            cropperInstance = null;
         }
-
-        setupCropListeners();
     };
 
-    const updateCropBox = (x, y, w, h) => {
-        if (!cropBox) return;
-        cropBox.style.left = x + 'px';
-        cropBox.style.top = y + 'px';
-        cropBox.style.width = w + 'px';
-        cropBox.style.height = h + 'px';
-    };
-
-    const updateCropRectNorm = (x, y, w, h, canvasW, canvasH) => {
-        state.cropState.cropRectNorm = {
-            x: x / canvasW,
-            y: y / canvasH,
-            w: w / canvasW,
-            h: h / canvasH
-        };
-    };
-
-    const getCropBoxBounds = () => {
-        if (!cropBox || !cropCanvas) return null;
-        const rect = cropBox.getBoundingClientRect();
-        const canvasRect = cropCanvas.getBoundingClientRect();
+    // Get crop data from Cropper.js (used when confirming crop)
+    const getCropData = () => {
+        if (!cropperInstance) return null;
+        
+        const data = cropperInstance.getData(true); // Get rounded pixel values
+        const imageData = cropperInstance.getImageData();
+        
         return {
-            x: rect.left - canvasRect.left,
-            y: rect.top - canvasRect.top,
-            width: rect.width,
-            height: rect.height
+            x: data.x,
+            y: data.y,
+            width: data.width,
+            height: data.height,
+            rotate: data.rotate || 0,
+            // Original image dimensions
+            naturalWidth: imageData.naturalWidth,
+            naturalHeight: imageData.naturalHeight
         };
     };
 
-    const constrainCropBox = (x, y, w, h, canvasW, canvasH) => {
-        const closest = state.cropState.closestRatio;
-        if (!closest) return { x, y, w, h };
-
-        const targetRatio = closest.value;
-        h = w / targetRatio; // Maintain aspect ratio
-
-        // Clamp to canvas bounds
-        x = Math.max(0, Math.min(x, canvasW - w));
-        y = Math.max(0, Math.min(y, canvasH - h));
-        w = Math.max(100, Math.min(w, canvasW - x));
-        h = Math.max(100 / targetRatio, Math.min(h, canvasH - y));
-
-        // Re-adjust to maintain ratio
-        h = w / targetRatio;
-        if (y + h > canvasH) {
-            h = canvasH - y;
-            w = h * targetRatio;
-        }
-        if (x + w > canvasW) {
-            w = canvasW - x;
-            h = w / targetRatio;
-        }
-
-        return { x, y, w, h };
-    };
-
-    const handleCropPanStart = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        cropIsDragging = true;
-        cropBox?.classList.add('dragging');
-
-        const touch = e.touches?.[0] || null;
-        const clientX = touch ? touch.clientX : e.clientX;
-        const clientY = touch ? touch.clientY : e.clientY;
-
-        cropDragStart = { x: clientX, y: clientY };
-
-        const bounds = getCropBoxBounds();
-        if (bounds) {
-            cropPanStart = { x: bounds.x, y: bounds.y };
-        }
-
-        // Check for pinch start
-        if (e.touches && e.touches.length >= 2) {
-            const dx = e.touches[0].clientX - e.touches[1].clientX;
-            const dy = e.touches[0].clientY - e.touches[1].clientY;
-            cropPinchStartDistance = Math.sqrt(dx * dx + dy * dy);
-            cropPinchStartZoom = state.cropState.zoom;
-        }
-    };
-
-    const handleCropPanMove = (e) => {
-        if (!cropIsDragging || !cropCanvas || !cropBox) return;
-        e.preventDefault();
-        e.stopPropagation();
-
-        // Handle pinch-to-zoom
-        if (e.touches && e.touches.length >= 2) {
-            const dx = e.touches[0].clientX - e.touches[1].clientX;
-            const dy = e.touches[0].clientY - e.touches[1].clientY;
-            const currentDistance = Math.sqrt(dx * dx + dy * dy);
-
-            if (cropPinchStartDistance > 0) {
-                const scaleFactor = currentDistance / cropPinchStartDistance;
-                const newZoom = Math.max(1, Math.min(3, cropPinchStartZoom * scaleFactor));
-                state.cropState.zoom = newZoom;
-                if (cropZoomSlider) cropZoomSlider.value = newZoom;
-                updateCropZoom();
-            }
-            return;
-        }
-
-        const touch = e.touches?.[0] || null;
-        const clientX = touch ? touch.clientX : e.clientX;
-        const clientY = touch ? touch.clientY : e.clientY;
-
-        const deltaX = clientX - cropDragStart.x;
-        const deltaY = clientY - cropDragStart.y;
-
-        const canvasRect = cropCanvas.getBoundingClientRect();
-        const canvasW = cropCanvas.width;
-        const canvasH = cropCanvas.height;
-
-        const newX = cropPanStart.x + deltaX * (canvasW / canvasRect.width);
-        const newY = cropPanStart.y + deltaY * (canvasH / canvasRect.height);
-
-        const bounds = getCropBoxBounds();
-        if (!bounds) return;
-
-        const constrained = constrainCropBox(newX, newY, bounds.width, bounds.height, canvasW, canvasH);
-        updateCropBox(constrained.x, constrained.y, constrained.w, constrained.h);
-        updateCropRectNorm(constrained.x, constrained.y, constrained.w, constrained.h, canvasW, canvasH);
-    };
-
-    const handleCropPanEnd = (e) => {
-        if (cropIsDragging) {
-            cropIsDragging = false;
-            cropBox?.classList.remove('dragging');
-            cropPinchStartDistance = 0;
-        }
-    };
-
-    const updateCropZoom = () => {
-        const zoom = state.cropState.zoom;
-        if (!cropSource || !cropCanvas || !cropCtx) return;
-
-        const img = cropSource;
-        const imgW = img.naturalWidth || img.width;
-        const imgH = img.naturalHeight || img.height;
-
-        const container = cropCanvas.parentElement;
-        if (!container) return;
-
-        const containerRect = container.getBoundingClientRect();
-        const maxW = containerRect.width;
-        const maxH = containerRect.height;
-
-        const baseScaleW = maxW / imgW;
-        const baseScaleH = maxH / imgH;
-        const baseScale = Math.min(baseScaleW, baseScaleH, 1.0);
-
-        const scaledW = Math.floor(imgW * baseScale * zoom);
-        const scaledH = Math.floor(imgH * baseScale * zoom);
-
-        cropCanvas.width = scaledW;
-        cropCanvas.height = scaledH;
-        cropCanvas.style.width = scaledW + 'px';
-        cropCanvas.style.height = scaledH + 'px';
-
-        cropCtx.drawImage(img, 0, 0, scaledW, scaledH);
-
-        // Adjust crop box to maintain position
-        const bounds = getCropBoxBounds();
-        if (bounds) {
-            const canvasW = cropCanvas.width;
-            const canvasH = cropCanvas.height;
-            const constrained = constrainCropBox(bounds.x, bounds.y, bounds.width, bounds.height, canvasW, canvasH);
-            updateCropBox(constrained.x, constrained.y, constrained.w, constrained.h);
-            updateCropRectNorm(constrained.x, constrained.y, constrained.w, constrained.h, canvasW, canvasH);
-        }
-    };
-
-    const setupCropListeners = () => {
-        if (!cropBox || !cropCanvas) return;
-
-        // Attach listeners (only once - use a flag or check if already attached)
-        if (cropBox.dataset.listenersAttached) return;
-        cropBox.dataset.listenersAttached = 'true';
-
-        cropBox.addEventListener('pointerdown', handleCropPanStart);
-        cropBox.addEventListener('touchstart', handleCropPanStart, { passive: false });
-
-        // Use document for move/end to track drag even when mouse leaves crop box
-        document.addEventListener('pointermove', handleCropPanMove);
-        document.addEventListener('touchmove', handleCropPanMove, { passive: false });
-        document.addEventListener('pointerup', handleCropPanEnd);
-        document.addEventListener('touchend', handleCropPanEnd);
-        document.addEventListener('pointercancel', handleCropPanEnd);
-        document.addEventListener('touchcancel', handleCropPanEnd);
-    };
+    // Cropper.js handles all pan/zoom internally - no custom handlers needed
+    
+    // Cropper.js handles all interactions - no custom setup needed
 
     // FIX: Show error by removing BOTH possible hidden classes
     const showError = (msg) => {
@@ -2072,10 +1874,10 @@
         try {
             // Load original image for crop screen
             const dataUrl = URL.createObjectURL(file);
-            if (cropSource) {
-                cropSource.src = dataUrl;
-                cropSource.onload = () => {
-                    const img = cropSource;
+            if (cropImage) {
+                cropImage.src = dataUrl;
+                cropImage.onload = () => {
+                    const img = cropImage;
                     const imgW = img.naturalWidth || img.width;
                     const imgH = img.naturalHeight || img.height;
 
@@ -2132,7 +1934,7 @@
                     })();
 
                 };
-                cropSource.onerror = () => {
+                cropImage.onerror = () => {
                     console.error('[See It] Failed to load crop image');
                     showError('Failed to load image. Please try again.');
                 };
@@ -2155,14 +1957,16 @@
     btnBackCrop?.addEventListener('click', () => {
         // Clean up crop state
         cropImageLoaded = false;
-        if (cropSource) cropSource.src = '';
+        destroyCropper();
+        if (cropImage) cropImage.src = '';
         showScreen('entry');
     });
 
     btnCropCancel?.addEventListener('click', () => {
         // Clean up crop state
         cropImageLoaded = false;
-        if (cropSource) cropSource.src = '';
+        destroyCropper();
+        if (cropImage) cropImage.src = '';
         showScreen('entry');
     });
 
@@ -2191,12 +1995,28 @@
         try {
             resetError();
 
-            // Prepare crop params
+            // Get crop data from Cropper.js
+            const cropData = getCropData();
+            if (!cropData) {
+                showError('Crop data not available. Please try again.');
+                return;
+            }
+
             const closest = state.cropState.closestRatio;
+            
+            // Convert Cropper.js pixel data to normalized coordinates
+            const cropRectNorm = {
+                x: cropData.x / cropData.naturalWidth,
+                y: cropData.y / cropData.naturalHeight,
+                w: cropData.width / cropData.naturalWidth,
+                h: cropData.height / cropData.naturalHeight
+            };
+
             const cropParams = {
                 ratio_label: closest.label,
                 ratio_value: closest.value,
-                crop_rect_norm: state.cropState.cropRectNorm
+                crop_rect_norm: cropRectNorm,
+                rotate: cropData.rotate || 0
             };
 
             console.log('[See It] Confirming room with crop params:', JSON.stringify(cropParams));
@@ -2266,7 +2086,7 @@
 
             // Clean up crop state
             cropImageLoaded = false;
-            if (cropSource) cropSource.src = '';
+            if (cropImage) cropImage.src = '';
 
             // Show prepare screen
             showScreen('prepare');
@@ -2288,13 +2108,6 @@
             console.error('[See It] Crop confirm error:', err);
             showError('Failed to process crop: ' + err.message);
         }
-    });
-
-    // Crop zoom slider
-    cropZoomSlider?.addEventListener('input', (e) => {
-        const zoom = parseFloat(e.target.value);
-        state.cropState.zoom = zoom;
-        updateCropZoom();
     });
 
     // --- Navigation ---

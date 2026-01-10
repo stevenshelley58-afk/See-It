@@ -534,77 +534,49 @@
   line-height: var(--si-line-body);
 }
 
+/* Cropper.js container */
 .see-it-crop-container {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background: #1a1a1a;
-  overflow: hidden;
   border-radius: var(--si-radius-card);
-  /* Don't let it get wider than tall - keeps crop area reasonable */
-  aspect-ratio: 4/3;
-  max-height: 100%;
-  margin: 0 auto;
-  justify-content: center;
-  min-height: 0;
+  overflow: hidden;
   margin-bottom: 20px;
+  min-height: 200px;
 }
 
-.see-it-crop-canvas-wrapper {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.see-it-crop-canvas {
+.see-it-crop-container img {
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  touch-action: none;
-  user-select: none;
+  max-width: 100%;
 }
 
-.see-it-crop-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+/* Cropper.js overrides for our theme */
+.see-it-crop-container .cropper-view-box {
+  outline: 2px solid #fff;
+  outline-color: rgba(255, 255, 255, 0.75);
 }
 
-.see-it-crop-box {
-  position: absolute;
-  border: 2px solid #fff;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
-  pointer-events: auto; /* Re-enable interactions on the crop box */
-  pointer-events: none;
-  cursor: move;
+.see-it-crop-container .cropper-line {
+  background-color: rgba(255, 255, 255, 0.3);
 }
 
-.see-it-crop-box.dragging {
-  cursor: grabbing;
+.see-it-crop-container .cropper-point {
+  background-color: #fff;
+  width: 12px;
+  height: 12px;
+  opacity: 1;
 }
 
-.see-it-crop-handle {
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  background: #fff;
-  border: 2px solid #000;
-  border-radius: 50%;
-  pointer-events: auto;
-  cursor: nwse-resize;
+.see-it-crop-container .cropper-point.point-se {
+  width: 12px;
+  height: 12px;
 }
 
-.see-it-crop-handle-nw {
-  top: -10px;
-  left: -10px;
-  cursor: nwse-resize;
+/* Hide the dashed lines - cleaner look */
+.see-it-crop-container .cropper-dashed {
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
+/* DEPRECATED - keeping for reference but not used anymore */
 .see-it-crop-handle-ne {
   top: -10px;
   right: -10px;
