@@ -150,6 +150,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
     });
 
+    // Verify product is enabled for See It
+    if (!productAsset || productAsset.status !== "live") {
+        await prisma.renderJob.update({
+            where: { id: job.id },
+            data: {
+                status: "failed",
+                errorCode: "PRODUCT_NOT_ENABLED",
+                errorMessage: "Product not enabled for See It visualization"
+            }
+        });
+
+        logger.warn(
+            { ...shopLogContext, stage: "product-check" },
+            `Product ${product_id} not enabled for See It (status: ${productAsset?.status || 'no asset'})`
+        );
+
+        return json({
+            job_id: job.id,
+            status: "failed",
+            error: "product_not_enabled",
+            message: "This product is not enabled for See It visualization"
+        }, { headers: corsHeaders });
+    }
+
     const roomSession = await prisma.roomSession.findUnique({
         where: { id: room_session_id }
     });
