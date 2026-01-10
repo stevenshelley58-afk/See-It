@@ -84,6 +84,8 @@ export const loader = async ({ request }) => {
                         handle
                         status
                         totalInventory
+                        productType
+                        vendor
                         description
                         descriptionHtml
                         tags

@@ -278,25 +278,37 @@ export function extractStructuredFields(product: ProductData): StructuredFields 
 }
 
 function extractDimensions(text: string): { height?: number; width?: number } | undefined {
-    // Pattern: "H90 x W200" or "90cm x 200cm" or "90 x 200"
-    const match = text.match(/(\d+)\s*(?:cm|mm)?\s*[x×]\s*(\d+)/i);
-    if (match) {
-        return { 
-            height: parseInt(match[1]), 
-            width: parseInt(match[2]) 
+    if (!text) return undefined;
+
+    // Strip basic HTML + common entities (descriptionHtml/metafields can contain both)
+    const clean = text
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&times;/gi, '×')
+        .replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    // Pattern: "H90 x W200" or "90cm x 200cm" or "90 x 200" (supports decimals)
+    const cross = clean.match(/(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?\s*[x×]\s*(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?/i);
+    if (cross) {
+        return {
+            height: parseFloat(cross[1]),
+            width: parseFloat(cross[2]),
         };
     }
-    
-    // Pattern: "Height: 90cm"
-    const heightMatch = text.match(/height[:\s]*(\d+)/i);
-    const widthMatch = text.match(/width[:\s]*(\d+)/i);
-    
+
+    // Pattern: "Height: 90cm", "H: 90", "Width 200"
+    const heightMatch = clean.match(/\b(h(?:eight)?)\s*[:\s-]*(\d{2,4}(?:\.\d+)?)/i);
+    const widthMatch = clean.match(/\b(w(?:idth)?)\s*[:\s-]*(\d{2,4}(?:\.\d+)?)/i);
     if (heightMatch || widthMatch) {
         return {
-            height: heightMatch ? parseInt(heightMatch[1]) : undefined,
-            width: widthMatch ? parseInt(widthMatch[1]) : undefined
+            height: heightMatch ? parseFloat(heightMatch[2]) : undefined,
+            width: widthMatch ? parseFloat(widthMatch[2]) : undefined,
         };
     }
-    
+
     return undefined;
 }

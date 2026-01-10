@@ -17,9 +17,107 @@ import { Button } from '../ui';
 // HELPERS
 // ============================================================================
 
+function stripHtml(input) {
+    if (!input) return '';
+    return String(input)
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&times;/gi, '×')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function flattenMetafields(product) {
+    const edges = product?.metafields?.edges;
+    if (!Array.isArray(edges)) return [];
+    return edges.map(e => e?.node).filter(Boolean);
+}
+
+function extractDimsFromText(rawText) {
+    const text = (rawText || '').toString();
+    if (!text) return { height: null, width: null };
+
+    // Try JSON-ish values first (common when metafields store structured data)
+    // e.g. {"height":180,"width":95} or {"h":180,"w":95}
+    try {
+        const maybeJson = text.trim();
+        if (maybeJson.startsWith('{') && maybeJson.endsWith('}')) {
+            const parsed = JSON.parse(maybeJson);
+            const h = parsed.height ?? parsed.h ?? parsed.Height ?? null;
+            const w = parsed.width ?? parsed.w ?? parsed.Width ?? null;
+            const height = typeof h === 'number' ? h : (typeof h === 'string' ? parseFloat(h) : null);
+            const width = typeof w === 'number' ? w : (typeof w === 'string' ? parseFloat(w) : null);
+            if (Number.isFinite(height) || Number.isFinite(width)) {
+                return {
+                    height: Number.isFinite(height) ? height : null,
+                    width: Number.isFinite(width) ? width : null,
+                };
+            }
+        }
+    } catch {
+        // ignore
+    }
+
+    // Common patterns:
+    // - "180 x 95" (assume cm)
+    // - "180cm x 95cm"
+    // - "H: 180cm W: 95cm"
+    // - "Height 180 Width 95"
+    // - "180×95"
+    const cross = text.match(/(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?\s*[x×]\s*(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?/i);
+    if (cross) {
+        return { height: parseFloat(cross[1]), width: parseFloat(cross[2]) };
+    }
+
+    const heightMatch = text.match(/\b(h(?:eight)?)\s*[:\-]?\s*(\d{2,4}(?:\.\d+)?)\s*(cm|mm|")?\b/i);
+    const widthMatch = text.match(/\b(w(?:idth)?)\s*[:\-]?\s*(\d{2,4}(?:\.\d+)?)\s*(cm|mm|")?\b/i);
+    if (heightMatch || widthMatch) {
+        return {
+            height: heightMatch ? parseFloat(heightMatch[2]) : null,
+            width: widthMatch ? parseFloat(widthMatch[2]) : null,
+        };
+    }
+
+    return { height: null, width: null };
+}
+
+function extractDimsFromMetafields(product) {
+    const metas = flattenMetafields(product);
+    if (!metas.length) return { height: null, width: null };
+
+    // Prefer metafields likely to contain dimensions/measurements
+    const candidates = metas.filter(m => {
+        const key = `${m.namespace || ''}.${m.key || ''}`.toLowerCase();
+        return (
+            key.includes('dimension') ||
+            key.includes('dimensions') ||
+            key.includes('measurement') ||
+            key.includes('measurements') ||
+            key.includes('size')
+        );
+    });
+
+    const ordered = candidates.length ? candidates : metas;
+    for (const m of ordered) {
+        const val = stripHtml(m.value || '');
+        const dims = extractDimsFromText(val);
+        if (dims.height || dims.width) return dims;
+    }
+
+    return { height: null, width: null };
+}
+
 // Auto-detect fields from product title/description (client-side quick version)
 function autoDetectFields(product) {
-    const allText = `${product.title} ${product.description || ''} ${product.productType || ''}`.toLowerCase();
+    const descriptionText = stripHtml(product.description || product.descriptionHtml || '');
+    const metafieldText = flattenMetafields(product).map(m => stripHtml(m.value || '')).join(' ');
+    const tagsText = Array.isArray(product.tags) ? product.tags.join(' ') : (product.tags || '');
+    const allText = `${product.title} ${tagsText} ${descriptionText} ${metafieldText} ${product.productType || ''} ${product.vendor || ''}`.toLowerCase();
     
     // Surface detection
     const surfaceKeywords = {
@@ -69,10 +167,10 @@ function autoDetectFields(product) {
     }
     
     // Dimensions from description
-    let dimensions = { height: null, width: null };
-    const dimMatch = (product.description || '').match(/(\d+)\s*(?:cm)?\s*[x×]\s*(\d+)/i);
-    if (dimMatch) {
-        dimensions = { height: parseInt(dimMatch[1]), width: parseInt(dimMatch[2]) };
+    // Pull from metafields first (if present), else from description/descriptionHtml.
+    let dimensions = extractDimsFromMetafields(product);
+    if (!dimensions.height && !dimensions.width) {
+        dimensions = extractDimsFromText(descriptionText);
     }
     
     // v2 fields: Auto-detect defaults
@@ -127,6 +225,49 @@ export function PlacementTab({ product, asset, onChange }) {
     const [isGenerating, setIsGenerating] = useState(false);
     const [hasEdited, setHasEdited] = useState(false);
     const [showEditWarning, setShowEditWarning] = useState(false);
+
+    // Hydrate missing dimensions from server-side extraction (Shopify descriptionHtml + metafields).
+    // This runs once per product open and only fills dims if the current dims are empty.
+    useEffect(() => {
+        let cancelled = false;
+        const numericId = product?.id ? String(product.id).split('/').pop() : null;
+        if (!numericId) return;
+        if (fields?.dimensions?.height || fields?.dimensions?.width) return;
+
+        (async () => {
+            try {
+                const res = await fetch(`/api/products/generate-description?productId=${encodeURIComponent(numericId)}`);
+                const data = await res.json().catch(() => null);
+                const suggested = data?.suggestedFields;
+                if (!res.ok || !suggested || cancelled) return;
+
+                const h = suggested?.dimensions?.height;
+                const w = suggested?.dimensions?.width;
+                if (!h && !w) return;
+
+                setFields(prev => {
+                    // only fill if still empty
+                    const prevH = prev?.dimensions?.height;
+                    const prevW = prev?.dimensions?.width;
+                    if (prevH || prevW) return prev;
+                    return {
+                        ...prev,
+                        dimensions: {
+                            height: typeof h === 'number' ? h : (typeof h === 'string' ? parseFloat(h) : null),
+                            width: typeof w === 'number' ? w : (typeof w === 'string' ? parseFloat(w) : null),
+                        }
+                    };
+                });
+            } catch {
+                // silent: never break merchant UI
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [product?.id]);
     
     // Notify parent when description or v2 fields change
     useEffect(() => {
@@ -319,15 +460,19 @@ export function PlacementTab({ product, asset, onChange }) {
                 {/* Dimensions */}
                 <div className="space-y-2">
                     <label className="block text-sm font-semibold text-neutral-700">
-                        Real-World Dimensions <span className="font-normal text-neutral-400">(optional but helpful)</span>
+                        Product dimensions (cm) <span className="font-normal text-neutral-400">(optional)</span>
                     </label>
+                    <p className="text-xs text-neutral-500">
+                        Used to help the AI keep proportions consistent. This is for merchant setup only (not shown to customers).
+                    </p>
                     <div className="grid grid-cols-2 gap-4 max-w-xs">
                         <div className="relative">
                             <input
                                 type="number"
+                                step="any"
                                 placeholder="Height"
                                 value={fields.dimensions?.height || ''}
-                                onChange={(e) => updateField('dimensions.height', e.target.value ? parseInt(e.target.value) : null)}
+                                onChange={(e) => updateField('dimensions.height', e.target.value ? parseFloat(e.target.value) : null)}
                                 className="w-full pl-3 pr-10 py-2 bg-white border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
                             />
                             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-400">cm</span>
@@ -335,9 +480,10 @@ export function PlacementTab({ product, asset, onChange }) {
                         <div className="relative">
                             <input
                                 type="number"
+                                step="any"
                                 placeholder="Width"
                                 value={fields.dimensions?.width || ''}
-                                onChange={(e) => updateField('dimensions.width', e.target.value ? parseInt(e.target.value) : null)}
+                                onChange={(e) => updateField('dimensions.width', e.target.value ? parseFloat(e.target.value) : null)}
                                 className="w-full pl-3 pr-10 py-2 bg-white border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
                             />
                             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-400">cm</span>

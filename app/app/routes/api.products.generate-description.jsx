@@ -91,9 +91,20 @@ export const loader = async ({ request }) => {
                 product(id: $id) {
                     title
                     description
+                    descriptionHtml
                     productType
                     vendor
                     tags
+                    metafields(first: 20) {
+                        edges {
+                            node {
+                                namespace
+                                key
+                                value
+                                type
+                            }
+                        }
+                    }
                 }
             }
         `, {
@@ -108,9 +119,16 @@ export const loader = async ({ request }) => {
         }
 
         // Extract structured fields
+        // IMPORTANT: description can be blank on some shops while descriptionHtml is populated.
+        // Also pull metafields so dimensions/measurements stored in Shopify can be parsed.
+        const metaText = Array.isArray(product.metafields?.edges)
+            ? product.metafields.edges.map(e => e?.node?.value).filter(Boolean).join(' ')
+            : '';
+        const combinedDescription = `${product.description || ''}\n${product.descriptionHtml || ''}\n${metaText}`.trim();
+
         const fields = extractStructuredFields({
             title: product.title,
-            description: product.description,
+            description: combinedDescription,
             productType: product.productType,
             tags: product.tags,
         });
