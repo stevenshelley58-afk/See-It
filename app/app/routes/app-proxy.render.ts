@@ -131,9 +131,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             productId: product_id,
             variantId: variant_id || null,
             roomSession: room_session_id ? { connect: { id: room_session_id } } : undefined,
-            placementX: null,
-            placementY: null,
-            placementScale: null,
+            // Legacy fields required by schema - use box_px from configJson for actual placement
+            placementX: 0.5,  // Dummy value - actual placement in configJson.box_px
+            placementY: 0.5,  // Dummy value - actual placement in configJson.box_px
+            placementScale: 1.0,  // Dummy value - actual placement in configJson.box_px
             stylePreset: config?.style_preset || "neutral",
             quality: config?.quality || "standard",
             configJson: JSON.stringify({
