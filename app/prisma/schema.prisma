@@ -63,7 +63,8 @@ model ProductAsset {
   sourceImageUrl     String   @map("source_image_url")
   preparedImageUrl   String?  @map("prepared_image_url")
   preparedImageKey   String?  @map("prepared_image_key") // GCS key for on-demand URL generation
-  status             String // "pending" | "processing" | "ready" | "failed" | "stale" | "orphaned"
+  status             String // "unprepared" | "preparing" | "ready" | "live" | "failed"
+  enabled            Boolean  @default(false) @map("enabled")
   prepStrategy       String   @map("prep_strategy") // "batch" | "fallback" | "manual"
   promptVersion      Int      @map("prompt_version")
   errorMessage       String?  @map("error_message")
