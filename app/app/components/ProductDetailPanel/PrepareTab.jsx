@@ -44,7 +44,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
         const hasResult = !!(asset?.preparedImageUrlFresh || asset?.preparedImageUrl);
         return hasResult ? "result" : "original";
     });
-    
+
     // Derived: resultExists
     const resultExists = !!preparedImageUrl;
 
@@ -91,13 +91,14 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
         if (fetcher.state === 'idle') {
             setIsBusy(false);
-            
+
             if (fetcher.data) {
                 if (fetcher.data.success) {
                     if (fetcher.data.preparedImageUrl) {
                         setPreparedImageUrl(fetcher.data.preparedImageUrl);
-                        // If we just generated a result, switch to result view
-                        if (mode === 'normal' && !resultExists) {
+                        // Always switch to result view when we get a new result in normal mode
+                        // This ensures "Start Over" shows the freshly regenerated result
+                        if (mode === 'normal') {
                             setView("result");
                         }
                     }
@@ -133,13 +134,13 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                 setIsBusy(false);
                 const timeoutError = 'Request timed out after 30 seconds. The image may be too large or the server is slow. Please try again or use a smaller image.';
                 setError(timeoutError);
-                
+
                 // Try to abort the request if abort controller exists
                 if (abortControllerRef.current) {
                     abortControllerRef.current.abort();
                     abortControllerRef.current = null;
                 }
-                
+
                 // Warn if fetcher is still active after timeout
                 if (fetcher.state !== 'idle') {
                     console.warn('[PrepareTab] Fetcher still active after timeout - may be stuck');
@@ -159,12 +160,12 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
     // Initialize Canvas Image - update when view or image changes
     useEffect(() => {
-        const imageUrlToLoad = (mode === "edit" && view === "result" && preparedImageUrl) 
-            ? preparedImageUrl 
+        const imageUrlToLoad = (mode === "edit" && view === "result" && preparedImageUrl)
+            ? preparedImageUrl
             : selectedImageUrl;
-        
+
         if (!imageUrlToLoad) return;
-        
+
         const img = new Image();
         img.crossOrigin = "anonymous";
         img.onload = () => {
@@ -200,7 +201,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
         // Use original Shopify image URL (from asset if available, otherwise selected image)
         const originalImageUrl = asset?.sourceImageUrl || selectedImageUrl;
-        
+
         if (!originalImageUrl) {
             setError("No original image available. Please select an image.");
             setIsBusy(false);
@@ -288,7 +289,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
             // Check if we're editing a prepared image (eraser mode: start white, paint black)
             const isEditingPrepared = view === "result" && preparedImageUrl;
-            
+
             // Initialize mask: white = keep everything, black = remove
             // For prepared images (eraser): start white (keep all), strokes paint black (erase)
             // For original images (refinement): start black (remove all), strokes paint white (keep)
@@ -333,11 +334,11 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             // Auto-generate first
             setError(null);
             setIsBusy(true);
-            
+
             const formData = new FormData();
             formData.append('productId', product.id.split('/').pop());
             formData.append('imageUrl', selectedImageUrl);
-            
+
             fetcher.submit(formData, {
                 method: 'post',
                 action: '/api/products/remove-background'
@@ -505,8 +506,8 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                                 mode === "edit" && view === "result" && preparedImageUrl
                                     ? preparedImageUrl
                                     : showResult
-                                    ? preparedImageUrl
-                                    : selectedImageUrl
+                                        ? preparedImageUrl
+                                        : selectedImageUrl
                             }
                             alt="Product"
                             className={cx(
@@ -532,8 +533,8 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                                 isEraserMode={view === "result" && preparedImageUrl}
                                 onCommitStroke={(stroke) => {
                                     // In eraser mode, always commit as "remove" mode (will paint black)
-                                    const effectiveStroke = (view === "result" && preparedImageUrl) 
-                                        ? { ...stroke, mode: "remove" } 
+                                    const effectiveStroke = (view === "result" && preparedImageUrl)
+                                        ? { ...stroke, mode: "remove" }
                                         : stroke;
                                     setStrokeStore(prev => {
                                         const newStrokes = prev.strokes.slice(0, prev.cursor);
