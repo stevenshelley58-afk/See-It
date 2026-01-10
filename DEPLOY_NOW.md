@@ -43,6 +43,8 @@ Required variables (production):
 | `GEMINI_API_KEY` | Google Gemini API key | (from Google AI Studio) |
 | `GOOGLE_CREDENTIALS_JSON` | GCS service account JSON | full JSON (or encoded as your env expects) |
 | `GCS_BUCKET` | GCS bucket name | `see-it-room` |
+| `PRODIA_API_TOKEN` | Prodia API token (product background removal) | (from Prodia dashboard) |
+| `CLIPDROP_API_KEY` | Clipdrop API key (object removal / cleanup) | (from Clipdrop) |
 
 ---
 

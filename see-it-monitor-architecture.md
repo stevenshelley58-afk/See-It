@@ -446,7 +446,7 @@ Error Patterns (Aggregated)
 │  │   [View Details]                                        │   │
 │  │                                                         │   │
 │  │ MASK_GENERATION_FAILED      7    ↓       3    Watching  │   │
-│  │   SAM model returned empty mask                         │   │
+│  │   Segmentation model returned empty mask                 │   │
 │  │   Common with: white backgrounds, glass objects         │   │
 │  │   [View Details]                                        │   │
 │  └─────────────────────────────────────────────────────────┘   │

@@ -38,7 +38,7 @@ export const action = async ({ request }) => {
             ? productId
             : `gid://shopify/Product/${productId}`;
 
-        // Fetch product details from Shopify GraphQL (includes title for Grounded SAM)
+        // Fetch product details from Shopify GraphQL
         const response = await admin.graphql(
             `#graphql
             query getProduct($id: ID!) {
@@ -97,7 +97,7 @@ export const action = async ({ request }) => {
 
         const imageId = product.featuredImage.id;
         const imageUrl = product.featuredImage.url;
-        const productTitle = product.title || null; // For Grounded SAM text-prompted segmentation
+        const productTitle = product.title || null;
 
         logger.info(
             createLogContext("prepare", requestId, "fetch-title", { shopId, productId }),
@@ -151,7 +151,7 @@ export const action = async ({ request }) => {
                         prepStrategy: "manual",
                         sourceImageUrl: String(imageUrl),
                         sourceImageId: String(imageId),
-                        productTitle: productTitle, // Store for Grounded SAM
+                        productTitle: productTitle,
                         retryCount: 0, // Reset retry count so processor picks it up
                         errorMessage: null, // Clear previous error
                         updatedAt: new Date()
@@ -162,7 +162,7 @@ export const action = async ({ request }) => {
                     data: {
                         shopId,
                         productId: String(productId),
-                        productTitle: productTitle, // Store for Grounded SAM
+                        productTitle: productTitle,
                         sourceImageId: String(imageId),
                         sourceImageUrl: String(imageUrl),
                         status: "pending",

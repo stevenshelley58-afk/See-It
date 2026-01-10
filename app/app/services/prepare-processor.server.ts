@@ -136,8 +136,7 @@ async function processPendingAssets(batchRequestId: string) {
                             asset.shopId,
                             asset.productId,
                             asset.id,
-                            itemRequestId,
-                            asset.productTitle ?? undefined // Pass product title for Grounded SAM
+                            itemRequestId
                         );
                         success = true;
 

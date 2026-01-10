@@ -5,7 +5,6 @@ import sharp from "sharp";
 import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
-import { segmentWithGroundedSam, isGroundedSamAvailable, extractObjectType } from "./grounded-sam.server";
 import { uploadToGeminiFiles, isGeminiFileValid, type GeminiFileInfo } from "./gemini-files.server";
 
 // ============================================================================
@@ -71,12 +70,18 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
  */
 function buildCompositePrompt(
     productDescription: string,
-    placement: { x: number; y: number }
+    placement: { x: number; y: number; productWidthFraction?: number }
 ): string {
+    const widthHint =
+        Number.isFinite(placement.productWidthFraction) && (placement.productWidthFraction as number) > 0
+            ? `The product should take up approximately ${(placement.productWidthFraction as number * 100).toFixed(0)}% of the room image width.`
+            : '';
+
     return `You are compositing a product into a room photo for an AR furniture visualization app.
 
 SIZING:
 The user has already sized this product for this location. Minor adjustments for realism are fine, but respect the user's intended size.
+${widthHint ? `\n${widthHint}` : ''}
 
 PLACEMENT:
 Position the product center at approximately x=${placement.x.toFixed(2)}, y=${placement.y.toFixed(2)} (normalized 0-1 coordinates).
@@ -386,17 +391,15 @@ export async function prepareProduct(
     shopId: string,
     productId: string,
     assetId: string,
-    requestId: string = "background-processor",
-    productTitle?: string // Optional product title for Grounded SAM text-prompted segmentation
+    requestId: string = "background-processor"
 ): Promise<PrepareProductResult> {
     const logContext = createLogContext("prepare", requestId, "start", {
         shopId,
         productId,
         assetId,
-        productTitle: productTitle || "(not provided)",
     });
 
-    logger.info(logContext, `Starting product preparation: productId=${productId}, title="${productTitle || 'N/A'}", sourceImageUrl=${sourceImageUrl.substring(0, 80)}...`);
+    logger.info(logContext, `Starting product preparation: productId=${productId}, sourceImageUrl=${sourceImageUrl.substring(0, 80)}...`);
 
     // Track buffers for explicit cleanup to prevent memory leaks
     let imageBuffer: Buffer | null = null;
@@ -450,65 +453,10 @@ export async function prepareProduct(
             );
         }
 
-        // ============================================================================
-        // BACKGROUND REMOVAL STRATEGY:
-        // 1. If productTitle is provided AND Grounded SAM is available -> Use Grounded SAM
-        //    (Text-prompted segmentation: "segment the Mirror" -> only the mirror is kept)
-        // 2. Fallback to @imgly/background-removal-node (generic ML-based removal)
-        // ============================================================================
-
         let lastError: unknown = null;
         let usedMethod: string = "none";
 
-        // Strategy 1: Grounded SAM (text-prompted segmentation)
-        if (productTitle && isGroundedSamAvailable()) {
-            // Extract simplified object type from title for better detection
-            // "Mirror 2" -> "mirror", "Luxury Snowboard Pro" -> "snowboard"
-            const simplifiedPrompt = extractObjectType(productTitle);
-
-            logger.info(
-                { ...logContext, stage: "bg-remove-grounded-sam" },
-                `Attempting Grounded SAM with prompt: "${simplifiedPrompt}" (from title: "${productTitle}")`
-            );
-
-            try {
-                const result = await segmentWithGroundedSam(
-                    sourceImageUrl, // Pass original URL - Replicate can fetch it directly
-                    simplifiedPrompt,
-                    requestId
-                );
-
-                // Convert base64 to buffer
-                outputBuffer = Buffer.from(result.imageBase64, 'base64');
-                usedMethod = "grounded-sam";
-
-                logger.info(
-                    { ...logContext, stage: "bg-remove-grounded-sam" },
-                    `Grounded SAM succeeded, output size: ${outputBuffer.length} bytes`
-                );
-            } catch (groundedSamError) {
-                lastError = groundedSamError;
-                const errorMsg = groundedSamError instanceof Error ? groundedSamError.message : "Unknown error";
-                logger.warn(
-                    { ...logContext, stage: "bg-remove-grounded-sam-failed" },
-                    `Grounded SAM failed, falling back to @imgly: ${errorMsg}`,
-                    groundedSamError
-                );
-                // Continue to fallback
-            }
-        } else if (!productTitle) {
-            logger.info(
-                { ...logContext, stage: "bg-remove" },
-                "No product title provided, using @imgly directly"
-            );
-        } else {
-            logger.info(
-                { ...logContext, stage: "bg-remove" },
-                "Grounded SAM not available (REPLICATE_API_TOKEN not set), using @imgly"
-            );
-        }
-
-        // Strategy 2: Fallback to @imgly/background-removal-node
+        // Background removal: @imgly/background-removal-node
         if (!outputBuffer) {
             logger.info(
                 { ...logContext, stage: "bg-remove" },

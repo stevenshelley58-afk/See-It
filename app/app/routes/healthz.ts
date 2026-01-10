@@ -42,6 +42,19 @@ export const loader = async () => {
     const checks: Record<string, { status: "ok" | "error" | "warning"; message?: string }> = {};
     let overallHealthy = true;
 
+    // Check required envs for key features (non-critical, but prevents silent failures)
+    if (process.env.PRODIA_API_TOKEN) {
+        checks.prodia = { status: "ok" };
+    } else {
+        checks.prodia = { status: "warning", message: "PRODIA_API_TOKEN not configured (product background removal may fail)" };
+    }
+
+    if (process.env.CLIPDROP_API_KEY) {
+        checks.clipdrop = { status: "ok" };
+    } else {
+        checks.clipdrop = { status: "warning", message: "CLIPDROP_API_KEY not configured (object removal / cleanup may fail)" };
+    }
+
     // Check database (critical)
     try {
         await withHealthCheckTimeout(prisma.$queryRaw`SELECT 1`);

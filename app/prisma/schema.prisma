@@ -57,7 +57,7 @@ model ProductAsset {
   id                 String   @id @default(uuid())
   shopId             String   @map("shop_id")
   productId          String   @map("product_id")
-  productTitle       String?  @map("product_title") // Product title for Grounded SAM text prompt
+  productTitle       String?  @map("product_title")
   variantId          String?  @map("variant_id")
   sourceImageId      String   @map("source_image_id")
   sourceImageUrl     String   @map("source_image_url")
