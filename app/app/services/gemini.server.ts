@@ -617,16 +617,17 @@ export async function prepareProduct(
             
             const { width, height, channels } = info;
             
-            // Find bounding box of non-transparent pixels (alpha > 0)
+            // Find bounding box of non-transparent pixels (alpha > 128 to ignore semi-transparent fringes)
             let minX = width, minY = height, maxX = 0, maxY = 0;
             let foundContent = false;
+            const ALPHA_THRESHOLD = 128; // Ignore pixels less than 50% opaque
             
             for (let y = 0; y < height; y++) {
                 for (let x = 0; x < width; x++) {
                     const idx = (y * width + x) * channels;
                     const alpha = data[idx + 3]; // Alpha channel is 4th byte (RGBA)
                     
-                    if (alpha > 0) {
+                    if (alpha > ALPHA_THRESHOLD) {
                         foundContent = true;
                         if (x < minX) minX = x;
                         if (x > maxX) maxX = x;
