@@ -172,20 +172,21 @@ async function generateVariant(
 
   const client = getGeminiClient();
 
+  // Order matches prompt: "The first image is the product cutout. The second image is a real room photo."
   const parts = [
     { text: prompt },
-    { text: "ROOM IMAGE:" },
-    {
-      inlineData: {
-        mimeType: 'image/png',
-        data: roomBuffer.toString('base64')
-      }
-    },
-    { text: "PRODUCT IMAGE:" },
+    { text: "PRODUCT CUTOUT (transparent background, isolated product):" },
     {
       inlineData: {
         mimeType: 'image/png',
         data: productBuffer.toString('base64')
+      }
+    },
+    { text: "CUSTOMER ROOM PHOTO (real room to place product into):" },
+    {
+      inlineData: {
+        mimeType: 'image/png',
+        data: roomBuffer.toString('base64')
       }
     }
   ];
