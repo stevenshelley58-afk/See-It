@@ -3,11 +3,12 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { emitPrepEvent } from "../services/prep-events.server";
+import { setSeeItLiveTag } from "../utils/shopify-tags.server";
 
 /**
  * POST /api/products/update-instructions
  *
- * Update custom render instructions, placement fields, and v2 config for a product asset
+ * Update custom render instructions, placement fields, and See It Now placement rules for a product asset
  *
  * Body (FormData):
  * - productId: Shopify product ID (numeric)
@@ -23,7 +24,7 @@ export const action = async ({ request }) => {
     const logContext = createLogContext("api", requestId, "update-instructions", {});
 
     try {
-        const { session } = await authenticate.admin(request);
+        const { session, admin } = await authenticate.admin(request);
         const shopDomain = session.shop;
 
         const formData = await request.formData();
@@ -45,7 +46,7 @@ export const action = async ({ request }) => {
             }
         }
         
-        // Extract v2 fields
+        // Extract placement rules
         const sceneRole = formData.get("sceneRole")?.toString() || null;
         const replacementRule = formData.get("replacementRule")?.toString() || null;
         const allowSpaceCreationRaw = formData.get("allowSpaceCreation")?.toString();
@@ -59,7 +60,7 @@ export const action = async ({ request }) => {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
         }
         
-        // Validate v2 fields
+        // Validate placement rules
         const validSceneRoles = ['Dominant', 'Integrated'];
         if (sceneRole && !validSceneRoles.includes(sceneRole)) {
             return json({ success: false, error: `Invalid sceneRole. Must be one of: ${validSceneRoles.join(', ')}` }, { status: 400 });
@@ -112,7 +113,7 @@ export const action = async ({ request }) => {
             updateData.placementFields = placementFieldsWithSource;
         }
         
-        // Add v2 fields if provided (also mark as merchant-owned when explicitly set)
+        // Add placement rules if provided (also mark as merchant-owned when explicitly set)
         if (sceneRole !== null) {
             updateData.sceneRole = sceneRole;
         }
@@ -123,7 +124,7 @@ export const action = async ({ request }) => {
             updateData.allowSpaceCreation = allowSpaceCreation;
         }
         
-        // Mark v2 fields as merchant-owned in fieldSource when explicitly set
+        // Mark placement rules as merchant-owned in fieldSource when explicitly set
         if (sceneRole !== null || replacementRule !== null || allowSpaceCreation !== null) {
             const existingFieldSource = asset?.fieldSource ? (typeof asset.fieldSource === 'object' ? asset.fieldSource : {}) : {};
             const updatedFieldSource = { ...existingFieldSource };
@@ -147,6 +148,18 @@ export const action = async ({ request }) => {
                 updateData.status = "ready";
             }
             // If status is not ready/live, don't change it (e.g., preparing, failed, pending)
+
+            // Sync "see-it-live" tag to Shopify product so storefront can conditionally show button
+            // Only sync if we're actually transitioning to/from live status
+            if (updateData.status === "live" || (currentStatus === "live" && !enabled)) {
+                const tagResult = await setSeeItLiveTag(admin, productId, enabled);
+                if (!tagResult.success) {
+                    logger.warn(
+                        { ...logContext, stage: "tag-sync-warning" },
+                        `Failed to sync product tag (non-blocking): ${tagResult.error}`
+                    );
+                }
+            }
 
             // Emit event for monitor
             await emitPrepEvent(
