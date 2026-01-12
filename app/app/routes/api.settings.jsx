@@ -5,7 +5,10 @@ import prisma from "../db.server";
 const DEFAULT_SETTINGS = {
     style_preset: "neutral",
     automation_enabled: false,
-    show_quota: false
+    show_quota: false,
+    seeItPrompt: "",
+    seeItNowPrompt: "",
+    coordinateInstructions: ""
 };
 
 // GET /api/settings — read settings (spec Routes → Admin API)
@@ -34,10 +37,25 @@ export const action = async ({ request }) => {
     }
 
     const body = await request.json();
+    
+    // Merge with existing settings to preserve other fields
+    const shop = await prisma.shop.findUnique({
+        where: { shopDomain: session.shop },
+        select: { settingsJson: true }
+    });
+    
+    const existingSettings = shop?.settingsJson
+        ? JSON.parse(shop.settingsJson)
+        : DEFAULT_SETTINGS;
+    
     const settings = {
-        style_preset: body.style_preset ?? DEFAULT_SETTINGS.style_preset,
-        automation_enabled: body.automation_enabled ?? DEFAULT_SETTINGS.automation_enabled,
-        show_quota: body.show_quota ?? DEFAULT_SETTINGS.show_quota
+        ...existingSettings,
+        style_preset: body.style_preset ?? existingSettings.style_preset ?? DEFAULT_SETTINGS.style_preset,
+        automation_enabled: body.automation_enabled ?? existingSettings.automation_enabled ?? DEFAULT_SETTINGS.automation_enabled,
+        show_quota: body.show_quota ?? existingSettings.show_quota ?? DEFAULT_SETTINGS.show_quota,
+        seeItPrompt: body.seeItPrompt !== undefined ? body.seeItPrompt : (existingSettings.seeItPrompt ?? DEFAULT_SETTINGS.seeItPrompt),
+        seeItNowPrompt: body.seeItNowPrompt !== undefined ? body.seeItNowPrompt : (existingSettings.seeItNowPrompt ?? DEFAULT_SETTINGS.seeItNowPrompt),
+        coordinateInstructions: body.coordinateInstructions !== undefined ? body.coordinateInstructions : (existingSettings.coordinateInstructions ?? DEFAULT_SETTINGS.coordinateInstructions)
     };
 
     await prisma.shop.update({

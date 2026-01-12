@@ -6,7 +6,7 @@
  *   Mobile: Button → Entry screen → Take Photo → Camera → Thinking → Swipe Results
  *   Desktop: Button → File picker → Thinking → Swipe Results
  *
- * Key differences from V2:
+ * This is the simplified instant visualization flow:
  *   - No select grid, just swipe through results
  *   - Mobile shows brief entry screen before camera (can't overlay UI on native camera)
  *   - Consumes whatever number of variants the API returns (not hardcoded to 5)
@@ -332,8 +332,46 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // ============================================================================
-    // API CALLS (matching V2 patterns exactly)
+    // API CALLS
     // ============================================================================
+
+    async function readJsonOrText(res) {
+      const contentType = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
+      const raw = await res.text();
+
+      // Try JSON first if it looks like JSON
+      const looksJson = contentType.includes('application/json') || raw.trim().startsWith('{') || raw.trim().startsWith('[');
+      if (looksJson) {
+        try {
+          return { data: raw ? JSON.parse(raw) : {}, raw };
+        } catch (e) {
+          // fall through to return raw text
+        }
+      }
+
+      // Return as text payload
+      return { data: { message: raw }, raw };
+    }
+
+    function buildHttpErrorMessage({ name, res, payload }) {
+      const status = res?.status;
+      const statusText = res?.statusText;
+      const err = (payload && (payload.error || payload.message)) || `HTTP ${status}`;
+
+      // Special-case: route missing / HTML response (common in Remix 404 pages)
+      const raw = payload?.message || '';
+      const looksLikeHtml = typeof raw === 'string' && raw.trim().startsWith('<!DOCTYPE');
+      if (status === 404 || looksLikeHtml) {
+        return [
+          `${name} failed (HTTP ${status || 404}).`,
+          `This usually means the backend route is not deployed yet.`,
+          `Expected app-proxy route: /app-proxy/see-it-now/render`,
+          `Fix: rebuild + redeploy the backend (the old build won't have this route).`,
+        ].join(' ');
+      }
+
+      return `${name} failed (${status}${statusText ? ` ${statusText}` : ''}): ${err}`;
+    }
 
     async function startSession(contentType = 'image/jpeg') {
       const res = await fetch('/apps/see-it/room/upload', {
@@ -342,13 +380,7 @@ document.addEventListener('DOMContentLoaded', function () {
         body: JSON.stringify({ content_type: contentType }),
       });
 
-      const raw = await res.text();
-      let data = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = { message: raw };
-      }
+      const { data } = await readJsonOrText(res);
 
       if (!res.ok) {
         throw new Error(data.message || data.error || `HTTP ${res.status}`);
@@ -374,14 +406,15 @@ document.addEventListener('DOMContentLoaded', function () {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ room_session_id: sessionId })
       });
-      if (!res.ok) throw new Error('Failed to confirm room');
-      return res.json();
+      const { data } = await readJsonOrText(res);
+      if (!res.ok) throw new Error(buildHttpErrorMessage({ name: 'Confirm room', res, payload: data }));
+      return data;
     }
 
     async function generateImages(roomSessionId, productId) {
       console.log('[See It Now] Generating images...', { roomSessionId, productId });
 
-      const res = await fetch('/apps/see-it/render-v2', {
+      const res = await fetch('/apps/see-it/see-it-now/render', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -390,11 +423,11 @@ document.addEventListener('DOMContentLoaded', function () {
         })
       });
 
-      const data = await res.json();
+      const { data } = await readJsonOrText(res);
       console.log('[See It Now] Generation response:', data);
 
       if (!res.ok) {
-        throw new Error(data.error || data.message || `HTTP ${res.status}`);
+        throw new Error(buildHttpErrorMessage({ name: 'Generate images', res, payload: data }));
       }
 
       if (!data.variants || data.variants.length === 0) {
@@ -616,7 +649,7 @@ document.addEventListener('DOMContentLoaded', function () {
       console.log('[See It Now] Trigger clicked');
       activeTrigger = sourceTrigger || activeTrigger;
 
-      // Read product data (matches V2 format)
+      // Read product data from button
       state.productId = activeTrigger?.dataset.productId || '';
       state.productTitle = activeTrigger?.dataset.productTitle || '';
       state.productImageUrl = activeTrigger?.dataset.productImage || '';

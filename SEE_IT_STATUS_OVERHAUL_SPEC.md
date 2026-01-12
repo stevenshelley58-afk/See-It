@@ -162,7 +162,7 @@ WHERE status IN ('stale', 'orphaned');
 |------|---------|
 | `app/routes/app-proxy.product.prepared.ts` | Check for status="live" (not "ready") |
 | `app/routes/app-proxy.render.ts` | Check for status="live" before allowing render |
-| `app/routes/app-proxy.render-v2.ts` | Check for status="live" before allowing render |
+| `app/routes/app-proxy.see-it-now.render.ts` | Check for status="live" before allowing render |
 | `extensions/see-it-extension/assets/see-it-modal.js` | No changes needed (checks server response) |
 | `extensions/see-it-extension/blocks/*.liquid` | No changes needed |
 

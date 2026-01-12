@@ -283,7 +283,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   
   async function generateImages(roomSessionId, productId) {
-    // POST /apps/see-it/render-v2
+    // POST /apps/see-it/see-it-now/render
     // Returns { session_id, variants: [{ id, image_url }, ...] }
   }
 
@@ -846,7 +846,7 @@ All existing - no backend changes required.
 | `/apps/see-it/room/upload` | POST | `{ content_type }` | `{ sessionId, uploadUrl }` |
 | (signed URL) | PUT | Binary image | 200 OK |
 | `/apps/see-it/room/confirm` | POST | `{ room_session_id }` | `{ roomImageUrl }` |
-| `/apps/see-it/render-v2` | POST | `{ room_session_id, product_id }` | `{ session_id, variants[], duration_ms }` |
+| `/apps/see-it/see-it-now/render` | POST | `{ room_session_id, product_id }` | `{ session_id, variants[], duration_ms }` |
 
 ---
 
@@ -864,7 +864,6 @@ All existing - no backend changes required.
 ## Dependencies
 
 - None (no external libraries)
-- Reuses design tokens from V2 where applicable
 - Custom swipe implementation (~80 lines)
 
 ---

@@ -26,7 +26,7 @@ extensions/see-it-extension/
 │   └── see-it-now.css       ← NEW
 ```
 
-**DO NOT MODIFY** existing V1/V2 files.
+**DO NOT MODIFY** existing V1 files.
 
 ---
 
@@ -34,13 +34,13 @@ extensions/see-it-extension/
 
 | Issue | Fix |
 |-------|-----|
-| Liquid schema | Uses `templates` at top level (matches existing V2, works in current Shopify) |
+| Liquid schema | Uses `templates` at top level (works in current Shopify) |
 | Floating upload link | Removed - now shows entry screen with "or upload a photo" link BEFORE camera trigger |
 | Gemini aspect ratios | Added 21:9 to supported list |
 | Hardcoded 5 images | Carousel now handles any number of variants returned by API |
 | Share logic | Added `navigator.canShare({ files })` check, try/catch, URL fallback, download fallback |
 | CORS on share | Falls back to opening URL in new tab if fetch fails |
-| Product ID format | Uses `product.id` from Liquid (matches V2 exactly) |
+| Product ID format | Uses `product.id` from Liquid |
 | Upload headers | Uses `file.type` from normalized blob, matches signed URL requirements |
 | Response casing | Handles both `sessionId`/`session_id` and `uploadUrl`/`upload_url` |
 
@@ -142,10 +142,10 @@ Body: { "room_session_id": "xxx" }
 
 ### 4. Generate Images
 ```
-POST /apps/see-it/render-v2
+POST /apps/see-it/see-it-now/render
 Body: { "room_session_id": "xxx", "product_id": "123" }
 Response: {
-  "session_id": "v2_xxx",
+  "session_id": "see-it-now_xxx",
   "variants": [
     { "id": "center", "image_url": "https://..." },
     // ... 1 to N variants (not hardcoded)

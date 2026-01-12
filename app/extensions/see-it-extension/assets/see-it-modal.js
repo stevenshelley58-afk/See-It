@@ -46,7 +46,7 @@
 })();
 
 (function() {
-    const VERSION = '1.0.30'; // Fix sizing bug - use actual room image dimensions, not container
+    const VERSION = '1.0.29'; // Fix sizing bug - use actual room image dimensions, not container
     
     // Function to initialize - runs when DOM is ready
     function initSeeIt() {

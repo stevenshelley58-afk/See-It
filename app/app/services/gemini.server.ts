@@ -64,29 +64,49 @@ function findClosestGeminiRatio(width: number, height: number): { label: string;
 /**
  * Build the composition prompt for Gemini image compositing
  * 
- * Uses exact normalized coordinates (0-1) for precise placement.
- * Includes explicit sizing information so Gemini preserves user's intended scale.
- * The placementPrompt provides product-specific rendering guidance (lighting, shadows, materials).
+ * STRICT: Only concatenates merchant-provided prompts. No AI-invented text.
  */
 function buildCompositePrompt(
+    generalPrompt: string,
+    coordinateInstructions: string,
     placementPrompt: string,
-    placement: { x: number; y: number; width_px?: number; height_px?: number; canonical_width?: number; canonical_height?: number }
+    coords: { x: number; y: number; width_px?: number; height_px?: number; center_x_px?: number; center_y_px?: number; canonical_width?: number; canonical_height?: number }
 ): string {
-    // Build coordinates text
-    let coordsText = `(${placement.x.toFixed(2)}, ${placement.y.toFixed(2)})`;
-    if (placement.canonical_width && placement.canonical_height) {
-        const centerX_px = Math.round(placement.x * placement.canonical_width);
-        const centerY_px = Math.round(placement.y * placement.canonical_height);
-        coordsText = `(${centerX_px}, ${centerY_px}) pixels`;
+    const parts: string[] = [];
+    
+    if (generalPrompt?.trim()) {
+        parts.push(generalPrompt.trim());
     }
-
-    return `You are helping an online furniture store customer visualize a product in their home.
-Composite the product image into the room photo so they can see how it would look in their space.
-
-The product image is already scaled to the correct size. Do not resize it.
-Position the product center at approximately ${coordsText}.
-
-${placementPrompt || ''}`;
+    
+    if (coordinateInstructions?.trim()) {
+        // Replace placeholders with actual values
+        let processed = coordinateInstructions.trim();
+        processed = processed.replace(/\{\{X\}\}/g, coords.x.toFixed(2));
+        processed = processed.replace(/\{\{Y\}\}/g, coords.y.toFixed(2));
+        processed = processed.replace(/\{\{WIDTH_PX\}\}/g, String(coords.width_px || ''));
+        processed = processed.replace(/\{\{HEIGHT_PX\}\}/g, String(coords.height_px || ''));
+        
+        // Calculate center_x_px and center_y_px if not provided but we have canonical dimensions
+        let center_x_px = coords.center_x_px;
+        let center_y_px = coords.center_y_px;
+        if (!center_x_px && coords.canonical_width) {
+            center_x_px = Math.round(coords.x * coords.canonical_width);
+        }
+        if (!center_y_px && coords.canonical_height) {
+            center_y_px = Math.round(coords.y * coords.canonical_height);
+        }
+        
+        processed = processed.replace(/\{\{CENTER_X_PX\}\}/g, String(center_x_px || ''));
+        processed = processed.replace(/\{\{CENTER_Y_PX\}\}/g, String(center_y_px || ''));
+        
+        parts.push(processed);
+    }
+    
+    if (placementPrompt?.trim()) {
+        parts.push(placementPrompt.trim());
+    }
+    
+    return parts.join('\n\n');
 }
 
 /**
@@ -773,7 +793,9 @@ export async function compositeScene(
     stylePreset: string = 'neutral',
     requestId: string = "composite",
     placementPrompt?: string,
-    options?: CompositeOptions
+    options?: CompositeOptions,
+    generalPrompt?: string,
+    coordinateInstructions?: string
 ): Promise<CompositeResult> {
     const logContext = createLogContext("render", requestId, "start", {});
 
@@ -879,16 +901,19 @@ export async function compositeScene(
             `Resized product: ${productMetadata.width}×${productMetadata.height} → ${resizedWidth}×${resizedHeight}px, room=${roomWidth}×${roomHeight}`
         );
 
-        // STEP 4: Build the narrative prompt with explicit sizing
-        // Pass the placementPrompt which contains product-specific rendering guidance
-        const promptText = placementPrompt?.trim() || '';
-        const prompt = buildCompositePrompt(promptText, {
-            x: placement.x,
-            y: placement.y,
-            width_px: (placement as any).width_px,
-            canonical_width: (placement as any).canonical_width,
-            canonical_height: (placement as any).canonical_height
-        });
+        // STEP 4: Build the prompt - STRICT: only merchant-provided prompts
+        const prompt = buildCompositePrompt(
+            generalPrompt || '',
+            coordinateInstructions || '',
+            placementPrompt || '',
+            {
+                x: placement.x,
+                y: placement.y,
+                width_px: (placement as any).width_px,
+                canonical_width: (placement as any).canonical_width,
+                canonical_height: (placement as any).canonical_height
+            }
+        );
 
         // Compute closest Gemini-supported aspect ratio
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);

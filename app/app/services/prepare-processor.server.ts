@@ -415,10 +415,10 @@ async function processPendingAssets(batchRequestId: string) {
                     const hasMerchantOwnedPlacementField = Object.values(placementFieldsSource).some(src => src === 'merchant');
                     const shouldGenerateFields = (!placementFields || Object.keys(placementFields).filter(k => k !== 'fieldSource').length === 0) && !hasMerchantOwnedPlacementField;
 
-                    const shouldGenerateV2Rules = (!sceneRole || !replacementRule || allowSpaceCreation === null) &&
+                    const shouldGeneratePlacementRules = (!sceneRole || !replacementRule || allowSpaceCreation === null) &&
                         (!isMerchantOwned('sceneRole') && !isMerchantOwned('replacementRule') && !isMerchantOwned('allowSpaceCreation'));
 
-                    const shouldGeneratePlacement = (shouldGeneratePrompt || shouldGenerateFields || shouldGenerateV2Rules);
+                    const shouldGeneratePlacement = (shouldGeneratePrompt || shouldGenerateFields || shouldGeneratePlacementRules);
 
                     if (shouldGeneratePlacement && asset.productTitle) {
                         try {
@@ -433,7 +433,7 @@ async function processPendingAssets(batchRequestId: string) {
 
                             const extractedFields = extractStructuredFields(productData);
 
-                            // Auto-detect v2 placement rules (same logic as PlacementTab)
+                            // Auto-detect placement rules (same logic as PlacementTab)
                             const largeItemKeywords = ['sofa', 'couch', 'sectional', 'mirror', 'cabinet', 'dresser', 'bookshelf', 'bed', 'table', 'desk', 'console', 'credenza', 'sideboard'];
                             const titleLower = (asset.productTitle || '').toLowerCase();
                             const isLargeItem = largeItemKeywords.some(k => titleLower.includes(k));
@@ -519,8 +519,8 @@ async function processPendingAssets(batchRequestId: string) {
                                 };
                             }
 
-                            // Set v2 fields if not already set and not merchant-owned
-                            if (shouldGenerateV2Rules) {
+                            // Set placement rules if not already set and not merchant-owned
+                            if (shouldGeneratePlacementRules) {
                                 if (!sceneRole && !isMerchantOwned('sceneRole')) {
                                     sceneRole = autoSceneRole;
                                 }
@@ -591,7 +591,7 @@ async function processPendingAssets(batchRequestId: string) {
                         updateData.placementFields = placementFields;
                     }
 
-                    // Only update v2 fields if we have values
+                    // Only update placement rules if we have values
                     if (sceneRole) {
                         updateData.sceneRole = sceneRole;
                     }
@@ -820,6 +820,15 @@ async function processPendingRenderJobs(batchRequestId: string) {
                         });
                     }
 
+                    // Fetch shop for settings
+                    const shop = await prisma.shop.findUnique({
+                        where: { id: job.shopId },
+                        select: { settingsJson: true }
+                    });
+                    const settings = shop?.settingsJson ? JSON.parse(shop.settingsJson) : {};
+                    const generalPrompt = settings.seeItPrompt || '';
+                    const coordinateInstructions = settings.coordinateInstructions || '';
+
                     // 1. Get Product Image URL (generate fresh URL if key is available)
                     const productAsset = await prisma.productAsset.findFirst({
                         where: { shopId: job.shopId, productId: job.productId }
@@ -936,7 +945,9 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                     onPromptBuilt: (telemetry) => {
                                         capturedTelemetry = telemetry;
                                     },
-                                }
+                                },
+                                generalPrompt,
+                                coordinateInstructions
                             );
                             success = true;
                         } catch (error) {

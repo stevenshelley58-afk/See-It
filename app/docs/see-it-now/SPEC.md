@@ -210,7 +210,6 @@ let state = {
 
 ```css
 /* Scoped to .see-it-now-* classes */
-/* Reuse design tokens from V2 where possible */
 /* New: swipe container, dot indicators, slide animations */
 ```
 
@@ -218,15 +217,15 @@ let state = {
 
 **No new endpoints required.**
 
-Reuse existing V2 endpoints:
+See It Now API Endpoints:
 - `POST /apps/see-it/room/upload` - Get signed upload URL
 - `POST /apps/see-it/room/confirm` - Confirm room upload
-- `POST /apps/see-it/render-v2` - Generate 5 variants
+- `POST /apps/see-it/see-it-now/render` - Generate 5 variants
 
-Response from render-v2:
+Response from see-it-now/render:
 ```json
 {
-  "session_id": "v2_xxx_123",
+  "session_id": "see-it-now_xxx_123",
   "variants": [
     { "id": "center", "image_url": "https://..." },
     { "id": "left", "image_url": "https://..." },
@@ -312,7 +311,7 @@ function isMobile() {
 - Merchants can choose which block to add to their theme
 - All three share the same backend infrastructure
 - No database schema changes required
-- Shop allowlist in render-v2.ts still applies
+- Shop allowlist in see-it-now.render.ts still applies
 
 ---
 

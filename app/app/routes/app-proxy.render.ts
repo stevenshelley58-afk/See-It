@@ -99,7 +99,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
     }
 
-    const shop = await prisma.shop.findUnique({ where: { shopDomain: session.shop } });
+    const shop = await prisma.shop.findUnique({ 
+        where: { shopDomain: session.shop },
+        select: { id: true, settingsJson: true }
+    });
     if (!shop) {
         logger.error(
             { ...logContext, stage: "shop-lookup" },
@@ -107,6 +110,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
         return json({ error: "Shop not found" }, { status: 404, headers: corsHeaders });
     }
+
+    // Get shop settings for prompts
+    const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
+    const generalPrompt = settings.seeItPrompt || '';
+    const coordinateInstructions = settings.coordinateInstructions || '';
 
     // Update log context with shop info
     const shopLogContext = { ...logContext, shopId: shop.id, productId: product_id };

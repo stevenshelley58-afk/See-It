@@ -1,5 +1,5 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useSubmit, useRouteError, isRouteErrorResponse } from "@remix-run/react";
+import { useLoaderData, useSubmit, useRouteError, isRouteErrorResponse, useFetcher } from "@remix-run/react";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -7,6 +7,7 @@ import { PLANS } from "../billing";
 import pkg from "../../package.json" with { type: "json" };
 import { GEMINI_IMAGE_MODEL_PRO, MODEL_FOR_COMPOSITING } from "../config/ai-models.config";
 import { PageShell, Card, Button } from "../components/ui";
+import { useEffect, useState } from "react";
 
 export const loader = async ({ request }) => {
   const { session, admin, billing } = await authenticate.admin(request);
@@ -59,18 +60,55 @@ export const loader = async ({ request }) => {
     date: new Date(buildTimestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   };
 
+  // Fetch settings for prompts
+  const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
+
   return json({
     shop,
     isPro,
-    version
+    version,
+    settings: {
+      seeItPrompt: settings.seeItPrompt || "",
+      seeItNowPrompt: settings.seeItNowPrompt || "",
+      coordinateInstructions: settings.coordinateInstructions || ""
+    }
   });
 };
 
 export default function Settings() {
-  const { shop, isPro, version } = useLoaderData();
+  const { shop, isPro, version, settings } = useLoaderData();
   const submit = useSubmit();
+  const fetcher = useFetcher();
+  const [prompts, setPrompts] = useState({
+    seeItPrompt: settings.seeItPrompt || "",
+    seeItNowPrompt: settings.seeItNowPrompt || "",
+    coordinateInstructions: settings.coordinateInstructions || ""
+  });
+  const [saving, setSaving] = useState(false);
 
   const handleUpgrade = () => submit({ plan: "PRO" }, { method: "POST", action: "/api/billing" });
+
+  const handleSavePrompts = () => {
+    setSaving(true);
+    fetcher.submit(
+      {
+        seeItPrompt: prompts.seeItPrompt,
+        seeItNowPrompt: prompts.seeItNowPrompt,
+        coordinateInstructions: prompts.coordinateInstructions
+      },
+      {
+        method: "POST",
+        action: "/api/settings",
+        encType: "application/json"
+      }
+    );
+  };
+
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data) {
+      setSaving(false);
+    }
+  }, [fetcher.state, fetcher.data]);
 
   return (
     <>
@@ -146,6 +184,93 @@ export default function Settings() {
               >
                 <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full transition-transform" />
               </button>
+            </div>
+          </div>
+        </Card>
+
+        {/* AI Prompts */}
+        <Card>
+          <h2 className="font-semibold text-neutral-900 mb-3 md:mb-4 text-sm md:text-base">AI Prompts</h2>
+          
+          {/* Warning Box */}
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-800 font-medium">
+              These prompts are sent EXACTLY as written. Nothing is added or modified by the system.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            {/* See It Prompt */}
+            <div>
+              <label className="block text-sm font-medium text-neutral-900 mb-1.5">
+                See It Prompt
+              </label>
+              <p className="text-xs text-neutral-500 mb-2">
+                This is the prompt used for composite renders. Combined with coordinate instructions and per-product placement prompts.
+              </p>
+              <textarea
+                value={prompts.seeItPrompt}
+                onChange={(e) => setPrompts({ ...prompts, seeItPrompt: e.target.value })}
+                rows={4}
+                className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
+                placeholder="Enter the prompt for See It composite renders..."
+              />
+            </div>
+
+            {/* See It Now Prompt */}
+            <div>
+              <label className="block text-sm font-medium text-neutral-900 mb-1.5">
+                See It Now Prompt
+              </label>
+              <p className="text-xs text-neutral-500 mb-2">
+                This is the prompt used for hero shot renders. Combined with per-product placement prompts.
+              </p>
+              <textarea
+                value={prompts.seeItNowPrompt}
+                onChange={(e) => setPrompts({ ...prompts, seeItNowPrompt: e.target.value })}
+                rows={4}
+                className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
+                placeholder="Enter the prompt for See It Now hero shots..."
+              />
+            </div>
+
+            {/* Coordinate Instructions */}
+            <div>
+              <label className="block text-sm font-medium text-neutral-900 mb-1.5">
+                Coordinate Instructions
+              </label>
+              <p className="text-xs text-neutral-500 mb-2">
+                Optional template for communicating placement coordinates. Use placeholders: <code className="px-1 py-0.5 bg-neutral-100 rounded">{"{{X}}"}</code>, <code className="px-1 py-0.5 bg-neutral-100 rounded">{"{{Y}}"}</code>, <code className="px-1 py-0.5 bg-neutral-100 rounded">{"{{CENTER_X_PX}}"}</code>, <code className="px-1 py-0.5 bg-neutral-100 rounded">{"{{CENTER_Y_PX}}"}</code>, <code className="px-1 py-0.5 bg-neutral-100 rounded">{"{{WIDTH_PX}}"}</code>, <code className="px-1 py-0.5 bg-neutral-100 rounded">{"{{HEIGHT_PX}}"}</code>
+              </p>
+              <textarea
+                value={prompts.coordinateInstructions}
+                onChange={(e) => setPrompts({ ...prompts, coordinateInstructions: e.target.value })}
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent font-mono text-xs"
+                placeholder="Position the product center at ({{CENTER_X_PX}}, {{CENTER_Y_PX}}) pixels."
+              />
+              <div className="mt-2 text-xs text-neutral-500">
+                <p className="font-medium mb-1">Available placeholders:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><code>{"{{X}}"}</code> - Normalized X (0-1)</div>
+                  <div><code>{"{{Y}}"}</code> - Normalized Y (0-1)</div>
+                  <div><code>{"{{CENTER_X_PX}}"}</code> - Center X in pixels</div>
+                  <div><code>{"{{CENTER_Y_PX}}"}</code> - Center Y in pixels</div>
+                  <div><code>{"{{WIDTH_PX}}"}</code> - Product width in pixels</div>
+                  <div><code>{"{{HEIGHT_PX}}"}</code> - Product height in pixels</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex justify-end pt-2">
+              <Button
+                onClick={handleSavePrompts}
+                disabled={saving}
+                variant="primary"
+              >
+                {saving ? "Saving..." : "Save Prompts"}
+              </Button>
             </div>
           </div>
         </Card>
