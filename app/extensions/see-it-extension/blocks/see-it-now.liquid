@@ -1,0 +1,201 @@
+{% schema %}
+{
+  "name": "See It Now",
+  "target": "section",
+  "stylesheet": "see-it-now.css",
+  "javascript": "see-it-now.js",
+  "templates": ["product"],
+  "settings": [
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Button Label",
+      "default": "See It Now"
+    },
+    {
+      "type": "select",
+      "id": "button_style",
+      "label": "Button Style",
+      "options": [
+        { "value": "primary", "label": "Primary" },
+        { "value": "secondary", "label": "Secondary" }
+      ],
+      "default": "primary"
+    }
+  ]
+}
+{% endschema %}
+
+{% if product != blank and product.featured_image != blank %}
+  {% assign product_image_url = product.featured_image | image_url: width: 800 %}
+  {% assign product_image_width = product.featured_image.width | default: 800 %}
+  {% assign product_image_height = product.featured_image.height | default: 800 %}
+  {% assign product_title = product.title | default: "Product" %}
+  {% assign product_price = product.price | money %}
+  {% assign product_collection = product.collections.first.handle | default: '' %}
+
+  {% assign btn_class = 'see-it-now-btn-primary-pill' %}
+  {% if block.settings.button_style == 'secondary' %}
+    {% assign btn_class = 'see-it-now-btn-outline-pill' %}
+  {% endif %}
+
+  <!-- Widget Container -->
+  <div class="see-it-now-widget-hook">
+    <div class="see-it-now-widget-content">
+      <div class="see-it-now-widget-text">
+        <span class="see-it-now-widget-title">See It In Your Space</span>
+        <span class="see-it-now-widget-description">Instant AI visualization</span>
+      </div>
+    </div>
+
+    <button
+      id="see-it-now-trigger"
+      class="{{ btn_class }}"
+      data-product-id="{{ product.id }}"
+      data-product-handle="{{ product.handle }}"
+      data-product-image="{{ product_image_url }}"
+      data-product-title="{{ product_title | escape }}"
+      data-product-price="{{ product_price | escape }}"
+      data-product-collection="{{ product_collection }}"
+      data-shop-domain="{{ shop.domain }}"
+      data-shop-permanent-domain="{{ shop.permanent_domain }}"
+      type="button"
+    >
+      <svg class="see-it-now-icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/>
+      </svg>
+      <svg class="see-it-now-icon-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+      </svg>
+      {{ block.settings.button_label | default: "See It Now" }}
+    </button>
+  </div>
+
+  <!-- Modal -->
+  <div id="see-it-now-modal" class="see-it-now-modal hidden">
+    <div class="see-it-now-modal-content">
+      <div id="see-it-now-global-error" class="see-it-now-hidden"></div>
+
+      <!-- ENTRY SCREEN (Mobile only - shows upload fallback before camera trigger) -->
+      <div id="see-it-now-screen-entry" class="see-it-now-screen">
+        <div class="see-it-now-header">
+          <button class="see-it-now-btn-icon" id="see-it-now-close-entry" aria-label="Close">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+          <div class="see-it-now-header-spacer"></div>
+        </div>
+
+        <div class="see-it-now-entry-content">
+          <div class="see-it-now-entry-product">
+            <img id="see-it-now-entry-product-img" src="{{ product_image_url }}" alt="{{ product_title }}" width="{{ product_image_width }}" height="{{ product_image_height }}" loading="lazy">
+          </div>
+
+          <h1 class="see-it-now-entry-title">See it in your space</h1>
+          <p class="see-it-now-entry-description">Take a photo of your room for an instant AI visualization.</p>
+
+          <div class="see-it-now-entry-actions">
+            <button class="see-it-now-btn-primary-pill" id="see-it-now-btn-camera">
+              <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/></svg>
+              Take Photo
+            </button>
+            <button class="see-it-now-btn-text" id="see-it-now-btn-upload-fallback">
+              or upload a photo
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- THINKING SCREEN -->
+      <div id="see-it-now-screen-thinking" class="see-it-now-screen">
+        <div class="see-it-now-header">
+          <div class="see-it-now-header-spacer"></div>
+          <div class="see-it-now-header-spacer"></div>
+        </div>
+
+        <div class="see-it-now-thinking-content">
+          <div class="see-it-now-thinking-product">
+            <img id="see-it-now-thinking-product-img" src="{{ product_image_url }}" alt="{{ product_title }}" width="{{ product_image_width }}" height="{{ product_image_height }}" loading="lazy">
+          </div>
+
+          <h2 class="see-it-now-thinking-title">Creating your visualization<span class="see-it-now-loading-dots"></span></h2>
+          <p class="see-it-now-thinking-subtitle">AI is placing the product in your room</p>
+
+          <div class="see-it-now-thinking-spinner"></div>
+
+          <p id="see-it-now-thinking-tip" class="see-it-now-thinking-tip">Tip: Good lighting makes the best visualizations</p>
+        </div>
+      </div>
+
+      <!-- RESULT SCREEN -->
+      <div id="see-it-now-screen-result" class="see-it-now-screen">
+        <div class="see-it-now-header">
+          <button class="see-it-now-btn-icon" id="see-it-now-back-result" aria-label="Back">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <div class="see-it-now-header-spacer"></div>
+          <button class="see-it-now-btn-icon" id="see-it-now-close-result" aria-label="Close">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div class="see-it-now-swipe-container" id="see-it-now-swipe-container">
+          <div class="see-it-now-swipe-track" id="see-it-now-swipe-track">
+            <!-- Slides populated by JS -->
+          </div>
+          <div class="see-it-now-nav-left" id="see-it-now-nav-left"></div>
+          <div class="see-it-now-nav-right" id="see-it-now-nav-right"></div>
+          <div class="see-it-now-dots" id="see-it-now-dots">
+            <!-- Dots populated by JS -->
+          </div>
+        </div>
+
+        <div class="see-it-now-result-actions">
+          <button class="see-it-now-btn-primary-pill" id="see-it-now-share">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            Share
+          </button>
+          <div class="see-it-now-result-secondary">
+            <button class="see-it-now-btn-text" id="see-it-now-try-again">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              Try Again
+            </button>
+            <button class="see-it-now-btn-text" id="see-it-now-try-another">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+              Try Another Product
+            </button>
+          </div>
+        </div>
+
+        <div class="see-it-now-version-badge">See It Now</div>
+      </div>
+
+      <!-- ERROR SCREEN -->
+      <div id="see-it-now-screen-error" class="see-it-now-screen">
+        <div class="see-it-now-header">
+          <div class="see-it-now-header-spacer"></div>
+          <div class="see-it-now-header-spacer"></div>
+          <button class="see-it-now-btn-icon" id="see-it-now-close-error" aria-label="Close">
+            <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div class="see-it-now-error-content">
+          <svg class="see-it-now-error-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+          </svg>
+          <h2 class="see-it-now-error-title">Something went wrong</h2>
+          <p class="see-it-now-error-subtitle" id="see-it-now-error-message">We couldn't create your visualization</p>
+          <div class="see-it-now-error-actions">
+            <button class="see-it-now-btn-primary-pill" id="see-it-now-error-retry">Try Again</button>
+            <button class="see-it-now-btn-outline-pill" id="see-it-now-error-close">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hidden File Inputs -->
+      <input type="file" id="see-it-now-camera-input" accept="image/*" capture="environment" style="display: none;">
+      <input type="file" id="see-it-now-upload-input" accept="image/*" style="display: none;">
+    </div>
+  </div>
+{% endif %}
