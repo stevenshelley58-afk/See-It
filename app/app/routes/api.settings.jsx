@@ -8,7 +8,16 @@ const DEFAULT_SETTINGS = {
     show_quota: false,
     seeItPrompt: "",
     seeItNowPrompt: "",
-    coordinateInstructions: ""
+    coordinateInstructions: "",
+    // See It Now variant prompts - each variant gets a unique creative direction
+    seeItNowVariants: [
+        { id: "balanced", prompt: "Place the product in the most visually balanced and natural position for this room." },
+        { id: "left", prompt: "Explore placing the product toward the left side of the scene, where it feels natural." },
+        { id: "right", prompt: "Explore placing the product toward the right side of the scene, where it feels natural." },
+        { id: "prominent", prompt: "Make the product appear slightly more prominent and larger than typical, as if it's the hero of the space." },
+        { id: "subtle", prompt: "Make the product appear slightly more subtle and smaller than typical, letting the room breathe." },
+        { id: "creative", prompt: "Try an unexpected but aesthetically pleasing placement that showcases the product beautifully." }
+    ]
 };
 
 // GET /api/settings — read settings (spec Routes → Admin API)
@@ -55,7 +64,8 @@ export const action = async ({ request }) => {
         show_quota: body.show_quota ?? existingSettings.show_quota ?? DEFAULT_SETTINGS.show_quota,
         seeItPrompt: body.seeItPrompt !== undefined ? body.seeItPrompt : (existingSettings.seeItPrompt ?? DEFAULT_SETTINGS.seeItPrompt),
         seeItNowPrompt: body.seeItNowPrompt !== undefined ? body.seeItNowPrompt : (existingSettings.seeItNowPrompt ?? DEFAULT_SETTINGS.seeItNowPrompt),
-        coordinateInstructions: body.coordinateInstructions !== undefined ? body.coordinateInstructions : (existingSettings.coordinateInstructions ?? DEFAULT_SETTINGS.coordinateInstructions)
+        coordinateInstructions: body.coordinateInstructions !== undefined ? body.coordinateInstructions : (existingSettings.coordinateInstructions ?? DEFAULT_SETTINGS.coordinateInstructions),
+        seeItNowVariants: body.seeItNowVariants !== undefined ? body.seeItNowVariants : (existingSettings.seeItNowVariants ?? DEFAULT_SETTINGS.seeItNowVariants)
     };
 
     await prisma.shop.update({

@@ -63,6 +63,16 @@ export const loader = async ({ request }) => {
   // Fetch settings for prompts
   const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
 
+  // Default variant prompts
+  const defaultVariants = [
+    { id: "balanced", prompt: "Place the product in the most visually balanced and natural position for this room." },
+    { id: "left", prompt: "Explore placing the product toward the left side of the scene, where it feels natural." },
+    { id: "right", prompt: "Explore placing the product toward the right side of the scene, where it feels natural." },
+    { id: "prominent", prompt: "Make the product appear slightly more prominent and larger than typical, as if it's the hero of the space." },
+    { id: "subtle", prompt: "Make the product appear slightly more subtle and smaller than typical, letting the room breathe." },
+    { id: "creative", prompt: "Try an unexpected but aesthetically pleasing placement that showcases the product beautifully." }
+  ];
+
   return json({
     shop,
     isPro,
@@ -70,7 +80,8 @@ export const loader = async ({ request }) => {
     settings: {
       seeItPrompt: settings.seeItPrompt || "",
       seeItNowPrompt: settings.seeItNowPrompt || "",
-      coordinateInstructions: settings.coordinateInstructions || ""
+      coordinateInstructions: settings.coordinateInstructions || "",
+      seeItNowVariants: settings.seeItNowVariants || defaultVariants
     }
   });
 };
@@ -82,7 +93,8 @@ export default function Settings() {
   const [prompts, setPrompts] = useState({
     seeItPrompt: settings.seeItPrompt || "",
     seeItNowPrompt: settings.seeItNowPrompt || "",
-    coordinateInstructions: settings.coordinateInstructions || ""
+    coordinateInstructions: settings.coordinateInstructions || "",
+    seeItNowVariants: settings.seeItNowVariants || []
   });
   const [saving, setSaving] = useState(false);
 
@@ -94,7 +106,8 @@ export default function Settings() {
       {
         seeItPrompt: prompts.seeItPrompt,
         seeItNowPrompt: prompts.seeItNowPrompt,
-        coordinateInstructions: prompts.coordinateInstructions
+        coordinateInstructions: prompts.coordinateInstructions,
+        seeItNowVariants: prompts.seeItNowVariants
       },
       {
         method: "POST",
@@ -102,6 +115,25 @@ export default function Settings() {
         encType: "application/json"
       }
     );
+  };
+
+  const updateVariantPrompt = (index, newPrompt) => {
+    const newVariants = [...prompts.seeItNowVariants];
+    newVariants[index] = { ...newVariants[index], prompt: newPrompt };
+    setPrompts({ ...prompts, seeItNowVariants: newVariants });
+  };
+
+  const addVariant = () => {
+    const newId = `custom_${Date.now()}`;
+    setPrompts({
+      ...prompts,
+      seeItNowVariants: [...prompts.seeItNowVariants, { id: newId, prompt: "" }]
+    });
+  };
+
+  const removeVariant = (index) => {
+    const newVariants = prompts.seeItNowVariants.filter((_, i) => i !== index);
+    setPrompts({ ...prompts, seeItNowVariants: newVariants });
   };
 
   useEffect(() => {
@@ -259,6 +291,66 @@ export default function Settings() {
                   <div><code>{"{{WIDTH_PX}}"}</code> - Product width in pixels</div>
                   <div><code>{"{{HEIGHT_PX}}"}</code> - Product height in pixels</div>
                 </div>
+              </div>
+            </div>
+
+            {/* See It Now Variant Prompts */}
+            <div className="border-t border-neutral-200 pt-4 mt-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-neutral-900">
+                  See It Now Variants ({prompts.seeItNowVariants?.length || 0})
+                </label>
+                <button
+                  type="button"
+                  onClick={addVariant}
+                  className="text-xs px-2 py-1 bg-neutral-100 hover:bg-neutral-200 rounded-md text-neutral-700 transition-colors"
+                >
+                  + Add Variant
+                </button>
+              </div>
+              <p className="text-xs text-neutral-500 mb-3">
+                Each variant generates a separate image with its own creative direction. More variants = more options but longer generation time.
+              </p>
+              
+              <div className="space-y-3">
+                {prompts.seeItNowVariants?.map((variant, index) => (
+                  <div key={variant.id} className="relative group">
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-neutral-100 text-neutral-500 text-xs flex items-center justify-center mt-2">
+                        {index + 1}
+                      </span>
+                      <div className="flex-1">
+                        <input
+                          type="text"
+                          value={variant.prompt}
+                          onChange={(e) => updateVariantPrompt(index, e.target.value)}
+                          className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
+                          placeholder="Enter creative direction for this variant..."
+                        />
+                        <span className="text-xs text-neutral-400 mt-1 block">{variant.id}</span>
+                      </div>
+                      {prompts.seeItNowVariants.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeVariant(index)}
+                          className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-2 text-neutral-400 hover:text-red-500"
+                          title="Remove variant"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-xs text-amber-800">
+                  <strong>Tip:</strong> Each variant runs in parallel. 6 variants ≈ same time as 1, but uses 6× the quota. 
+                  Mix placement (left/right/center) with size (prominent/subtle) for best coverage.
+                </p>
               </div>
             </div>
 

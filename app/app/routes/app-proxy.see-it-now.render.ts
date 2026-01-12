@@ -21,17 +21,21 @@ import { GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 
 // ============================================================================
-// PLACEMENT VARIANTS - 5 different AI-guided placements
+// PLACEMENT VARIANTS - Default fallback if no settings configured
 // ============================================================================
-const PLACEMENT_VARIANTS = [
-  { id: 'center', hint: 'Center', variation: 'Center' },
-  { id: 'left', hint: 'Slightly left', variation: 'Slightly left' },
-  { id: 'right', hint: 'Slightly right', variation: 'Slightly right' },
-  { id: 'higher', hint: 'Slightly higher (if wall-based) or slightly forward (if floor-based)', variation: 'Slightly higher' },
-  { id: 'lower', hint: 'Slightly lower (if wall-based) or slightly back (if floor-based)', variation: 'Slightly lower' },
-] as const;
+const DEFAULT_VARIANTS = [
+  { id: 'balanced', prompt: 'Place the product in the most visually balanced and natural position for this room.' },
+  { id: 'left', prompt: 'Explore placing the product toward the left side of the scene, where it feels natural.' },
+  { id: 'right', prompt: 'Explore placing the product toward the right side of the scene, where it feels natural.' },
+  { id: 'prominent', prompt: 'Make the product appear slightly more prominent and larger than typical, as if it\'s the hero of the space.' },
+  { id: 'subtle', prompt: 'Make the product appear slightly more subtle and smaller than typical, letting the room breathe.' },
+  { id: 'creative', prompt: 'Try an unexpected but aesthetically pleasing placement that showcases the product beautifully.' },
+];
 
-type VariantId = typeof PLACEMENT_VARIANTS[number]['id'];
+interface VariantConfig {
+  id: string;
+  prompt: string;
+}
 
 // ============================================================================
 // CORS Headers
@@ -123,11 +127,12 @@ interface PlacementFields {
 
 // ============================================================================
 // Build Hero Shot Prompt
-// STRICT: Only concatenates merchant-provided prompts. No AI-invented text.
+// Concatenates: general prompt + product placement + variant creative direction
 // ============================================================================
 function buildHeroShotPrompt(
   generalPrompt: string,
-  placementPrompt: string
+  placementPrompt: string,
+  variantDirection: string
 ): string {
   const parts: string[] = [];
   if (generalPrompt?.trim()) {
@@ -135,6 +140,10 @@ function buildHeroShotPrompt(
   }
   if (placementPrompt?.trim()) {
     parts.push(placementPrompt.trim());
+  }
+  // Add variant-specific creative direction
+  if (variantDirection?.trim()) {
+    parts.push(`CREATIVE DIRECTION FOR THIS VARIANT: ${variantDirection.trim()}`);
   }
   return parts.join('\n\n');
 }
@@ -145,11 +154,11 @@ function buildHeroShotPrompt(
 async function generateVariant(
   roomBuffer: Buffer,
   productBuffer: Buffer,
-  variant: { id: string; hint: string; variation: string },
+  variant: VariantConfig,
   generalPrompt: string,
   placementPrompt: string,
   logContext: ReturnType<typeof createLogContext>
-): Promise<{ id: string; base64: string; hint: string }> {
+): Promise<{ id: string; base64: string; direction: string }> {
   const variantLogContext = { ...logContext, variantId: variant.id };
 
   logger.info(
@@ -158,7 +167,8 @@ async function generateVariant(
   );
 
   const startTime = Date.now();
-  const prompt = buildHeroShotPrompt(generalPrompt, placementPrompt);
+  // Include the variant's creative direction in the prompt
+  const prompt = buildHeroShotPrompt(generalPrompt, placementPrompt, variant.prompt);
 
   const client = getGeminiClient();
 
@@ -202,7 +212,7 @@ async function generateVariant(
         return {
           id: variant.id,
           base64: part.inlineData.data,
-          hint: variant.hint,
+          direction: variant.prompt,
         };
       }
     }
@@ -433,9 +443,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Generate a unique session ID for this See It Now render batch
     const seeItNowSessionId = `see-it-now_${room_session_id}_${Date.now()}`;
 
-    // Get shop settings for prompts
+    // Get shop settings for prompts and variants
     const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
     const generalPrompt = settings.seeItNowPrompt || '';
+    
+    // Get variant configurations from settings, or use defaults
+    const variants: VariantConfig[] = settings.seeItNowVariants?.length > 0 
+      ? settings.seeItNowVariants 
+      : DEFAULT_VARIANTS;
 
     // Compute effective placement prompt: prefer renderInstructionsSeeItNow, fallback to renderInstructions
     const now = productAsset?.renderInstructionsSeeItNow?.trim();
@@ -445,11 +460,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Log prompt source, length (never content)
     logger.info(
       { ...shopLogContext, stage: "prompt-selection" },
-      `[See It Now] Using prompt source: ${now ? 'seeItNow' : 'fallback'}, placementPrompt length: ${placementPrompt.length}, generalPrompt length: ${generalPrompt.length}`
+      `[See It Now] Using prompt source: ${now ? 'seeItNow' : 'fallback'}, placementPrompt length: ${placementPrompt.length}, generalPrompt length: ${generalPrompt.length}, variants: ${variants.length}`
     );
 
-    // Generate all 5 variants in PARALLEL
-    const variantPromises = PLACEMENT_VARIANTS.map(variant =>
+    // Generate all variants in PARALLEL
+    const variantPromises = variants.map(variant =>
       generateVariant(
         roomBuffer,
         productBuffer,
@@ -483,7 +498,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         .then(result => ({
           id: result.id,
           image_url: result.imageUrl,
-          hint: variant.hint,
+          direction: variant.direction,
         }))
     );
 
