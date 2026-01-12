@@ -21,15 +21,19 @@ import { GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 
 // ============================================================================
-// PLACEMENT VARIANTS - Default fallback if no settings configured
+// PLACEMENT VARIANTS - 10 variants focused on accurate placement and sizing
 // ============================================================================
 const DEFAULT_VARIANTS = [
-  { id: 'balanced', prompt: 'Place the product in the most visually balanced and natural position for this room.' },
-  { id: 'left', prompt: 'Explore placing the product toward the left side of the scene, where it feels natural.' },
-  { id: 'right', prompt: 'Explore placing the product toward the right side of the scene, where it feels natural.' },
-  { id: 'prominent', prompt: 'Make the product appear slightly more prominent and larger than typical, as if it\'s the hero of the space.' },
-  { id: 'subtle', prompt: 'Make the product appear slightly more subtle and smaller than typical, letting the room breathe.' },
-  { id: 'creative', prompt: 'Try an unexpected but aesthetically pleasing placement that showcases the product beautifully.' },
+  { id: 'center-accurate', prompt: 'Place the product in the center of the scene at the exact size specified in the product description.' },
+  { id: 'center-larger', prompt: 'Place the product in the center of the scene, sized 15% larger than the dimensions specified.' },
+  { id: 'center-smaller', prompt: 'Place the product in the center of the scene, sized 15% smaller than the dimensions specified.' },
+  { id: 'left-accurate', prompt: 'Place the product toward the left third of the scene at the exact size specified in the product description.' },
+  { id: 'left-larger', prompt: 'Place the product toward the left third of the scene, sized 15% larger than the dimensions specified.' },
+  { id: 'right-accurate', prompt: 'Place the product toward the right third of the scene at the exact size specified in the product description.' },
+  { id: 'right-larger', prompt: 'Place the product toward the right third of the scene, sized 15% larger than the dimensions specified.' },
+  { id: 'far-left', prompt: 'Place the product near the left edge of the scene at the exact size specified in the product description.' },
+  { id: 'far-right', prompt: 'Place the product near the right edge of the scene at the exact size specified in the product description.' },
+  { id: 'prominent', prompt: 'Place the product where it would be most visually prominent, sized 20% larger than specified to emphasize its presence.' },
 ];
 
 interface VariantConfig {
