@@ -110,7 +110,20 @@ async function downloadToBuffer(
 }
 
 // ============================================================================
+// Types for structured placement fields
+// ============================================================================
+interface PlacementFields {
+  surface?: 'floor' | 'wall' | 'table' | 'ceiling' | 'shelf' | 'other' | null;
+  material?: 'fabric' | 'wood' | 'metal' | 'glass' | 'ceramic' | 'stone' | 'leather' | 'mixed' | 'other' | null;
+  orientation?: 'upright' | 'flat' | 'leaning' | 'wall-mounted' | 'hanging' | 'draped' | 'other' | null;
+  shadow?: 'contact' | 'cast' | 'soft' | 'none' | null;
+  dimensions?: { height?: number | null; width?: number | null } | null;
+  additionalNotes?: string | null;
+}
+
+// ============================================================================
 // Build Hero Shot Prompt
+// Uses ALL extracted + merchant-confirmed data for best render quality
 // ============================================================================
 function buildHeroShotPrompt(
   placementPrompt: string | null,
@@ -119,81 +132,176 @@ function buildHeroShotPrompt(
     sceneRole: string | null;
     replacementRule: string | null;
     allowSpaceCreation: boolean | null;
-  } | null
+  } | null,
+  placementFields: PlacementFields | null
 ): string {
-  // If placement rules missing, fall back to simple prompt
-  if (!placementRulesConfig || !placementRulesConfig.sceneRole || !placementRulesConfig.replacementRule) {
-    return `Place this furniture naturally into this room photograph.
-
-PRODUCT:
-${placementPrompt || 'Furniture piece'}
-
-PLACEMENT GUIDANCE:
-${variant.hint}
-
-Look at the room and choose the most logical position following the guidance above.
-
-RULES:
-- Match the room's existing lighting and color temperature
-- Add natural contact shadow where product meets the floor/surface
-- Keep the product's exact proportions - do not stretch or distort
-- Make it look like a professional interior photograph
-- Do not modify anything else in the room`;
-  }
-
-  // Build placement-aware prompt
   const parts: string[] = [];
 
-  parts.push(`PRODUCT:`);
-  parts.push(`${placementPrompt || 'Furniture piece'}`);
-  parts.push(``);
-
-  // Scene Role placement rules
-  parts.push(`SCENE ROLE: ${placementRulesConfig.sceneRole}`);
-  if (placementRulesConfig.sceneRole === 'Dominant') {
-    parts.push(`- Place as a main object in the room.`);
-    parts.push(`- Prefer a clear wall or primary open area.`);
-    parts.push(`- Do not place on surfaces or inside decor clusters.`);
-  } else if (placementRulesConfig.sceneRole === 'Integrated') {
-    parts.push(`- Place as part of the existing scene.`);
-    parts.push(`- Use an appropriate surface or grouping.`);
-    parts.push(`- Do not center or hero the product.`);
+  // =========================================================================
+  // SECTION 1: PRODUCT IDENTITY (Prose description)
+  // The merchant-approved prose that describes what the product looks like
+  // =========================================================================
+  parts.push(`═══════════════════════════════════════════════════════════════════`);
+  parts.push(`PRODUCT DESCRIPTION`);
+  parts.push(`═══════════════════════════════════════════════════════════════════`);
+  if (placementPrompt?.trim()) {
+    parts.push(placementPrompt.trim());
+  } else {
+    parts.push(`Furniture/home decor piece (refer to product image for appearance).`);
   }
   parts.push(``);
 
-  // Replacement rules
-  parts.push(`REPLACEMENT RULE: ${placementRulesConfig.replacementRule}`);
-  if (placementRulesConfig.replacementRule === 'Same Role Only') {
-    parts.push(`- Replace only an object with the same purpose.`);
-  } else if (placementRulesConfig.replacementRule === 'Similar Size or Position') {
-    parts.push(`- Replace an object in the same wall or floor position.`);
-  } else if (placementRulesConfig.replacementRule === 'Any Blocking Object') {
-    parts.push(`- Remove a smaller object if it blocks placement.`);
-  } else if (placementRulesConfig.replacementRule === 'None') {
-    parts.push(`- Do not remove anything.`);
+  // =========================================================================
+  // SECTION 2: PHYSICAL PROPERTIES (Structured metadata)
+  // Extracted/confirmed structured data about the product
+  // =========================================================================
+  if (placementFields && (placementFields.surface || placementFields.material || placementFields.orientation || placementFields.dimensions)) {
+    parts.push(`═══════════════════════════════════════════════════════════════════`);
+    parts.push(`PHYSICAL PROPERTIES`);
+    parts.push(`═══════════════════════════════════════════════════════════════════`);
+    
+    // Surface type determines WHERE it goes
+    if (placementFields.surface && placementFields.surface !== 'other') {
+      const surfaceDescriptions: Record<string, string> = {
+        floor: 'Floor-standing piece - place directly on floor, ensure all legs/base contact surface',
+        wall: 'Wall piece - mount or lean against wall at appropriate height',
+        table: 'Tabletop item - place on a table, console, or shelf surface',
+        ceiling: 'Ceiling-mounted - hangs from above, cast shadow downward',
+        shelf: 'Shelf item - place on shelving, bookcase, or display unit',
+      };
+      parts.push(`• Surface: ${surfaceDescriptions[placementFields.surface] || placementFields.surface}`);
+    }
+    
+    // Material affects how light interacts
+    if (placementFields.material && placementFields.material !== 'other') {
+      const materialLighting: Record<string, string> = {
+        fabric: 'Fabric - soft light absorption, matte appearance, subtle texture shadows',
+        wood: 'Wood - warm tones, visible grain, slight sheen on polished areas',
+        metal: 'Metal - reflective highlights, may mirror surroundings, hard shadows',
+        glass: 'Glass - transparent/translucent, refractions, may show room reflections',
+        ceramic: 'Ceramic - smooth or textured glaze, subtle reflections on glazed areas',
+        stone: 'Stone - matte natural texture, minimal reflection, organic color variation',
+        leather: 'Leather - soft sheen, texture creases, absorbs light on matte areas',
+        mixed: 'Mixed materials - handle each material surface appropriately',
+      };
+      parts.push(`• Material: ${materialLighting[placementFields.material] || placementFields.material}`);
+    }
+    
+    // Orientation affects positioning
+    if (placementFields.orientation && placementFields.orientation !== 'other') {
+      const orientationGuide: Record<string, string> = {
+        upright: 'Upright - standing vertical, base on surface',
+        flat: 'Flat - lying horizontal (rug, mat, tray)',
+        leaning: 'Leaning - tilted against wall at shallow angle',
+        'wall-mounted': 'Wall-mounted - fixed to wall, parallel to wall surface',
+        hanging: 'Hanging - suspended from above, may sway slightly',
+        draped: 'Draped - soft goods flowing over surface or form',
+      };
+      parts.push(`• Orientation: ${orientationGuide[placementFields.orientation] || placementFields.orientation}`);
+    }
+    
+    // Dimensions for accurate scale
+    if (placementFields.dimensions) {
+      const dims: string[] = [];
+      if (placementFields.dimensions.height) dims.push(`${placementFields.dimensions.height}cm tall`);
+      if (placementFields.dimensions.width) dims.push(`${placementFields.dimensions.width}cm wide`);
+      if (dims.length > 0) {
+        parts.push(`• Real-world size: ${dims.join(', ')} - MATCH THIS SCALE EXACTLY`);
+      }
+    }
+    
+    // Shadow type for realism
+    if (placementFields.shadow && placementFields.shadow !== 'none') {
+      const shadowGuide: Record<string, string> = {
+        contact: 'Contact shadow - soft shadow where product touches surface',
+        cast: 'Cast shadow - distinct shadow projection based on light direction',
+        soft: 'Soft shadow - diffused ambient shadow, no hard edges',
+      };
+      parts.push(`• Shadow: ${shadowGuide[placementFields.shadow] || placementFields.shadow}`);
+    }
+    
+    // Merchant's additional notes
+    if (placementFields.additionalNotes?.trim()) {
+      parts.push(`• Special notes: ${placementFields.additionalNotes.trim()}`);
+    }
+    
+    parts.push(``);
   }
-  parts.push(``);
 
-  // Space creation
-  parts.push(`SPACE CREATION: ${placementRulesConfig.allowSpaceCreation ? 'Yes' : 'No'}`);
-  if (placementRulesConfig.allowSpaceCreation === true) {
-    parts.push(`- If the product does not fit, remove or push back a small blocking object.`);
-    parts.push(`- Changes must be minimal.`);
+  // =========================================================================
+  // SECTION 3: PLACEMENT RULES (Scene integration strategy)
+  // How this product should integrate into the room scene
+  // =========================================================================
+  if (placementRulesConfig && (placementRulesConfig.sceneRole || placementRulesConfig.replacementRule)) {
+    parts.push(`═══════════════════════════════════════════════════════════════════`);
+    parts.push(`PLACEMENT STRATEGY`);
+    parts.push(`═══════════════════════════════════════════════════════════════════`);
+    
+    // Scene Role
+    if (placementRulesConfig.sceneRole) {
+      parts.push(`Scene Role: ${placementRulesConfig.sceneRole}`);
+      if (placementRulesConfig.sceneRole === 'Dominant') {
+        parts.push(`  → Place as a MAIN focal piece in the room`);
+        parts.push(`  → Prefer clear walls or primary open areas`);
+        parts.push(`  → Do NOT place on existing surfaces or inside decor clusters`);
+      } else if (placementRulesConfig.sceneRole === 'Integrated') {
+        parts.push(`  → Place as part of the existing scene arrangement`);
+        parts.push(`  → Use an appropriate surface or grouping with other items`);
+        parts.push(`  → Do NOT center or hero the product`);
+      }
+    }
+    
+    // Replacement Rule
+    if (placementRulesConfig.replacementRule) {
+      parts.push(`Replacement Rule: ${placementRulesConfig.replacementRule}`);
+      if (placementRulesConfig.replacementRule === 'Same Role Only') {
+        parts.push(`  → May replace an existing object with the SAME purpose only`);
+      } else if (placementRulesConfig.replacementRule === 'Similar Size or Position') {
+        parts.push(`  → May replace an object in a similar wall/floor position`);
+      } else if (placementRulesConfig.replacementRule === 'Any Blocking Object') {
+        parts.push(`  → May remove a smaller object if it blocks ideal placement`);
+      } else if (placementRulesConfig.replacementRule === 'None') {
+        parts.push(`  → Do NOT remove or replace any existing objects`);
+      }
+    }
+    
+    // Space Creation
+    if (placementRulesConfig.allowSpaceCreation !== null) {
+      parts.push(`Space Creation: ${placementRulesConfig.allowSpaceCreation ? 'Allowed' : 'Not allowed'}`);
+      if (placementRulesConfig.allowSpaceCreation) {
+        parts.push(`  → If product doesn't fit, may minimally adjust small blocking items`);
+      }
+    }
+    
+    parts.push(``);
   }
-  parts.push(``);
 
-  // Variation instruction
-  parts.push(`VARIATION: ${variant.variation}`);
+  // =========================================================================
+  // SECTION 4: POSITION VARIANT
+  // The specific position variation for this render
+  // =========================================================================
+  parts.push(`═══════════════════════════════════════════════════════════════════`);
+  parts.push(`POSITION VARIANT: ${variant.variation.toUpperCase()}`);
+  parts.push(`═══════════════════════════════════════════════════════════════════`);
   parts.push(`${variant.hint}`);
   parts.push(``);
 
-  // Hard realism rules (always)
-  parts.push(`HARD REALISM RULES (always):`);
-  parts.push(`- Do not redesign the room.`);
-  parts.push(`- Do not move furniture unless allowed.`);
-  parts.push(`- Match real scale using dimensions.`);
-  parts.push(`- Match lighting, perspective, and grain.`);
-  parts.push(`- Do not invent objects, text, people, or reflections.`);
+  // =========================================================================
+  // SECTION 5: HARD REALISM RULES (Non-negotiable)
+  // These rules ALWAYS apply, no exceptions
+  // =========================================================================
+  parts.push(`═══════════════════════════════════════════════════════════════════`);
+  parts.push(`HARD RULES (ALWAYS FOLLOW)`);
+  parts.push(`═══════════════════════════════════════════════════════════════════`);
+  parts.push(`✓ Match the room's existing lighting direction and color temperature`);
+  parts.push(`✓ Match the room's perspective and camera angle exactly`);
+  parts.push(`✓ Add appropriate shadow based on room lighting (see Shadow type above)`);
+  parts.push(`✓ Keep the product's EXACT proportions - never stretch or distort`);
+  parts.push(`✓ If dimensions given, scale product to match real-world size`);
+  parts.push(`✗ Do NOT redesign or modify the room architecture`);
+  parts.push(`✗ Do NOT move existing furniture unless replacement rule allows`);
+  parts.push(`✗ Do NOT invent objects, text, people, or reflections`);
+  parts.push(`✗ Do NOT add decorations, props, or styling not in original images`);
 
   return parts.join('\n');
 }
@@ -211,6 +319,7 @@ async function generateVariant(
     replacementRule: string | null;
     allowSpaceCreation: boolean | null;
   } | null,
+  placementFields: PlacementFields | null,
   logContext: ReturnType<typeof createLogContext>
 ): Promise<{ id: string; base64: string; hint: string }> {
   const variantLogContext = { ...logContext, variantId: variant.id };
@@ -221,7 +330,7 @@ async function generateVariant(
   );
 
   const startTime = Date.now();
-  const prompt = buildHeroShotPrompt(placementPrompt, variant, placementRulesConfig);
+  const prompt = buildHeroShotPrompt(placementPrompt, variant, placementRulesConfig, placementFields);
 
   const client = getGeminiClient();
 
@@ -410,7 +519,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  // Fetch ProductAsset (including placement rules)
+  // Fetch ProductAsset (including placement rules AND structured fields)
   const productAsset = await prisma.productAsset.findFirst({
     where: { shopId: shop.id, productId: product_id },
     select: {
@@ -424,6 +533,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       sceneRole: true,
       replacementRule: true,
       allowSpaceCreation: true,
+      placementFields: true, // Structured metadata: surface, material, orientation, shadow, dimensions, additionalNotes
     }
   });
 
@@ -499,16 +609,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       allowSpaceCreation: productAsset.allowSpaceCreation,
     } : null;
 
+    // Parse placementFields from JSON (stored as Prisma Json type)
+    let parsedPlacementFields: PlacementFields | null = null;
+    if (productAsset?.placementFields && typeof productAsset.placementFields === 'object') {
+      parsedPlacementFields = productAsset.placementFields as PlacementFields;
+    }
+
     // Compute effective prompt: prefer renderInstructionsSeeItNow, fallback to renderInstructions
     const now = productAsset?.renderInstructionsSeeItNow?.trim();
     const fallback = productAsset?.renderInstructions?.trim();
     const effectivePrompt = now ? now : (fallback ? fallback : null);
     const promptSource = now ? 'seeItNow' : 'fallback';
 
-    // Log prompt source and length (never prompt content)
+    // Log prompt source, length, and structured fields status (never content)
     logger.info(
       { ...shopLogContext, stage: "prompt-selection" },
-      `[See It Now] Using prompt source: ${promptSource}, length: ${(effectivePrompt || '').length}`
+      `[See It Now] Using prompt source: ${promptSource}, length: ${(effectivePrompt || '').length}, hasPlacementFields: ${!!parsedPlacementFields}, surface: ${parsedPlacementFields?.surface || 'none'}, material: ${parsedPlacementFields?.material || 'none'}`
     );
 
     // Generate all 5 variants in PARALLEL
@@ -519,6 +635,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         variant,
         effectivePrompt,
         placementRulesConfig,
+        parsedPlacementFields,
         shopLogContext
       ).catch(error => {
         logger.error(
