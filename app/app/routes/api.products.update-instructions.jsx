@@ -32,7 +32,7 @@ export const action = async ({ request }) => {
         const instructions = formData.get("instructions")?.toString() ?? "";
         
         // Extract instructionsSeeItNow (3-state: missing = no change, empty = null, value = trimmed text)
-        let instructionsSeeItNow: string | null | undefined = undefined;
+        let instructionsSeeItNow = undefined;
         if (formData.has("instructionsSeeItNow")) {
             const raw = formData.get("instructionsSeeItNow")?.toString() ?? "";
             instructionsSeeItNow = raw.trim() || null;
@@ -98,18 +98,7 @@ export const action = async ({ request }) => {
         });
 
         // Prepare update data
-        const updateData: {
-            renderInstructions: string | null;
-            renderInstructionsSeeItNow?: string | null;
-            updatedAt: Date;
-            placementFields?: any;
-            sceneRole?: string | null;
-            replacementRule?: string | null;
-            allowSpaceCreation?: boolean | null;
-            enabled?: boolean;
-            status?: string;
-            fieldSource?: any;
-        } = {
+        const updateData = {
             renderInstructions: instructions.trim() || null,
             updatedAt: new Date(),
         };
