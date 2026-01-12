@@ -63,18 +63,18 @@ export const loader = async ({ request }) => {
   // Fetch settings for prompts
   const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
 
-  // Default variant prompts - 10 variants focused on accurate placement and sizing
+  // Default variant prompts - 10 parallel requests with different placement strategies
   const defaultVariants = [
-    { id: "center-accurate", prompt: "Place the product in the center of the scene at the exact size specified in the product description." },
-    { id: "center-larger", prompt: "Place the product in the center of the scene, sized 15% larger than the dimensions specified." },
-    { id: "center-smaller", prompt: "Place the product in the center of the scene, sized 15% smaller than the dimensions specified." },
-    { id: "left-accurate", prompt: "Place the product toward the left third of the scene at the exact size specified in the product description." },
-    { id: "left-larger", prompt: "Place the product toward the left third of the scene, sized 15% larger than the dimensions specified." },
-    { id: "right-accurate", prompt: "Place the product toward the right third of the scene at the exact size specified in the product description." },
-    { id: "right-larger", prompt: "Place the product toward the right third of the scene, sized 15% larger than the dimensions specified." },
-    { id: "far-left", prompt: "Place the product near the left edge of the scene at the exact size specified in the product description." },
-    { id: "far-right", prompt: "Place the product near the right edge of the scene at the exact size specified in the product description." },
-    { id: "prominent", prompt: "Place the product where it would be most visually prominent, sized 20% larger than specified to emphasize its presence." }
+    { id: "safe-baseline", prompt: "Place the product in the most obvious, low-risk location where it would naturally belong in this room, prioritizing realism, correct scale, and physical plausibility." },
+    { id: "conservative-scale", prompt: "Place the product in a natural location and scale it conservatively so it clearly fits the room without feeling visually dominant." },
+    { id: "confident-scale", prompt: "Place the product in a natural location and scale it confidently so it feels intentionally sized for the space while remaining physically believable." },
+    { id: "dominant-presence", prompt: "Place the product so it reads as a primary visual element in the room, drawing attention while still making physical and spatial sense." },
+    { id: "integrated-placement", prompt: "Place the product so it feels integrated with existing elements in the room, allowing natural proximity or partial occlusion if it would realistically occur." },
+    { id: "minimal-interaction", prompt: "Place the product in a clean, uncluttered area of the room with minimal interaction from surrounding objects, emphasizing clarity and realism." },
+    { id: "alternative-location", prompt: "Place the product in a plausible but less obvious location than the most typical choice, while maintaining realistic scale and placement." },
+    { id: "architectural-alignment", prompt: "Place the product aligned cleanly with architectural features in the room such as walls, corners, or vertical planes, emphasizing structural coherence." },
+    { id: "spatial-balance", prompt: "Place the product in a position that creates visual balance within the room's composition, avoiding crowding or awkward spacing." },
+    { id: "last-resort-realism", prompt: "Choose the placement and scale that would most likely result in a believable real photograph, even if it means a less dramatic composition." }
   ];
 
   return json({
