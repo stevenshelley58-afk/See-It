@@ -13,6 +13,18 @@
       "default": "See it in your room"
     },
     {
+      "type": "checkbox",
+      "id": "require_tag",
+      "label": "Only show when product has tag",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "required_tag",
+      "label": "Required product tag",
+      "default": "see-it-live"
+    },
+    {
       "type": "select",
       "id": "button_style",
       "label": "Button Style",
@@ -26,7 +38,16 @@
 }
 {% endschema %}
 
-{% if product != blank and product.featured_image != blank and product.tags contains 'see-it-live' %}
+{% assign required_tag = block.settings.required_tag | default: 'see-it-live' %}
+{% assign tag_ok = true %}
+{% if block.settings.require_tag %}
+  {% assign tag_ok = false %}
+  {% if product.tags contains required_tag %}
+    {% assign tag_ok = true %}
+  {% endif %}
+{% endif %}
+
+{% if product != blank and product.featured_image != blank and tag_ok %}
   {% assign product_image_url = product.featured_image | image_url: width: 800 %}
   {% assign product_image_width = product.featured_image.width | default: 800 %}
   {% assign product_image_height = product.featured_image.height | default: 800 %}
