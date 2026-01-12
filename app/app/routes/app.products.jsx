@@ -371,6 +371,7 @@ export const loader = async ({ request }) => {
                     ...a,
                     preparedImageUrlFresh,
                     renderInstructions: a.renderInstructions || "",
+                    renderInstructionsSeeItNow: a.renderInstructionsSeeItNow || "",
                     enabled: a.enabled || false,
                 };
             }

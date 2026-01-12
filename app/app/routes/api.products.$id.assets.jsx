@@ -36,6 +36,8 @@ export const loader = async ({ request, params }) => {
             prep_strategy: a.prepStrategy,
             prompt_version: a.promptVersion,
             error_message: a.errorMessage,
+            render_instructions: a.renderInstructions,
+            render_instructions_see_it_now: a.renderInstructionsSeeItNow,
             created_at: a.createdAt,
             updated_at: a.updatedAt,
         }))

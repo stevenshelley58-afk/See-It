@@ -308,17 +308,17 @@ export function PlacementTab({ product, asset, onChange }) {
         }
     }, [asset?.placementFields]);
     
-    // v2 fields state - use existing asset values or auto-detected defaults
-    const [v2Fields, setV2Fields] = useState({
+    // placement rules state - use existing asset values or auto-detected defaults
+    const [placementRulesFields, setPlacementRulesFields] = useState({
         sceneRole: asset?.sceneRole || detectedFields.sceneRole || null,
         replacementRule: asset?.replacementRule || detectedFields.replacementRule || null,
         allowSpaceCreation: asset?.allowSpaceCreation !== undefined ? asset.allowSpaceCreation : detectedFields.allowSpaceCreation,
     });
     
-    // Update v2Fields when asset loads async
+    // Update placementRulesFields when asset loads async
     useEffect(() => {
         if (asset) {
-            setV2Fields({
+            setPlacementRulesFields({
                 sceneRole: asset.sceneRole || detectedFields.sceneRole || null,
                 replacementRule: asset.replacementRule || detectedFields.replacementRule || null,
                 allowSpaceCreation: asset.allowSpaceCreation !== undefined ? asset.allowSpaceCreation : detectedFields.allowSpaceCreation,
@@ -330,6 +330,10 @@ export function PlacementTab({ product, asset, onChange }) {
     const [isGenerating, setIsGenerating] = useState(false);
     const [hasEdited, setHasEdited] = useState(false);
     const [showEditWarning, setShowEditWarning] = useState(false);
+
+    // See It Now prompt state (with dirty tracking)
+    const [seeItNowPrompt, setSeeItNowPrompt] = useState(asset?.renderInstructionsSeeItNow || '');
+    const [seeItNowDirty, setSeeItNowDirty] = useState(false);
 
     // Enable toggle state
     const [enabled, setEnabled] = useState(asset?.enabled || false);
@@ -392,13 +396,27 @@ export function PlacementTab({ product, asset, onChange }) {
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [existingDescription]);
+
+    // Hydrate See It Now prompt when asset loads async (only if not dirty)
+    useEffect(() => {
+        if (seeItNowDirty) return;
+        const assetValue = asset?.renderInstructionsSeeItNow || '';
+        setSeeItNowPrompt((prev) => {
+            const prevTrim = (prev || '').toString().trim();
+            if (prevTrim) return prev;
+            return assetValue;
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [asset?.renderInstructionsSeeItNow]);
     
-    // Notify parent when description, placementFields, v2 fields, or enabled change
+    // Notify parent when description, placementFields, v2 fields, See It Now prompt, or enabled change
     useEffect(() => {
         if (onChange) {
-            // Pass renderInstructions (placement prompt), placementFields, v2 config, and enabled
+            // Pass renderInstructions (placement prompt), placementFields, v2 config, See It Now prompt, and enabled
             onChange({
                 renderInstructions: description || null,
+                renderInstructionsSeeItNow: seeItNowPrompt,
+                renderInstructionsSeeItNowDirty: seeItNowDirty,
                 placementFields: {
                     surface: fields.surface,
                     material: fields.material,
@@ -407,15 +425,15 @@ export function PlacementTab({ product, asset, onChange }) {
                     dimensions: fields.dimensions || { height: null, width: null },
                     additionalNotes: fields.additionalNotes || '',
                 },
-                v2Config: {
-                    sceneRole: v2Fields.sceneRole || null,
-                    replacementRule: v2Fields.replacementRule || null,
-                    allowSpaceCreation: v2Fields.allowSpaceCreation !== undefined ? v2Fields.allowSpaceCreation : null,
+                placementRulesConfig: {
+                    sceneRole: placementRulesFields.sceneRole || null,
+                    replacementRule: placementRulesFields.replacementRule || null,
+                    allowSpaceCreation: placementRulesFields.allowSpaceCreation !== undefined ? placementRulesFields.allowSpaceCreation : null,
                 },
                 enabled: enabled
             });
         }
-    }, [description, fields, v2Fields, enabled, onChange]);
+    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, onChange]);
     
     // Update a field
     const updateField = useCallback((field, value) => {
@@ -668,9 +686,9 @@ export function PlacementTab({ product, asset, onChange }) {
                             {sceneRoles.map(role => (
                                 <button
                                     key={role}
-                                    onClick={() => setV2Fields(prev => ({ ...prev, sceneRole: role }))}
+                                    onClick={() => setPlacementRulesFields(prev => ({ ...prev, sceneRole: role }))}
                                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                                        v2Fields.sceneRole === role
+                                        placementRulesFields.sceneRole === role
                                             ? 'bg-neutral-900 text-white'
                                             : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
                                     }`}
@@ -691,9 +709,9 @@ export function PlacementTab({ product, asset, onChange }) {
                             {replacementRules.map(rule => (
                                 <button
                                     key={rule}
-                                    onClick={() => setV2Fields(prev => ({ ...prev, replacementRule: rule }))}
+                                    onClick={() => setPlacementRulesFields(prev => ({ ...prev, replacementRule: rule }))}
                                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all text-left ${
-                                        v2Fields.replacementRule === rule
+                                        placementRulesFields.replacementRule === rule
                                             ? 'bg-neutral-900 text-white'
                                             : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
                                     }`}
@@ -710,8 +728,8 @@ export function PlacementTab({ product, asset, onChange }) {
                     <label className="flex items-center gap-3 cursor-pointer">
                         <input
                             type="checkbox"
-                            checked={v2Fields.allowSpaceCreation === true}
-                            onChange={(e) => setV2Fields(prev => ({ ...prev, allowSpaceCreation: e.target.checked }))}
+                            checked={placementRulesFields.allowSpaceCreation === true}
+                            onChange={(e) => setPlacementRulesFields(prev => ({ ...prev, allowSpaceCreation: e.target.checked }))}
                             className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
                         />
                         <div>
@@ -725,13 +743,13 @@ export function PlacementTab({ product, asset, onChange }) {
             {/* Divider */}
             <div className="border-t border-neutral-200"></div>
             
-            {/* SECTION 2: Placement Prompt */}
+            {/* SECTION 2: Placement Prompts (See It and See It Now) */}
             <div className="space-y-4">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h3 className="text-lg font-bold text-neutral-900">Placement Prompt</h3>
+                        <h3 className="text-lg font-bold text-neutral-900">Placement Prompts</h3>
                         <p className="text-sm text-neutral-500 mt-1">
-                            Natural language prompt that helps the AI place your product realistically in room photos.
+                            Natural language prompts that help the AI place your product realistically in room photos.
                         </p>
                     </div>
                     <Button
@@ -744,63 +762,106 @@ export function PlacementTab({ product, asset, onChange }) {
                     </Button>
                 </div>
                 
-                {/* Description Box */}
-                <div className="relative">
-                    {showEditWarning && (
-                        <div className="absolute -top-2 left-4 right-4 bg-amber-50 border border-amber-200 rounded-lg p-3 z-10 shadow-lg">
-                            <div className="flex items-start gap-2">
-                                <svg className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                                </svg>
-                                <div className="flex-1">
-                                    <p className="text-sm font-semibold text-amber-800">Edit at your own risk</p>
-                                    <p className="text-xs text-amber-700 mt-1">
-                                        This description was optimised for AI rendering. Manual edits may reduce quality.
-                                    </p>
-                                </div>
-                                <button 
-                                    onClick={() => setShowEditWarning(false)}
-                                    className="text-amber-600 hover:text-amber-800"
-                                >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                                    </svg>
-                                </button>
-                            </div>
+                {/* Two-column layout for prompts */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Left: See It Prompt */}
+                    <div className="space-y-2">
+                        <div>
+                            <label className="block text-sm font-semibold text-neutral-700">
+                                See It prompt
+                            </label>
+                            <p className="text-xs text-neutral-500 mt-0.5">
+                                Used for full See It flow
+                            </p>
                         </div>
-                    )}
-                    
-                    <div className={`bg-neutral-900 rounded-xl p-4 ${showEditWarning ? 'mt-16' : ''}`}>
-                        {description ? (
-                            <textarea
-                                value={description}
-                                onChange={(e) => handleDescriptionEdit(e.target.value)}
-                                className="w-full bg-transparent text-neutral-100 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]"
-                                placeholder="Click 'Generate Prompt' to create a placement prompt..."
-                            />
-                        ) : (
-                            <div className="text-neutral-400 text-sm py-8 text-center">
-                                <p>No placement prompt yet.</p>
-                                <p className="mt-1">Review the fields above, then click <strong>Generate Prompt</strong>.</p>
+                        <div className="relative">
+                            {showEditWarning && (
+                                <div className="absolute -top-2 left-0 right-0 bg-amber-50 border border-amber-200 rounded-lg p-3 z-10 shadow-lg">
+                                    <div className="flex items-start gap-2">
+                                        <svg className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                        </svg>
+                                        <div className="flex-1">
+                                            <p className="text-sm font-semibold text-amber-800">Edit at your own risk</p>
+                                            <p className="text-xs text-amber-700 mt-1">
+                                                This description was optimised for AI rendering. Manual edits may reduce quality.
+                                            </p>
+                                        </div>
+                                        <button 
+                                            onClick={() => setShowEditWarning(false)}
+                                            className="text-amber-600 hover:text-amber-800"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            <div className={`bg-neutral-900 rounded-xl p-4 ${showEditWarning ? 'mt-16' : ''}`}>
+                                {description ? (
+                                    <textarea
+                                        value={description}
+                                        onChange={(e) => handleDescriptionEdit(e.target.value)}
+                                        className="w-full bg-transparent text-neutral-100 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]" 
+                                        placeholder="Click 'Generate Prompt' to create a placement prompt..."
+                                    />
+                                ) : (
+                                    <div className="text-neutral-400 text-sm py-8 text-center">
+                                        <p>No placement prompt yet.</p>
+                                        <p className="mt-1">Review the fields above, then click <strong>Generate Prompt</strong>.</p>
+                                    </div>
+                                )}
                             </div>
-                        )}
-                    </div>
-                    
-                    {description && (
-                        <div className="flex items-center justify-between mt-2 px-1">
-                            <span className="text-xs text-neutral-400">
-                                {description.length} characters
-                            </span>
-                            {hasEdited && (
-                                <span className="text-xs text-amber-600 flex items-center gap-1">
-                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                                    </svg>
-                                    Manually edited
-                                </span>
+                            
+                            {description && (
+                                <div className="flex items-center justify-between mt-2 px-1">
+                                    <span className="text-xs text-neutral-400">
+                                        {description.length} characters
+                                    </span>
+                                    {hasEdited && (
+                                        <span className="text-xs text-amber-600 flex items-center gap-1">
+                                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                            </svg>
+                                            Manually edited
+                                        </span>
+                                    )}
+                                </div>
                             )}
                         </div>
-                    )}
+                    </div>
+
+                    {/* Right: See It Now Prompt */}
+                    <div className="space-y-2">
+                        <div>
+                            <label className="block text-sm font-semibold text-neutral-700">
+                                See It Now prompt
+                            </label>
+                            <p className="text-xs text-neutral-500 mt-0.5">
+                                Used for instant See It Now flow. Leave blank to use the See It prompt.
+                            </p>
+                        </div>
+                        <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
+                            <textarea
+                                value={seeItNowPrompt}
+                                onChange={(e) => {
+                                    setSeeItNowPrompt(e.target.value);
+                                    setSeeItNowDirty(true);
+                                }}
+                                className="w-full bg-transparent text-neutral-900 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]" 
+                                placeholder="Leave blank to use the See It prompt..."
+                            />
+                            {seeItNowPrompt && (
+                                <div className="flex items-center justify-between mt-2 px-1">
+                                    <span className="text-xs text-neutral-400">
+                                        {seeItNowPrompt.length} characters
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
             

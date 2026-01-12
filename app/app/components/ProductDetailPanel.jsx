@@ -54,21 +54,27 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
         } else if (pendingMetadata && typeof pendingMetadata === 'object') {
             formData.append("instructions", pendingMetadata.renderInstructions || '');
 
+            // Add instructionsSeeItNow only if dirty (to prevent accidental erasure)
+            if (pendingMetadata.renderInstructionsSeeItNowDirty === true) {
+                formData.append("instructionsSeeItNow", pendingMetadata.renderInstructionsSeeItNow || '');
+            }
+
             // Add placementFields if present
             if (pendingMetadata.placementFields) {
                 formData.append("placementFields", JSON.stringify(pendingMetadata.placementFields));
             }
 
-            // Add v2 config
-            if (pendingMetadata.v2Config) {
-                if (pendingMetadata.v2Config.sceneRole) {
-                    formData.append("sceneRole", pendingMetadata.v2Config.sceneRole);
+            // Add placement rules config (handle both naming conventions for robustness)
+            const rulesConfig = pendingMetadata.v2Config || pendingMetadata.placementRulesConfig;
+            if (rulesConfig) {
+                if (rulesConfig.sceneRole) {
+                    formData.append("sceneRole", rulesConfig.sceneRole);
                 }
-                if (pendingMetadata.v2Config.replacementRule) {
-                    formData.append("replacementRule", pendingMetadata.v2Config.replacementRule);
+                if (rulesConfig.replacementRule) {
+                    formData.append("replacementRule", rulesConfig.replacementRule);
                 }
-                if (pendingMetadata.v2Config.allowSpaceCreation !== undefined && pendingMetadata.v2Config.allowSpaceCreation !== null) {
-                    formData.append("allowSpaceCreation", pendingMetadata.v2Config.allowSpaceCreation ? 'true' : 'false');
+                if (rulesConfig.allowSpaceCreation !== undefined && rulesConfig.allowSpaceCreation !== null) {
+                    formData.append("allowSpaceCreation", rulesConfig.allowSpaceCreation ? 'true' : 'false');
                 }
             }
 

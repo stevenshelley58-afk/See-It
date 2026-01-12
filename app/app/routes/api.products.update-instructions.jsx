@@ -31,6 +31,13 @@ export const action = async ({ request }) => {
         const productId = formData.get("productId")?.toString();
         const instructions = formData.get("instructions")?.toString() ?? "";
         
+        // Extract instructionsSeeItNow (3-state: missing = no change, empty = null, value = trimmed text)
+        let instructionsSeeItNow: string | null | undefined = undefined;
+        if (formData.has("instructionsSeeItNow")) {
+            const raw = formData.get("instructionsSeeItNow")?.toString() ?? "";
+            instructionsSeeItNow = raw.trim() || null;
+        }
+        
         // Extract placementFields (JSON)
         let placementFields = null;
         const placementFieldsRaw = formData.get("placementFields")?.toString();
@@ -91,10 +98,26 @@ export const action = async ({ request }) => {
         });
 
         // Prepare update data
-        const updateData = {
+        const updateData: {
+            renderInstructions: string | null;
+            renderInstructionsSeeItNow?: string | null;
+            updatedAt: Date;
+            placementFields?: any;
+            sceneRole?: string | null;
+            replacementRule?: string | null;
+            allowSpaceCreation?: boolean | null;
+            enabled?: boolean;
+            status?: string;
+            fieldSource?: any;
+        } = {
             renderInstructions: instructions.trim() || null,
             updatedAt: new Date(),
         };
+        
+        // Add renderInstructionsSeeItNow if provided (3-state semantics)
+        if (instructionsSeeItNow !== undefined) {
+            updateData.renderInstructionsSeeItNow = instructionsSeeItNow;
+        }
         
         // Add placementFields if provided (mark all fields as merchant-owned when saved)
         if (placementFields !== null) {
@@ -214,6 +237,7 @@ export const action = async ({ request }) => {
                     actorType: "merchant",
                     payload: {
                         renderInstructions: instructions.trim() || undefined,
+                        renderInstructionsSeeItNow: instructionsSeeItNow !== undefined ? instructionsSeeItNow || undefined : undefined,
                         placementFields: placementFields || undefined,
                         sceneRole: sceneRole || undefined,
                         replacementRule: replacementRule || undefined,
@@ -239,6 +263,7 @@ export const action = async ({ request }) => {
         // Capture before state for diff (if needed)
         const beforeState = {
             renderInstructions: asset.renderInstructions,
+            renderInstructionsSeeItNow: asset.renderInstructionsSeeItNow,
             placementFields: asset.placementFields,
             sceneRole: asset.sceneRole,
             replacementRule: asset.replacementRule,
@@ -266,13 +291,15 @@ export const action = async ({ request }) => {
                 actorType: "merchant",
                 payload: {
                     renderInstructions: instructions.trim() || undefined,
+                    renderInstructionsSeeItNow: instructionsSeeItNow !== undefined ? instructionsSeeItNow || undefined : undefined,
                     placementFields: placementFields || undefined,
                     sceneRole: sceneRole || undefined,
                     replacementRule: replacementRule || undefined,
                     allowSpaceCreation: allowSpaceCreation !== null ? allowSpaceCreation : undefined,
-                    before: beforeState.renderInstructions !== instructions.trim() || placementFields !== null || sceneRole !== null || replacementRule !== null || allowSpaceCreation !== null
+                    before: beforeState.renderInstructions !== instructions.trim() || instructionsSeeItNow !== undefined || placementFields !== null || sceneRole !== null || replacementRule !== null || allowSpaceCreation !== null
                         ? {
                             renderInstructions: beforeState.renderInstructions || undefined,
+                            renderInstructionsSeeItNow: instructionsSeeItNow !== undefined ? (beforeState.renderInstructionsSeeItNow || undefined) : undefined,
                             placementFields: beforeState.placementFields ? (typeof beforeState.placementFields === 'object' ? beforeState.placementFields : undefined) : undefined,
                             sceneRole: beforeState.sceneRole || undefined,
                             replacementRule: beforeState.replacementRule || undefined,
