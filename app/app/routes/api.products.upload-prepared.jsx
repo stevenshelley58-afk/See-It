@@ -79,7 +79,7 @@ export const action = async ({ request }) => {
         // Convert to PNG with alpha channel (ensure transparency is preserved)
         // IMPORTANT: .rotate() with no args auto-orients based on EXIF and removes the tag
         // This fixes rotation issues with phone photos that have EXIF orientation metadata
-        let processedBuffer: Buffer;
+        let processedBuffer;
         try {
             processedBuffer = await sharp(inputBuffer)
                 .rotate() // Auto-orient based on EXIF, then strip EXIF orientation tag
