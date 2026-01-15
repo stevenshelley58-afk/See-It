@@ -83,15 +83,8 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                 formData.append("enabled", pendingMetadata.enabled ? 'true' : 'false');
             }
 
-            // Add See It Now generated prompt fields (only if dirty to prevent accidental erasure)
-            if (pendingMetadata.generatedSeeItNowPrompt !== undefined) {
-                formData.append("generatedSeeItNowPrompt", pendingMetadata.generatedSeeItNowPrompt || '');
-            }
             if (pendingMetadata.seeItNowVariants !== undefined) {
                 formData.append("seeItNowVariants", JSON.stringify(pendingMetadata.seeItNowVariants));
-            }
-            if (pendingMetadata.useGeneratedPrompt !== undefined) {
-                formData.append("useGeneratedPrompt", pendingMetadata.useGeneratedPrompt ? 'true' : 'false');
             }
         } else {
             formData.append("instructions", JSON.stringify(pendingMetadata));

@@ -18,9 +18,15 @@ import { GEMINI_IMAGE_MODEL_PRO, GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-mod
 
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 
-// Valid variant IDs
-const VALID_VARIANT_IDS = ['open', 'wall', 'light', 'corner'] as const;
-type VariantId = typeof VALID_VARIANT_IDS[number];
+function isSafeVariantId(value: unknown): value is string {
+  // Accept any reasonable identifier. (The extension currently doesn't call this endpoint,
+  // but keeping it permissive avoids mismatches if it is used later.)
+  if (typeof value !== "string") return false;
+  const id = value.trim();
+  if (!id) return false;
+  if (id.length > 64) return false;
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id);
+}
 
 // ============================================================================
 // CORS Headers
@@ -216,10 +222,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  // Validate variant ID
-  if (!VALID_VARIANT_IDS.includes(selected_variant_id as VariantId)) {
+  // Validate variant ID (permissive)
+  if (!isSafeVariantId(selected_variant_id)) {
     return json(
-      { error: "invalid_variant_id", message: `selected_variant_id must be one of: ${VALID_VARIANT_IDS.join(', ')}` },
+      { error: "invalid_variant_id", message: "selected_variant_id is invalid" },
       { status: 400, headers: corsHeaders }
     );
   }

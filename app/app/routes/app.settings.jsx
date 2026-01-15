@@ -6,6 +6,7 @@ import prisma from "../db.server";
 import { PLANS } from "../billing";
 import pkg from "../../package.json" with { type: "json" };
 import { GEMINI_IMAGE_MODEL_PRO, MODEL_FOR_COMPOSITING } from "../config/ai-models.config";
+import { SEE_IT_NOW_VARIANT_LIBRARY } from "../config/see-it-now-variants.config";
 import { PageShell, Card, Button } from "../components/ui";
 import { useEffect, useState } from "react";
 
@@ -63,19 +64,8 @@ export const loader = async ({ request }) => {
   // Fetch settings for prompts
   const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
 
-  // Default variant prompts - 10 parallel requests with different placement strategies
-  const defaultVariants = [
-    { id: "safe-baseline", prompt: "Place the product in the most obvious, low-risk location where it would naturally belong in this room, prioritizing realism, correct scale, and physical plausibility." },
-    { id: "conservative-scale", prompt: "Place the product in a natural location and scale it conservatively so it clearly fits the room without feeling visually dominant." },
-    { id: "confident-scale", prompt: "Place the product in a natural location and scale it confidently so it feels intentionally sized for the space while remaining physically believable." },
-    { id: "dominant-presence", prompt: "Place the product so it reads as a primary visual element in the room, drawing attention while still making physical and spatial sense." },
-    { id: "integrated-placement", prompt: "Place the product so it feels integrated with existing elements in the room, allowing natural proximity or partial occlusion if it would realistically occur." },
-    { id: "minimal-interaction", prompt: "Place the product in a clean, uncluttered area of the room with minimal interaction from surrounding objects, emphasizing clarity and realism." },
-    { id: "alternative-location", prompt: "Place the product in a plausible but less obvious location than the most typical choice, while maintaining realistic scale and placement." },
-    { id: "architectural-alignment", prompt: "Place the product aligned cleanly with architectural features in the room such as walls, corners, or vertical planes, emphasizing structural coherence." },
-    { id: "spatial-balance", prompt: "Place the product in a position that creates visual balance within the room's composition, avoiding crowding or awkward spacing." },
-    { id: "last-resort-realism", prompt: "Choose the placement and scale that would most likely result in a believable real photograph, even if it means a less dramatic composition." }
-  ];
+  // Default variant prompts - 10 option library
+  const defaultVariants = SEE_IT_NOW_VARIANT_LIBRARY;
 
   return json({
     shop,

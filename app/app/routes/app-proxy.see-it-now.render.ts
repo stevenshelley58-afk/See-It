@@ -20,26 +20,14 @@ import { GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
 
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 
-// ============================================================================
-// PLACEMENT VARIANTS - 10 parallel requests with different placement strategies
-// ============================================================================
-const DEFAULT_VARIANTS = [
-  { id: 'safe-baseline', prompt: 'Place the product in the most obvious, low-risk location where it would naturally belong in this room, prioritizing realism, correct scale, and physical plausibility.' },
-  { id: 'conservative-scale', prompt: 'Place the product in a natural location and scale it conservatively so it clearly fits the room without feeling visually dominant.' },
-  { id: 'confident-scale', prompt: 'Place the product in a natural location and scale it confidently so it feels intentionally sized for the space while remaining physically believable.' },
-  { id: 'dominant-presence', prompt: 'Place the product so it reads as a primary visual element in the room, drawing attention while still making physical and spatial sense.' },
-  { id: 'integrated-placement', prompt: 'Place the product so it feels integrated with existing elements in the room, allowing natural proximity or partial occlusion if it would realistically occur.' },
-  { id: 'minimal-interaction', prompt: 'Place the product in a clean, uncluttered area of the room with minimal interaction from surrounding objects, emphasizing clarity and realism.' },
-  { id: 'alternative-location', prompt: 'Place the product in a plausible but less obvious location than the most typical choice, while maintaining realistic scale and placement.' },
-  { id: 'architectural-alignment', prompt: 'Place the product aligned cleanly with architectural features in the room such as walls, corners, or vertical planes, emphasizing structural coherence.' },
-  { id: 'spatial-balance', prompt: 'Place the product in a position that creates visual balance within the room\'s composition, avoiding crowding or awkward spacing.' },
-  { id: 'last-resort-realism', prompt: 'Choose the placement and scale that would most likely result in a believable real photograph, even if it means a less dramatic composition.' },
-];
+import {
+  SEE_IT_NOW_VARIANT_LIBRARY,
+  pickDefaultSelectedSeeItNowVariants,
+  normalizeSeeItNowVariants,
+  type SeeItNowVariantConfig,
+} from "~/config/see-it-now-variants.config";
 
-interface VariantConfig {
-  id: string;
-  prompt: string;
-}
+type VariantConfig = SeeItNowVariantConfig;
 
 // ============================================================================
 // CORS Headers
@@ -380,9 +368,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       replacementRule: true,
       allowSpaceCreation: true,
       placementFields: true, // Structured metadata: surface, material, orientation, shadow, dimensions, additionalNotes
-      generatedSeeItNowPrompt: true,
       seeItNowVariants: true,
-      useGeneratedPrompt: true,
     }
   });
 
@@ -451,81 +437,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Generate a unique session ID for this See It Now render batch
     const seeItNowSessionId = `see-it-now_${room_session_id}_${Date.now()}`;
 
-    // Per-product prompt system: only activates when enabled AND prompt exists.
-    // If prompt is missing/empty, fall back to shop-level prompts automatically.
-    const hasPerProductPrompt =
-      Boolean(productAsset?.useGeneratedPrompt) &&
-      Boolean(productAsset?.generatedSeeItNowPrompt?.trim());
+    // Simplified model:
+    // - General prompt is shop-level
+    // - Placement prompt is product-level (See It Now override, fallback to See It)
+    // - Variants are product-level selection (fallback to 5-of-10 defaults)
+    const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
 
-    let generalPrompt: string;
-    let variants: VariantConfig[];
-    let placementPrompt: string;
+    const generalPrompt: string = settings.seeItNowPrompt || "";
 
-    if (hasPerProductPrompt) {
-      // Per-product prompt + variants
-      const SEE_IT_NOW_GENERAL_PROMPT = `This image is generated for a live ecommerce visualization showing how a real product would look in a customer's home.
+    // Compute effective placement prompt: prefer renderInstructionsSeeItNow, fallback to renderInstructions
+    const now = productAsset?.renderInstructionsSeeItNow?.trim();
+    const fallback = productAsset?.renderInstructions?.trim();
+    const placementPrompt: string = now || fallback || "";
 
-The first image is the exact product being sold and must remain unchanged.
-The second image is a real room photo taken by a customer.
+    // Variant library can be shop-configured; fallback to canonical 10-option library.
+    const variantLibrary: VariantConfig[] =
+      Array.isArray(settings.seeItNowVariants) && settings.seeItNowVariants.length > 0
+        ? normalizeSeeItNowVariants(settings.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY)
+        : SEE_IT_NOW_VARIANT_LIBRARY;
 
-Make the product appear naturally present in the room by matching the scene's perspective, lighting, and overall visual character. Only make the minimal changes required for realistic physical interaction such as shadows, reflections, and occlusion.
+    // Per-product selected variants (merchant-adjustable). If missing, default to 5 selected.
+    const perProductSelected = normalizeSeeItNowVariants(
+      productAsset?.seeItNowVariants,
+      variantLibrary
+    );
+    const variants: VariantConfig[] =
+      perProductSelected.length > 0 ? perProductSelected : pickDefaultSelectedSeeItNowVariants(variantLibrary);
 
-If product photos appear to contradict stated dimensions, defer to the written dimensions.
-
-Return only the final composed image. No text.`;
-
-      const productPromptSection = productAsset.generatedSeeItNowPrompt.trim();
-      generalPrompt = `${SEE_IT_NOW_GENERAL_PROMPT}\n\n${productPromptSection}`;
-
-      // Get variants from product asset (must be a non-empty array)
-      if (productAsset.seeItNowVariants && Array.isArray(productAsset.seeItNowVariants)) {
-        variants = productAsset.seeItNowVariants as VariantConfig[];
-      } else {
-        variants = [];
-      }
-
-      // If variants are missing/empty, fall back to shop-level flow (graceful)
-      if (variants.length === 0) {
-        const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
-        generalPrompt = settings.seeItNowPrompt || '';
-        variants = settings.seeItNowVariants?.length > 0
-          ? settings.seeItNowVariants
-          : DEFAULT_VARIANTS;
-        const now = productAsset?.renderInstructionsSeeItNow?.trim();
-        const fallback = productAsset?.renderInstructions?.trim();
-        placementPrompt = now || fallback || '';
-
-        logger.info(
-          { ...shopLogContext, stage: "prompt-selection" },
-          `[See It Now] Per-product prompt enabled but variants missing; falling back to shop-level prompts (variants: ${variants.length})`
-        );
-      } else {
-        placementPrompt = ''; // Product-specific prompt already contains placement behaviour
-        logger.info(
-          { ...shopLogContext, stage: "prompt-selection" },
-          `[See It Now] Using per-product prompt system: prompt length: ${generalPrompt.length}, variants: ${variants.length}`
-        );
-      }
-    } else {
-      // Fallback: Shop-level prompts
-      const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
-      generalPrompt = settings.seeItNowPrompt || '';
-      
-      // Get variant configurations from settings, or use defaults
-      variants = settings.seeItNowVariants?.length > 0 
-        ? settings.seeItNowVariants 
-        : DEFAULT_VARIANTS;
-
-      // Compute effective placement prompt: prefer renderInstructionsSeeItNow, fallback to renderInstructions
-      const now = productAsset?.renderInstructionsSeeItNow?.trim();
-      const fallback = productAsset?.renderInstructions?.trim();
-      placementPrompt = now || fallback || '';
-
-      logger.info(
-        { ...shopLogContext, stage: "prompt-selection" },
-        `[See It Now] Using shop-level prompts: placementPrompt length: ${placementPrompt.length}, generalPrompt length: ${generalPrompt.length}, variants: ${variants.length}`
-      );
-    }
+    logger.info(
+      { ...shopLogContext, stage: "prompt-selection" },
+      `[See It Now] Using prompts: placementPrompt length: ${placementPrompt.length}, generalPrompt length: ${generalPrompt.length}, variants: ${variants.length}`
+    );
 
     // Generate all variants in PARALLEL
     const variantPromises = variants.map(variant =>

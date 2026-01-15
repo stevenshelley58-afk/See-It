@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '../ui';
+import {
+    SEE_IT_NOW_VARIANT_LIBRARY,
+    pickDefaultSelectedSeeItNowVariants,
+    normalizeSeeItNowVariants,
+} from '~/config/see-it-now-variants.config';
 
 /**
  * PlacementTab - Product preparation for rendering
@@ -64,14 +69,24 @@ function extractDimsFromText(rawText) {
     }
 
     // Common patterns:
-    // - "180 x 95" (assume cm)
-    // - "180cm x 95cm"
     // - "H: 180cm W: 95cm"
     // - "Height 180 Width 95"
-    // - "180×95"
-    const cross = text.match(/(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?\s*[x×]\s*(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?/i);
-    if (cross) {
-        return { height: parseFloat(cross[1]), width: parseFloat(cross[2]) };
+    //
+    // NOTE: Be conservative with unlabeled "A × B" patterns.
+    // Many Shopify PDPs use "25×25cm" to mean footprint (W×D), not height×width.
+    const hasExplicitAxes =
+        /\b(h(?:eight)?)\b/i.test(text) ||
+        /\b(w(?:idth)?)\b/i.test(text) ||
+        /\bH\s*[x×]\s*W\b/i.test(text) ||
+        /\bW\s*[x×]\s*H\b/i.test(text) ||
+        /\bHxW\b/i.test(text) ||
+        /\bWxH\b/i.test(text);
+
+    if (hasExplicitAxes) {
+        const cross = text.match(/(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?\s*[x×]\s*(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?/i);
+        if (cross) {
+            return { height: parseFloat(cross[1]), width: parseFloat(cross[2]) };
+        }
     }
 
     const heightMatch = text.match(/\b(h(?:eight)?)\s*[:\-]?\s*(\d{2,4}(?:\.\d+)?)\s*(cm|mm|")?\b/i);
@@ -247,39 +262,12 @@ function createBestGuessDescription(product, fields) {
     return `${article} ${title}${material ? ` primarily in ${material}` : ''}, described for realistic interior photography with accurate proportions and natural lighting.${sizeSentence}${notesSentence}`.trim();
 }
 
-// ============================================================================
-// SEE IT NOW PER-PRODUCT VARIANT DEFAULTS (client-side only)
-// Mirrors the server archetype priority map so "Reset to Defaults" is instant.
-// ============================================================================
-
-const SEE_IT_NOW_VARIATION_PROMPTS = {
-    1: "Place the product in the most obvious and conventional location where this type of product would naturally belong, scaled realistically.",
-    2: "Place the product in a different but still natural location, scaled realistically.",
-    3: "Place the product in an accommodating location, scaled slightly smaller than typical so it feels comfortably fitted.",
-    4: "Place the product in a plausible secondary location, scaled accurately to real-world proportions.",
-    5: "Place the product in a strong location, scaled slightly larger than typical so it feels intentionally sized.",
-    6: "Place the product in a different natural location, scaled larger than a standard version would normally be.",
-    7: "Place the product in a clear, visually strong area where it can act as a focal point.",
-    8: "Place the product near existing elements in an integrated way, allowing proximity or partial occlusion if natural.",
-    9: "Place the product in a less central but appropriate location, prioritizing subtlety.",
-    10: "Choose the location and scale most likely to result in a believable real photograph.",
-};
-
-const SEE_IT_NOW_ARCHETYPE_VARIATIONS = {
-    oversized_architectural: { primary: [5, 6, 7, 10], secondary: [1, 2] },
-    large_furniture: { primary: [1, 4, 5, 10], secondary: [2, 8] },
-    medium_furniture: { primary: [1, 4, 8, 10], secondary: [2, 3] },
-    small_homewares: { primary: [3, 8, 9, 10], secondary: [1, 2] },
-    wall_mounted_decor: { primary: [1, 2, 4, 10], secondary: [8, 9] },
-};
-
-function buildDefaultSeeItNowVariants(archetype) {
-    const cfg = SEE_IT_NOW_ARCHETYPE_VARIATIONS[archetype];
-    if (!cfg) return [];
-    const numbers = [...(cfg.primary || []), ...((cfg.secondary || []).slice(0, 2))];
-    return numbers
-        .filter((n) => SEE_IT_NOW_VARIATION_PROMPTS[n])
-        .map((n) => ({ id: `variation_${n}`, prompt: SEE_IT_NOW_VARIATION_PROMPTS[n] }));
+function formatVariantLabel(id) {
+    return (id || '')
+        .toString()
+        .split('-')
+        .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+        .join(' ');
 }
 
 // ============================================================================
@@ -370,44 +358,25 @@ export function PlacementTab({ product, asset, onChange }) {
     const [seeItNowPrompt, setSeeItNowPrompt] = useState(asset?.renderInstructionsSeeItNow || '');
     const [seeItNowDirty, setSeeItNowDirty] = useState(false);
 
-    // See It Now generated prompt state
-    const [generatedSeeItNowPrompt, setGeneratedSeeItNowPrompt] = useState(asset?.generatedSeeItNowPrompt || '');
-    const [generatedPromptDirty, setGeneratedPromptDirty] = useState(false);
+    // See It Now variants: 10-option library, with per-product selection (default 5 selected)
     const [seeItNowVariants, setSeeItNowVariants] = useState(() => {
-        if (asset?.seeItNowVariants && Array.isArray(asset.seeItNowVariants)) {
-            return asset.seeItNowVariants;
-        }
-        return [];
+        const normalized = normalizeSeeItNowVariants(asset?.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY);
+        return normalized.length > 0 ? normalized : pickDefaultSelectedSeeItNowVariants(SEE_IT_NOW_VARIANT_LIBRARY);
     });
     const [variantsDirty, setVariantsDirty] = useState(false);
-    const [detectedArchetype, setDetectedArchetype] = useState(asset?.detectedArchetype || null);
-    const [useGeneratedPrompt, setUseGeneratedPrompt] = useState(asset?.useGeneratedPrompt || false);
-    const [isRegenerating, setIsRegenerating] = useState(false);
 
-    // Sync generated prompt state when asset loads async
+    // Sync variants state when asset loads async (only if not dirty)
     useEffect(() => {
-        if (!generatedPromptDirty && asset?.generatedSeeItNowPrompt) {
-            const assetValue = asset.generatedSeeItNowPrompt;
-            setGeneratedSeeItNowPrompt((prev) => {
-                const prevTrim = (prev || '').toString().trim();
-                if (prevTrim) return prev;
-                return assetValue;
-            });
+        if (variantsDirty) return;
+        const normalized = normalizeSeeItNowVariants(asset?.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY);
+        if (normalized.length > 0) {
+            setSeeItNowVariants(normalized);
+            return;
         }
-        if (!variantsDirty && asset?.seeItNowVariants && Array.isArray(asset.seeItNowVariants) && asset.seeItNowVariants.length > 0) {
-            const assetVariants = asset.seeItNowVariants;
-            setSeeItNowVariants((prev) => {
-                if (Array.isArray(prev) && prev.length > 0) return prev;
-                return assetVariants;
-            });
-        }
-        if (asset?.detectedArchetype) {
-            setDetectedArchetype((prev) => prev || asset.detectedArchetype);
-        }
-        if (asset?.useGeneratedPrompt !== undefined) {
-            setUseGeneratedPrompt(asset.useGeneratedPrompt);
-        }
-    }, [asset?.generatedSeeItNowPrompt, asset?.seeItNowVariants, asset?.detectedArchetype, asset?.useGeneratedPrompt, generatedPromptDirty, variantsDirty]);
+        // If asset has no saved variants (older data), show the default 5 selection in the UI.
+        setSeeItNowVariants(pickDefaultSelectedSeeItNowVariants(SEE_IT_NOW_VARIANT_LIBRARY));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [asset?.seeItNowVariants, variantsDirty]);
 
     // Enable toggle state
     const [enabled, setEnabled] = useState(asset?.enabled || false);
@@ -504,13 +473,11 @@ export function PlacementTab({ product, asset, onChange }) {
                     replacementRule: placementRulesFields.replacementRule || null,
                     allowSpaceCreation: placementRulesFields.allowSpaceCreation !== undefined ? placementRulesFields.allowSpaceCreation : null,
                 },
-                generatedSeeItNowPrompt: generatedPromptDirty ? generatedSeeItNowPrompt : undefined,
                 seeItNowVariants: variantsDirty ? seeItNowVariants : undefined,
-                useGeneratedPrompt: useGeneratedPrompt,
                 enabled: enabled
             });
         }
-    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, generatedSeeItNowPrompt, generatedPromptDirty, seeItNowVariants, variantsDirty, useGeneratedPrompt, onChange]);
+    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, seeItNowVariants, variantsDirty, onChange]);
     
     // Update a field
     const updateField = useCallback((field, value) => {
@@ -574,51 +541,65 @@ export function PlacementTab({ product, asset, onChange }) {
         setHasEdited(true);
     }, [hasEdited, description]);
 
-    // Handle regenerate See It Now prompt
-    const handleRegeneratePrompt = useCallback(async () => {
-        setIsRegenerating(true);
-        try {
-            const numericId = product?.id ? String(product.id).split('/').pop() : null;
-            if (!numericId || !asset?.id) {
-                console.error('Missing product ID or asset ID');
-                return;
-            }
-
-            const response = await fetch('/api/products/regenerate-prompt', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    productId: numericId,
-                    assetId: asset.id
-                }),
-            });
-
-            const data = await response.json();
-            if (data.success) {
-                setGeneratedSeeItNowPrompt(data.prompt || '');
-                setSeeItNowVariants(data.variants || []);
-                setDetectedArchetype(data.archetype || null);
-                // Regenerate endpoint persists to DB, so treat as clean state.
-                setGeneratedPromptDirty(false);
-                setVariantsDirty(false);
-            } else {
-                console.error('Failed to regenerate prompt:', data.error);
-            }
-        } catch (error) {
-            console.error('Error regenerating prompt:', error);
-        } finally {
-            setIsRegenerating(false);
-        }
-    }, [product?.id, asset?.id]);
-
-    // Handle reset variants to defaults
     const handleResetVariants = useCallback(() => {
-        if (!detectedArchetype) return;
-        const defaults = buildDefaultSeeItNowVariants(detectedArchetype);
-        if (defaults.length === 0) return;
-        setSeeItNowVariants(defaults);
+        setSeeItNowVariants(pickDefaultSelectedSeeItNowVariants(SEE_IT_NOW_VARIANT_LIBRARY));
         setVariantsDirty(true);
-    }, [detectedArchetype]);
+    }, []);
+
+    const libraryIdSet = useMemo(
+        () => new Set((SEE_IT_NOW_VARIANT_LIBRARY || []).map((v) => v.id)),
+        []
+    );
+
+    const selectedById = useMemo(() => {
+        const map = new Map();
+        (seeItNowVariants || []).forEach((v) => {
+            if (v?.id) map.set(v.id, v);
+        });
+        return map;
+    }, [seeItNowVariants]);
+
+    const selectedLibraryCount = useMemo(() => {
+        let count = 0;
+        for (const id of libraryIdSet) {
+            if (selectedById.has(id)) count += 1;
+        }
+        return count;
+    }, [libraryIdSet, selectedById]);
+
+    const extraVariants = useMemo(() => {
+        return (seeItNowVariants || []).filter((v) => v?.id && !libraryIdSet.has(v.id));
+    }, [seeItNowVariants, libraryIdSet]);
+
+    const toggleLibraryVariant = useCallback((variantId, enabled) => {
+        const lib = (SEE_IT_NOW_VARIANT_LIBRARY || []).find((v) => v.id === variantId);
+        if (!lib) return;
+
+        setSeeItNowVariants((prev) => {
+            const current = Array.isArray(prev) ? prev : [];
+            const exists = current.some((v) => v?.id === variantId);
+            if (enabled && !exists) {
+                return [...current, { id: lib.id, prompt: lib.prompt }];
+            }
+            if (!enabled && exists) {
+                return current.filter((v) => v?.id !== variantId);
+            }
+            return current;
+        });
+        setVariantsDirty(true);
+    }, []);
+
+    const updateVariantPrompt = useCallback((variantId, newPrompt) => {
+        setSeeItNowVariants((prev) => {
+            const current = Array.isArray(prev) ? prev : [];
+            const idx = current.findIndex((v) => v?.id === variantId);
+            if (idx === -1) return current;
+            const next = [...current];
+            next[idx] = { ...next[idx], prompt: newPrompt };
+            return next;
+        });
+        setVariantsDirty(true);
+    }, []);
     
     // Options for dropdowns
     const surfaces = ['floor', 'wall', 'table', 'ceiling', 'shelf', 'other'];
@@ -991,157 +972,123 @@ export function PlacementTab({ product, asset, onChange }) {
             {/* Divider */}
             <div className="border-t border-neutral-200"></div>
 
-            {/* SECTION 3: See It Now - Generated Prompt */}
+            {/* SECTION 3: See It Now Variants (10 options, pick 5 by default) */}
             <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h3 className="text-lg font-bold text-neutral-900">See It Now - Generated Prompt</h3>
-                            <p className="text-sm text-neutral-500 mt-1">
-                                LLM-generated prompt with product-specific details and selected variations.
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={useGeneratedPrompt}
-                                    onChange={(e) => setUseGeneratedPrompt(e.target.checked)}
-                                    disabled={(!generatedSeeItNowPrompt || !generatedSeeItNowPrompt.trim()) && !useGeneratedPrompt}
-                                    className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
-                                />
-                                <span className="text-sm font-medium text-neutral-700">
-                                    Use Generated Prompt
-                                </span>
-                            </label>
-                        </div>
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h3 className="text-lg font-bold text-neutral-900">See It Now Variants</h3>
+                        <p className="text-sm text-neutral-500 mt-1">
+                            Pick which variants to generate for this product. Default is 5 selected from a 10-option library.
+                        </p>
                     </div>
-
-                    {!generatedSeeItNowPrompt?.trim() && (
-                        <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 text-sm text-neutral-600">
-                            No per-product prompt yet. Click <strong>Regenerate</strong> to create one (or paste/edit your own).
-                        </div>
-                    )}
-
-                    {/* Archetype Badge */}
-                    {detectedArchetype && (
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-neutral-500">Detected Archetype:</span>
-                            <span className="px-2 py-1 bg-neutral-100 text-neutral-700 text-xs font-medium rounded-full">
-                                {detectedArchetype.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                            </span>
-                        </div>
-                    )}
-
-                    {/* Generated Prompt Textarea */}
-                    <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-neutral-700">
-                            Product Prompt
-                        </label>
-                        <textarea
-                            value={generatedSeeItNowPrompt}
-                            onChange={(e) => {
-                                setGeneratedSeeItNowPrompt(e.target.value);
-                                setGeneratedPromptDirty(true);
-                            }}
-                            className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-lg text-sm min-h-[200px] resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900/10 font-mono text-xs"
-                            placeholder="Generated prompt will appear here..."
-                        />
-                        <div className="flex items-center justify-between">
-                            <span className="text-xs text-neutral-400">
-                                {generatedSeeItNowPrompt.length} characters
-                            </span>
-                            {generatedPromptDirty && (
-                                <span className="text-xs text-amber-600 flex items-center gap-1">
-                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                                    </svg>
-                                    Edited
-                                </span>
-                            )}
-                        </div>
+                    <div className="flex gap-2">
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleResetVariants}
+                        >
+                            Reset to Default (5)
+                        </Button>
                     </div>
+                </div>
 
-                    {/* Variants List */}
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                            <label className="block text-sm font-semibold text-neutral-700">
-                                Variants ({seeItNowVariants.length})
-                            </label>
-                            <div className="flex gap-2">
-                                <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={handleResetVariants}
-                                    disabled={!detectedArchetype || isRegenerating}
-                                >
-                                    Reset to Defaults
-                                </Button>
-                                <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={handleRegeneratePrompt}
-                                    loading={isRegenerating}
-                                    disabled={isRegenerating || !asset?.id}
-                                >
-                                    Regenerate
-                                </Button>
+                <div className="text-xs text-neutral-500">
+                    Selected: <strong>{selectedLibraryCount}</strong> / {SEE_IT_NOW_VARIANT_LIBRARY.length}
+                    {extraVariants.length > 0 ? (
+                        <span className="ml-2 text-neutral-400">
+                            (+ {extraVariants.length} legacy/custom)
+                        </span>
+                    ) : null}
+                </div>
+
+                <div className="space-y-3">
+                    {SEE_IT_NOW_VARIANT_LIBRARY.map((lib) => {
+                        const isSelected = selectedById.has(lib.id);
+                        const selectedVariant = selectedById.get(lib.id);
+                        const value = (selectedVariant?.prompt ?? lib.prompt) || '';
+
+                        return (
+                            <div key={lib.id} className="border border-neutral-200 rounded-lg p-3 bg-white">
+                                <label className="flex items-start gap-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={(e) => toggleLibraryVariant(lib.id, e.target.checked)}
+                                        className="mt-1 w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="text-sm font-semibold text-neutral-800">
+                                                {formatVariantLabel(lib.id)}
+                                            </div>
+                                            <div className="text-[11px] text-neutral-400 font-mono">
+                                                {lib.id}
+                                            </div>
+                                        </div>
+                                        <textarea
+                                            value={value}
+                                            disabled={!isSelected}
+                                            onChange={(e) => updateVariantPrompt(lib.id, e.target.value)}
+                                            className={`mt-2 w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent min-h-[72px] resize-none ${
+                                                isSelected
+                                                    ? 'border-neutral-300 bg-white text-neutral-900'
+                                                    : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                                            }`}
+                                        />
+                                        {!isSelected && (
+                                            <div className="mt-1 text-xs text-neutral-400">
+                                                Select to include this variant (and enable editing).
+                                            </div>
+                                        )}
+                                    </div>
+                                </label>
                             </div>
+                        );
+                    })}
+                </div>
+
+                {/* Legacy/custom variants (keep visible so nothing silently disappears) */}
+                {extraVariants.length > 0 && (
+                    <div className="space-y-2 pt-2">
+                        <div className="text-sm font-semibold text-neutral-700">
+                            Legacy / custom variants
+                        </div>
+                        <div className="text-xs text-neutral-500">
+                            These variants were saved previously and aren’t part of the standard 10-option library. You can edit or remove them.
                         </div>
                         <div className="space-y-2">
-                            {seeItNowVariants.map((variant, index) => (
-                                <div key={variant.id || index} className="relative group">
+                            {extraVariants.map((variant, index) => (
+                                <div key={`${variant.id || 'extra'}_${index}`} className="relative group">
                                     <div className="flex items-start gap-2">
-                                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-neutral-100 text-neutral-500 text-xs flex items-center justify-center mt-2">
-                                            {index + 1}
-                                        </span>
                                         <div className="flex-1">
                                             <input
                                                 type="text"
                                                 value={variant.prompt || ''}
-                                                onChange={(e) => {
-                                                    const newVariants = [...seeItNowVariants];
-                                                    newVariants[index] = { ...variant, prompt: e.target.value };
-                                                    setSeeItNowVariants(newVariants);
-                                                    setVariantsDirty(true);
-                                                }}
+                                                onChange={(e) => updateVariantPrompt(variant.id, e.target.value)}
                                                 className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
                                                 placeholder="Enter variant prompt..."
                                             />
-                                            <span className="text-xs text-neutral-400 mt-1 block">{variant.id}</span>
+                                            <span className="text-xs text-neutral-400 mt-1 block font-mono">{variant.id}</span>
                                         </div>
-                                        {seeItNowVariants.length > 1 && (
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const newVariants = seeItNowVariants.filter((_, i) => i !== index);
-                                                    setSeeItNowVariants(newVariants);
-                                                    setVariantsDirty(true);
-                                                }}
-                                                className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-2 text-neutral-400 hover:text-red-500"
-                                                title="Remove variant"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                            </button>
-                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setSeeItNowVariants((prev) => (prev || []).filter((v) => v?.id !== variant.id));
+                                                setVariantsDirty(true);
+                                            }}
+                                            className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-2 text-neutral-400 hover:text-red-500"
+                                            title="Remove legacy/custom variant"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
                                     </div>
                                 </div>
                             ))}
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                const newId = `custom_${Date.now()}`;
-                                setSeeItNowVariants([...seeItNowVariants, { id: newId, prompt: '' }]);
-                                setVariantsDirty(true);
-                            }}
-                            className="text-xs px-2 py-1 bg-neutral-100 hover:bg-neutral-200 rounded-md text-neutral-700 transition-colors"
-                        >
-                            + Add Variant
-                        </button>
                     </div>
-                </div>
+                )}
             
             {/* Status Message */}
             {description && !hasEdited && (

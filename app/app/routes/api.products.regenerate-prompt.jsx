@@ -2,14 +2,19 @@ import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { logger, createLogContext } from "../utils/logger.server";
-import { generateSeeItNowPrompt } from "../services/see-it-now-prompt-generator.server";
+import {
+    SEE_IT_NOW_VARIANT_LIBRARY,
+    normalizeSeeItNowVariants,
+    pickDefaultSelectedSeeItNowVariants,
+} from "../config/see-it-now-variants.config";
 
 /**
  * POST /api/products/regenerate-prompt
- * 
- * Manually regenerate the See It Now prompt for a product asset.
- * This allows merchants to regenerate prompts from the UI.
- * 
+ *
+ * Deprecated: the system no longer uses per-product "generated prompt mode".
+ * This endpoint now resets the per-product See It Now variant selection to the default
+ * 5-selected-from-10 (using shop-level variant library if configured).
+ *
  * Body (JSON):
  * - productId: Shopify product ID (numeric)
  * - assetId: ProductAsset ID (UUID)
@@ -52,9 +57,7 @@ export const action = async ({ request }) => {
             },
             select: {
                 id: true,
-                productTitle: true,
-                productType: true,
-                placementFields: true,
+                seeItNowVariants: true,
             },
         });
 
@@ -64,49 +67,35 @@ export const action = async ({ request }) => {
 
         logger.info(
             { ...logContext, assetId: asset.id, productId },
-            `Regenerating See It Now prompt for asset ${assetId}`
+            `Resetting See It Now variants for asset ${assetId}`
         );
 
-        // Build product data for prompt generation
-        const placementFields = asset.placementFields && typeof asset.placementFields === 'object'
-            ? asset.placementFields
-            : null;
-
-        const productData = {
-            title: asset.productTitle || '',
-            description: '', // Not available in this context
-            productType: asset.productType || undefined,
-            vendor: undefined,
-            tags: [],
-            dimensions: placementFields?.dimensions || undefined,
-            placementFields: placementFields || undefined,
-        };
-
-        // Generate prompt
-        const promptResult = await generateSeeItNowPrompt(productData, requestId);
+        // Use shop-level variant library if present, otherwise use canonical 10-option library.
+        const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
+        const library = Array.isArray(settings?.seeItNowVariants) && settings.seeItNowVariants.length > 0
+            ? normalizeSeeItNowVariants(settings.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY)
+            : SEE_IT_NOW_VARIANT_LIBRARY;
+        const selectedVariants = pickDefaultSelectedSeeItNowVariants(library);
 
         // Update asset with new prompt
         await prisma.productAsset.update({
             where: { id: asset.id },
             data: {
-                generatedSeeItNowPrompt: promptResult.productPrompt,
-                seeItNowVariants: promptResult.selectedVariants,
-                detectedArchetype: promptResult.archetype,
-                // useGeneratedPrompt stays as-is (merchant controls this separately)
+                seeItNowVariants: selectedVariants,
                 updatedAt: new Date(),
             },
         });
 
         logger.info(
-            { ...logContext, assetId: asset.id, archetype: promptResult.archetype, variantCount: promptResult.selectedVariants.length },
-            `Successfully regenerated prompt: archetype=${promptResult.archetype}, ${promptResult.selectedVariants.length} variants`
+            { ...logContext, assetId: asset.id, variantCount: selectedVariants.length },
+            `Successfully reset variants: ${selectedVariants.length} selected`
         );
 
         return json({
             success: true,
-            prompt: promptResult.productPrompt,
-            archetype: promptResult.archetype,
-            variants: promptResult.selectedVariants,
+            prompt: null,
+            archetype: null,
+            variants: selectedVariants,
         });
 
     } catch (error) {

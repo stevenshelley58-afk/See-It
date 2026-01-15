@@ -7,6 +7,8 @@ import { removeBackgroundFast, isBackgroundRemoverAvailable } from "../services/
 import { emitPrepEvent } from "../services/prep-events.server";
 import sharp from "sharp";
 
+const MAX_EDIT_EDGE_PX = 4096;
+
 /**
  * Extract image ID from Shopify CDN URL
  */
@@ -51,6 +53,7 @@ export const action = async ({ request }) => {
         const productId = formData.get("productId")?.toString();
         const maskDataUrl = formData.get("maskDataUrl")?.toString();
         const customImageUrl = formData.get("imageUrl")?.toString();
+        const editPreparedRaw = formData.get("editPrepared")?.toString();
 
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
@@ -97,7 +100,20 @@ export const action = async ({ request }) => {
             // Non-critical
         });
 
-        const sourceImageUrl = customImageUrl || asset?.sourceImageUrl;
+        const wantsEditPrepared =
+            editPreparedRaw === "true" || editPreparedRaw === "1" || editPreparedRaw === "yes";
+
+        // If the client is editing an already-prepared PNG, prefer the stored GCS key.
+        // This avoids failures from stale signed URLs and ensures we always fetch the latest prepared asset.
+        let sourceImageUrl = customImageUrl || asset?.sourceImageUrl;
+        if (wantsEditPrepared) {
+            if (asset?.preparedImageKey) {
+                sourceImageUrl = await StorageService.getSignedReadUrl(asset.preparedImageKey, 60 * 60 * 1000);
+            } else if (asset?.preparedImageUrl) {
+                sourceImageUrl = asset.preparedImageUrl;
+            }
+        }
+
         if (!sourceImageUrl) {
             return json({ success: false, error: "Product asset not found" }, { status: 404 });
         }
@@ -139,7 +155,25 @@ export const action = async ({ request }) => {
 
         // Get image dimensions
         const imageMetadata = await sharp(imageBuffer).metadata();
-        const { width, height } = imageMetadata;
+        const srcWidth = imageMetadata.width || 0;
+        const srcHeight = imageMetadata.height || 0;
+        if (!srcWidth || !srcHeight) {
+            return json({ success: false, error: "Unsupported image format. Please try a different image." }, { status: 400 });
+        }
+
+        // Cap extremely large images to avoid memory/time blowups.
+        let width = srcWidth;
+        let height = srcHeight;
+        const maxEdge = Math.max(srcWidth, srcHeight);
+        if (maxEdge > MAX_EDIT_EDGE_PX) {
+            const scale = MAX_EDIT_EDGE_PX / maxEdge;
+            width = Math.max(1, Math.round(srcWidth * scale));
+            height = Math.max(1, Math.round(srcHeight * scale));
+            logger.info(
+                { ...logContext, stage: "downscale" },
+                `Downscaling source image for edit: ${srcWidth}×${srcHeight} → ${width}×${height}`
+            );
+        }
 
         // Process user's rough mask - resize to match image
         logger.info({ ...logContext, stage: "processing-mask" }, "Processing user mask...");
@@ -167,9 +201,9 @@ export const action = async ({ request }) => {
         let finalAlpha;
         let resultBuffer;
 
-        // Check if we're editing a prepared image (already has background removed)
-        // If so, skip Prodia - just use user's mask directly (much faster!)
-        const isEditingPreparedImage = customImageUrl && customImageUrl !== asset?.sourceImageUrl;
+        // When editing a prepared image (already transparent), we treat the mask as a "keep" mask and
+        // apply it on top of the existing alpha so transparency is preserved (no background reappears).
+        const isEditingPreparedImage = wantsEditPrepared;
         
         if (isEditingPreparedImage) {
             // Fast path: editing prepared image - skip Prodia, use user's mask directly
@@ -235,9 +269,10 @@ export const action = async ({ request }) => {
             finalAlpha = smoothedMask;
         }
 
-        // Get original image as RGBA
+        // Get original image as RGBA (resize if needed)
         const imageRgba = await sharp(imageBuffer)
             .ensureAlpha()
+            .resize({ width, height, fit: "fill" })
             .raw()
             .toBuffer();
 
@@ -248,7 +283,14 @@ export const action = async ({ request }) => {
             outputBuffer[rgbaIdx] = imageRgba[rgbaIdx];         // R
             outputBuffer[rgbaIdx + 1] = imageRgba[rgbaIdx + 1]; // G
             outputBuffer[rgbaIdx + 2] = imageRgba[rgbaIdx + 2]; // B
-            outputBuffer[rgbaIdx + 3] = finalAlpha[i];          // A from smart mask
+            if (isEditingPreparedImage) {
+                // Preserve existing transparency by combining alphas (multiply in 0..255 space)
+                const existingA = imageRgba[rgbaIdx + 3];
+                const maskA = finalAlpha[i];
+                outputBuffer[rgbaIdx + 3] = Math.round((existingA * maskA) / 255);
+            } else {
+                outputBuffer[rgbaIdx + 3] = finalAlpha[i]; // A from smart mask (keep-mask)
+            }
         }
 
         // Create final PNG

@@ -9,9 +9,11 @@ import { authenticate } from "../shopify.server";
 import { StorageService } from "../services/storage.server";
 import prisma from "../db.server";
 import { logger, createLogContext } from "../utils/logger.server";
+import sharp from "sharp";
 
 // Maximum file size: 10MB
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_ROOM_EDGE_PX = 2048;
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const logContext = createLogContext("upload", "direct", "start", {});
@@ -96,8 +98,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }, { status: 400 });
         }
 
-        const extension = extensionMap[finalContentType] || "jpg";
-        const filename = `room-${Date.now()}.${extension}`;
+        // Normalize the uploaded image into a canonical JPEG.
+        // This makes downstream cleanup/rendering robust across formats + EXIF orientations.
+        let canonicalBuffer: Buffer;
+        try {
+            canonicalBuffer = await sharp(imageBuffer)
+                .rotate()
+                .resize({
+                    width: MAX_ROOM_EDGE_PX,
+                    height: MAX_ROOM_EDGE_PX,
+                    fit: "inside",
+                    withoutEnlargement: true
+                })
+                .jpeg({ quality: 90 })
+                .toBuffer();
+
+            const meta = await sharp(canonicalBuffer).metadata();
+            if (!meta.width || !meta.height) {
+                throw new Error("Missing dimensions");
+            }
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.warn(
+                { ...logContext, stage: "normalize-failed", contentType: finalContentType },
+                `Failed to decode/normalize uploaded room image: ${message}`
+            );
+            return json({
+                status: "error",
+                message: "Unsupported image format. Please upload a JPG, PNG, or WebP.",
+            }, { status: 400 });
+        }
+
+        const filename = `room-${Date.now()}.jpg`;
 
         // Create room session
         const roomSession = await prisma.roomSession.create({
@@ -111,7 +143,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Upload directly to GCS
         const key = `rooms/${shop.id}/${roomSession.id}/${filename}`;
         // Note: uploadBuffer signature is (buffer, key, contentType)
-        const publicUrl = await StorageService.uploadBuffer(imageBuffer, key, finalContentType);
+        const publicUrl = await StorageService.uploadBuffer(canonicalBuffer, key, "image/jpeg");
 
         // Store the GCS key for future URL generation
         await prisma.roomSession.update({

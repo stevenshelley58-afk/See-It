@@ -5,6 +5,8 @@ import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import sharp from "sharp";
 
+const MAX_ORIGINAL_EDGE_PX = 4096;
+
 /**
  * POST /api/products/use-original
  *
@@ -70,6 +72,14 @@ export const action = async ({ request }) => {
 
         // Convert to PNG (for consistency)
         let pngBuffer = await sharp(inputBuffer)
+            .rotate()
+            .resize({
+                width: MAX_ORIGINAL_EDGE_PX,
+                height: MAX_ORIGINAL_EDGE_PX,
+                fit: "inside",
+                withoutEnlargement: true
+            })
+            .ensureAlpha()
             .png()
             .toBuffer();
 

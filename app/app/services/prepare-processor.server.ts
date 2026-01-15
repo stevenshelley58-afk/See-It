@@ -6,7 +6,11 @@ import { incrementQuota } from "../quota.server";
 import { emitPrepEvent } from "./prep-events.server";
 import { extractStructuredFields, generateProductDescription } from "./description-writer.server";
 import { GoogleGenAI } from "@google/genai";
-import { generateSeeItNowPrompt } from "./see-it-now-prompt-generator.server";
+import {
+    SEE_IT_NOW_VARIANT_LIBRARY,
+    normalizeSeeItNowVariants,
+    pickDefaultSelectedSeeItNowVariants,
+} from "~/config/see-it-now-variants.config";
 
 let processorInterval: NodeJS.Timeout | null = null;
 let isProcessing = false;
@@ -74,6 +78,7 @@ interface PlacementConfig {
 async function generatePlacementConfig(
     imageUrl: string,
     productTitle: string,
+    productContext: { description?: string; productType?: string; vendor?: string; tags?: string[] } | null,
     requestId: string
 ): Promise<PlacementConfig | null> {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -97,9 +102,16 @@ async function generatePlacementConfig(
         const base64Image = Buffer.from(imageBuffer).toString('base64');
         const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
 
+        const descriptionSnippet = (productContext?.description || '').toString().replace(/\s+/g, ' ').trim().slice(0, 1200);
+        const tagsSnippet = Array.isArray(productContext?.tags) ? productContext!.tags.slice(0, 20).join(', ') : '';
+
         const prompt = `You are analyzing a product image for an AR/visualization app that places furniture and home decor into customer room photos.
 
 Product Title: "${productTitle}"
+Product Type: "${(productContext?.productType || '').toString().trim()}"
+Vendor: "${(productContext?.vendor || '').toString().trim()}"
+Tags: "${tagsSnippet}"
+Product Description (from PDP, may include dimensions/materials): "${descriptionSnippet}"
 
 Analyze this product image and provide:
 
@@ -187,6 +199,89 @@ Respond in JSON format only, no markdown:
             }),
             "Failed to generate placement config",
             error
+        );
+        return null;
+    }
+}
+
+type ShopifyProductForPrompt = {
+    title?: string | null;
+    description?: string | null;
+    descriptionHtml?: string | null;
+    productType?: string | null;
+    vendor?: string | null;
+    tags?: string[] | null;
+    metafields?: { edges?: Array<{ node?: { namespace?: string; key?: string; value?: string; type?: string } }> } | null;
+};
+
+async function fetchShopifyProductForPrompt(
+    shopDomain: string,
+    accessToken: string,
+    productId: string,
+    requestId: string
+): Promise<ShopifyProductForPrompt | null> {
+    // Guard: missing/placeholder token
+    if (!accessToken || accessToken === "pending") return null;
+
+    // Shopify Admin API GraphQL endpoint (Jan 2025)
+    const endpoint = `https://${shopDomain}/admin/api/2025-01/graphql.json`;
+
+    const query = `#graphql
+        query GetProductForPrompt($id: ID!) {
+            product(id: $id) {
+                title
+                description
+                descriptionHtml
+                productType
+                vendor
+                tags
+                metafields(first: 20) {
+                    edges {
+                        node {
+                            namespace
+                            key
+                            value
+                            type
+                        }
+                    }
+                }
+            }
+        }
+    `;
+
+    try {
+        const res = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": accessToken,
+            },
+            body: JSON.stringify({
+                query,
+                variables: { id: `gid://shopify/Product/${productId}` },
+            }),
+        });
+
+        if (!res.ok) {
+            logger.warn(
+                createLogContext("prepare", requestId, "shopify-product-fetch", {
+                    status: res.status,
+                    statusText: res.statusText,
+                }),
+                `Failed to fetch product from Shopify Admin API (HTTP ${res.status})`
+            );
+            return null;
+        }
+
+        const json = await res.json().catch(() => null);
+        const product = json?.data?.product as ShopifyProductForPrompt | undefined;
+        return product || null;
+    } catch (err) {
+        logger.warn(
+            createLogContext("prepare", requestId, "shopify-product-fetch", {
+                error: err instanceof Error ? err.message : String(err),
+            }),
+            "Failed to fetch product from Shopify Admin API (network/parsing)"
         );
         return null;
     }
@@ -366,12 +461,43 @@ async function processPendingAssets(batchRequestId: string) {
                     let replacementRule = asset.replacementRule;
                     let allowSpaceCreation = asset.allowSpaceCreation;
 
+                    // Fetch shop + product context (PDP) so the LLM can ground prompts in real product info.
+                    // This runs only during prepare (not at render time).
+                    const shopRecord = await prisma.shop.findUnique({
+                        where: { id: asset.shopId },
+                        select: { shopDomain: true, accessToken: true, settingsJson: true },
+                    });
+
+                    const shopifyProduct = shopRecord
+                        ? await fetchShopifyProductForPrompt(
+                            shopRecord.shopDomain,
+                            shopRecord.accessToken,
+                            asset.productId,
+                            itemRequestId
+                        )
+                        : null;
+
+                    const metafieldText = Array.isArray(shopifyProduct?.metafields?.edges)
+                        ? shopifyProduct!.metafields!.edges!
+                            .map((e) => e?.node?.value)
+                            .filter(Boolean)
+                            .join(" ")
+                        : "";
+
+                    const combinedDescription = `${shopifyProduct?.description || ""}\n${shopifyProduct?.descriptionHtml || ""}\n${metafieldText}`.trim();
+
                     // NEW: Auto-generate placement config using image analysis if not already set
                     if (!renderInstructions && !isMerchantOwned('renderInstructions')) {
                         try {
                             const placementConfig = await generatePlacementConfig(
                                 asset.sourceImageUrl,
                                 asset.productTitle || '',
+                                {
+                                    description: combinedDescription || undefined,
+                                    productType: shopifyProduct?.productType || asset.productType || undefined,
+                                    vendor: shopifyProduct?.vendor || undefined,
+                                    tags: (shopifyProduct?.tags || []) as any,
+                                },
                                 itemRequestId
                             );
 
@@ -424,12 +550,12 @@ async function processPendingAssets(batchRequestId: string) {
                     if (shouldGeneratePlacement && asset.productTitle) {
                         try {
                             // Extract structured fields from product title (best effort without full product data)
-                            // TODO: Enhance this by fetching full product data from Shopify Admin API
+                            // Enhanced: include PDP descriptionHtml + metafields when available.
                             const productData = {
-                                title: asset.productTitle,
-                                description: '', // Not available in background processor yet
-                                productType: null,
-                                tags: [],
+                                title: (shopifyProduct?.title || asset.productTitle || '').toString(),
+                                description: combinedDescription || '',
+                                productType: shopifyProduct?.productType || asset.productType || null,
+                                tags: shopifyProduct?.tags || [],
                             };
 
                             const extractedFields = extractStructuredFields(productData);
@@ -603,70 +729,20 @@ async function processPendingAssets(batchRequestId: string) {
                         updateData.allowSpaceCreation = allowSpaceCreation;
                     }
 
-                    // Generate See It Now prompt if not already present (don't overwrite merchant edits)
-                    if (!asset.generatedSeeItNowPrompt) {
+                    // Ensure per-product See It Now variants exist (10 options, default 5 selected).
+                    // Do not overwrite if already set (merchant may have adjusted).
+                    const existingVariants = normalizeSeeItNowVariants(asset.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY);
+                    if (existingVariants.length === 0) {
+                        let library = SEE_IT_NOW_VARIANT_LIBRARY;
                         try {
-                            // Build product data for prompt generation
-                            const productDataForPrompt = {
-                                title: asset.productTitle || '',
-                                description: '', // Not available in background processor
-                                productType: asset.productType || undefined,
-                                vendor: undefined, // Not available
-                                tags: [],
-                                dimensions: placementFields?.dimensions || undefined,
-                                placementFields: placementFields || undefined,
-                            };
-
-                            const promptResult = await generateSeeItNowPrompt(
-                                productDataForPrompt,
-                                itemRequestId
-                            );
-
-                            // Add to updateData (will be saved with other fields)
-                            if (promptResult.productPrompt) {
-                                updateData.generatedSeeItNowPrompt = promptResult.productPrompt;
+                            const settings = shopRecord?.settingsJson ? JSON.parse(shopRecord.settingsJson) : {};
+                            if (Array.isArray(settings?.seeItNowVariants) && settings.seeItNowVariants.length > 0) {
+                                library = normalizeSeeItNowVariants(settings.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY);
                             }
-                            if (promptResult.selectedVariants && promptResult.selectedVariants.length > 0) {
-                                updateData.seeItNowVariants = promptResult.selectedVariants;
-                            }
-                            if (promptResult.archetype) {
-                                updateData.detectedArchetype = promptResult.archetype;
-                            }
-                            // useGeneratedPrompt stays false - merchant must enable
-
-                            logger.info(
-                                createLogContext("prepare", itemRequestId, "see-it-now-prompt-generated", {
-                                    assetId: asset.id,
-                                    productId: asset.productId,
-                                    archetype: promptResult.archetype,
-                                    variantCount: promptResult.selectedVariants.length
-                                }),
-                                `Generated See It Now prompt: archetype=${promptResult.archetype}, ${promptResult.selectedVariants.length} variants`
-                            );
-
-                            // Emit event for monitor
-                            await emitPrepEvent({
-                                assetId: asset.id,
-                                productId: asset.productId,
-                                shopId: asset.shopId,
-                                eventType: "see_it_now_prompt_generated",
-                                actorType: "system",
-                                payload: {
-                                    source: "auto",
-                                    archetype: promptResult.archetype,
-                                    variantCount: promptResult.selectedVariants.length,
-                                }
-                            }, null, itemRequestId).catch(() => { });
-                        } catch (promptError) {
-                            // Non-critical - log and continue, don't fail the prepare
-                            logger.warn(
-                                createLogContext("prepare", itemRequestId, "see-it-now-prompt-failed", {
-                                    error: promptError instanceof Error ? promptError.message : String(promptError)
-                                }),
-                                "See It Now prompt generation failed, continuing without",
-                                promptError
-                            );
+                        } catch {
+                            // ignore - fallback to canonical library
                         }
+                        updateData.seeItNowVariants = pickDefaultSelectedSeeItNowVariants(library);
                     }
 
                     // Update fieldSource to mark auto-generated fields

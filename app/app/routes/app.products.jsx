@@ -43,6 +43,31 @@ export const loader = async ({ request }) => {
     const searchQuery = url.searchParams.get("q") || "";
     const sortField = url.searchParams.get("sort") || "manual"; // title, price, manual
     const sortDir = url.searchParams.get("sortDir") || "asc";
+    const collectionId = url.searchParams.get("collection") || "";
+
+    // Fetch all collections for the filter dropdown
+    let collections = [];
+    try {
+        const collectionsResponse = await admin.graphql(
+            `#graphql
+            query getCollections {
+                collections(first: 100, sortKey: TITLE) {
+                    edges {
+                        node {
+                            id
+                            title
+                            handle
+                            productsCount
+                        }
+                    }
+                }
+            }`
+        );
+        const collectionsJson = await collectionsResponse.json();
+        collections = collectionsJson?.data?.collections?.edges?.map(e => e.node) || [];
+    } catch (err) {
+        console.error("Failed to fetch collections:", err);
+    }
 
     const pageSize = 12;
     let queryArgs = { first: pageSize };
@@ -69,90 +94,161 @@ export const loader = async ({ request }) => {
     const finalQuery = queryParts.join(" AND ");
 
     // #region agent log
-    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'Before GraphQL query',data:{queryArgs,query:finalQuery,sortKey,reverse},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'Before GraphQL query',data:{queryArgs,query:finalQuery,sortKey,reverse,collectionId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
     // #endregion
     let response;
-    try {
-        response = await admin.graphql(
-        `#graphql
-        query getProducts($first: Int, $last: Int, $after: String, $before: String, $query: String, $sortKey: ProductSortKeys, $reverse: Boolean) {
-            products(first: $first, last: $last, after: $after, before: $before, query: $query, sortKey: $sortKey, reverse: $reverse) {
-                edges {
-                    node {
+    let edges, pageInfo;
+
+    // Use different query when filtering by collection
+    if (collectionId) {
+        // Collection products query - note: query filter is not supported for collection products
+        // Convert sortKey for ProductCollectionSortKeys (TITLE, PRICE, MANUAL, COLLECTION_DEFAULT, etc.)
+        let collectionSortKey = "COLLECTION_DEFAULT";
+        if (sortField === 'title') collectionSortKey = "TITLE";
+        else if (sortField === 'price') collectionSortKey = "PRICE";
+        else if (sortField === 'manual') collectionSortKey = "MANUAL";
+
+        try {
+            response = await admin.graphql(
+                `#graphql
+                query getCollectionProducts($collectionId: ID!, $first: Int, $last: Int, $after: String, $before: String, $sortKey: ProductCollectionSortKeys, $reverse: Boolean) {
+                    collection(id: $collectionId) {
                         id
                         title
-                        handle
-                        status
-                        totalInventory
-                        productType
-                        vendor
-                        description
-                        descriptionHtml
-                        tags
-                        metafields(first: 10) {
+                        products(first: $first, last: $last, after: $after, before: $before, sortKey: $sortKey, reverse: $reverse) {
                             edges {
                                 node {
-                                    namespace
-                                    key
-                                    value
-                                    type
+                                    id
+                                    title
+                                    handle
+                                    status
+                                    totalInventory
+                                    productType
+                                    vendor
+                                    description
+                                    descriptionHtml
+                                    tags
+                                    metafields(first: 10) {
+                                        edges {
+                                            node {
+                                                namespace
+                                                key
+                                                value
+                                                type
+                                            }
+                                        }
+                                    }
+                                    priceRangeV2 {
+                                        minVariantPrice { amount currencyCode }
+                                    }
+                                    featuredImage { id url altText }
+                                    images(first: 10) { edges { node { id url altText } } }
+                                }
+                                cursor
+                            }
+                            pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
+                        }
+                    }
+                }`,
+                { variables: { collectionId, ...queryArgs, sortKey: collectionSortKey, reverse: sortDir === 'desc' } }
+            );
+            const responseJson = await response.json();
+            
+            if (!responseJson?.data?.collection) {
+                throw new Error(`Collection not found: ${collectionId}`);
+            }
+            
+            edges = responseJson.data.collection.products.edges;
+            pageInfo = responseJson.data.collection.products.pageInfo;
+        } catch (error) {
+            process.env.DEBUG_INGEST_URL && console.error('[DEBUG] Collection query error:', error);
+            throw error;
+        }
+    } else {
+        // Standard products query
+        try {
+            response = await admin.graphql(
+            `#graphql
+            query getProducts($first: Int, $last: Int, $after: String, $before: String, $query: String, $sortKey: ProductSortKeys, $reverse: Boolean) {
+                products(first: $first, last: $last, after: $after, before: $before, query: $query, sortKey: $sortKey, reverse: $reverse) {
+                    edges {
+                        node {
+                            id
+                            title
+                            handle
+                            status
+                            totalInventory
+                            productType
+                            vendor
+                            description
+                            descriptionHtml
+                            tags
+                            metafields(first: 10) {
+                                edges {
+                                    node {
+                                        namespace
+                                        key
+                                        value
+                                        type
+                                    }
                                 }
                             }
+                            priceRangeV2 {
+                                minVariantPrice { amount currencyCode }
+                            }
+                            featuredImage { id url altText }
+                            images(first: 10) { edges { node { id url altText } } }
                         }
-                        priceRangeV2 {
-                            minVariantPrice { amount currencyCode }
-                        }
-                        featuredImage { id url altText }
-                        images(first: 10) { edges { node { id url altText } } }
+                        cursor
                     }
-                    cursor
+                    pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
                 }
-                pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
-            }
-        }`,
-        { variables: { ...queryArgs, query: finalQuery, sortKey, reverse } }
-    );
-        // #region agent log
-        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:83',message:'After GraphQL query',data:{hasResponse:!!response,status:response?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
-    } catch (error) {
-        // #region agent log
-        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'GraphQL query error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
-        throw error;
-    }
+            }`,
+            { variables: { ...queryArgs, query: finalQuery, sortKey, reverse } }
+        );
+            // #region agent log
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:83',message:'After GraphQL query',data:{hasResponse:!!response,status:response?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+            // #endregion
+        } catch (error) {
+            // #region agent log
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:47',message:'GraphQL query error',data:{error:error?.message,errorName:error?.name,stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+            // #endregion
+            throw error;
+        }
 
-    // #region agent log
-    process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'Before response.json',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-    // #endregion
-    let responseJson;
-    try {
-        responseJson = await response.json();
         // #region agent log
-        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'After response.json',data:{hasData:!!responseJson?.data,hasProducts:!!responseJson?.data?.products,hasErrors:!!responseJson?.errors,errors:responseJson?.errors?.map(e=>e?.message)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'Before response.json',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
         // #endregion
-    } catch (error) {
+        let responseJson;
+        try {
+            responseJson = await response.json();
+            // #region agent log
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'After response.json',data:{hasData:!!responseJson?.data,hasProducts:!!responseJson?.data?.products,hasErrors:!!responseJson?.errors,errors:responseJson?.errors?.map(e=>e?.message)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+            // #endregion
+        } catch (error) {
+            // #region agent log
+            process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'response.json error',data:{error:error?.message,errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+            // #endregion
+            throw error;
+        }
         // #region agent log
-        process.env.DEBUG_INGEST_URL && fetch(process.env.DEBUG_INGEST_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app.products.jsx:85',message:'response.json error',data:{error:error?.message,errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL response received, has data:', !!responseJson?.data, 'has products:', !!responseJson?.data?.products, 'has errors:', !!responseJson?.errors);
+        if (responseJson?.errors) {
+            process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL errors:', responseJson.errors);
+        }
         // #endregion
-        throw error;
+        if (!responseJson?.data?.products) {
+            // #region agent log
+            const errorMsg = responseJson?.errors?.[0]?.message || 'Unknown error';
+            const fullResponse = JSON.stringify(responseJson, null, 2).substring(0, 1000);
+            process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL response missing products data. Full response:', fullResponse);
+            process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL errors:', responseJson?.errors);
+            // #endregion
+            throw new Error(`GraphQL query failed: ${errorMsg}. Response: ${fullResponse.substring(0, 200)}`);
+        }
+        edges = responseJson.data.products.edges;
+        pageInfo = responseJson.data.products.pageInfo;
     }
-    // #region agent log
-    process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL response received, has data:', !!responseJson?.data, 'has products:', !!responseJson?.data?.products, 'has errors:', !!responseJson?.errors);
-    if (responseJson?.errors) {
-        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL errors:', responseJson.errors);
-    }
-    // #endregion
-    if (!responseJson?.data?.products) {
-        // #region agent log
-        const errorMsg = responseJson?.errors?.[0]?.message || 'Unknown error';
-        const fullResponse = JSON.stringify(responseJson, null, 2).substring(0, 1000);
-        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL response missing products data. Full response:', fullResponse);
-        process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL errors:', responseJson?.errors);
-        // #endregion
-        throw new Error(`GraphQL query failed: ${errorMsg}. Response: ${fullResponse.substring(0, 200)}`);
-    }
-    const { edges, pageInfo } = responseJson.data.products;
     if (!edges || !Array.isArray(edges)) {
         // #region agent log
         process.env.DEBUG_INGEST_URL && console.error('[DEBUG] GraphQL response missing edges array. edges:', edges, 'pageInfo:', pageInfo);

@@ -311,16 +311,21 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             // 3. Determine source image - if editing result, use prepared image; otherwise use original
             const sourceImageUrl = (view === "result" && preparedImageUrl) ? preparedImageUrl : selectedImageUrl;
 
-            // Validate source image URL
-            if (!sourceImageUrl || !sourceImageUrl.startsWith('http')) {
-                throw new Error('Invalid image URL. Please try again.');
+            if (!sourceImageUrl) {
+                throw new Error('Missing image URL. Please try again.');
             }
+
+            // Resolve relative URLs (e.g. app-proxy paths) to absolute for server-side fetch.
+            const resolvedSourceImageUrl = sourceImageUrl.startsWith("http")
+                ? sourceImageUrl
+                : new URL(sourceImageUrl, window.location.origin).toString();
 
             // 4. Submit
             const formData = new FormData();
             formData.append("productId", product.id.split('/').pop());
             formData.append("maskDataUrl", maskDataUrl);
-            formData.append("imageUrl", sourceImageUrl); // Use prepared image if editing result
+            formData.append("imageUrl", resolvedSourceImageUrl); // Use prepared image if editing result
+            formData.append("editPrepared", (view === "result" && preparedImageUrl) ? "true" : "false");
 
             fetcher.submit(formData, {
                 method: "post",

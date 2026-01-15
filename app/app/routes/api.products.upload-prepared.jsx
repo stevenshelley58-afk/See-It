@@ -5,6 +5,8 @@ import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import sharp from "sharp";
 
+const MAX_PREPARED_EDGE_PX = 4096;
+
 /**
  * POST /api/products/upload-prepared
  *
@@ -77,11 +79,24 @@ export const action = async ({ request }) => {
         // Convert to PNG with alpha channel (ensure transparency is preserved)
         // IMPORTANT: .rotate() with no args auto-orients based on EXIF and removes the tag
         // This fixes rotation issues with phone photos that have EXIF orientation metadata
-        let processedBuffer = await sharp(inputBuffer)
-            .rotate() // Auto-orient based on EXIF, then strip EXIF orientation tag
-            .ensureAlpha()
-            .png()
-            .toBuffer();
+        let processedBuffer: Buffer;
+        try {
+            processedBuffer = await sharp(inputBuffer)
+                .rotate() // Auto-orient based on EXIF, then strip EXIF orientation tag
+                .resize({
+                    width: MAX_PREPARED_EDGE_PX,
+                    height: MAX_PREPARED_EDGE_PX,
+                    fit: "inside",
+                    withoutEnlargement: true,
+                })
+                .ensureAlpha()
+                .png()
+                .toBuffer();
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.warn({ ...logContext, stage: "process" }, `Failed to decode/normalize uploaded image: ${message}`);
+            return json({ success: false, error: "Unsupported image format. Please upload a JPG, PNG, or WebP under 10MB." }, { status: 400 });
+        }
 
         // Verify the image has content (not empty)
         const metadata = await sharp(processedBuffer).metadata();

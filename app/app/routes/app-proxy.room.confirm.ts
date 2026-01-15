@@ -7,6 +7,49 @@ import sharp from "sharp";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
 
+const MAX_ORIGINAL_DOWNLOAD_BYTES = 25 * 1024 * 1024; // 25MB
+const MAX_CANONICAL_EDGE_PX = 2048;
+
+function clampInt(n: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+async function downloadToBuffer(url: string, maxBytes: number): Promise<Buffer> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) {
+            throw new Error(`Failed to download image: ${res.status}`);
+        }
+
+        const contentLength = res.headers.get("content-length");
+        if (contentLength) {
+            const len = Number(contentLength);
+            if (Number.isFinite(len) && len > maxBytes) {
+                throw new Error(`Image too large (${Math.round(len / 1024 / 1024)}MB). Please upload a smaller image.`);
+            }
+        }
+
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length > maxBytes) {
+            throw new Error(`Image too large (${Math.round(buf.length / 1024 / 1024)}MB). Please upload a smaller image.`);
+        }
+        if (buf.length === 0) {
+            throw new Error("Empty image");
+        }
+        return buf;
+    } catch (err: any) {
+        if (err?.name === "AbortError") {
+            throw new Error("Timed out downloading image. Please try again.");
+        }
+        throw err;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 function getCorsHeaders(shopDomain: string | null): Record<string, string> {
     const headers: Record<string, string> = {
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -65,192 +108,141 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ error: "Room image not uploaded yet" }, { status: 400, headers: corsHeaders });
     }
 
-    // If crop_params provided, generate canonical image
-    if (crop_params) {
-        try {
-            logger.info(
-                { ...logContext, sessionId: sanitizedSessionId },
-                `Generating canonical room image with crop params: ${JSON.stringify(crop_params)}`
-            );
-
-            // Download original image from GCS
-            const originalUrl = await StorageService.getSignedReadUrl(originalKey, 60 * 60 * 1000);
-            const response = await fetch(originalUrl);
-            if (!response.ok) {
-                throw new Error(`Failed to download original image: ${response.status}`);
-            }
-
-            const arrayBuffer = await response.arrayBuffer();
-            const originalBuffer = Buffer.from(arrayBuffer);
-
-            // Get original image metadata
-            const originalMetadata = await sharp(originalBuffer).metadata();
-            const originalWidth = originalMetadata.width || 0;
-            const originalHeight = originalMetadata.height || 0;
-
-            if (!originalWidth || !originalHeight) {
-                throw new Error("Original image missing dimensions");
-            }
-
-            // Parse crop params (normalized to oriented dimensions)
-            const { ratio_label, ratio_value, crop_rect_norm } = crop_params;
-
-            if (!crop_rect_norm || typeof crop_rect_norm.x !== 'number' || typeof crop_rect_norm.y !== 'number' ||
-                typeof crop_rect_norm.w !== 'number' || typeof crop_rect_norm.h !== 'number') {
-                throw new Error("Invalid crop_rect_norm format");
-            }
-
-            // Apply rotation first (auto-orient based on EXIF, then strip EXIF tag)
-            // After rotation, dimensions may change - get the oriented dimensions
-            let rotatedBuffer = await sharp(originalBuffer)
-                .rotate() // Auto-orient based on EXIF
-                .toBuffer();
-
-            const rotatedMetadata = await sharp(rotatedBuffer).metadata();
-            const orientedWidth = rotatedMetadata.width || originalWidth;
-            const orientedHeight = rotatedMetadata.height || originalHeight;
-
-            // Convert normalized crop rect to pixel coordinates (based on oriented dimensions)
-            const cropX = Math.round(crop_rect_norm.x * orientedWidth);
-            const cropY = Math.round(crop_rect_norm.y * orientedHeight);
-            const cropW = Math.round(crop_rect_norm.w * orientedWidth);
-            const cropH = Math.round(crop_rect_norm.h * orientedHeight);
-
-            logger.info(
-                { ...logContext, stage: "crop-calc" },
-                `Crop rect: ${cropX},${cropY},${cropW}x${cropH} (from norm: ${JSON.stringify(crop_rect_norm)}, oriented: ${orientedWidth}x${orientedHeight})`
-            );
-
-            // Extract crop region and resize to max 2048
-            const canonicalBuffer = await sharp(rotatedBuffer)
-                .extract({
-                    left: cropX,
-                    top: cropY,
-                    width: cropW,
-                    height: cropH
-                })
-                .resize({
-                    width: 2048,
-                    height: 2048,
-                    fit: 'inside',
-                    withoutEnlargement: true
-                })
-                .jpeg({ quality: 90 })
-                .toBuffer();
-
-            const canonicalMetadata = await sharp(canonicalBuffer).metadata();
-            const canonicalWidth = canonicalMetadata.width || 0;
-            const canonicalHeight = canonicalMetadata.height || 0;
-
-            if (!canonicalWidth || !canonicalHeight) {
-                throw new Error("Failed to generate canonical image dimensions");
-            }
-
-            logger.info(
-                { ...logContext, stage: "canonical-generated" },
-                `Canonical image generated: ${canonicalWidth}x${canonicalHeight}, ratio: ${ratio_label}`
-            );
-
-            // Upload canonical image to GCS
-            const canonicalKey = `rooms/${roomSession.shopId}/${sanitizedSessionId}/canonical.jpg`;
-            const canonicalUrl = await StorageService.uploadBuffer(
-                canonicalBuffer,
-                canonicalKey,
-                'image/jpeg'
-            );
-
-            // Update room session with canonical fields and invalidate Gemini URI
-            await prisma.roomSession.update({
-                where: { id: sanitizedSessionId },
-                data: {
-                    canonicalRoomImageKey: canonicalKey,
-                    canonicalRoomWidth: canonicalWidth,
-                    canonicalRoomHeight: canonicalHeight,
-                    canonicalRoomRatioLabel: ratio_label,
-                    canonicalRoomRatioValue: ratio_value,
-                    canonicalRoomCrop: crop_params,
-                    canonicalCreatedAt: new Date(),
-                    // Invalidate Gemini URI since room image changed
-                    geminiFileUri: null,
-                    geminiFileExpiresAt: null,
-                    lastUsedAt: new Date()
-                }
-            });
-
-            logger.info(
-                { ...logContext, stage: "complete" },
-                `Canonical room image saved: ${canonicalKey}`
-            );
-
-            // Return canonical URL + metadata
-            return json({
-                ok: true,
-                canonical_room_image_url: canonicalUrl,
-                canonical_width: canonicalWidth,
-                canonical_height: canonicalHeight,
-                ratio_label: ratio_label,
-                // Legacy fields for backward compatibility
-                room_image_url: canonicalUrl,
-                roomImageUrl: canonicalUrl
-            }, { headers: corsHeaders });
-
-        } catch (error) {
-            logger.error(
-                { ...logContext, stage: "canonical-error" },
-                "Failed to generate canonical room image",
-                error
-            );
-
-            const errorMessage = error instanceof Error ? error.message : "Unknown error";
-            return json({
-                error: "canonicalization_failed",
-                message: errorMessage
-            }, { status: 500, headers: corsHeaders });
-        }
-    }
-
-    // Legacy path: no crop_params - return original URL (backward compatibility)
-    // But check if canonical already exists and return that if available
-    if (roomSession.canonicalRoomImageKey) {
-        const canonicalUrl = await StorageService.getSignedReadUrl(
-            roomSession.canonicalRoomImageKey,
-            60 * 60 * 1000
-        );
-
+    // If canonical already exists and we aren't changing crop params, just return it.
+    if (!crop_params && roomSession.canonicalRoomImageKey) {
+        const canonicalUrl = await StorageService.getSignedReadUrl(roomSession.canonicalRoomImageKey, 60 * 60 * 1000);
         await prisma.roomSession.update({
             where: { id: sanitizedSessionId },
-            data: {
-                lastUsedAt: new Date()
-            }
+            data: { lastUsedAt: new Date() }
         });
-
         return json({
             ok: true,
             canonical_room_image_url: canonicalUrl,
             canonical_width: roomSession.canonicalRoomWidth || null,
             canonical_height: roomSession.canonicalRoomHeight || null,
             ratio_label: roomSession.canonicalRoomRatioLabel || null,
-            // Legacy fields
             room_image_url: canonicalUrl,
             roomImageUrl: canonicalUrl
         }, { headers: corsHeaders });
     }
 
-    // Fallback to original image
-    const publicUrl = await StorageService.getSignedReadUrl(originalKey, 60 * 60 * 1000);
+    // Always generate a canonical JPEG, even if no crop params are provided.
+    // This makes downstream cleanup/rendering robust across formats (png/webp/heic/etc) and aspect ratios.
+    try {
+        logger.info(
+            { ...logContext, sessionId: sanitizedSessionId },
+            crop_params
+                ? `Generating canonical room image with crop params: ${JSON.stringify(crop_params)}`
+                : "Generating canonical room image (no crop params)"
+        );
 
-    await prisma.roomSession.update({
-        where: { id: sanitizedSessionId },
-        data: {
-            originalRoomImageKey: originalKey, // Ensure key is always set
-            originalRoomImageUrl: publicUrl, // Legacy field - keep for compatibility
-            lastUsedAt: new Date()
+        const originalUrl = await StorageService.getSignedReadUrl(originalKey, 60 * 60 * 1000);
+        const originalBuffer = await downloadToBuffer(originalUrl, MAX_ORIGINAL_DOWNLOAD_BYTES);
+
+        // Rotate first (auto-orient), then process
+        const rotated = sharp(originalBuffer).rotate();
+        const rotatedMeta = await rotated.metadata();
+        const orientedWidth = rotatedMeta.width || 0;
+        const orientedHeight = rotatedMeta.height || 0;
+        if (!orientedWidth || !orientedHeight) {
+            throw new Error("Uploaded image is not a supported image format.");
         }
-    });
 
-    return json({
-        ok: true,
-        room_image_url: publicUrl,
-        roomImageUrl: publicUrl
-    }, { headers: corsHeaders });
+        let pipeline = rotated;
+        let ratioLabel: string | null = null;
+        let ratioValue: number | null = null;
+        let cropToStore: any = null;
+
+        if (crop_params) {
+            const { ratio_label, ratio_value, crop_rect_norm } = crop_params;
+            ratioLabel = ratio_label ?? null;
+            ratioValue = ratio_value ?? null;
+            cropToStore = crop_params;
+
+            if (!crop_rect_norm || typeof crop_rect_norm.x !== 'number' || typeof crop_rect_norm.y !== 'number' ||
+                typeof crop_rect_norm.w !== 'number' || typeof crop_rect_norm.h !== 'number') {
+                throw new Error("Invalid crop_rect_norm format");
+            }
+
+            const rawX = Math.round(crop_rect_norm.x * orientedWidth);
+            const rawY = Math.round(crop_rect_norm.y * orientedHeight);
+            const rawW = Math.round(crop_rect_norm.w * orientedWidth);
+            const rawH = Math.round(crop_rect_norm.h * orientedHeight);
+
+            // Clamp extract to image bounds (prevents out-of-bounds errors on odd aspect ratios/rounding)
+            const left = clampInt(rawX, 0, orientedWidth - 1);
+            const top = clampInt(rawY, 0, orientedHeight - 1);
+            const width = clampInt(rawW, 1, orientedWidth - left);
+            const height = clampInt(rawH, 1, orientedHeight - top);
+
+            logger.info(
+                { ...logContext, stage: "crop-calc" },
+                `Crop rect: ${left},${top},${width}x${height} (from norm: ${JSON.stringify(crop_rect_norm)}, oriented: ${orientedWidth}x${orientedHeight})`
+            );
+
+            pipeline = pipeline.extract({ left, top, width, height });
+        }
+
+        const canonicalBuffer = await pipeline
+            .resize({
+                width: MAX_CANONICAL_EDGE_PX,
+                height: MAX_CANONICAL_EDGE_PX,
+                fit: "inside",
+                withoutEnlargement: true,
+            })
+            .jpeg({ quality: 90 })
+            .toBuffer();
+
+        const canonicalMeta = await sharp(canonicalBuffer).metadata();
+        const canonicalWidth = canonicalMeta.width || 0;
+        const canonicalHeight = canonicalMeta.height || 0;
+        if (!canonicalWidth || !canonicalHeight) {
+            throw new Error("Failed to generate canonical image dimensions");
+        }
+
+        const canonicalKey = `rooms/${roomSession.shopId}/${sanitizedSessionId}/canonical.jpg`;
+        const canonicalUrl = await StorageService.uploadBuffer(canonicalBuffer, canonicalKey, "image/jpeg");
+
+        await prisma.roomSession.update({
+            where: { id: sanitizedSessionId },
+            data: {
+                canonicalRoomImageKey: canonicalKey,
+                canonicalRoomWidth: canonicalWidth,
+                canonicalRoomHeight: canonicalHeight,
+                canonicalRoomRatioLabel: ratioLabel,
+                canonicalRoomRatioValue: ratioValue,
+                canonicalRoomCrop: cropToStore,
+                canonicalCreatedAt: new Date(),
+                // Keep original key/url around, but ensure key is always set
+                originalRoomImageKey: originalKey,
+                // Invalidate Gemini URI since room image changed
+                geminiFileUri: null,
+                geminiFileExpiresAt: null,
+                lastUsedAt: new Date(),
+            }
+        });
+
+        return json({
+            ok: true,
+            canonical_room_image_url: canonicalUrl,
+            canonical_width: canonicalWidth,
+            canonical_height: canonicalHeight,
+            ratio_label: ratioLabel,
+            room_image_url: canonicalUrl,
+            roomImageUrl: canonicalUrl
+        }, { headers: corsHeaders });
+    } catch (error) {
+        logger.error(
+            { ...logContext, stage: "canonical-error" },
+            "Failed to generate canonical room image",
+            error
+        );
+
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        return json({
+            error: "canonicalization_failed",
+            message: errorMessage,
+            hint: "Try uploading a JPG, PNG, or WebP under 25MB."
+        }, { status: 500, headers: corsHeaders });
+    }
 };

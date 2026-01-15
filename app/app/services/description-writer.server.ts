@@ -294,13 +294,24 @@ function extractDimensions(text: string): { height?: number; width?: number } | 
         .replace(/\s+/g, ' ')
         .trim();
 
-    // Pattern: "H90 x W200" or "90cm x 200cm" or "90 x 200" (supports decimals)
-    const cross = clean.match(/(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?\s*[x×]\s*(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?/i);
-    if (cross) {
-        return {
-            height: parseFloat(cross[1]),
-            width: parseFloat(cross[2]),
-        };
+    // Pattern: explicit height/width (be conservative with unlabeled "A × B")
+    // Many PDPs use "25×25cm" to mean footprint (W×D), not height×width.
+    const hasExplicitAxes =
+        /\b(h(?:eight)?)\b/i.test(clean) ||
+        /\b(w(?:idth)?)\b/i.test(clean) ||
+        /\bH\s*[x×]\s*W\b/i.test(clean) ||
+        /\bW\s*[x×]\s*H\b/i.test(clean) ||
+        /\bHxW\b/i.test(clean) ||
+        /\bWxH\b/i.test(clean);
+
+    if (hasExplicitAxes) {
+        const cross = clean.match(/(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?\s*[x×]\s*(\d{2,4}(?:\.\d+)?)\s*(?:cm|mm|")?/i);
+        if (cross) {
+            return {
+                height: parseFloat(cross[1]),
+                width: parseFloat(cross[2]),
+            };
+        }
     }
 
     // Pattern: "Height: 90cm", "H: 90", "Width 200"

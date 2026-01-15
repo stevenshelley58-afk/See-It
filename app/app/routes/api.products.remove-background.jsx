@@ -7,6 +7,9 @@ import { logger, createLogContext } from "../utils/logger.server";
 import { emitPrepEvent } from "../services/prep-events.server";
 import sharp from "sharp";
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_SOURCE_EDGE_PX = 4096;
+
 /**
  * Extract image ID from Shopify CDN URL
  * e.g., "https://cdn.shopify.com/s/files/.../double-iron-caddy-900895.jpg?v=1729945400"
@@ -77,14 +80,36 @@ export const action = async ({ request }) => {
         // HANDLE FILE UPLOAD
         if (file && typeof file !== 'string') {
             logger.info(logContext, `Processing file upload: ${file.name} (${file.size} bytes)`);
+            if (typeof file.size === "number" && file.size > MAX_UPLOAD_BYTES) {
+                return json({ success: false, error: `File too large. Maximum size is ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB.` }, { status: 400 });
+            }
             const buffer = Buffer.from(await file.arrayBuffer());
-            const filename = `shops/${shop.id}/products/${productId}/source-${Date.now()}-${file.name}`;
+            let normalized: Buffer;
+            try {
+                // Normalize orientation + size and encode as JPEG for consistent downstream processing.
+                normalized = await sharp(buffer)
+                    .rotate()
+                    .resize({
+                        width: MAX_SOURCE_EDGE_PX,
+                        height: MAX_SOURCE_EDGE_PX,
+                        fit: "inside",
+                        withoutEnlargement: true
+                    })
+                    .jpeg({ quality: 90 })
+                    .toBuffer();
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                logger.warn(logContext, `Failed to decode/normalize uploaded file: ${message}`);
+                return json({ success: false, error: "Unsupported image format. Please upload a JPG, PNG, or WebP under 10MB." }, { status: 400 });
+            }
+
+            const filename = `shops/${shop.id}/products/${productId}/source-${Date.now()}.jpg`;
 
             // Upload source file to storage
             sourceImageUrl = await StorageService.uploadBuffer(
-                buffer,
+                normalized,
                 filename,
-                file.type || 'image/png'
+                'image/jpeg'
             );
             logger.info(logContext, `Uploaded source image to: ${sourceImageUrl}`);
         }
