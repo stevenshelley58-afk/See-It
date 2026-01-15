@@ -1275,6 +1275,11 @@
   border: 2px dashed rgba(23, 23, 23, 0.6);
   border-radius: 4px;
   box-sizing: border-box;
+  /* GPU acceleration to prevent jitter during drag */
+  will-change: transform;
+  /* Use transform for positioning - avoids layout thrashing */
+  left: 0;
+  top: 0;
 }
 
 /* Product image inside overlay */

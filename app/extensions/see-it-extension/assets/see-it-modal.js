@@ -1277,6 +1277,10 @@
         state.y = 0.5;
         state.scale = 1.0;
 
+        // Reset dimension tracking (forces width/height update on first render)
+        lastOverlayWidth = 0;
+        lastOverlayHeight = 0;
+
         // Show the overlay
         if (productOverlay) {
             productOverlay.style.display = 'block';
@@ -1316,6 +1320,10 @@
         });
     };
 
+    // Track last dimensions to avoid unnecessary width/height updates during drag
+    let lastOverlayWidth = 0;
+    let lastOverlayHeight = 0;
+
     const updateProductOverlay = () => {
         if (!productOverlay || !positionContainer) return;
 
@@ -1327,11 +1335,18 @@
         const pixelX = state.x * containerRect.width - (scaledWidth / 2);
         const pixelY = state.y * containerRect.height - (scaledHeight / 2);
 
-        productOverlay.style.width = scaledWidth + 'px';
-        productOverlay.style.height = scaledHeight + 'px';
-        productOverlay.style.left = pixelX + 'px';
-        productOverlay.style.top = pixelY + 'px';
-        productOverlay.style.transform = 'none'; // Remove the CSS centering transform
+        // Use transform for positioning (GPU-accelerated, no layout thrashing)
+        // This prevents jitter during drag by avoiding reflow
+        productOverlay.style.transform = `translate3d(${pixelX}px, ${pixelY}px, 0)`;
+
+        // Only update width/height when they actually change (during resize)
+        // This avoids unnecessary style recalculations during drag
+        if (scaledWidth !== lastOverlayWidth || scaledHeight !== lastOverlayHeight) {
+            productOverlay.style.width = scaledWidth + 'px';
+            productOverlay.style.height = scaledHeight + 'px';
+            lastOverlayWidth = scaledWidth;
+            lastOverlayHeight = scaledHeight;
+        }
     };
 
     const getEventPos = (e) => {
