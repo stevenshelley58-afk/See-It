@@ -84,7 +84,7 @@ export const action = async ({ request }) => {
                 return json({ success: false, error: `File too large. Maximum size is ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB.` }, { status: 400 });
             }
             const buffer = Buffer.from(await file.arrayBuffer());
-            let normalized: Buffer;
+            let normalized;
             try {
                 // Normalize orientation + size and encode as JPEG for consistent downstream processing.
                 normalized = await sharp(buffer)
