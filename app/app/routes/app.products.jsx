@@ -57,14 +57,19 @@ export const loader = async ({ request }) => {
                             id
                             title
                             handle
-                            productsCount
+                            productsCount {
+                                count
+                            }
                         }
                     }
                 }
             }`
         );
         const collectionsJson = await collectionsResponse.json();
-        collections = collectionsJson?.data?.collections?.edges?.map(e => e.node) || [];
+        collections = collectionsJson?.data?.collections?.edges?.map(e => ({
+            ...e.node,
+            productsCount: e.node.productsCount?.count || 0
+        })) || [];
     } catch (err) {
         console.error("Failed to fetch collections:", err);
     }
