@@ -64,8 +64,8 @@
   <div class="see-it-now-widget-hook">
     <div class="see-it-now-widget-content">
       <div class="see-it-now-widget-text">
-        <span class="see-it-now-widget-title">See It In Your Space</span>
-        <span class="see-it-now-widget-description">Instant AI visualization</span>
+        <span class="see-it-now-widget-title">See it in your home</span>
+        <span class="see-it-now-widget-description">Get a real view of this in your space.</span>
       </div>
     </div>
 
@@ -82,12 +82,13 @@
       data-shop-permanent-domain="{{ shop.permanent_domain }}"
       type="button"
     >
-      <svg class="see-it-now-icon-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/>
-        <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"/>
-      </svg>
-      <svg class="see-it-now-icon-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+      <svg class="see-it-now-icon-cube" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <!-- Isometric cube: top face -->
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6L18 9L12 12L6 9Z"/>
+        <!-- Isometric cube: front face -->
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 9L6 15L12 18L12 12Z"/>
+        <!-- Isometric cube: right face -->
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 12L18 9L18 15L12 18Z"/>
       </svg>
       {{ block.settings.button_label | default: "See It Now" }}
     </button>
@@ -112,8 +113,8 @@
             <img id="see-it-now-entry-product-img" src="{{ product_image_url }}" alt="{{ product_title }}" width="{{ product_image_width }}" height="{{ product_image_height }}" loading="lazy">
           </div>
 
-          <h1 class="see-it-now-entry-title">See it in your space</h1>
-          <p class="see-it-now-entry-description">Take a photo of your room for an instant AI visualization.</p>
+          <h1 class="see-it-now-entry-title">See it in your home</h1>
+          <p class="see-it-now-entry-description">Get a real view of this in your space.</p>
 
           <div class="see-it-now-entry-actions">
             <button class="see-it-now-btn-primary-pill" id="see-it-now-btn-camera">

@@ -231,8 +231,7 @@
   display: block;
 }
 
-#see-it-now-trigger .see-it-now-icon-camera,
-#see-it-now-trigger .see-it-now-icon-upload {
+#see-it-now-trigger .see-it-now-icon-cube {
   width: 20px;
   height: 20px;
   flex-shrink: 0;

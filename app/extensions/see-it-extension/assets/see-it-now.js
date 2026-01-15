@@ -133,12 +133,10 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function updateButtonIcon() {
-      const mobile = isMobile();
+      // Cube icon is always visible, no need to toggle based on device
       triggers.forEach(t => {
-        const cameraIcon = t.querySelector('.see-it-now-icon-camera');
-        const uploadIcon = t.querySelector('.see-it-now-icon-upload');
-        if (cameraIcon) cameraIcon.style.display = mobile ? 'block' : 'none';
-        if (uploadIcon) uploadIcon.style.display = mobile ? 'none' : 'block';
+        const cubeIcon = t.querySelector('.see-it-now-icon-cube');
+        if (cubeIcon) cubeIcon.style.display = 'block';
       });
     }
     updateButtonIcon();
