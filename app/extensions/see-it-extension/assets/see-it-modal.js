@@ -1376,7 +1376,8 @@
     };
 
     const handleDragStart = (e) => {
-        if (isResizing) return;
+        // Prevent double-initialization (safety guard)
+        if (isDragging || isResizing) return;
 
         // Check if clicking on a resize handle
         if (e.target.classList.contains('see-it-resize-handle')) {
@@ -1494,6 +1495,9 @@
     };
 
     const handleResizeStart = (e) => {
+        // Prevent double-initialization (safety guard)
+        if (isDragging || isResizing) return;
+        
         e.preventDefault();
         e.stopPropagation();
 
@@ -1568,23 +1572,19 @@
 
         console.log('[See It] Attaching position listeners');
 
-        // Drag listeners on the overlay
+        // Use ONLY pointer events - they unify mouse/touch/pen
+        // DO NOT add touch events - they cause double-firing and jitter on mobile
         productOverlay.addEventListener('pointerdown', handleDragStart);
-        productOverlay.addEventListener('touchstart', handleDragStart, { passive: false });
 
         // Move and end listeners on document for smoother interaction
         document.addEventListener('pointermove', handleDragMove);
-        document.addEventListener('touchmove', handleDragMove, { passive: false });
         document.addEventListener('pointerup', handleDragEnd);
-        document.addEventListener('touchend', handleDragEnd);
         document.addEventListener('pointercancel', handleDragEnd);
-        document.addEventListener('touchcancel', handleDragEnd);
 
-        // Resize handle listeners
+        // Resize handle listeners - pointer events only
         const handles = productOverlay.querySelectorAll('.see-it-resize-handle');
         handles.forEach(handle => {
             handle.addEventListener('pointerdown', handleResizeStart);
-            handle.addEventListener('touchstart', handleResizeStart, { passive: false });
         });
 
         positionListenersAttached = true;
