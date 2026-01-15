@@ -5,7 +5,7 @@ import {
     SEE_IT_NOW_VARIANT_LIBRARY,
     pickDefaultSelectedSeeItNowVariants,
     normalizeSeeItNowVariants,
-} from '~/config/see-it-now-variants.config';
+} from '../../config/see-it-now-variants.config';
 
 /**
  * PlacementTab - Product preparation for rendering
