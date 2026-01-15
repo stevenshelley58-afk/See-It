@@ -263,6 +263,21 @@ export const loader = async ({ request }) => {
         return edge.node;
     }).filter(Boolean);
 
+    // When filtering by collection, apply status and search filters client-side
+    // (collection.products query doesn't support the `query` argument)
+    if (collectionId) {
+        if (statusFilter && statusFilter !== "all") {
+            products = products.filter(p => p.status === statusFilter);
+        }
+        if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            products = products.filter(p => 
+                p.title?.toLowerCase().includes(q) || 
+                p.tags?.some(tag => tag.toLowerCase().includes(q))
+            );
+        }
+    }
+
     // Apply custom sort point 7: active -> in-stock -> price desc
     // ONLY if we are in "manual" sort mode (default) OR explicitly sorting by status (which we hack here for now)
     if (sortField === 'manual' || sortField === 'status') {
@@ -548,7 +563,9 @@ export const loader = async ({ request }) => {
             statusFilter,
             searchQuery,
             sortField,
-            sortDir
+            sortDir,
+            collections,
+            collectionId
         });
     } catch (error) {
         // #region agent log
@@ -590,7 +607,7 @@ export const loader = async ({ request }) => {
 };
 
 export default function Products() {
-    const { products, assetsMap, usage, quota, isPro, pageInfo, statusFilter, searchQuery, sortField, sortDir } = useLoaderData();
+    const { products, assetsMap, usage, quota, isPro, pageInfo, statusFilter, searchQuery, sortField, sortDir, collections, collectionId } = useLoaderData();
     const singleFetcher = useFetcher();
     const revalidator = useRevalidator();
     const navigate = useNavigate();
@@ -1054,38 +1071,72 @@ export default function Products() {
                             )}
                         </div>
 
-                        {/* Shopify-style Status Tabs */}
+                        {/* Shopify-style Status Tabs + Collection Filter */}
                         <div className="border-b border-neutral-200 -mx-1 px-1">
-                            <div className="flex gap-1 overflow-x-auto scrollbar-hide">
-                                {[
-                                    { value: 'all', label: 'All' },
-                                    { value: 'ACTIVE', label: 'Active' },
-                                    { value: 'DRAFT', label: 'Draft' },
-                                    { value: 'ARCHIVED', label: 'Archived' }
-                                ].map((tab) => {
-                                    const isActive = statusFilter === tab.value;
-                                    return (
-                                        <button
-                                            key={tab.value}
-                                            onClick={() => {
+                            <div className="flex items-center justify-between gap-4">
+                                {/* Status Tabs */}
+                                <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                                    {[
+                                        { value: 'all', label: 'All' },
+                                        { value: 'ACTIVE', label: 'Active' },
+                                        { value: 'DRAFT', label: 'Draft' },
+                                        { value: 'ARCHIVED', label: 'Archived' }
+                                    ].map((tab) => {
+                                        const isActive = statusFilter === tab.value;
+                                        return (
+                                            <button
+                                                key={tab.value}
+                                                onClick={() => {
+                                                    const params = new URLSearchParams(window.location.search);
+                                                    params.set('status', tab.value);
+                                                    params.delete('cursor');
+                                                    navigate(`${window.location.pathname}?${params.toString()}`);
+                                                }}
+                                                className={`
+                                                    px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors
+                                                    relative -mb-px
+                                                    ${isActive
+                                                        ? 'text-neutral-900 border-b-2 border-neutral-900'
+                                                        : 'text-neutral-600 hover:text-neutral-900 border-b-2 border-transparent hover:border-neutral-300'
+                                                    }
+                                                `}
+                                            >
+                                                {tab.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Collection Filter Dropdown */}
+                                {collections && collections.length > 0 && (
+                                    <div className="flex items-center gap-2 py-1">
+                                        <label htmlFor="collection-filter" className="text-sm text-neutral-500 whitespace-nowrap">
+                                            Collection:
+                                        </label>
+                                        <select
+                                            id="collection-filter"
+                                            value={collectionId || ""}
+                                            onChange={(e) => {
                                                 const params = new URLSearchParams(window.location.search);
-                                                params.set('status', tab.value);
+                                                if (e.target.value) {
+                                                    params.set('collection', e.target.value);
+                                                } else {
+                                                    params.delete('collection');
+                                                }
                                                 params.delete('cursor');
                                                 navigate(`${window.location.pathname}?${params.toString()}`);
                                             }}
-                                            className={`
-                                                px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors
-                                                relative -mb-px
-                                                ${isActive
-                                                    ? 'text-neutral-900 border-b-2 border-neutral-900'
-                                                    : 'text-neutral-600 hover:text-neutral-900 border-b-2 border-transparent hover:border-neutral-300'
-                                                }
-                                            `}
+                                            className="text-sm border border-neutral-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-neutral-900/5 focus:border-neutral-900 min-w-[160px] max-w-[240px]"
                                         >
-                                            {tab.label}
-                                        </button>
-                                    );
-                                })}
+                                            <option value="">All collections</option>
+                                            {collections.map((collection) => (
+                                                <option key={collection.id} value={collection.id}>
+                                                    {collection.title} ({collection.productsCount})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -1309,12 +1360,12 @@ export default function Products() {
                         {/* Pagination */}
                         <div className="border-t border-neutral-200 p-3 flex justify-center gap-2">
                             {pageInfo?.hasPreviousPage && (
-                                <Link to={`?cursor=${pageInfo.startCursor}&direction=previous&q=${searchQuery}&status=${statusFilter}&sort=${sortField}&sortDir=${sortDir}`}>
+                                <Link to={`?cursor=${pageInfo.startCursor}&direction=previous&q=${searchQuery}&status=${statusFilter}&sort=${sortField}&sortDir=${sortDir}${collectionId ? `&collection=${encodeURIComponent(collectionId)}` : ''}`}>
                                     <Button variant="secondary" size="sm">Previous</Button>
                                 </Link>
                             )}
                             {pageInfo?.hasNextPage && (
-                                <Link to={`?cursor=${pageInfo.endCursor}&direction=next&q=${searchQuery}&status=${statusFilter}&sort=${sortField}&sortDir=${sortDir}`}>
+                                <Link to={`?cursor=${pageInfo.endCursor}&direction=next&q=${searchQuery}&status=${statusFilter}&sort=${sortField}&sortDir=${sortDir}${collectionId ? `&collection=${encodeURIComponent(collectionId)}` : ''}`}>
                                     <Button variant="secondary" size="sm">Next</Button>
                                 </Link>
                             )}
