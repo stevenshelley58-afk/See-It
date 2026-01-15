@@ -1089,6 +1089,7 @@ export function PlacementTab({ product, asset, onChange }) {
                         </div>
                     </div>
                 )}
+            </div>
             
             {/* Status Message */}
             {description && !hasEdited && (
