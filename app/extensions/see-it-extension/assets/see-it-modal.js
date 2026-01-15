@@ -1197,6 +1197,11 @@
     let productStart = { x: 0, y: 0, width: 0, height: 0 };
     let pinchStartDistance = 0;
     let pinchStartScale = 1;
+    
+    // Cached dimensions for jitter-free drag (set once at drag start, not every frame)
+    let cachedContainerRect = null;
+    let cachedRoomDims = null;
+    let dragRAFPending = false;
 
     // Fetch prepared product image (background removed) and real dimensions
     const fetchPreparedProductImage = async (productId) => {
@@ -1327,7 +1332,12 @@
     const updateProductOverlay = () => {
         if (!productOverlay || !positionContainer) return;
 
-        const containerRect = positionContainer.getBoundingClientRect();
+        // Use CACHED container rect during drag to avoid getBoundingClientRect() calls
+        // This is critical for eliminating jitter
+        const containerRect = (isDragging && cachedContainerRect) 
+            ? cachedContainerRect 
+            : positionContainer.getBoundingClientRect();
+            
         const scaledWidth = state.productWidth * state.scale;
         const scaledHeight = state.productHeight * state.scale;
 
@@ -1385,11 +1395,15 @@
         const pos = getEventPos(e);
         dragStart = { x: pos.x, y: pos.y };
 
-        const containerRect = positionContainer?.getBoundingClientRect();
-        if (containerRect) {
+        // CRITICAL: Cache container and room dimensions ONCE at drag start
+        // This eliminates getBoundingClientRect() calls during drag which cause jitter
+        cachedContainerRect = positionContainer?.getBoundingClientRect();
+        cachedRoomDims = getRenderedRoomImageDimensions();
+        
+        if (cachedContainerRect) {
             productStart = {
-                x: state.x * containerRect.width,
-                y: state.y * containerRect.height
+                x: state.x * cachedContainerRect.width,
+                y: state.y * cachedContainerRect.height
             };
         }
 
@@ -1417,56 +1431,45 @@
         }
 
         if (isDragging) {
-            const pos = getEventPos(e);
-            const containerRect = positionContainer?.getBoundingClientRect();
-            if (!containerRect) return;
+            // Use CACHED dimensions from drag start - NO getBoundingClientRect() during drag!
+            // This is critical for eliminating jitter
+            if (!cachedContainerRect) return;
 
+            const pos = getEventPos(e);
             const deltaX = pos.x - dragStart.x;
             const deltaY = pos.y - dragStart.y;
 
             const newPixelX = productStart.x + deltaX;
             const newPixelY = productStart.y + deltaY;
 
-            // Convert back to normalized coordinates (container-relative)
-            const nextX = newPixelX / containerRect.width;
-            const nextY = newPixelY / containerRect.height;
+            // Convert back to normalized coordinates using CACHED container rect
+            const nextX = newPixelX / cachedContainerRect.width;
+            const nextY = newPixelY / cachedContainerRect.height;
 
             // CRITICAL: Constrain drag to the ACTUAL rendered room image area (object-fit: contain)
-            // If users drag into the letterboxed/pillarboxed "blank" bars, the later conversion step
-            // will clamp and cause big jumps in the rendered output. Prevent that here.
-            const roomDims = getRenderedRoomImageDimensions();
-            if (roomDims) {
-                const minX = roomDims.offsetX / containerRect.width;
-                const maxX = (roomDims.offsetX + roomDims.width) / containerRect.width;
-                const minY = roomDims.offsetY / containerRect.height;
-                const maxY = (roomDims.offsetY + roomDims.height) / containerRect.height;
+            // Using CACHED room dimensions from drag start
+            if (cachedRoomDims) {
+                const minX = cachedRoomDims.offsetX / cachedContainerRect.width;
+                const maxX = (cachedRoomDims.offsetX + cachedRoomDims.width) / cachedContainerRect.width;
+                const minY = cachedRoomDims.offsetY / cachedContainerRect.height;
+                const maxY = (cachedRoomDims.offsetY + cachedRoomDims.height) / cachedContainerRect.height;
 
-                const clampedX = Math.max(minX, Math.min(maxX, nextX));
-                const clampedY = Math.max(minY, Math.min(maxY, nextY));
-
-                // Optional debug visibility when we clamp (helps diagnose "why did it move?")
-                if (clampedX !== nextX || clampedY !== nextY) {
-                    console.log('[See It] Drag clamped to room image bounds:', {
-                        nextX: nextX.toFixed(3),
-                        nextY: nextY.toFixed(3),
-                        clampedX: clampedX.toFixed(3),
-                        clampedY: clampedY.toFixed(3),
-                        minX: minX.toFixed(3),
-                        maxX: maxX.toFixed(3),
-                        minY: minY.toFixed(3),
-                        maxY: maxY.toFixed(3),
-                    });
-                }
-
-                state.x = clampedX;
-                state.y = clampedY;
+                state.x = Math.max(minX, Math.min(maxX, nextX));
+                state.y = Math.max(minY, Math.min(maxY, nextY));
             } else {
                 // Fallback: clamp to container bounds
                 state.x = Math.max(0, Math.min(1, nextX));
                 state.y = Math.max(0, Math.min(1, nextY));
             }
 
-            updateProductOverlay();
+            // Use requestAnimationFrame to throttle DOM updates and prevent jitter
+            if (!dragRAFPending) {
+                dragRAFPending = true;
+                requestAnimationFrame(() => {
+                    dragRAFPending = false;
+                    updateProductOverlay();
+                });
+            }
         }
 
         if (isResizing) {
@@ -1479,6 +1482,10 @@
             isDragging = false;
             productOverlay?.classList.remove('dragging');
             pinchStartDistance = 0;
+            // Clear cached dimensions
+            cachedContainerRect = null;
+            cachedRoomDims = null;
+            dragRAFPending = false;
             console.log('[See It] Product position:', { x: state.x.toFixed(3), y: state.y.toFixed(3), scale: state.scale.toFixed(2) });
         }
         if (isResizing) {
@@ -1511,10 +1518,8 @@
         if (!isResizing || !positionContainer) return;
 
         const pos = getEventPos(e);
-        const containerRect = positionContainer.getBoundingClientRect();
-
-        let deltaX = pos.x - dragStart.x;
-        let deltaY = pos.y - dragStart.y;
+        const deltaX = pos.x - dragStart.x;
+        const deltaY = pos.y - dragStart.y;
 
         // Maintain aspect ratio
         const aspectRatio = state.productNaturalHeight / state.productNaturalWidth;
