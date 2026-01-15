@@ -10,6 +10,288 @@ import { getGcsClient } from "../utils/gcs-client.server";
 const SESSION_BUCKET = process.env.GCS_SESSION_BUCKET || 'see-it-sessions';
 
 type StepName = 'room' | 'mask' | 'inpaint' | 'placement' | 'final';
+
+// ============================================================================
+// SEE IT NOW - Session Event Types
+// ============================================================================
+
+export type SeeItNowEventType = 
+  | 'session_started'
+  | 'room_uploaded'
+  | 'variants_generated'
+  | 'variant_selected'
+  | 'error'
+  | 'session_ended';
+
+export interface SeeItNowEventData {
+  // Common fields
+  sessionId: string;
+  shop: string;
+  productId?: string;
+  productTitle?: string;
+  timestamp?: string;
+  
+  // session_started
+  device?: {
+    userAgent?: string;
+    deviceType?: string;
+    browser?: string;
+    os?: string;
+    screenWidth?: number;
+    screenHeight?: number;
+  };
+  
+  // room_uploaded
+  roomSessionId?: string;
+  imageSize?: string;
+  
+  // variants_generated
+  variantCount?: number;
+  variantIds?: string[];
+  durationMs?: number;
+  imageUrls?: string[];
+  
+  // variant_selected
+  selectedVariantId?: string;
+  selectedImageUrl?: string;
+  upscaled?: boolean;
+  
+  // error
+  errorCode?: string;
+  errorMessage?: string;
+  step?: string;
+  
+  // session_ended
+  status?: 'completed' | 'abandoned' | 'error';
+  totalDurationMs?: number;
+}
+
+interface SeeItNowSession {
+  sessionId: string;
+  shop: string;
+  productId?: string;
+  productTitle?: string;
+  startedAt: string;
+  updatedAt: string;
+  status: 'in_progress' | 'completed' | 'abandoned' | 'error';
+  device?: SeeItNowEventData['device'];
+  roomSessionId?: string;
+  events: Array<{
+    type: SeeItNowEventType;
+    at: string;
+    data: Partial<SeeItNowEventData>;
+  }>;
+  variants?: Array<{
+    id: string;
+    imageUrl: string;
+    selected?: boolean;
+  }>;
+  selectedVariant?: string;
+  error?: {
+    code: string;
+    message: string;
+    step?: string;
+  };
+  totalDurationMs?: number;
+}
+
+/**
+ * Log a See It Now session event to GCS. Fire-and-forget - never await this.
+ * 
+ * @example
+ * // In your route handler (do NOT await):
+ * logSeeItNowEvent('variants_generated', {
+ *   sessionId: 'see-it-now_abc123',
+ *   shop: 'myshop.myshopify.com',
+ *   variantCount: 5,
+ *   durationMs: 4500
+ * });
+ */
+export function logSeeItNowEvent(
+  eventType: SeeItNowEventType,
+  data: SeeItNowEventData
+): void {
+  // Fire and forget - run in background
+  doLogSeeItNowEvent(eventType, data).catch((error) => {
+    console.error('[SessionLogger] Failed to log See It Now event:', eventType, error?.message || error);
+  });
+}
+
+/**
+ * Internal async implementation for See It Now logging
+ */
+async function doLogSeeItNowEvent(
+  eventType: SeeItNowEventType,
+  data: SeeItNowEventData
+): Promise<void> {
+  const storage = getGcsClient();
+  const bucket = storage.bucket(SESSION_BUCKET);
+  const basePath = `see-it-now/${data.sessionId}`;
+  const now = data.timestamp || new Date().toISOString();
+
+  // Read existing session or create new
+  let session: SeeItNowSession;
+  const sessionFile = bucket.file(`${basePath}/session.json`);
+
+  try {
+    const [exists] = await sessionFile.exists();
+    if (exists) {
+      const [content] = await sessionFile.download();
+      session = JSON.parse(content.toString());
+    } else {
+      session = {
+        sessionId: data.sessionId,
+        shop: data.shop,
+        productId: data.productId,
+        productTitle: data.productTitle,
+        startedAt: now,
+        updatedAt: now,
+        status: 'in_progress',
+        events: [],
+      };
+    }
+  } catch {
+    // Create fresh if can't read
+    session = {
+      sessionId: data.sessionId,
+      shop: data.shop,
+      productId: data.productId,
+      productTitle: data.productTitle,
+      startedAt: now,
+      updatedAt: now,
+      status: 'in_progress',
+      events: [],
+    };
+  }
+
+  // Add event
+  session.events.push({
+    type: eventType,
+    at: now,
+    data,
+  });
+  session.updatedAt = now;
+
+  // Update session based on event type
+  switch (eventType) {
+    case 'session_started':
+      session.device = data.device;
+      break;
+
+    case 'room_uploaded':
+      session.roomSessionId = data.roomSessionId;
+      break;
+
+    case 'variants_generated':
+      if (data.variantIds && data.imageUrls) {
+        session.variants = data.variantIds.map((id, i) => ({
+          id,
+          imageUrl: data.imageUrls?.[i] || '',
+        }));
+      }
+      break;
+
+    case 'variant_selected':
+      session.selectedVariant = data.selectedVariantId;
+      if (session.variants && data.selectedVariantId) {
+        const variant = session.variants.find(v => v.id === data.selectedVariantId);
+        if (variant) variant.selected = true;
+      }
+      break;
+
+    case 'error':
+      session.status = 'error';
+      session.error = {
+        code: data.errorCode || 'UNKNOWN',
+        message: data.errorMessage || 'Unknown error',
+        step: data.step,
+      };
+      break;
+
+    case 'session_ended':
+      session.status = data.status || 'completed';
+      session.totalDurationMs = data.totalDurationMs;
+      break;
+  }
+
+  // Save session
+  await sessionFile.save(JSON.stringify(session, null, 2), {
+    contentType: 'application/json',
+    resumable: false,
+  });
+
+  // Update shop index (best effort)
+  try {
+    await updateSeeItNowShopIndex(bucket, data.shop, data.sessionId, session);
+  } catch {
+    // Ignore - shop index is secondary
+  }
+}
+
+/**
+ * Update the per-shop See It Now sessions index
+ */
+async function updateSeeItNowShopIndex(
+  bucket: ReturnType<typeof getGcsClient>['bucket'] extends (name: string) => infer R ? R : never,
+  shop: string,
+  sessionId: string,
+  session: SeeItNowSession
+): Promise<void> {
+  const shopIndexPath = `shops/${shop}/see-it-now-sessions.json`;
+  const indexFile = bucket.file(shopIndexPath);
+
+  interface ShopIndex {
+    shop: string;
+    totalSessions: number;
+    sessions: Array<{
+      sessionId: string;
+      startedAt: string;
+      status: SeeItNowSession['status'];
+      variantCount: number;
+      selectedVariant?: string;
+    }>;
+  }
+
+  let index: ShopIndex;
+  try {
+    const [exists] = await indexFile.exists();
+    if (exists) {
+      const [content] = await indexFile.download();
+      index = JSON.parse(content.toString());
+    } else {
+      index = { shop, totalSessions: 0, sessions: [] };
+    }
+  } catch {
+    index = { shop, totalSessions: 0, sessions: [] };
+  }
+
+  // Update or add session entry
+  const existingIdx = index.sessions.findIndex(s => s.sessionId === sessionId);
+  const sessionEntry = {
+    sessionId,
+    startedAt: session.startedAt,
+    status: session.status,
+    variantCount: session.variants?.length || 0,
+    selectedVariant: session.selectedVariant,
+  };
+
+  if (existingIdx >= 0) {
+    index.sessions[existingIdx] = sessionEntry;
+  } else {
+    index.sessions.unshift(sessionEntry);
+    index.totalSessions++;
+  }
+
+  // Keep only last 100 sessions per shop
+  if (index.sessions.length > 100) {
+    index.sessions = index.sessions.slice(0, 100);
+  }
+
+  await indexFile.save(JSON.stringify(index, null, 2), {
+    contentType: 'application/json',
+    resumable: false,
+  });
+}
 type SessionStatus = 'in_progress' | 'complete' | 'failed' | 'abandoned';
 
 interface StepData {

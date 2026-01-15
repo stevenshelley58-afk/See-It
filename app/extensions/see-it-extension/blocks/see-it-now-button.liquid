@@ -33,6 +33,20 @@
         { "value": "secondary", "label": "Secondary" }
       ],
       "default": "primary"
+    },
+    {
+      "type": "text",
+      "id": "monitor_url",
+      "label": "Monitor Dashboard URL",
+      "info": "URL for analytics tracking (e.g., https://see-it-monitor.vercel.app)",
+      "default": ""
+    },
+    {
+      "type": "checkbox",
+      "id": "enable_analytics",
+      "label": "Enable Session Analytics",
+      "info": "Track user sessions for the monitor dashboard",
+      "default": true
     }
   ]
 }
@@ -61,10 +75,19 @@
   {% assign product_title = product.title | default: "Product" %}
   {% assign product_price = product.price | money %}
   {% assign product_collection = product.collections.first.handle | default: '' %}
+  {% assign monitor_url = block.settings.monitor_url | default: '' %}
+  {% assign enable_analytics = block.settings.enable_analytics | default: true %}
 
   {% assign btn_class = 'see-it-now-btn-primary-pill' %}
   {% if block.settings.button_style == 'secondary' %}
     {% assign btn_class = 'see-it-now-btn-outline-pill' %}
+  {% endif %}
+
+  {%- comment -%}
+    Load analytics script if enabled
+  {%- endcomment -%}
+  {% if enable_analytics %}
+    {{ 'see-it-now-analytics.js' | asset_url | script_tag }}
   {% endif %}
 
   <!-- Widget Container -->
@@ -87,6 +110,8 @@
       data-product-collection="{{ product_collection }}"
       data-shop-domain="{{ shop.domain }}"
       data-shop-permanent-domain="{{ shop.permanent_domain }}"
+      data-monitor-url="{{ monitor_url }}"
+      data-analytics-enabled="{{ enable_analytics }}"
       type="button"
     >
       <svg class="see-it-now-icon-cube" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">

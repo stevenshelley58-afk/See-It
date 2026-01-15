@@ -19,6 +19,7 @@ import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
 
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
+import { logSeeItNowEvent } from "~/services/session-logger.server";
 
 import {
   SEE_IT_NOW_VARIANT_LIBRARY,
@@ -492,6 +493,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const successfulVariants = variantResults.filter((v): v is NonNullable<typeof v> => v !== null);
 
     if (successfulVariants.length === 0) {
+      // Log error to monitor
+      logSeeItNowEvent('error', {
+        sessionId: seeItNowSessionId,
+        shop: session.shop,
+        productId: product_id,
+        errorCode: 'all_variants_failed',
+        errorMessage: 'Failed to generate any variants',
+        step: 'variants_generated',
+      });
+
       return json(
         { error: "all_variants_failed", message: "Failed to generate any variants" },
         { status: 500, headers: corsHeaders }
@@ -520,6 +531,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `[See It Now] Hero shot generation completed: ${uploadedVariants.length} variants in ${duration}ms`
     );
 
+    // Log successful generation to monitor
+    logSeeItNowEvent('variants_generated', {
+      sessionId: seeItNowSessionId,
+      shop: session.shop,
+      productId: product_id,
+      roomSessionId: room_session_id,
+      variantCount: uploadedVariants.length,
+      variantIds: uploadedVariants.map(v => v.id),
+      imageUrls: uploadedVariants.map(v => v.image_url),
+      durationMs: duration,
+    });
+
     return json({
       session_id: seeItNowSessionId,
       variants: uploadedVariants,
@@ -534,6 +557,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `[See It Now] Hero shot generation failed`,
       error
     );
+
+    // Log error to monitor
+    logSeeItNowEvent('error', {
+      sessionId: `see-it-now_${room_session_id}_${Date.now()}`,
+      shop: session.shop,
+      productId: product_id,
+      roomSessionId: room_session_id,
+      errorCode: 'generation_failed',
+      errorMessage: errorMessage,
+      step: 'variants_generated',
+    });
 
     return json({
       error: "generation_failed",

@@ -17,6 +17,29 @@ document.addEventListener('DOMContentLoaded', function () {
   console.log('[See It Now] === LOADED ===', { VERSION, timestamp: Date.now() });
 
   // ============================================================================
+  // ANALYTICS INITIALIZATION
+  // ============================================================================
+
+  function initAnalytics() {
+    // Get monitor URL from the trigger button's data attribute
+    const trigger = document.getElementById('see-it-now-trigger');
+    const monitorUrl = trigger?.dataset.monitorUrl || window.SEE_IT_NOW_MONITOR_URL || '';
+    const shopDomain = trigger?.dataset.shopPermanentDomain || trigger?.dataset.shopDomain || '';
+
+    if (window.SeeItNowAnalytics) {
+      window.SeeItNowAnalytics.init({
+        monitorUrl,
+        shopDomain,
+        debug: window.location.hostname === 'localhost',
+      });
+      console.log('[See It Now] Analytics initialized:', { monitorUrl: monitorUrl ? 'configured' : 'not configured' });
+    }
+  }
+
+  // Initialize analytics when the script loads
+  initAnalytics();
+
+  // ============================================================================
   // CONSTANTS
   // ============================================================================
 
@@ -184,6 +207,15 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function closeModal() {
+      // End analytics session if active
+      if (window.SeeItNowAnalytics && window.SeeItNowAnalytics.isActive()) {
+        const status = state.images.length > 0 ? 'completed' : 'abandoned';
+        window.SeeItNowAnalytics.endSession(status, {
+          variantsViewed: state.images.length,
+          lastViewedIndex: state.currentIndex,
+        });
+      }
+
       modal.classList.add('hidden');
       unlockScroll();
       stopTipRotation();
@@ -588,6 +620,15 @@ document.addEventListener('DOMContentLoaded', function () {
       const currentUrl = state.images[state.currentIndex];
       if (!currentUrl) return;
 
+      // Track share action (this implies the user "selected" this variant as their favorite)
+      if (window.SeeItNowAnalytics) {
+        window.SeeItNowAnalytics.trackEvent('variant_selected', {
+          sessionId: state.sessionId,
+          selectedVariantIndex: state.currentIndex,
+          action: 'share',
+        });
+      }
+
       try {
         // Try native share with file (mobile)
         if (navigator.share && navigator.canShare) {
@@ -651,6 +692,12 @@ document.addEventListener('DOMContentLoaded', function () {
       state.productId = activeTrigger?.dataset.productId || '';
       state.productTitle = activeTrigger?.dataset.productTitle || '';
       state.productImageUrl = activeTrigger?.dataset.productImage || '';
+      const shopDomain = activeTrigger?.dataset.shopPermanentDomain || activeTrigger?.dataset.shopDomain || '';
+
+      // Start analytics session
+      if (window.SeeItNowAnalytics) {
+        window.SeeItNowAnalytics.startSession(state.productId, state.productTitle, shopDomain);
+      }
 
       // Update product images
       if (entryProductImg && state.productImageUrl) {
@@ -694,6 +741,14 @@ document.addEventListener('DOMContentLoaded', function () {
         await uploadImage(normalizedFile, uploadUrl);
         console.log('[See It Now] Uploaded');
 
+        // Track room upload
+        if (window.SeeItNowAnalytics) {
+          window.SeeItNowAnalytics.trackEvent('room_uploaded', {
+            roomSessionId: state.roomSessionId,
+            imageSize: `${normalized.width}x${normalized.height}`,
+          });
+        }
+
         // Confirm
         await confirmRoom(state.roomSessionId);
         console.log('[See It Now] Confirmed');
@@ -704,10 +759,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Extract image URLs from variants
         const imageUrls = result.variants.map(v => v.image_url);
+        const variantIds = result.variants.map(v => v.id);
         console.log('[See It Now] Got', imageUrls.length, 'images');
 
         if (imageUrls.length === 0) {
           throw new Error('No images generated');
+        }
+
+        // Track variants generated (client-side timing)
+        if (window.SeeItNowAnalytics) {
+          window.SeeItNowAnalytics.trackEvent('variants_generated', {
+            sessionId: state.sessionId,
+            roomSessionId: state.roomSessionId,
+            variantCount: imageUrls.length,
+            variantIds,
+            durationMs: result.duration_ms,
+          });
         }
 
         // Populate carousel
@@ -719,6 +786,16 @@ document.addEventListener('DOMContentLoaded', function () {
       } catch (err) {
         console.error('[See It Now] Error:', err);
         state.isGenerating = false;
+
+        // Track error
+        if (window.SeeItNowAnalytics) {
+          window.SeeItNowAnalytics.trackError(
+            'generation_failed',
+            err.message || 'Something went wrong',
+            { roomSessionId: state.roomSessionId }
+          );
+        }
+
         showError(err.message || 'Something went wrong');
       }
     }

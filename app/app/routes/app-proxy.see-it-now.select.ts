@@ -17,6 +17,7 @@ import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { GEMINI_IMAGE_MODEL_PRO, GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
 
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
+import { logSeeItNowEvent } from "~/services/session-logger.server";
 
 function isSafeVariantId(value: unknown): value is string {
   // Accept any reasonable identifier. (The extension currently doesn't call this endpoint,
@@ -325,6 +326,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `[See It Now] Selection recorded: variant=${selected_variant_id}, upscaled=${upscale}`
     );
 
+    // Log variant selection to monitor
+    logSeeItNowEvent('variant_selected', {
+      sessionId: session_id,
+      shop: session.shop,
+      roomSessionId: room_session_id,
+      selectedVariantId: selected_variant_id,
+      selectedImageUrl: finalImageUrl || undefined,
+      upscaled: upscale,
+    });
+
     return json({
       success: true,
       render_job_id: renderJob.id,
@@ -342,6 +353,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `[See It Now] Selection processing failed`,
       error
     );
+
+    // Log error to monitor
+    logSeeItNowEvent('error', {
+      sessionId: session_id,
+      shop: session.shop,
+      roomSessionId: room_session_id,
+      errorCode: 'selection_failed',
+      errorMessage: errorMessage,
+      step: 'variant_selected',
+    });
 
     return json({
       error: "selection_failed",
