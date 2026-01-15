@@ -19,15 +19,29 @@ interface PageProps {
 
 export default async function RunsPage({ searchParams }: PageProps) {
   const params = await searchParams;
+
+  const LEGACY_SEE_IT_NOW_FLOW = 'placement_v2';
+  const SEE_IT_NOW_FLOW = 'see_it_now';
+
   const flow = params.flow;
+  const normalizedFlow = flow === LEGACY_SEE_IT_NOW_FLOW ? SEE_IT_NOW_FLOW : flow;
   const env = params.env;
   const status = params.status;
   const search = params.search;
 
   // Build query conditions
   const conditions = [];
-  if (flow && flow !== 'all') {
-    conditions.push(eq(sessions.flow, flow));
+  if (normalizedFlow && normalizedFlow !== 'all') {
+    if (normalizedFlow === SEE_IT_NOW_FLOW) {
+      conditions.push(
+        or(
+          eq(sessions.flow, SEE_IT_NOW_FLOW),
+          eq(sessions.flow, LEGACY_SEE_IT_NOW_FLOW)
+        )
+      );
+    } else {
+      conditions.push(eq(sessions.flow, normalizedFlow));
+    }
   }
   if (env && env !== 'all') {
     conditions.push(eq(sessions.env, env));
@@ -149,6 +163,14 @@ export default async function RunsPage({ searchParams }: PageProps) {
     return { text: outcome, bg: 'bg-gray-100 text-gray-700' };
   };
 
+  const formatFlowLabel = (flowValue: string | null) => {
+    if (!flowValue || flowValue === 'unknown') return 'Unknown';
+    if (flowValue === SEE_IT_NOW_FLOW || flowValue === LEGACY_SEE_IT_NOW_FLOW) return 'See It Now';
+    if (flowValue === 'cleanup') return 'Cleanup';
+    if (flowValue === 'product_prep') return 'Product Prep';
+    return flowValue;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -156,7 +178,7 @@ export default async function RunsPage({ searchParams }: PageProps) {
       </div>
 
       {/* Filters */}
-      <RunsFilters flow={flow} env={env} status={status} search={search} />
+      <RunsFilters flow={normalizedFlow} env={env} status={status} search={search} />
 
       {/* Runs Table */}
       <div className="card divide-y divide-gray-100">
@@ -184,7 +206,7 @@ export default async function RunsPage({ searchParams }: PageProps) {
                     <td className="px-4 py-3 text-sm">
                       {new Date(run.startedAt).toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 text-sm">{run.flow || 'unknown'}</td>
+                    <td className="px-4 py-3 text-sm">{formatFlowLabel(run.flow)}</td>
                     <td className="px-4 py-3 text-sm">{run.env || 'unknown'}</td>
                     <td className="px-4 py-3">
                       <span className={`badge ${outcomeBadge.bg}`}>

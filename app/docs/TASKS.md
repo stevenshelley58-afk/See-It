@@ -30,7 +30,7 @@ Create app/components/ProductDetailPanel.jsx:
 - Footer: Cancel + Save buttons
 - Props: product, asset, isOpen, onClose, onSave
 
-Use Polaris Modal or build with Tailwind. Match the style in product-prep-demo-v2.html.
+Use Polaris Modal or build with Tailwind. Match the style in product-prep-demo.html.
 ```
 
 ---
@@ -62,14 +62,14 @@ Features:
 - Button groups: surface, orientation, material, shadow
 - Number inputs: height (cm), width (cm)
 - Textarea: additional notes
-- v2 Placement Rules: Scene Role, Replacement Rule, Allow Space Creation
+- Placement Rules: Scene Role, Replacement Rule, Allow Space Creation
 - "Generate Prompt" button → Creates prose placement prompt from structured fields
 - Editable placement prompt textarea (with edit warning)
 
 Data saved:
 - placementFields (JSON): { surface, material, orientation, shadow, dimensions, additionalNotes, fieldSource }
 - renderInstructions (prose string): Natural-language placement prompt
-- v2 columns: sceneRole, replacementRule, allowSpaceCreation
+- Placement rule columns: sceneRole, replacementRule, allowSpaceCreation
 - All marked as 'merchant' in fieldSource when saved (never overwritten by bulk prepare)
 ```
 
@@ -157,7 +157,7 @@ Read CLAUDE.md and docs/PRODUCT_PREP_REDESIGN.md. What task am I on?
 
 **Drifting from spec:**
 ```
-Open product-prep-demo-v2.html. Compare to what you built. What's different?
+Open product-prep-demo.html. Compare to what you built. What's different?
 ```
 
 **API errors:**

@@ -84,6 +84,11 @@ model ProductAsset {
   fieldSource           Json?     @map("field_source") // JSON: { fieldName: "auto" | "merchant" }
   fieldOverrides        Json?     @map("field_overrides") // JSON: { fieldName: true | false }
   fieldEvidence         Json?     @map("field_evidence") // JSON: { fieldName: "snippet/keywords/image cues" }
+  // See It Now per-product prompt fields
+  generatedSeeItNowPrompt   String?   @map("generated_see_it_now_prompt") // LLM-generated complete product-specific prompt
+  seeItNowVariants          Json?     @map("see_it_now_variants") // JSON: Array of {id: string, prompt: string}
+  detectedArchetype         String?   @map("detected_archetype") // Detected archetype: oversized_architectural, large_furniture, medium_furniture, small_homewares, wall_mounted_decor
+  useGeneratedPrompt        Boolean   @default(false) @map("use_generated_prompt") // When true, uses per-product prompts instead of shop-level
   createdAt             DateTime  @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 

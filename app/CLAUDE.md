@@ -23,13 +23,13 @@ Background Processor (prepare-processor.server.ts)
   ├─→ Background removal → preparedImageUrl (transparent PNG)
   ├─→ Extract structured fields (surface, material, orientation, shadow, dimensions)
   ├─→ Generate prose placement prompt → renderInstructions
-  └─→ Set v2 placement rules (sceneRole, replacementRule, allowSpaceCreation)
+  └─→ Set placement rules (sceneRole, replacementRule, allowSpaceCreation)
   ↓
 ProductAsset saved with:
   - preparedImageUrl / preparedImageKey
   - placementFields (JSON: structured fields)
   - renderInstructions (prose: natural-language placement prompt)
-  - sceneRole, replacementRule, allowSpaceCreation (v2 columns)
+  - sceneRole, replacementRule, allowSpaceCreation (placement rule columns)
   - fieldSource (JSON: provenance tracking, 'auto' vs 'merchant')
 ```
 
@@ -64,7 +64,7 @@ Composited room photo with product placed realistically
 ## Critical Files
 | Purpose | File |
 |---------|------|
-| Schema | `prisma/schema.prisma` (ProductAsset has placementFields JSON, renderInstructions prose, v2 columns) |
+| Schema | `prisma/schema.prisma` (ProductAsset has placementFields JSON, renderInstructions prose, placement rule columns) |
 | Products page | `app/routes/app.products.jsx` |
 | Background processor | `app/services/prepare-processor.server.ts` (generates placement during bulk prepare) |
 | Placement prompt generator | `app/services/description-writer.server.ts` (structured fields → prose) |

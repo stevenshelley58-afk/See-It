@@ -148,7 +148,7 @@ export const sessions = pgTable('sessions', {
   gcsPath: text('gcs_path'),
   
   // Flight Recorder fields
-  flow: varchar('flow', { length: 50 }), // cleanup, placement_v2, product_prep, unknown
+  flow: varchar('flow', { length: 50 }), // cleanup, see_it_now, product_prep, unknown
   flowVersion: varchar('flow_version', { length: 50 }),
   env: varchar('env', { length: 20 }), // prod, preview, dev, unknown
   appVersion: varchar('app_version', { length: 100 }),

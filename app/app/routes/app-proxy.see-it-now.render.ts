@@ -380,6 +380,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       replacementRule: true,
       allowSpaceCreation: true,
       placementFields: true, // Structured metadata: surface, material, orientation, shadow, dimensions, additionalNotes
+      generatedSeeItNowPrompt: true,
+      seeItNowVariants: true,
+      useGeneratedPrompt: true,
     }
   });
 
@@ -448,25 +451,81 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Generate a unique session ID for this See It Now render batch
     const seeItNowSessionId = `see-it-now_${room_session_id}_${Date.now()}`;
 
-    // Get shop settings for prompts and variants
-    const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
-    const generalPrompt = settings.seeItNowPrompt || '';
-    
-    // Get variant configurations from settings, or use defaults
-    const variants: VariantConfig[] = settings.seeItNowVariants?.length > 0 
-      ? settings.seeItNowVariants 
-      : DEFAULT_VARIANTS;
+    // Per-product prompt system: only activates when enabled AND prompt exists.
+    // If prompt is missing/empty, fall back to shop-level prompts automatically.
+    const hasPerProductPrompt =
+      Boolean(productAsset?.useGeneratedPrompt) &&
+      Boolean(productAsset?.generatedSeeItNowPrompt?.trim());
 
-    // Compute effective placement prompt: prefer renderInstructionsSeeItNow, fallback to renderInstructions
-    const now = productAsset?.renderInstructionsSeeItNow?.trim();
-    const fallback = productAsset?.renderInstructions?.trim();
-    const placementPrompt = now || fallback || '';
+    let generalPrompt: string;
+    let variants: VariantConfig[];
+    let placementPrompt: string;
 
-    // Log prompt source, length (never content)
-    logger.info(
-      { ...shopLogContext, stage: "prompt-selection" },
-      `[See It Now] Using prompt source: ${now ? 'seeItNow' : 'fallback'}, placementPrompt length: ${placementPrompt.length}, generalPrompt length: ${generalPrompt.length}, variants: ${variants.length}`
-    );
+    if (hasPerProductPrompt) {
+      // Per-product prompt + variants
+      const SEE_IT_NOW_GENERAL_PROMPT = `This image is generated for a live ecommerce visualization showing how a real product would look in a customer's home.
+
+The first image is the exact product being sold and must remain unchanged.
+The second image is a real room photo taken by a customer.
+
+Make the product appear naturally present in the room by matching the scene's perspective, lighting, and overall visual character. Only make the minimal changes required for realistic physical interaction such as shadows, reflections, and occlusion.
+
+If product photos appear to contradict stated dimensions, defer to the written dimensions.
+
+Return only the final composed image. No text.`;
+
+      const productPromptSection = productAsset.generatedSeeItNowPrompt.trim();
+      generalPrompt = `${SEE_IT_NOW_GENERAL_PROMPT}\n\n${productPromptSection}`;
+
+      // Get variants from product asset (must be a non-empty array)
+      if (productAsset.seeItNowVariants && Array.isArray(productAsset.seeItNowVariants)) {
+        variants = productAsset.seeItNowVariants as VariantConfig[];
+      } else {
+        variants = [];
+      }
+
+      // If variants are missing/empty, fall back to shop-level flow (graceful)
+      if (variants.length === 0) {
+        const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
+        generalPrompt = settings.seeItNowPrompt || '';
+        variants = settings.seeItNowVariants?.length > 0
+          ? settings.seeItNowVariants
+          : DEFAULT_VARIANTS;
+        const now = productAsset?.renderInstructionsSeeItNow?.trim();
+        const fallback = productAsset?.renderInstructions?.trim();
+        placementPrompt = now || fallback || '';
+
+        logger.info(
+          { ...shopLogContext, stage: "prompt-selection" },
+          `[See It Now] Per-product prompt enabled but variants missing; falling back to shop-level prompts (variants: ${variants.length})`
+        );
+      } else {
+        placementPrompt = ''; // Product-specific prompt already contains placement behaviour
+        logger.info(
+          { ...shopLogContext, stage: "prompt-selection" },
+          `[See It Now] Using per-product prompt system: prompt length: ${generalPrompt.length}, variants: ${variants.length}`
+        );
+      }
+    } else {
+      // Fallback: Shop-level prompts
+      const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
+      generalPrompt = settings.seeItNowPrompt || '';
+      
+      // Get variant configurations from settings, or use defaults
+      variants = settings.seeItNowVariants?.length > 0 
+        ? settings.seeItNowVariants 
+        : DEFAULT_VARIANTS;
+
+      // Compute effective placement prompt: prefer renderInstructionsSeeItNow, fallback to renderInstructions
+      const now = productAsset?.renderInstructionsSeeItNow?.trim();
+      const fallback = productAsset?.renderInstructions?.trim();
+      placementPrompt = now || fallback || '';
+
+      logger.info(
+        { ...shopLogContext, stage: "prompt-selection" },
+        `[See It Now] Using shop-level prompts: placementPrompt length: ${placementPrompt.length}, generalPrompt length: ${generalPrompt.length}, variants: ${variants.length}`
+      );
+    }
 
     // Generate all variants in PARALLEL
     const variantPromises = variants.map(variant =>

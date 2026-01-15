@@ -73,7 +73,7 @@ In Shopify admin:
 
 ## Step 5 — Smoke test (MANDATORY)
 
-### V1 (BHM live store) — must work here
+### See It (BHM live store) — must work here
 Test on:
 `https://www.bhm.com.au/products/detailed-sundar-mirror-bleach-chalky-bleach?_pos=1&_psq=sunda&_ss=e&_v=1.0`
 
@@ -85,11 +85,11 @@ Checklist:
 - Click **“See it in your room”** → modal opens
 - Upload a room image → flow proceeds
 
-### V2 (test store) — must work when installed
+### See It Now (test store) — must work when installed
 If the test store is password protected, enter it first.
 
 Checklist:
-- Click V2 button → V2 modal opens
+- Click **See It Now** button → modal opens
 - Upload a room image → generates placements / progresses through flow
 
 ---

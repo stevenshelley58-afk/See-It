@@ -307,9 +307,9 @@ function isMobile() {
 
 ## Migration Notes
 
-- See It Now lives alongside V1 and V2
-- Merchants can choose which block to add to their theme
-- All three share the same backend infrastructure
+- See It Now lives alongside the full See It flow
+- Merchants can choose which block to add to their theme (See It vs See It Now)
+- Both flows share the same backend infrastructure
 - No database schema changes required
 - Shop allowlist in see-it-now.render.ts still applies
 

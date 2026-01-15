@@ -1,7 +1,7 @@
 # Product Preparation Redesign
 
 ## Reference
-Open `product-prep-demo-v2.html` in browser - build exactly this.
+Open `product-prep-demo.html` in browser - build exactly this.
 
 ## Products List
 - Columns: Checkbox | Images (original→prepared) | Product | Price | Status
@@ -38,7 +38,7 @@ Open `product-prep-demo-v2.html` in browser - build exactly this.
   - Shadow: contact/cast/soft/none
   - Dimensions: height, width (cm)
   - Additional notes textarea
-- Placement Rules (v2 fields, saved to separate columns):
+- Placement Rules (saved to separate columns):
   - Scene Role: Dominant / Integrated
   - Replacement Rule: Same Role Only / Similar Size or Position / Any Blocking Object / None
   - Allow Space Creation: checkbox
@@ -66,8 +66,8 @@ Open `product-prep-demo-v2.html` in browser - build exactly this.
    - Removes background from product image
    - Extracts structured placement fields from product title/description/metafields (best guess)
    - Generates natural-language placement prompt (prose)
-   - Sets v2 placement rules (sceneRole, replacementRule, allowSpaceCreation)
-   - Saves to `ProductAsset`: `placementFields` (JSON), `renderInstructions` (prose), v2 columns
+   - Sets placement rules (sceneRole, replacementRule, allowSpaceCreation)
+   - Saves to `ProductAsset`: `placementFields` (JSON), `renderInstructions` (prose), placement rule columns
    - Marks all as `fieldSource: 'auto'` in provenance tracking
 
 ### Placement Tab (Merchant Review/Confirm)

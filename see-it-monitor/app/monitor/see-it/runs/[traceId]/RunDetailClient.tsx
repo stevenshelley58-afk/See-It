@@ -98,6 +98,14 @@ export default function RunDetailClient({
     return { text: outcome, bg: 'bg-gray-100 text-gray-700' };
   };
 
+  const formatFlowLabel = (flowValue: string | null) => {
+    if (!flowValue || flowValue === 'unknown') return 'Unknown';
+    if (flowValue === 'see_it_now' || flowValue === 'placement_v2') return 'See It Now';
+    if (flowValue === 'cleanup') return 'Cleanup';
+    if (flowValue === 'product_prep') return 'Product Prep';
+    return flowValue;
+  };
+
   const outcomeBadge = getOutcomeBadge(session.outcome);
   const topMatch = archetypeMatches[0] || null;
 
@@ -139,7 +147,7 @@ export default function RunDetailClient({
           <div>
             <h1 className="text-2xl font-semibold">Run: {session.sessionId}</h1>
             <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
-              <span>Flow: {session.flow || 'unknown'}</span>
+              <span>Flow: {formatFlowLabel(session.flow)}</span>
               <span>Env: {session.env || 'unknown'}</span>
               <span className={`badge ${outcomeBadge.bg}`}>
                 {outcomeBadge.text}

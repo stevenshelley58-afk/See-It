@@ -6,6 +6,7 @@ import { incrementQuota } from "../quota.server";
 import { emitPrepEvent } from "./prep-events.server";
 import { extractStructuredFields, generateProductDescription } from "./description-writer.server";
 import { GoogleGenAI } from "@google/genai";
+import { generateSeeItNowPrompt } from "./see-it-now-prompt-generator.server";
 
 let processorInterval: NodeJS.Timeout | null = null;
 let isProcessing = false;
@@ -600,6 +601,72 @@ async function processPendingAssets(batchRequestId: string) {
                     }
                     if (allowSpaceCreation !== null && allowSpaceCreation !== undefined) {
                         updateData.allowSpaceCreation = allowSpaceCreation;
+                    }
+
+                    // Generate See It Now prompt if not already present (don't overwrite merchant edits)
+                    if (!asset.generatedSeeItNowPrompt) {
+                        try {
+                            // Build product data for prompt generation
+                            const productDataForPrompt = {
+                                title: asset.productTitle || '',
+                                description: '', // Not available in background processor
+                                productType: asset.productType || undefined,
+                                vendor: undefined, // Not available
+                                tags: [],
+                                dimensions: placementFields?.dimensions || undefined,
+                                placementFields: placementFields || undefined,
+                            };
+
+                            const promptResult = await generateSeeItNowPrompt(
+                                productDataForPrompt,
+                                itemRequestId
+                            );
+
+                            // Add to updateData (will be saved with other fields)
+                            if (promptResult.productPrompt) {
+                                updateData.generatedSeeItNowPrompt = promptResult.productPrompt;
+                            }
+                            if (promptResult.selectedVariants && promptResult.selectedVariants.length > 0) {
+                                updateData.seeItNowVariants = promptResult.selectedVariants;
+                            }
+                            if (promptResult.archetype) {
+                                updateData.detectedArchetype = promptResult.archetype;
+                            }
+                            // useGeneratedPrompt stays false - merchant must enable
+
+                            logger.info(
+                                createLogContext("prepare", itemRequestId, "see-it-now-prompt-generated", {
+                                    assetId: asset.id,
+                                    productId: asset.productId,
+                                    archetype: promptResult.archetype,
+                                    variantCount: promptResult.selectedVariants.length
+                                }),
+                                `Generated See It Now prompt: archetype=${promptResult.archetype}, ${promptResult.selectedVariants.length} variants`
+                            );
+
+                            // Emit event for monitor
+                            await emitPrepEvent({
+                                assetId: asset.id,
+                                productId: asset.productId,
+                                shopId: asset.shopId,
+                                eventType: "see_it_now_prompt_generated",
+                                actorType: "system",
+                                payload: {
+                                    source: "auto",
+                                    archetype: promptResult.archetype,
+                                    variantCount: promptResult.selectedVariants.length,
+                                }
+                            }, null, itemRequestId).catch(() => { });
+                        } catch (promptError) {
+                            // Non-critical - log and continue, don't fail the prepare
+                            logger.warn(
+                                createLogContext("prepare", itemRequestId, "see-it-now-prompt-failed", {
+                                    error: promptError instanceof Error ? promptError.message : String(promptError)
+                                }),
+                                "See It Now prompt generation failed, continuing without",
+                                promptError
+                            );
+                        }
                     }
 
                     // Update fieldSource to mark auto-generated fields

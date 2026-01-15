@@ -212,7 +212,7 @@ function autoDetectFields(product) {
         dimensions = extractDimsFromText(descriptionText);
     }
     
-    // v2 fields: Auto-detect defaults
+    // Placement rules: auto-detect defaults
     // Large items (sofas, mirrors, cabinets) → Dominant + Similar Size or Position + Yes
     // Small items (lamps, decor) → Integrated + None + No
     // Use labelText to avoid false positives from descriptions like "style it on a console table".
@@ -245,6 +245,41 @@ function createBestGuessDescription(product, fields) {
 
     // Keep it usable for AI/photography without forcing placement instructions.
     return `${article} ${title}${material ? ` primarily in ${material}` : ''}, described for realistic interior photography with accurate proportions and natural lighting.${sizeSentence}${notesSentence}`.trim();
+}
+
+// ============================================================================
+// SEE IT NOW PER-PRODUCT VARIANT DEFAULTS (client-side only)
+// Mirrors the server archetype priority map so "Reset to Defaults" is instant.
+// ============================================================================
+
+const SEE_IT_NOW_VARIATION_PROMPTS = {
+    1: "Place the product in the most obvious and conventional location where this type of product would naturally belong, scaled realistically.",
+    2: "Place the product in a different but still natural location, scaled realistically.",
+    3: "Place the product in an accommodating location, scaled slightly smaller than typical so it feels comfortably fitted.",
+    4: "Place the product in a plausible secondary location, scaled accurately to real-world proportions.",
+    5: "Place the product in a strong location, scaled slightly larger than typical so it feels intentionally sized.",
+    6: "Place the product in a different natural location, scaled larger than a standard version would normally be.",
+    7: "Place the product in a clear, visually strong area where it can act as a focal point.",
+    8: "Place the product near existing elements in an integrated way, allowing proximity or partial occlusion if natural.",
+    9: "Place the product in a less central but appropriate location, prioritizing subtlety.",
+    10: "Choose the location and scale most likely to result in a believable real photograph.",
+};
+
+const SEE_IT_NOW_ARCHETYPE_VARIATIONS = {
+    oversized_architectural: { primary: [5, 6, 7, 10], secondary: [1, 2] },
+    large_furniture: { primary: [1, 4, 5, 10], secondary: [2, 8] },
+    medium_furniture: { primary: [1, 4, 8, 10], secondary: [2, 3] },
+    small_homewares: { primary: [3, 8, 9, 10], secondary: [1, 2] },
+    wall_mounted_decor: { primary: [1, 2, 4, 10], secondary: [8, 9] },
+};
+
+function buildDefaultSeeItNowVariants(archetype) {
+    const cfg = SEE_IT_NOW_ARCHETYPE_VARIATIONS[archetype];
+    if (!cfg) return [];
+    const numbers = [...(cfg.primary || []), ...((cfg.secondary || []).slice(0, 2))];
+    return numbers
+        .filter((n) => SEE_IT_NOW_VARIATION_PROMPTS[n])
+        .map((n) => ({ id: `variation_${n}`, prompt: SEE_IT_NOW_VARIATION_PROMPTS[n] }));
 }
 
 // ============================================================================
@@ -335,6 +370,45 @@ export function PlacementTab({ product, asset, onChange }) {
     const [seeItNowPrompt, setSeeItNowPrompt] = useState(asset?.renderInstructionsSeeItNow || '');
     const [seeItNowDirty, setSeeItNowDirty] = useState(false);
 
+    // See It Now generated prompt state
+    const [generatedSeeItNowPrompt, setGeneratedSeeItNowPrompt] = useState(asset?.generatedSeeItNowPrompt || '');
+    const [generatedPromptDirty, setGeneratedPromptDirty] = useState(false);
+    const [seeItNowVariants, setSeeItNowVariants] = useState(() => {
+        if (asset?.seeItNowVariants && Array.isArray(asset.seeItNowVariants)) {
+            return asset.seeItNowVariants;
+        }
+        return [];
+    });
+    const [variantsDirty, setVariantsDirty] = useState(false);
+    const [detectedArchetype, setDetectedArchetype] = useState(asset?.detectedArchetype || null);
+    const [useGeneratedPrompt, setUseGeneratedPrompt] = useState(asset?.useGeneratedPrompt || false);
+    const [isRegenerating, setIsRegenerating] = useState(false);
+
+    // Sync generated prompt state when asset loads async
+    useEffect(() => {
+        if (!generatedPromptDirty && asset?.generatedSeeItNowPrompt) {
+            const assetValue = asset.generatedSeeItNowPrompt;
+            setGeneratedSeeItNowPrompt((prev) => {
+                const prevTrim = (prev || '').toString().trim();
+                if (prevTrim) return prev;
+                return assetValue;
+            });
+        }
+        if (!variantsDirty && asset?.seeItNowVariants && Array.isArray(asset.seeItNowVariants) && asset.seeItNowVariants.length > 0) {
+            const assetVariants = asset.seeItNowVariants;
+            setSeeItNowVariants((prev) => {
+                if (Array.isArray(prev) && prev.length > 0) return prev;
+                return assetVariants;
+            });
+        }
+        if (asset?.detectedArchetype) {
+            setDetectedArchetype((prev) => prev || asset.detectedArchetype);
+        }
+        if (asset?.useGeneratedPrompt !== undefined) {
+            setUseGeneratedPrompt(asset.useGeneratedPrompt);
+        }
+    }, [asset?.generatedSeeItNowPrompt, asset?.seeItNowVariants, asset?.detectedArchetype, asset?.useGeneratedPrompt, generatedPromptDirty, variantsDirty]);
+
     // Enable toggle state
     const [enabled, setEnabled] = useState(asset?.enabled || false);
 
@@ -409,10 +483,10 @@ export function PlacementTab({ product, asset, onChange }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [asset?.renderInstructionsSeeItNow]);
     
-    // Notify parent when description, placementFields, v2 fields, See It Now prompt, or enabled change
+    // Notify parent when description, placementFields, placement rules, See It Now prompt, or enabled change
     useEffect(() => {
         if (onChange) {
-            // Pass renderInstructions (placement prompt), placementFields, v2 config, See It Now prompt, and enabled
+            // Pass renderInstructions (placement prompt), placementFields, placement rules config, See It Now prompt, and enabled
             onChange({
                 renderInstructions: description || null,
                 renderInstructionsSeeItNow: seeItNowPrompt,
@@ -430,10 +504,13 @@ export function PlacementTab({ product, asset, onChange }) {
                     replacementRule: placementRulesFields.replacementRule || null,
                     allowSpaceCreation: placementRulesFields.allowSpaceCreation !== undefined ? placementRulesFields.allowSpaceCreation : null,
                 },
+                generatedSeeItNowPrompt: generatedPromptDirty ? generatedSeeItNowPrompt : undefined,
+                seeItNowVariants: variantsDirty ? seeItNowVariants : undefined,
+                useGeneratedPrompt: useGeneratedPrompt,
                 enabled: enabled
             });
         }
-    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, onChange]);
+    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, generatedSeeItNowPrompt, generatedPromptDirty, seeItNowVariants, variantsDirty, useGeneratedPrompt, onChange]);
     
     // Update a field
     const updateField = useCallback((field, value) => {
@@ -496,6 +573,52 @@ export function PlacementTab({ product, asset, onChange }) {
         setDescription(newValue);
         setHasEdited(true);
     }, [hasEdited, description]);
+
+    // Handle regenerate See It Now prompt
+    const handleRegeneratePrompt = useCallback(async () => {
+        setIsRegenerating(true);
+        try {
+            const numericId = product?.id ? String(product.id).split('/').pop() : null;
+            if (!numericId || !asset?.id) {
+                console.error('Missing product ID or asset ID');
+                return;
+            }
+
+            const response = await fetch('/api/products/regenerate-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    productId: numericId,
+                    assetId: asset.id
+                }),
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                setGeneratedSeeItNowPrompt(data.prompt || '');
+                setSeeItNowVariants(data.variants || []);
+                setDetectedArchetype(data.archetype || null);
+                // Regenerate endpoint persists to DB, so treat as clean state.
+                setGeneratedPromptDirty(false);
+                setVariantsDirty(false);
+            } else {
+                console.error('Failed to regenerate prompt:', data.error);
+            }
+        } catch (error) {
+            console.error('Error regenerating prompt:', error);
+        } finally {
+            setIsRegenerating(false);
+        }
+    }, [product?.id, asset?.id]);
+
+    // Handle reset variants to defaults
+    const handleResetVariants = useCallback(() => {
+        if (!detectedArchetype) return;
+        const defaults = buildDefaultSeeItNowVariants(detectedArchetype);
+        if (defaults.length === 0) return;
+        setSeeItNowVariants(defaults);
+        setVariantsDirty(true);
+    }, [detectedArchetype]);
     
     // Options for dropdowns
     const surfaces = ['floor', 'wall', 'table', 'ceiling', 'shelf', 'other'];
@@ -503,7 +626,7 @@ export function PlacementTab({ product, asset, onChange }) {
     const materials = ['fabric', 'wood', 'metal', 'glass', 'ceramic', 'stone', 'leather', 'mixed', 'other'];
     const shadows = ['contact', 'cast', 'soft', 'none'];
     
-    // v2 field options
+    // Placement rule options
     const sceneRoles = ['Dominant', 'Integrated'];
     const replacementRules = ['Same Role Only', 'Similar Size or Position', 'Any Blocking Object', 'None'];
 
@@ -864,6 +987,161 @@ export function PlacementTab({ product, asset, onChange }) {
                     </div>
                 </div>
             </div>
+
+            {/* Divider */}
+            <div className="border-t border-neutral-200"></div>
+
+            {/* SECTION 3: See It Now - Generated Prompt */}
+            <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h3 className="text-lg font-bold text-neutral-900">See It Now - Generated Prompt</h3>
+                            <p className="text-sm text-neutral-500 mt-1">
+                                LLM-generated prompt with product-specific details and selected variations.
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={useGeneratedPrompt}
+                                    onChange={(e) => setUseGeneratedPrompt(e.target.checked)}
+                                    disabled={(!generatedSeeItNowPrompt || !generatedSeeItNowPrompt.trim()) && !useGeneratedPrompt}
+                                    className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                                />
+                                <span className="text-sm font-medium text-neutral-700">
+                                    Use Generated Prompt
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    {!generatedSeeItNowPrompt?.trim() && (
+                        <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-3 text-sm text-neutral-600">
+                            No per-product prompt yet. Click <strong>Regenerate</strong> to create one (or paste/edit your own).
+                        </div>
+                    )}
+
+                    {/* Archetype Badge */}
+                    {detectedArchetype && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-neutral-500">Detected Archetype:</span>
+                            <span className="px-2 py-1 bg-neutral-100 text-neutral-700 text-xs font-medium rounded-full">
+                                {detectedArchetype.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                            </span>
+                        </div>
+                    )}
+
+                    {/* Generated Prompt Textarea */}
+                    <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-neutral-700">
+                            Product Prompt
+                        </label>
+                        <textarea
+                            value={generatedSeeItNowPrompt}
+                            onChange={(e) => {
+                                setGeneratedSeeItNowPrompt(e.target.value);
+                                setGeneratedPromptDirty(true);
+                            }}
+                            className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-lg text-sm min-h-[200px] resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900/10 font-mono text-xs"
+                            placeholder="Generated prompt will appear here..."
+                        />
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-neutral-400">
+                                {generatedSeeItNowPrompt.length} characters
+                            </span>
+                            {generatedPromptDirty && (
+                                <span className="text-xs text-amber-600 flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                    </svg>
+                                    Edited
+                                </span>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Variants List */}
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <label className="block text-sm font-semibold text-neutral-700">
+                                Variants ({seeItNowVariants.length})
+                            </label>
+                            <div className="flex gap-2">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={handleResetVariants}
+                                    disabled={!detectedArchetype || isRegenerating}
+                                >
+                                    Reset to Defaults
+                                </Button>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={handleRegeneratePrompt}
+                                    loading={isRegenerating}
+                                    disabled={isRegenerating || !asset?.id}
+                                >
+                                    Regenerate
+                                </Button>
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            {seeItNowVariants.map((variant, index) => (
+                                <div key={variant.id || index} className="relative group">
+                                    <div className="flex items-start gap-2">
+                                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-neutral-100 text-neutral-500 text-xs flex items-center justify-center mt-2">
+                                            {index + 1}
+                                        </span>
+                                        <div className="flex-1">
+                                            <input
+                                                type="text"
+                                                value={variant.prompt || ''}
+                                                onChange={(e) => {
+                                                    const newVariants = [...seeItNowVariants];
+                                                    newVariants[index] = { ...variant, prompt: e.target.value };
+                                                    setSeeItNowVariants(newVariants);
+                                                    setVariantsDirty(true);
+                                                }}
+                                                className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
+                                                placeholder="Enter variant prompt..."
+                                            />
+                                            <span className="text-xs text-neutral-400 mt-1 block">{variant.id}</span>
+                                        </div>
+                                        {seeItNowVariants.length > 1 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const newVariants = seeItNowVariants.filter((_, i) => i !== index);
+                                                    setSeeItNowVariants(newVariants);
+                                                    setVariantsDirty(true);
+                                                }}
+                                                className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-2 text-neutral-400 hover:text-red-500"
+                                                title="Remove variant"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const newId = `custom_${Date.now()}`;
+                                setSeeItNowVariants([...seeItNowVariants, { id: newId, prompt: '' }]);
+                                setVariantsDirty(true);
+                            }}
+                            className="text-xs px-2 py-1 bg-neutral-100 hover:bg-neutral-200 rounded-md text-neutral-700 transition-colors"
+                        >
+                            + Add Variant
+                        </button>
+                    </div>
+                </div>
             
             {/* Status Message */}
             {description && !hasEdited && (

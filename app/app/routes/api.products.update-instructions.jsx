@@ -63,6 +63,34 @@ export const action = async ({ request }) => {
         const enabledRaw = formData.get("enabled")?.toString();
         const enabled = enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : null;
 
+        // Extract See It Now generated prompt fields
+        let generatedSeeItNowPrompt = undefined;
+        if (formData.has("generatedSeeItNowPrompt")) {
+            const raw = formData.get("generatedSeeItNowPrompt")?.toString() ?? "";
+            generatedSeeItNowPrompt = raw.trim() || null;
+        }
+
+        let seeItNowVariants = undefined;
+        if (formData.has("seeItNowVariants")) {
+            const variantsRaw = formData.get("seeItNowVariants")?.toString();
+            if (variantsRaw) {
+                try {
+                    seeItNowVariants = JSON.parse(variantsRaw);
+                    // Validate it's an array
+                    if (!Array.isArray(seeItNowVariants)) {
+                        return json({ success: false, error: "seeItNowVariants must be a valid JSON array" }, { status: 400 });
+                    }
+                } catch (e) {
+                    return json({ success: false, error: "Invalid seeItNowVariants JSON format" }, { status: 400 });
+                }
+            } else {
+                seeItNowVariants = null;
+            }
+        }
+
+        const useGeneratedPromptRaw = formData.get("useGeneratedPrompt")?.toString();
+        const useGeneratedPrompt = useGeneratedPromptRaw === 'true' ? true : useGeneratedPromptRaw === 'false' ? false : undefined;
+
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
         }
@@ -144,6 +172,17 @@ export const action = async ({ request }) => {
             if (replacementRule !== null) updatedFieldSource.replacementRule = 'merchant';
             if (allowSpaceCreation !== null) updatedFieldSource.allowSpaceCreation = 'merchant';
             updateData.fieldSource = updatedFieldSource;
+        }
+
+        // Add See It Now generated prompt fields if provided
+        if (generatedSeeItNowPrompt !== undefined) {
+            updateData.generatedSeeItNowPrompt = generatedSeeItNowPrompt;
+        }
+        if (seeItNowVariants !== undefined) {
+            updateData.seeItNowVariants = seeItNowVariants;
+        }
+        if (useGeneratedPrompt !== undefined) {
+            updateData.useGeneratedPrompt = useGeneratedPrompt;
         }
 
         // Handle enabled toggle and status transitions

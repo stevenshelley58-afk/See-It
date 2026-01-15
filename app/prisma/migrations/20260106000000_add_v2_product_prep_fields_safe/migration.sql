@@ -1,4 +1,4 @@
--- Add v2 product prep fields if they don't exist
+-- Add product prep placement rule fields if they don't exist
 -- This migration is safe to run even if columns already exist
 
 DO $$

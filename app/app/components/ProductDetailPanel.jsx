@@ -64,8 +64,8 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                 formData.append("placementFields", JSON.stringify(pendingMetadata.placementFields));
             }
 
-            // Add placement rules config (handle both naming conventions for robustness)
-            const rulesConfig = pendingMetadata.v2Config || pendingMetadata.placementRulesConfig;
+            // Add placement rules config
+            const rulesConfig = pendingMetadata.placementRulesConfig;
             if (rulesConfig) {
                 if (rulesConfig.sceneRole) {
                     formData.append("sceneRole", rulesConfig.sceneRole);
@@ -81,6 +81,17 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
             // Add enabled flag
             if (pendingMetadata.enabled !== undefined) {
                 formData.append("enabled", pendingMetadata.enabled ? 'true' : 'false');
+            }
+
+            // Add See It Now generated prompt fields (only if dirty to prevent accidental erasure)
+            if (pendingMetadata.generatedSeeItNowPrompt !== undefined) {
+                formData.append("generatedSeeItNowPrompt", pendingMetadata.generatedSeeItNowPrompt || '');
+            }
+            if (pendingMetadata.seeItNowVariants !== undefined) {
+                formData.append("seeItNowVariants", JSON.stringify(pendingMetadata.seeItNowVariants));
+            }
+            if (pendingMetadata.useGeneratedPrompt !== undefined) {
+                formData.append("useGeneratedPrompt", pendingMetadata.useGeneratedPrompt ? 'true' : 'false');
             }
         } else {
             formData.append("instructions", JSON.stringify(pendingMetadata));
