@@ -499,7 +499,14 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             <canvas ref={maskCanvasRef} className="hidden" />
 
             {/* Content Region: Canvas + Overlays */}
-            <div className="flex-1 min-h-0 relative bg-neutral-50 overflow-hidden flex items-center justify-center">
+            <div
+                className="flex-none relative bg-neutral-50 overflow-hidden flex items-center justify-center"
+                style={{
+                    // Keep the whole modal from needing internal scroll by constraining the main image area.
+                    // Scales with viewport, but caps on large screens and never gets too tiny.
+                    height: "clamp(240px, 52vh, 520px)",
+                }}
+            >
 
                 {/* Checkerboard Background (only in result view) */}
                 <div className={cx("absolute inset-0 pointer-events-none transition-opacity duration-300", showResult ? "opacity-100" : "opacity-0")}
@@ -510,7 +517,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                 />
 
                 {/* Content Container (Constrained) */}
-                <div className="relative w-full h-full p-4 lg:p-6 flex items-center justify-center min-h-0">
+                <div className="relative w-full h-full p-2 lg:p-3 flex items-center justify-center min-h-0">
 
                     {isLoading && (
                         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm transition-all duration-300">
@@ -531,7 +538,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                     )}>
                         {showResult && (
                             /* White card backing for result image to improve contrast */
-                            <div className="absolute inset-4 bg-white rounded-xl shadow-2xl -z-10 opacity-0 animate-[fadeIn_0.5s_ease_forwards]" />
+                            <div className="absolute inset-2 bg-white rounded-xl shadow-2xl -z-10 opacity-0 animate-[fadeIn_0.5s_ease_forwards]" />
                         )}
 
                         <img
@@ -666,14 +673,14 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
 
             {/* View Toggle + Controls Bar (Normal Mode + Has Result) - Outside image area */}
             {mode === "normal" && resultExists && (
-                <div className="bg-white border-t border-[#E5E5E5] flex-shrink-0 px-4 lg:px-6 py-4 flex items-center justify-center">
+                <div className="bg-white border-t border-[#E5E5E5] flex-shrink-0 px-4 lg:px-6 py-3 flex items-center justify-center">
                     <div className="flex items-center gap-3">
                         <span className="text-xs font-semibold text-[#737373]">View:</span>
                         <div className="flex p-1 bg-[#F0F0F0] rounded-2xl border border-[#E5E5E5] shadow-sm">
                             <button
                                 onClick={() => setView("original")}
                                 className={cx(
-                                    "px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 border",
+                                    "px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-200 border",
                                     view === "original"
                                         ? "bg-[#171717] text-white shadow-md border-[#171717]"
                                         : "bg-white text-[#1A1A1A] border-[#E5E5E5] hover:border-[#A3A3A3] hover:shadow-sm"
@@ -685,7 +692,7 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
                             <button
                                 onClick={() => setView("result")}
                                 className={cx(
-                                    "px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 border",
+                                    "px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-200 border",
                                     view === "result"
                                         ? "bg-[#171717] text-white shadow-md border-[#171717]"
                                         : "bg-white text-[#1A1A1A] border-[#E5E5E5] hover:border-[#A3A3A3] hover:shadow-sm"
@@ -702,13 +709,13 @@ export function PrepareTab({ product, asset, onPrepareComplete, onRefine, setFoo
             {/* Thumbnails Row (Fixed Height) */}
             {mode === "normal" && allImages.length > 1 && (
                 <div className="bg-white border-t border-neutral-100 flex-shrink-0 z-10 w-full overflow-hidden">
-                    <div className="h-[68px] lg:h-[76px] flex items-center gap-3 overflow-x-auto overflow-y-hidden px-4 lg:px-6 hide-scrollbar whitespace-nowrap">
+                    <div className="h-[56px] lg:h-[64px] flex items-center gap-3 overflow-x-auto overflow-y-hidden px-4 lg:px-6 hide-scrollbar whitespace-nowrap">
                         {allImages.map((img, idx) => (
                             <button
                                 key={idx}
                                 onClick={() => setSelectedImageUrl(img.url)}
                                 className={cx(
-                                    "relative w-12 h-12 lg:w-14 lg:h-14 rounded-lg overflow-hidden border transition-all flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
+                                    "relative w-10 h-10 lg:w-12 lg:h-12 rounded-lg overflow-hidden border transition-all flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-neutral-900/10",
                                     selectedImageUrl === img.url ? "border-neutral-900 ring-1 ring-neutral-900 opacity-100 shadow-md scale-105" : "border-neutral-200 opacity-60 hover:opacity-100 hover:scale-105"
                                 )}
                             >
