@@ -4,8 +4,6 @@
 // Access: Only shops in SEE_IT_NOW_ALLOWED_SHOPS can use this feature
 
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import * as fs from "fs";
-import * as path from "path";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { checkQuota, incrementQuota } from "../quota.server";
@@ -31,18 +29,6 @@ import {
 } from "~/config/see-it-now-variants.config";
 
 type VariantConfig = SeeItNowVariantConfig;
-
-// DEBUG LOGGING HELPER
-function logToDebugFile(message: string, data?: any) {
-  try {
-    const logPath = "c:/See It/app/render-debug.log";
-    const timestamp = new Date().toISOString();
-    const logEntry = `[${timestamp}] ${message}\n${data ? JSON.stringify(data, null, 2) : ''}\n-------------------\n`;
-    fs.appendFileSync(logPath, logEntry);
-  } catch (e) {
-    console.error("Failed to write to debug log", e);
-  }
-}
 
 // ============================================================================
 // CORS Headers
@@ -186,12 +172,6 @@ async function generateVariant(
   // Include the variant's creative direction in the prompt
   const prompt = buildHeroShotPrompt(generalPrompt, placementPrompt, variant.prompt);
 
-  // Log prompt for debugging
-  logToDebugFile(`Variant ${variant.id} prompt`, {
-    promptLength: prompt.length,
-    promptPreview: prompt.substring(0, 500)
-  });
-
   const client = getGeminiClient();
 
   // Order matches prompt: "The first image is the product cutout. The second image is a real room photo."
@@ -232,7 +212,6 @@ async function generateVariant(
       { ...variantLogContext, stage: "gemini-no-candidates" },
       `[See It Now] No candidates returned for variant ${variant.id}`
     );
-    logToDebugFile(`Variant ${variant.id} no candidates`, { responseKeys: Object.keys(response || {}) });
     throw new Error(`[See It Now] No candidates in Gemini response for variant ${variant.id}`);
   }
 
@@ -269,12 +248,6 @@ async function generateVariant(
     { ...variantLogContext, stage: "gemini-no-image", finishReason, partTypes },
     `[See It Now] No image in response for variant ${variant.id}. Parts: ${partTypes.join(', ')}`
   );
-
-  logToDebugFile(`Variant ${variant.id} no image`, {
-    finishReason,
-    partTypes,
-    textContent: candidates?.[0]?.content?.parts?.filter((p: { text?: string }) => p.text)?.map((p: { text?: string }) => p.text?.substring(0, 200))
-  });
 
   throw new Error(`[See It Now] No image in Gemini response for variant ${variant.id}. Finish reason: ${finishReason}. Parts received: ${partTypes.join(', ') || 'none'}`);
 }
@@ -549,7 +522,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           `[See It Now] Variant ${variant.id} failed`,
           error
         );
-        logToDebugFile(`Variant ${variant.id} failed`, { error: error instanceof Error ? error.message : error, stack: error instanceof Error ? error.stack : undefined });
         return null; // Allow partial success
       })
     );
@@ -622,13 +594,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `[See It Now] Hero shot generation failed`,
       error
     );
-
-    logToDebugFile(`Hero shot generation failed`, {
-      error: errorMessage,
-      stack: error instanceof Error ? error.stack : undefined,
-      shop: session.shop,
-      productId: product_id
-    });
 
     // Log error to monitor
     logSeeItNowEvent('error', {
