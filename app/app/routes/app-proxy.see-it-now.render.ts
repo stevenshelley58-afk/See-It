@@ -128,6 +128,11 @@ function buildHeroShotPrompt(
   variantDirection: string
 ): string {
   const parts: string[] = [];
+
+  // CRITICAL: Explicit instruction for image generation
+  // Without this, Gemini may return text-only responses
+  parts.push(`Generate a photorealistic image that places the product into the room photo.`);
+
   if (generalPrompt?.trim()) {
     parts.push(generalPrompt.trim());
   }
@@ -138,6 +143,10 @@ function buildHeroShotPrompt(
   if (variantDirection?.trim()) {
     parts.push(`CREATIVE DIRECTION FOR THIS VARIANT: ${variantDirection.trim()}`);
   }
+
+  // Final reminder to output only the image
+  parts.push(`Return ONLY the final composed image. No text.`);
+
   return parts.join('\n\n');
 }
 
@@ -194,8 +203,26 @@ async function generateVariant(
 
   const duration = Date.now() - startTime;
 
-  // Extract image from response
+  // Extract image from response with improved diagnostics
   const candidates = response.candidates;
+
+  // Check for response issues
+  if (!candidates || candidates.length === 0) {
+    logger.error(
+      { ...variantLogContext, stage: "gemini-no-candidates" },
+      `[See It Now] No candidates returned for variant ${variant.id}`
+    );
+    throw new Error(`[See It Now] No candidates in Gemini response for variant ${variant.id}`);
+  }
+
+  const finishReason = candidates[0].finishReason || 'UNKNOWN';
+  if (finishReason !== 'STOP') {
+    logger.warn(
+      { ...variantLogContext, stage: "gemini-finish-reason", finishReason },
+      `[See It Now] Unexpected finish reason for variant ${variant.id}: ${finishReason}`
+    );
+  }
+
   if (candidates?.[0]?.content?.parts) {
     for (const part of candidates[0].content.parts) {
       if (part.inlineData?.data) {
@@ -212,7 +239,17 @@ async function generateVariant(
     }
   }
 
-  throw new Error(`[See It Now] No image in Gemini response for variant ${variant.id}`);
+  // More diagnostic error - log what parts we actually received
+  const partTypes = candidates?.[0]?.content?.parts?.map((p: { text?: string; inlineData?: { data: string } }) =>
+    p.text ? 'text' : p.inlineData ? 'image' : 'unknown'
+  ) || [];
+
+  logger.error(
+    { ...variantLogContext, stage: "gemini-no-image", finishReason, partTypes },
+    `[See It Now] No image in response for variant ${variant.id}. Parts: ${partTypes.join(', ')}`
+  );
+
+  throw new Error(`[See It Now] No image in Gemini response for variant ${variant.id}. Finish reason: ${finishReason}. Parts received: ${partTypes.join(', ') || 'none'}`);
 }
 
 // ============================================================================
@@ -317,7 +354,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // Fetch shop
-  const shop = await prisma.shop.findUnique({ 
+  const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop },
     select: { id: true, settingsJson: true }
   });
