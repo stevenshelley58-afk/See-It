@@ -1601,8 +1601,28 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        if (!res.ok) throw new Error('Failed to start session');
-        return res.json();
+        const raw = await res.text();
+        let data = {};
+        try {
+            data = raw ? JSON.parse(raw) : {};
+        } catch {
+            data = { message: raw };
+        }
+
+        if (!res.ok) {
+            const msg = (data && (data.error || data.message)) || '';
+            const looksLikeHtml = typeof msg === 'string' && msg.trim().startsWith('<!DOCTYPE');
+            if (looksLikeHtml || res.status === 404) {
+                throw new Error([
+                    `Start session failed (HTTP ${res.status || 404}).`,
+                    `This usually means the app proxy route is not reachable from the storefront.`,
+                    `Expected: /apps/see-it/room/upload`,
+                ].join(' '));
+            }
+            throw new Error(msg || `Start session failed (HTTP ${res.status})`);
+        }
+
+        return data;
     };
 
     const uploadImage = async (file, url) => {

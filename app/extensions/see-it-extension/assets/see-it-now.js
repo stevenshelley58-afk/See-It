@@ -414,7 +414,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const { data } = await readJsonOrText(res);
 
       if (!res.ok) {
-        throw new Error(data.message || data.error || `HTTP ${res.status}`);
+        throw new Error(buildHttpErrorMessage({ name: 'Start session', res, payload: data }));
       }
 
       return data;
