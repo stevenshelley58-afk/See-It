@@ -479,7 +479,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // - General prompt is shop-level
     // - Placement prompt is product-level (See It Now override, fallback to See It)
     // - Variants are product-level selection (fallback to 5-of-10 defaults)
-    const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
+    // Safely parse shop settings - handle empty strings and invalid JSON
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let settings: any = {};
+    if (shop.settingsJson && shop.settingsJson.trim()) {
+      try {
+        settings = JSON.parse(shop.settingsJson);
+      } catch (parseError) {
+        logger.warn(
+          { ...shopLogContext, stage: "settings-parse" },
+          `[See It Now] Failed to parse shop settings JSON, using defaults`
+        );
+      }
+    }
 
     const generalPrompt: string = settings.seeItNowPrompt || "";
 

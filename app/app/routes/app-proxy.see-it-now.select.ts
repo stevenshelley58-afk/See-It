@@ -12,6 +12,7 @@ import { getRequestId } from "../utils/request-context.server";
 import { GoogleGenAI } from "@google/genai";
 import sharp from "sharp";
 import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
+import { GCS_BUCKET } from "../utils/gcs-client.server";
 
 // Import model config from centralized source
 import { GEMINI_IMAGE_MODEL_PRO, GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
@@ -27,6 +28,33 @@ function isSafeVariantId(value: unknown): value is string {
   if (!id) return false;
   if (id.length > 64) return false;
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id);
+}
+
+function extractGcsKeyFromUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const hostname = u.hostname.toLowerCase();
+
+    // Path-style: https://storage.googleapis.com/BUCKET/key...
+    if (hostname === "storage.googleapis.com" || hostname === "storage.cloud.google.com") {
+      const parts = u.pathname.split("/").filter(Boolean);
+      if (parts.length >= 2 && parts[0] === GCS_BUCKET) {
+        return parts.slice(1).join("/");
+      }
+      return null;
+    }
+
+    // Subdomain-style: https://BUCKET.storage.googleapis.com/key...
+    if (hostname.endsWith(".storage.googleapis.com") || hostname.endsWith(".storage.cloud.google.com")) {
+      const bucket = hostname.split(".")[0];
+      if (bucket !== GCS_BUCKET) return null;
+      return u.pathname.replace(/^\/+/, "");
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================================
@@ -195,6 +223,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     room_session_id?: string;
     selected_image_url?: string; // The actual image URL to save/upscale
     upscale?: boolean; // Optional: whether to upscale with Pro model
+    product_id?: string; // Optional: track which product the user selected for
   };
 
   try {
@@ -206,7 +235,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  const { session_id, selected_variant_id, room_session_id, selected_image_url, upscale = false } = body;
+  const { session_id, selected_variant_id, room_session_id, selected_image_url, upscale = false, product_id } = body;
 
   // Validate required fields
   if (!session_id) {
@@ -295,10 +324,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Log the selection to database
     // Create a RenderJob record to track this See It Now selection
+    const inferredKeyFromUrl =
+      !finalImageKey && finalImageUrl ? extractGcsKeyFromUrl(finalImageUrl) : null;
+
     const renderJob = await prisma.renderJob.create({
       data: {
         shop: { connect: { id: shop.id } },
-        productId: 'see-it-now-selection', // Placeholder - we don't have product_id in select call
+        productId: product_id || 'see-it-now-selection',
         roomSession: { connect: { id: room_session_id } },
         placementX: 0, // See It Now doesn't use manual placement
         placementY: 0,
@@ -310,10 +342,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           seeItNowSessionId: session_id,
           selectedVariant: selected_variant_id,
           upscaled: upscale,
+          productId: product_id || undefined,
         }),
         status: "completed",
         imageUrl: finalImageUrl || null,
-        imageKey: finalImageKey,
+        imageKey: finalImageKey || inferredKeyFromUrl,
         createdAt: new Date(),
         completedAt: new Date(),
       }
