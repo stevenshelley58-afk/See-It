@@ -501,18 +501,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const placementPrompt: string = now || fallback || "";
 
     // Variant library can be shop-configured; fallback to canonical 10-option library.
-    const variantLibrary: VariantConfig[] =
+    // IMPORTANT: Guard against invalid/empty settings wiping the library (which would produce 0 variants and hard-fail).
+    const configuredVariantLibrary: VariantConfig[] =
       Array.isArray(settings.seeItNowVariants) && settings.seeItNowVariants.length > 0
         ? normalizeSeeItNowVariants(settings.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY)
-        : SEE_IT_NOW_VARIANT_LIBRARY;
+        : [];
+    const variantLibrary: VariantConfig[] =
+      configuredVariantLibrary.length > 0 ? configuredVariantLibrary : SEE_IT_NOW_VARIANT_LIBRARY;
 
     // Per-product selected variants (merchant-adjustable). If missing, default to 5 selected.
     const perProductSelected = normalizeSeeItNowVariants(
       productAsset?.seeItNowVariants,
       variantLibrary
     );
-    const variants: VariantConfig[] =
+    let variants: VariantConfig[] =
       perProductSelected.length > 0 ? perProductSelected : pickDefaultSelectedSeeItNowVariants(variantLibrary);
+
+    // Final safety net: never allow zero variants.
+    if (variants.length === 0) {
+      logger.warn(
+        { ...shopLogContext, stage: "variant-fallback" },
+        `[See It Now] Variant selection produced 0 variants; falling back to defaults`
+      );
+      variants = pickDefaultSelectedSeeItNowVariants(SEE_IT_NOW_VARIANT_LIBRARY);
+    }
 
     logger.info(
       { ...shopLogContext, stage: "prompt-selection" },
@@ -552,9 +564,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         step: 'variants_generated',
       });
 
+      // IMPORTANT:
+      // Shopify App Proxy wraps 5xx responses in a storefront HTML error page.
+      // That creates the "HTML wall" symptom in the widget. Use a 4xx with JSON so
+      // the storefront can display a clean, actionable message.
       return json(
-        { error: "all_variants_failed", message: "Failed to generate any variants" },
-        { status: 500, headers: corsHeaders }
+        {
+          success: false,
+          error: "all_variants_failed",
+          message: "Failed to generate any variants",
+          request_id: requestId,
+          version: "see-it-now",
+        },
+        { status: 422, headers: corsHeaders }
       );
     }
 
@@ -592,12 +614,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       durationMs: duration,
     });
 
-    return json({
-      session_id: seeItNowSessionId,
-      variants: uploadedVariants,
-      duration_ms: duration,
-      version: 'see-it-now',
-    }, { headers: corsHeaders });
+    return json(
+      {
+        session_id: seeItNowSessionId,
+        variants: uploadedVariants,
+        duration_ms: duration,
+        version: "see-it-now",
+      },
+      { headers: corsHeaders }
+    );
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -618,11 +643,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       step: 'variants_generated',
     });
 
-    return json({
-      error: "generation_failed",
-      message: errorMessage,
-      version: 'see-it-now',
-    }, { status: 500, headers: corsHeaders });
+    // IMPORTANT: see comment above — avoid 5xx on app proxy for expected failures.
+    return json(
+      {
+        success: false,
+        error: "generation_failed",
+        message: errorMessage,
+        request_id: requestId,
+        version: "see-it-now",
+      },
+      { status: 422, headers: corsHeaders }
+    );
   }
 };
 
