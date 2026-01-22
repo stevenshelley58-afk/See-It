@@ -24,6 +24,11 @@ import {
   type ProductPlacementFacts,
   type PromptPack,
   type ImageMeta,
+  type ExtractionInput,
+  extractProductFacts,
+  resolveProductFacts,
+  buildPromptPack,
+  ensurePromptVersion,
 } from "../services/see-it-now/index";
 
 // ============================================================================
@@ -105,6 +110,92 @@ async function downloadToBuffer(
  */
 function hashBuffer(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
+}
+
+type ShopifyProductForPrompt = {
+  title?: string | null;
+  description?: string | null;
+  descriptionHtml?: string | null;
+  productType?: string | null;
+  vendor?: string | null;
+  tags?: string[] | null;
+  images?: { edges?: Array<{ node?: { url?: string } }> } | null;
+  metafields?: { edges?: Array<{ node?: { namespace?: string; key?: string; value?: string } }> } | null;
+};
+
+async function fetchShopifyProductForPrompt(
+  shopDomain: string,
+  accessToken: string,
+  productId: string,
+  requestId: string
+): Promise<ShopifyProductForPrompt | null> {
+  if (!accessToken || accessToken === "pending") return null;
+
+  const endpoint = `https://${shopDomain}/admin/api/2025-01/graphql.json`;
+  const query = `#graphql
+    query GetProductForPrompt($id: ID!) {
+      product(id: $id) {
+        title
+        description
+        descriptionHtml
+        productType
+        vendor
+        tags
+        images(first: 3) {
+          edges {
+            node {
+              url
+            }
+          }
+        }
+        metafields(first: 20) {
+          edges {
+            node {
+              namespace
+              key
+              value
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": accessToken,
+      },
+      body: JSON.stringify({
+        query,
+        variables: { id: `gid://shopify/Product/${productId}` },
+      }),
+    });
+
+    if (!res.ok) {
+      logger.warn(
+        createLogContext("render", requestId, "shopify-product-fetch", {
+          status: res.status,
+          statusText: res.statusText,
+        }),
+        `Failed to fetch product from Shopify Admin API (HTTP ${res.status})`
+      );
+      return null;
+    }
+
+    const json = await res.json().catch(() => null);
+    return (json?.data?.product as ShopifyProductForPrompt | undefined) || null;
+  } catch (err) {
+    logger.warn(
+      createLogContext("render", requestId, "shopify-product-fetch", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+      "Failed to fetch product from Shopify Admin API (network/parsing)"
+    );
+    return null;
+  }
 }
 
 // ============================================================================
@@ -192,7 +283,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Fetch shop
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop },
-    select: { id: true },
+    select: { id: true, accessToken: true, shopDomain: true },
   });
   if (!shop) {
     logger.error(
@@ -239,12 +330,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     where: { shopId: shop.id, productId: product_id },
     select: {
       id: true,
+      productTitle: true,
+      productType: true,
       preparedImageUrl: true,
       preparedImageKey: true,
       sourceImageUrl: true,
       status: true,
       geminiFileUri: true,
       geminiFileExpiresAt: true,
+      extractedFacts: true,
+      merchantOverrides: true,
       // NEW: 2-LLM pipeline fields
       resolvedFacts: true,
       promptPack: true,
@@ -269,13 +364,102 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  // Validate pipeline data exists
-  if (!productAsset.resolvedFacts || !productAsset.promptPack) {
+  let resolvedFacts = productAsset.resolvedFacts as ProductPlacementFacts | null;
+  let promptPack = productAsset.promptPack as PromptPack | null;
+  let promptPackVersion = productAsset.promptPackVersion;
+
+  // Validate pipeline data exists (attempt backfill for legacy assets)
+  if (!resolvedFacts || !promptPack) {
     logger.warn(
       { ...shopLogContext, stage: "pipeline-check" },
-      `[See It Now] Product ${product_id} missing pipeline data (resolvedFacts: ${!!productAsset.resolvedFacts}, promptPack: ${!!productAsset.promptPack})`
+      `[See It Now] Product ${product_id} missing pipeline data (resolvedFacts: ${!!resolvedFacts}, promptPack: ${!!promptPack})`
     );
 
+    try {
+      const shopifyProduct = shop.accessToken
+        ? await fetchShopifyProductForPrompt(
+            shop.shopDomain,
+            shop.accessToken,
+            product_id,
+            requestId
+          )
+        : null;
+
+      const metafieldText = Array.isArray(shopifyProduct?.metafields?.edges)
+        ? shopifyProduct!.metafields!.edges!
+            .map((e) => e?.node?.value)
+            .filter(Boolean)
+            .join(" ")
+        : "";
+
+      const combinedDescription = `${shopifyProduct?.description || ""}\n${shopifyProduct?.descriptionHtml || ""}\n${metafieldText}`.trim();
+
+      const metafieldsRecord: Record<string, string> = {};
+      if (Array.isArray(shopifyProduct?.metafields?.edges)) {
+        for (const edge of shopifyProduct!.metafields!.edges!) {
+          const node = edge?.node;
+          if (node?.namespace && node?.key && node?.value) {
+            metafieldsRecord[`${node.namespace}.${node.key}`] = node.value;
+          }
+        }
+      }
+
+      const uniqueImages = new Set<string>();
+      if (productAsset.sourceImageUrl) uniqueImages.add(productAsset.sourceImageUrl);
+      if (productAsset.preparedImageUrl) uniqueImages.add(productAsset.preparedImageUrl);
+
+      if (Array.isArray(shopifyProduct?.images?.edges)) {
+        for (const edge of shopifyProduct!.images!.edges!) {
+          const url = edge?.node?.url;
+          if (url) uniqueImages.add(url);
+          if (uniqueImages.size >= 3) break;
+        }
+      }
+
+      const extractionInput: ExtractionInput = {
+        title: shopifyProduct?.title || productAsset.productTitle || "",
+        description: combinedDescription || "",
+        productType: shopifyProduct?.productType || productAsset.productType || null,
+        vendor: shopifyProduct?.vendor || null,
+        tags: (shopifyProduct?.tags || []) as string[],
+        metafields: metafieldsRecord,
+        imageUrls: Array.from(uniqueImages),
+      };
+
+      if (extractionInput.title && extractionInput.imageUrls.length > 0) {
+        const extractedFacts = await extractProductFacts(extractionInput, requestId);
+        const merchantOverrides = (productAsset.merchantOverrides as Record<string, unknown> | null) || null;
+        resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
+        promptPackVersion = await ensurePromptVersion();
+        promptPack = await buildPromptPack(resolvedFacts, requestId);
+
+        await prisma.productAsset.update({
+          where: { id: productAsset.id },
+          data: {
+            extractedFacts,
+            resolvedFacts,
+            promptPack,
+            promptPackVersion,
+            extractedAt: new Date(),
+            productTitle: shopifyProduct?.title || productAsset.productTitle || undefined,
+            productType: shopifyProduct?.productType || productAsset.productType || undefined,
+          },
+        });
+
+        logger.info(
+          { ...shopLogContext, stage: "pipeline-backfill" },
+          `[See It Now] Backfilled pipeline data for product ${product_id}`
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        { ...shopLogContext, stage: "pipeline-backfill-error" },
+        `[See It Now] Pipeline backfill failed for product ${product_id}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  if (!resolvedFacts || !promptPack) {
     return json(
       {
         success: false,
@@ -426,9 +610,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         meta: roomImageData.meta,
         geminiUri: roomGeminiFile.uri,
       },
-      resolvedFacts: productAsset.resolvedFacts as ProductPlacementFacts,
-      promptPack: productAsset.promptPack as PromptPack,
-      promptPackVersion: productAsset.promptPackVersion,
+      resolvedFacts,
+      promptPack,
+      promptPackVersion,
     };
 
     // Call the new renderer
