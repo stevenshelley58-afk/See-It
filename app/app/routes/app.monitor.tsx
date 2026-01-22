@@ -18,7 +18,7 @@ import {
   Thumbnail,
   Pagination,
 } from "@shopify/polaris";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 const PAGE_SIZE = 20;
 
@@ -197,21 +197,21 @@ export default function MonitorPage() {
   const appliedFilters = [
     ...(statusFilter.length > 0
       ? [
-          {
-            key: "status",
-            label: `Status: ${statusFilter[0]}`,
-            onRemove: () => handleStatusChange([]),
-          },
-        ]
+        {
+          key: "status",
+          label: `Status: ${statusFilter[0]}`,
+          onRemove: () => handleStatusChange([]),
+        },
+      ]
       : []),
     ...(versionFilter.length > 0
       ? [
-          {
-            key: "version",
-            label: `Version: v${versionFilter[0]}`,
-            onRemove: () => handleVersionChange([]),
-          },
-        ]
+        {
+          key: "version",
+          label: `Version: v${versionFilter[0]}`,
+          onRemove: () => handleVersionChange([]),
+        },
+      ]
       : []),
   ];
 
@@ -307,15 +307,22 @@ function RenderRunModal({
   const [loading, setLoading] = useState(true);
 
   // Fetch run details on mount
-  useState(() => {
+  // Fetch run details on mount
+  useEffect(() => {
+    let active = true;
     fetch(`/api/monitor/run/${runId}`)
       .then((res) => res.json())
       .then((data) => {
-        setRunDetails(data);
-        setLoading(false);
+        if (active) {
+          setRunDetails(data);
+          setLoading(false);
+        }
       })
-      .catch(() => setLoading(false));
-  });
+      .catch(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [runId]);
 
   return (
     <Modal

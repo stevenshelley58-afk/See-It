@@ -214,6 +214,7 @@ type ShopifyProductForPrompt = {
     productType?: string | null;
     vendor?: string | null;
     tags?: string[] | null;
+    images?: { edges?: Array<{ node?: { url?: string } }> } | null;
     metafields?: { edges?: Array<{ node?: { namespace?: string; key?: string; value?: string; type?: string } }> } | null;
 };
 
@@ -238,6 +239,13 @@ async function fetchShopifyProductForPrompt(
                 productType
                 vendor
                 tags
+                images(first: 3) {
+                  edges {
+                    node {
+                      url
+                    }
+                  }
+                }
                 metafields(first: 20) {
                     edges {
                         node {
@@ -450,7 +458,7 @@ async function processPendingAssets(batchRequestId: string) {
                     // ========================================================================
                     // NEW: See It Now 2-LLM Pipeline
                     // ========================================================================
-                    
+
                     // Get current prompt version
                     let promptPackVersion = 0;
                     try {
@@ -461,7 +469,7 @@ async function processPendingAssets(batchRequestId: string) {
                             `Failed to ensure prompt version: ${versionError instanceof Error ? versionError.message : String(versionError)}`
                         );
                     }
-                    
+
                     // Fetch shop + product context for extraction
                     const shopRecord = await prisma.shop.findUnique({
                         where: { id: asset.shopId },
@@ -485,7 +493,29 @@ async function processPendingAssets(batchRequestId: string) {
                         : "";
 
                     const combinedDescription = `${shopifyProduct?.description || ""}\n${shopifyProduct?.descriptionHtml || ""}\n${metafieldText}`.trim();
-                    
+
+                    const metafieldsRecord: Record<string, string> = {};
+                    if (Array.isArray(shopifyProduct?.metafields?.edges)) {
+                        for (const edge of shopifyProduct!.metafields!.edges!) {
+                            const node = edge?.node;
+                            if (node?.namespace && node?.key && node?.value) {
+                                metafieldsRecord[`${node.namespace}.${node.key}`] = node.value;
+                            }
+                        }
+                    }
+
+                    // Collect up to 3 unique images (starting with sourceImageUrl)
+                    const uniqueImages = new Set<string>();
+                    if (asset.sourceImageUrl) uniqueImages.add(asset.sourceImageUrl);
+
+                    if (Array.isArray(shopifyProduct?.images?.edges)) {
+                        for (const edge of shopifyProduct!.images!.edges!) {
+                            const url = edge?.node?.url;
+                            if (url) uniqueImages.add(url);
+                            if (uniqueImages.size >= 3) break;
+                        }
+                    }
+
                     // Step 1: Extract product facts (LLM #1)
                     let extractedFacts = null;
                     try {
@@ -495,12 +525,12 @@ async function processPendingAssets(batchRequestId: string) {
                             productType: shopifyProduct?.productType || asset.productType || null,
                             vendor: shopifyProduct?.vendor || null,
                             tags: (shopifyProduct?.tags || []) as string[],
-                            metafields: {},
-                            imageUrls: [asset.sourceImageUrl],
+                            metafields: metafieldsRecord,
+                            imageUrls: Array.from(uniqueImages),
                         };
-                        
+
                         extractedFacts = await extractProductFacts(extractionInput, itemRequestId);
-                        
+
                         logger.info(
                             createLogContext("prepare", itemRequestId, "extraction-complete", {
                                 productKind: extractedFacts.identity?.product_kind,
@@ -514,20 +544,20 @@ async function processPendingAssets(batchRequestId: string) {
                             `Extraction failed for ${asset.productId}, continuing with legacy flow: ${extractError instanceof Error ? extractError.message : String(extractError)}`
                         );
                     }
-                    
+
                     // Step 2: Resolve facts (merge with any existing merchant overrides)
                     let resolvedFacts = null;
                     if (extractedFacts) {
                         const merchantOverrides = asset.merchantOverrides as any || null;
                         resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
                     }
-                    
+
                     // Step 3: Build prompt pack (LLM #2)
                     let promptPack = null;
                     if (resolvedFacts) {
                         try {
                             promptPack = await buildPromptPack(resolvedFacts, itemRequestId);
-                            
+
                             logger.info(
                                 createLogContext("prepare", itemRequestId, "prompt-pack-complete", {
                                     variantCount: promptPack.variants.length,
@@ -541,7 +571,7 @@ async function processPendingAssets(batchRequestId: string) {
                             );
                         }
                     }
-                    
+
                     // ========================================================================
                     // LEGACY: Generate placement fields and prose prompt (only if not merchant-owned)
                     // Check fieldSource to avoid overwriting merchant edits
@@ -783,7 +813,7 @@ async function processPendingAssets(batchRequestId: string) {
                         retryCount: 0, // Reset retry count on success
                         errorMessage: null,
                         updatedAt: new Date(),
-                        
+
                         // NEW: See It Now 2-LLM Pipeline fields
                         ...(extractedFacts && { extractedFacts }),
                         ...(resolvedFacts && { resolvedFacts }),

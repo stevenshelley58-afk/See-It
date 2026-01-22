@@ -137,7 +137,7 @@ function autoDetectFields(product) {
     const labelText = `${product.title} ${tagsText} ${product.productType || ''} ${product.vendor || ''}`.toLowerCase();
     const contextText = `${descriptionText} ${metafieldText}`.toLowerCase();
     const allText = `${labelText} ${contextText}`.toLowerCase();
-    
+
     // Surface detection
     const surfaceKeywords = {
         // NOTE: do NOT include ambiguous words like "table" here because descriptions
@@ -188,7 +188,7 @@ function autoDetectFields(product) {
     } else if (surfaceKeywords.floor.some(k => allText.includes(k))) {
         surface = 'floor';
     }
-    
+
     // Material detection
     const materialKeywords = {
         fabric: ['fabric', 'velvet', 'linen', 'cotton', 'wool', 'upholstered', 'sofa', 'couch', 'chair', 'cushion'],
@@ -199,7 +199,7 @@ function autoDetectFields(product) {
         stone: ['stone', 'marble', 'granite', 'concrete'],
         leather: ['leather', 'suede'],
     };
-    
+
     let material = 'mixed';
     for (const [mat, keywords] of Object.entries(materialKeywords)) {
         if (keywords.some(k => allText.includes(k))) {
@@ -207,7 +207,7 @@ function autoDetectFields(product) {
             break;
         }
     }
-    
+
     // Orientation
     let orientation = 'upright';
     if (allText.includes('rug') || allText.includes('carpet')) {
@@ -219,25 +219,25 @@ function autoDetectFields(product) {
     } else if (surface === 'ceiling') {
         orientation = 'hanging';
     }
-    
+
     // Dimensions from description
     // Pull from metafields first (if present), else from description/descriptionHtml.
     let dimensions = extractDimsFromMetafields(product);
     if (!dimensions.height && !dimensions.width) {
         dimensions = extractDimsFromText(descriptionText);
     }
-    
+
     // Placement rules: auto-detect defaults
     // Large items (sofas, mirrors, cabinets) → Dominant + Similar Size or Position + Yes
     // Small items (lamps, decor) → Integrated + None + No
     // Use labelText to avoid false positives from descriptions like "style it on a console table".
     const largeItemKeywords = ['sofa', 'couch', 'sectional', 'mirror', 'cabinet', 'dresser', 'bookshelf', 'bed', 'table', 'desk', 'console', 'credenza', 'sideboard'];
     const isLargeItem = largeItemKeywords.some(k => labelText.includes(k));
-    
+
     const sceneRole = isLargeItem ? 'Dominant' : 'Integrated';
     const replacementRule = isLargeItem ? 'Similar Size or Position' : 'None';
     const allowSpaceCreation = isLargeItem;
-    
+
     return { surface, material, orientation, dimensions, sceneRole, replacementRule, allowSpaceCreation };
 }
 
@@ -347,7 +347,7 @@ function stableStringify(value) {
 
 export function PlacementTab({ product, asset, onChange }) {
     const fetcher = useFetcher();
-    
+
     // Parse existing saved description (if any)
     const existingDescription = useMemo(() => {
         if (!asset?.renderInstructions) return null;
@@ -355,10 +355,10 @@ export function PlacementTab({ product, asset, onChange }) {
         if (asset.renderInstructions.startsWith('{')) return null;
         return asset.renderInstructions;
     }, [asset]);
-    
+
     // Auto-detect initial fields (fallback if no saved data)
     const detectedFields = useMemo(() => autoDetectFields(product), [product]);
-    
+
     // Load saved placementFields from asset, or use auto-detected defaults
     const initialFields = useMemo(() => {
         if (asset?.placementFields && typeof asset.placementFields === 'object') {
@@ -383,10 +383,10 @@ export function PlacementTab({ product, asset, onChange }) {
             additionalNotes: '',
         };
     }, [asset?.placementFields, detectedFields]);
-    
+
     // State
     const [fields, setFields] = useState(initialFields);
-    
+
     // Update state when asset.placementFields changes (e.g., asset loads async)
     useEffect(() => {
         if (asset?.placementFields && typeof asset.placementFields === 'object') {
@@ -401,14 +401,14 @@ export function PlacementTab({ product, asset, onChange }) {
             }));
         }
     }, [asset?.placementFields]);
-    
+
     // placement rules state - use existing asset values or auto-detected defaults
     const [placementRulesFields, setPlacementRulesFields] = useState({
         sceneRole: asset?.sceneRole || detectedFields.sceneRole || null,
         replacementRule: asset?.replacementRule || detectedFields.replacementRule || null,
         allowSpaceCreation: asset?.allowSpaceCreation !== undefined ? asset.allowSpaceCreation : detectedFields.allowSpaceCreation,
     });
-    
+
     // Update placementRulesFields when asset loads async
     useEffect(() => {
         if (asset) {
@@ -419,7 +419,7 @@ export function PlacementTab({ product, asset, onChange }) {
             });
         }
     }, [asset?.sceneRole, asset?.replacementRule, asset?.allowSpaceCreation, detectedFields]);
-    
+
     const [description, setDescription] = useState(existingDescription || '');
     const [isGenerating, setIsGenerating] = useState(false);
     const [hasEdited, setHasEdited] = useState(false);
@@ -571,7 +571,7 @@ export function PlacementTab({ product, asset, onChange }) {
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [asset?.renderInstructionsSeeItNow]);
-    
+
     // Notify parent when description, placementFields, placement rules, See It Now prompt, or enabled change
     useEffect(() => {
         if (onChange) {
@@ -601,7 +601,7 @@ export function PlacementTab({ product, asset, onChange }) {
             });
         }
     }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, seeItNowVariants, variantsDirty, merchantOverrides, merchantOverridesDirty, hasEdited, onChange]);
-    
+
     // Update a field
     const updateField = useCallback((field, value) => {
         setFields(prev => {
@@ -615,12 +615,12 @@ export function PlacementTab({ product, asset, onChange }) {
             return { ...prev, [field]: value };
         });
     }, []);
-    
+
     // Generate description via API
     const handleGenerate = useCallback(async () => {
         setIsGenerating(true);
         setShowEditWarning(false);
-        
+
         try {
             const response = await fetch('/api/products/generate-description', {
                 method: 'POST',
@@ -635,9 +635,9 @@ export function PlacementTab({ product, asset, onChange }) {
                     fields: fields,
                 }),
             });
-            
+
             const data = await response.json();
-            
+
             if (data.success && data.description) {
                 setDescription(data.description);
                 setHasEdited(false);
@@ -723,13 +723,13 @@ export function PlacementTab({ product, asset, onChange }) {
         });
         setVariantsDirty(true);
     }, []);
-    
+
     // Options for dropdowns
     const surfaces = ['floor', 'wall', 'table', 'ceiling', 'shelf', 'other'];
     const orientations = ['upright', 'flat', 'leaning', 'wall-mounted', 'hanging', 'draped', 'other'];
     const materials = ['fabric', 'wood', 'metal', 'glass', 'ceramic', 'stone', 'leather', 'mixed', 'other'];
     const shadows = ['contact', 'cast', 'soft', 'none'];
-    
+
     // Placement rule options
     const sceneRoles = ['Dominant', 'Integrated'];
     const replacementRules = ['Same Role Only', 'Similar Size or Position', 'Any Blocking Object', 'None'];
@@ -765,7 +765,7 @@ export function PlacementTab({ product, asset, onChange }) {
 
     return (
         <div className="space-y-8 fade-in">
-            
+
             {/* SECTION 1: Structured Fields */}
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -774,7 +774,7 @@ export function PlacementTab({ product, asset, onChange }) {
                         Auto-detected • Review & adjust
                     </span>
                 </div>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Surface */}
                     <div className="space-y-2">
@@ -787,18 +787,17 @@ export function PlacementTab({ product, asset, onChange }) {
                                 <button
                                     key={s}
                                     onClick={() => updateField('surface', s)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                                        fields.surface === s
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.surface === s
                                             ? 'bg-neutral-900 text-white'
                                             : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
-                                    }`}
+                                        }`}
                                 >
                                     {s.charAt(0).toUpperCase() + s.slice(1)}
                                 </button>
                             ))}
                         </div>
                     </div>
-                    
+
                     {/* Material */}
                     <div className="space-y-2">
                         <label className="block text-sm font-semibold text-neutral-700">
@@ -810,18 +809,17 @@ export function PlacementTab({ product, asset, onChange }) {
                                 <button
                                     key={m}
                                     onClick={() => updateField('material', m)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                                        fields.material === m
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.material === m
                                             ? 'bg-neutral-900 text-white'
                                             : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
-                                    }`}
+                                        }`}
                                 >
                                     {m.charAt(0).toUpperCase() + m.slice(1)}
                                 </button>
                             ))}
                         </div>
                     </div>
-                    
+
                     {/* Orientation */}
                     <div className="space-y-2">
                         <label className="block text-sm font-semibold text-neutral-700">
@@ -833,18 +831,17 @@ export function PlacementTab({ product, asset, onChange }) {
                                 <button
                                     key={o}
                                     onClick={() => updateField('orientation', o)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                                        fields.orientation === o
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.orientation === o
                                             ? 'bg-neutral-900 text-white'
                                             : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
-                                    }`}
+                                        }`}
                                 >
                                     {o.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                                 </button>
                             ))}
                         </div>
                     </div>
-                    
+
                     {/* Shadow */}
                     <div className="space-y-2">
                         <label className="block text-sm font-semibold text-neutral-700">
@@ -856,11 +853,10 @@ export function PlacementTab({ product, asset, onChange }) {
                                 <button
                                     key={s}
                                     onClick={() => updateField('shadow', s)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                                        fields.shadow === s
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.shadow === s
                                             ? 'bg-neutral-900 text-white'
                                             : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
-                                    }`}
+                                        }`}
                                 >
                                     {s.charAt(0).toUpperCase() + s.slice(1)}
                                 </button>
@@ -868,7 +864,7 @@ export function PlacementTab({ product, asset, onChange }) {
                         </div>
                     </div>
                 </div>
-                
+
                 {/* Dimensions */}
                 <div className="space-y-2">
                     <label className="block text-sm font-semibold text-neutral-700">
@@ -902,7 +898,7 @@ export function PlacementTab({ product, asset, onChange }) {
                         </div>
                     </div>
                 </div>
-                
+
                 {/* Additional Notes */}
                 <div className="space-y-2">
                     <label className="block text-sm font-semibold text-neutral-700">
@@ -918,10 +914,10 @@ export function PlacementTab({ product, asset, onChange }) {
                     <p className="text-xs text-neutral-400 text-right">{(fields.additionalNotes || '').length}/200</p>
                 </div>
             </div>
-            
+
             {/* Divider */}
             <div className="border-t border-neutral-200"></div>
-            
+
             {/* SECTION: Placement Rules */}
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -930,7 +926,7 @@ export function PlacementTab({ product, asset, onChange }) {
                         Auto-detected • Review & adjust
                     </span>
                 </div>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Scene Role */}
                     <div className="space-y-2">
@@ -943,18 +939,17 @@ export function PlacementTab({ product, asset, onChange }) {
                                 <button
                                     key={role}
                                     onClick={() => setPlacementRulesFields(prev => ({ ...prev, sceneRole: role }))}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                                        placementRulesFields.sceneRole === role
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${placementRulesFields.sceneRole === role
                                             ? 'bg-neutral-900 text-white'
                                             : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
-                                    }`}
+                                        }`}
                                 >
                                     {role}
                                 </button>
                             ))}
                         </div>
                     </div>
-                    
+
                     {/* Replacement Rule */}
                     <div className="space-y-2">
                         <label className="block text-sm font-semibold text-neutral-700">
@@ -966,11 +961,10 @@ export function PlacementTab({ product, asset, onChange }) {
                                 <button
                                     key={rule}
                                     onClick={() => setPlacementRulesFields(prev => ({ ...prev, replacementRule: rule }))}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all text-left ${
-                                        placementRulesFields.replacementRule === rule
+                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all text-left ${placementRulesFields.replacementRule === rule
                                             ? 'bg-neutral-900 text-white'
                                             : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
-                                    }`}
+                                        }`}
                                 >
                                     {rule}
                                 </button>
@@ -978,7 +972,7 @@ export function PlacementTab({ product, asset, onChange }) {
                         </div>
                     </div>
                 </div>
-                
+
                 {/* Allow Space Creation */}
                 <div className="space-y-2">
                     <label className="flex items-center gap-3 cursor-pointer">
@@ -995,10 +989,10 @@ export function PlacementTab({ product, asset, onChange }) {
                     </label>
                 </div>
             </div>
-            
+
             {/* Divider */}
             <div className="border-t border-neutral-200"></div>
-            
+
             {/* SECTION: See It Now Facts / Overrides */}
             <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -1045,11 +1039,10 @@ export function PlacementTab({ product, asset, onChange }) {
                                 setMerchantOverrides((prev) => setPath(prev || {}, ["material_profile", "primary"], v));
                             }}
                             disabled={!materialPrimaryIsOverridden}
-                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${
-                                materialPrimaryIsOverridden
+                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${materialPrimaryIsOverridden
                                     ? 'border-neutral-300 bg-white text-neutral-900'
                                     : 'border-neutral-200 bg-neutral-50 text-neutral-500'
-                            }`}
+                                }`}
                         >
                             {materialPrimaryOptions.map((opt) => (
                                 <option key={opt} value={opt}>
@@ -1095,11 +1088,10 @@ export function PlacementTab({ product, asset, onChange }) {
                                 setMerchantOverrides((prev) => setPath(prev || {}, ["relative_scale", "class"], v));
                             }}
                             disabled={!relativeScaleClassIsOverridden}
-                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${
-                                relativeScaleClassIsOverridden
+                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${relativeScaleClassIsOverridden
                                     ? 'border-neutral-300 bg-white text-neutral-900'
                                     : 'border-neutral-200 bg-neutral-50 text-neutral-500'
-                            }`}
+                                }`}
                         >
                             {relativeScaleClassOptions.map((opt) => (
                                 <option key={opt} value={opt}>
@@ -1145,11 +1137,10 @@ export function PlacementTab({ product, asset, onChange }) {
                                 setMerchantOverrides((prev) => setPath(prev || {}, ["render_behavior", "cropping_policy"], v));
                             }}
                             disabled={!croppingPolicyIsOverridden}
-                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${
-                                croppingPolicyIsOverridden
+                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${croppingPolicyIsOverridden
                                     ? 'border-neutral-300 bg-white text-neutral-900'
                                     : 'border-neutral-200 bg-neutral-50 text-neutral-500'
-                            }`}
+                                }`}
                         >
                             {croppingPolicyOptions.map((opt) => (
                                 <option key={opt} value={opt}>
@@ -1193,7 +1184,7 @@ export function PlacementTab({ product, asset, onChange }) {
                         {description ? 'Regenerate Prompt' : 'Generate Prompt'}
                     </Button>
                 </div>
-                
+
                 {/* Two-column layout for prompts */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Left: See It Prompt */}
@@ -1219,7 +1210,7 @@ export function PlacementTab({ product, asset, onChange }) {
                                                 This description was optimised for AI rendering. Manual edits may reduce quality.
                                             </p>
                                         </div>
-                                        <button 
+                                        <button
                                             onClick={() => setShowEditWarning(false)}
                                             className="text-amber-600 hover:text-amber-800"
                                         >
@@ -1230,13 +1221,13 @@ export function PlacementTab({ product, asset, onChange }) {
                                     </div>
                                 </div>
                             )}
-                            
+
                             <div className={`bg-neutral-900 rounded-xl p-4 ${showEditWarning ? 'mt-16' : ''}`}>
                                 {description ? (
                                     <textarea
                                         value={description}
                                         onChange={(e) => handleDescriptionEdit(e.target.value)}
-                                        className="w-full bg-transparent text-neutral-100 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]" 
+                                        className="w-full bg-transparent text-neutral-100 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]"
                                         placeholder="Click 'Generate Prompt' to create a placement prompt..."
                                     />
                                 ) : (
@@ -1246,7 +1237,7 @@ export function PlacementTab({ product, asset, onChange }) {
                                     </div>
                                 )}
                             </div>
-                            
+
                             {description && (
                                 <div className="flex items-center justify-between mt-2 px-1">
                                     <span className="text-xs text-neutral-400">
@@ -1282,7 +1273,7 @@ export function PlacementTab({ product, asset, onChange }) {
                                     setSeeItNowPrompt(e.target.value);
                                     setSeeItNowDirty(true);
                                 }}
-                                className="w-full bg-transparent text-neutral-900 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]" 
+                                className="w-full bg-transparent text-neutral-900 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]"
                                 placeholder="Leave blank to use the See It prompt..."
                             />
                             {seeItNowPrompt && (
@@ -1300,125 +1291,8 @@ export function PlacementTab({ product, asset, onChange }) {
             {/* Divider */}
             <div className="border-t border-neutral-200"></div>
 
-            {/* SECTION 3: See It Now Variants (10 options, pick 5 by default) */}
-            <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h3 className="text-lg font-bold text-neutral-900">See It Now Variants</h3>
-                        <p className="text-sm text-neutral-500 mt-1">
-                            Pick which variants to generate for this product. Default is 5 selected from a 10-option library.
-                        </p>
-                    </div>
-                    <div className="flex gap-2">
-                        <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={handleResetVariants}
-                        >
-                            Reset to Default (5)
-                        </Button>
-                    </div>
-                </div>
 
-                <div className="text-xs text-neutral-500">
-                    Selected: <strong>{selectedLibraryCount}</strong> / {SEE_IT_NOW_VARIANT_LIBRARY.length}
-                    {extraVariants.length > 0 ? (
-                        <span className="ml-2 text-neutral-400">
-                            (+ {extraVariants.length} legacy/custom)
-                        </span>
-                    ) : null}
-                </div>
 
-                <div className="space-y-3">
-                    {SEE_IT_NOW_VARIANT_LIBRARY.map((lib) => {
-                        const isSelected = selectedById.has(lib.id);
-                        const selectedVariant = selectedById.get(lib.id);
-                        const value = (selectedVariant?.prompt ?? lib.prompt) || '';
-
-                        return (
-                            <div key={lib.id} className="border border-neutral-200 rounded-lg p-3 bg-white">
-                                <label className="flex items-start gap-3 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={isSelected}
-                                        onChange={(e) => toggleLibraryVariant(lib.id, e.target.checked)}
-                                        className="mt-1 w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div className="text-sm font-semibold text-neutral-800">
-                                                {formatVariantLabel(lib.id)}
-                                            </div>
-                                            <div className="text-[11px] text-neutral-400 font-mono">
-                                                {lib.id}
-                                            </div>
-                                        </div>
-                                        <textarea
-                                            value={value}
-                                            disabled={!isSelected}
-                                            onChange={(e) => updateVariantPrompt(lib.id, e.target.value)}
-                                            className={`mt-2 w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent min-h-[72px] resize-none ${
-                                                isSelected
-                                                    ? 'border-neutral-300 bg-white text-neutral-900'
-                                                    : 'border-neutral-200 bg-neutral-50 text-neutral-500'
-                                            }`}
-                                        />
-                                        {!isSelected && (
-                                            <div className="mt-1 text-xs text-neutral-400">
-                                                Select to include this variant (and enable editing).
-                                            </div>
-                                        )}
-                                    </div>
-                                </label>
-                            </div>
-                        );
-                    })}
-                </div>
-
-                {/* Legacy/custom variants (keep visible so nothing silently disappears) */}
-                {extraVariants.length > 0 && (
-                    <div className="space-y-2 pt-2">
-                        <div className="text-sm font-semibold text-neutral-700">
-                            Legacy / custom variants
-                        </div>
-                        <div className="text-xs text-neutral-500">
-                            These variants were saved previously and aren’t part of the standard 10-option library. You can edit or remove them.
-                        </div>
-                        <div className="space-y-2">
-                            {extraVariants.map((variant, index) => (
-                                <div key={`${variant.id || 'extra'}_${index}`} className="relative group">
-                                    <div className="flex items-start gap-2">
-                                        <div className="flex-1">
-                                            <input
-                                                type="text"
-                                                value={variant.prompt || ''}
-                                                onChange={(e) => updateVariantPrompt(variant.id, e.target.value)}
-                                                className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
-                                                placeholder="Enter variant prompt..."
-                                            />
-                                            <span className="text-xs text-neutral-400 mt-1 block font-mono">{variant.id}</span>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setSeeItNowVariants((prev) => (prev || []).filter((v) => v?.id !== variant.id));
-                                                setVariantsDirty(true);
-                                            }}
-                                            className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-2 text-neutral-400 hover:text-red-500"
-                                            title="Remove legacy/custom variant"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-            </div>
-            
             {/* Status Message */}
             {description && !hasEdited && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-3">

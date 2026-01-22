@@ -6,7 +6,7 @@ import prisma from "../db.server";
 import { PLANS } from "../billing";
 import pkg from "../../package.json" with { type: "json" };
 import { GEMINI_IMAGE_MODEL_PRO, MODEL_FOR_COMPOSITING } from "../config/ai-models.config";
-import { SEE_IT_NOW_VARIANT_LIBRARY } from "../config/see-it-now-variants.config";
+import { GEMINI_IMAGE_MODEL_PRO, MODEL_FOR_COMPOSITING } from "../config/ai-models.config";
 import { PageShell, Card, Button } from "../components/ui";
 import { useEffect, useState } from "react";
 
@@ -55,17 +55,14 @@ export const loader = async ({ request }) => {
 
   // Auto-generate build info
   const buildTimestamp = process.env.BUILD_TIMESTAMP || new Date().toISOString();
-  const version = { 
-    app: pkg.version, 
+  const version = {
+    app: pkg.version,
     build: buildTimestamp.slice(0, 10).replace(/-/g, ''),
     date: new Date(buildTimestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   };
 
   // Fetch settings for prompts
   const settings = shop.settingsJson ? JSON.parse(shop.settingsJson) : {};
-
-  // Default variant prompts - 10 option library
-  const defaultVariants = SEE_IT_NOW_VARIANT_LIBRARY;
 
   return json({
     shop,
@@ -74,8 +71,7 @@ export const loader = async ({ request }) => {
     settings: {
       seeItPrompt: settings.seeItPrompt || "",
       seeItNowPrompt: settings.seeItNowPrompt || "",
-      coordinateInstructions: settings.coordinateInstructions || "",
-      seeItNowVariants: settings.seeItNowVariants || defaultVariants
+      coordinateInstructions: settings.coordinateInstructions || ""
     }
   });
 };
@@ -87,8 +83,7 @@ export default function Settings() {
   const [prompts, setPrompts] = useState({
     seeItPrompt: settings.seeItPrompt || "",
     seeItNowPrompt: settings.seeItNowPrompt || "",
-    coordinateInstructions: settings.coordinateInstructions || "",
-    seeItNowVariants: settings.seeItNowVariants || []
+    coordinateInstructions: settings.coordinateInstructions || ""
   });
   const [saving, setSaving] = useState(false);
 
@@ -100,8 +95,7 @@ export default function Settings() {
       {
         seeItPrompt: prompts.seeItPrompt,
         seeItNowPrompt: prompts.seeItNowPrompt,
-        coordinateInstructions: prompts.coordinateInstructions,
-        seeItNowVariants: prompts.seeItNowVariants
+        coordinateInstructions: prompts.coordinateInstructions
       },
       {
         method: "POST",
@@ -111,24 +105,7 @@ export default function Settings() {
     );
   };
 
-  const updateVariantPrompt = (index, newPrompt) => {
-    const newVariants = [...prompts.seeItNowVariants];
-    newVariants[index] = { ...newVariants[index], prompt: newPrompt };
-    setPrompts({ ...prompts, seeItNowVariants: newVariants });
-  };
 
-  const addVariant = () => {
-    const newId = `custom_${Date.now()}`;
-    setPrompts({
-      ...prompts,
-      seeItNowVariants: [...prompts.seeItNowVariants, { id: newId, prompt: "" }]
-    });
-  };
-
-  const removeVariant = (index) => {
-    const newVariants = prompts.seeItNowVariants.filter((_, i) => i !== index);
-    setPrompts({ ...prompts, seeItNowVariants: newVariants });
-  };
 
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data) {
@@ -181,8 +158,8 @@ export default function Settings() {
                   Customize how the See It button appears on your store
                 </p>
               </div>
-              <Button 
-                size="sm" 
+              <Button
+                size="sm"
                 variant="secondary"
                 className="flex-shrink-0"
                 onClick={() => {
@@ -201,7 +178,7 @@ export default function Settings() {
                   Collect email addresses when customers save visualizations
                 </p>
               </div>
-              <button 
+              <button
                 className="w-11 h-6 bg-neutral-900 rounded-full relative flex-shrink-0"
                 onClick={() => {
                   // Toggle functionality would go here
@@ -217,7 +194,7 @@ export default function Settings() {
         {/* AI Prompts */}
         <Card>
           <h2 className="font-semibold text-neutral-900 mb-3 md:mb-4 text-sm md:text-base">AI Prompts</h2>
-          
+
           {/* Warning Box */}
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-sm text-red-800 font-medium">
@@ -288,66 +265,6 @@ export default function Settings() {
               </div>
             </div>
 
-            {/* See It Now Variant Prompts */}
-            <div className="border-t border-neutral-200 pt-4 mt-4">
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-sm font-medium text-neutral-900">
-                  See It Now Variants ({prompts.seeItNowVariants?.length || 0})
-                </label>
-                <button
-                  type="button"
-                  onClick={addVariant}
-                  className="text-xs px-2 py-1 bg-neutral-100 hover:bg-neutral-200 rounded-md text-neutral-700 transition-colors"
-                >
-                  + Add Variant
-                </button>
-              </div>
-              <p className="text-xs text-neutral-500 mb-3">
-                Each variant generates a separate image with its own creative direction. More variants = more options but longer generation time.
-              </p>
-              
-              <div className="space-y-3">
-                {prompts.seeItNowVariants?.map((variant, index) => (
-                  <div key={variant.id} className="relative group">
-                    <div className="flex items-start gap-2">
-                      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-neutral-100 text-neutral-500 text-xs flex items-center justify-center mt-2">
-                        {index + 1}
-                      </span>
-                      <div className="flex-1">
-                        <input
-                          type="text"
-                          value={variant.prompt}
-                          onChange={(e) => updateVariantPrompt(index, e.target.value)}
-                          className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
-                          placeholder="Enter creative direction for this variant..."
-                        />
-                        <span className="text-xs text-neutral-400 mt-1 block">{variant.id}</span>
-                      </div>
-                      {prompts.seeItNowVariants.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeVariant(index)}
-                          className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-2 text-neutral-400 hover:text-red-500"
-                          title="Remove variant"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="text-xs text-amber-800">
-                  <strong>Tip:</strong> Each variant runs in parallel. 6 variants ≈ same time as 1, but uses 6× the quota. 
-                  Mix placement (left/right/center) with size (prominent/subtle) for best coverage.
-                </p>
-              </div>
-            </div>
-
             {/* Save Button */}
             <div className="flex justify-end pt-2">
               <Button
@@ -375,7 +292,7 @@ export default function Settings() {
                 </div>
               </div>
               {!isPro && (
-                <Button 
+                <Button
                   variant="primary"
                   className="w-full md:w-auto"
                   onClick={handleUpgrade}
