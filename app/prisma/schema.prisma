@@ -2,7 +2,7 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
 }
 
@@ -50,65 +50,67 @@ model Shop {
   seeItCaptures    SeeItCapture[]
   prepEvents       PrepEvent[]
   renderRuns       RenderRun[]
+  monitorEvents    MonitorEvent[]
+  monitorArtifacts MonitorArtifact[]
 
   @@map("shops")
 }
 
 model ProductAsset {
-  id                 String   @id @default(uuid())
-  shopId             String   @map("shop_id")
-  productId          String   @map("product_id")
-  productTitle       String?  @map("product_title")
-  productType        String?  @map("product_type") // Shopify Product Type for grouping similar items
-  variantId          String?  @map("variant_id")
-  sourceImageId      String   @map("source_image_id")
-  sourceImageUrl     String   @map("source_image_url")
-  preparedImageUrl   String?  @map("prepared_image_url") // Cached signed URL (expires in 1hr) - legacy/fallback only. Prefer preparedImageKey for fresh URLs.
-  preparedImageKey   String?  @map("prepared_image_key") // Source of truth: Permanent GCS path (e.g., "shops/.../prepared-123.png"). Use this to generate fresh signed URLs on-demand via StorageService.getSignedReadUrl()
-  status             String // "unprepared" | "preparing" | "ready" | "live" | "failed"
-  enabled            Boolean  @default(false) @map("enabled")
-  prepStrategy       String   @map("prep_strategy") // "batch" | "fallback" | "manual"
-  promptVersion      Int      @map("prompt_version")
-  errorMessage       String?  @map("error_message")
-  retryCount         Int      @default(0) @map("retry_count") // Track retry attempts
-  isDefault          Boolean  @default(false) @map("is_default") // Only one default per shop+product
-  
+  id               String  @id @default(uuid())
+  shopId           String  @map("shop_id")
+  productId        String  @map("product_id")
+  productTitle     String? @map("product_title")
+  productType      String? @map("product_type") // Shopify Product Type for grouping similar items
+  variantId        String? @map("variant_id")
+  sourceImageId    String  @map("source_image_id")
+  sourceImageUrl   String  @map("source_image_url")
+  preparedImageUrl String? @map("prepared_image_url") // Cached signed URL (expires in 1hr) - legacy/fallback only. Prefer preparedImageKey for fresh URLs.
+  preparedImageKey String? @map("prepared_image_key") // Source of truth: Permanent GCS path (e.g., "shops/.../prepared-123.png"). Use this to generate fresh signed URLs on-demand via StorageService.getSignedReadUrl()
+  status           String // "unprepared" | "preparing" | "ready" | "live" | "failed"
+  enabled          Boolean @default(false) @map("enabled")
+  prepStrategy     String  @map("prep_strategy") // "batch" | "fallback" | "manual"
+  promptVersion    Int     @map("prompt_version")
+  errorMessage     String? @map("error_message")
+  retryCount       Int     @default(0) @map("retry_count") // Track retry attempts
+  isDefault        Boolean @default(false) @map("is_default") // Only one default per shop+product
+
   // Gemini file pre-upload
-  geminiFileUri         String?   @map("gemini_file_uri") // Pre-uploaded Gemini Files API URI
-  geminiFileExpiresAt   DateTime? @map("gemini_file_expires_at") // Gemini file expiration (48h from upload)
-  
+  geminiFileUri       String?   @map("gemini_file_uri") // Pre-uploaded Gemini Files API URI
+  geminiFileExpiresAt DateTime? @map("gemini_file_expires_at") // Gemini file expiration (48h from upload)
+
   // ==========================================================================
   // NEW: See It Now Pipeline Fields
   // ==========================================================================
-  extractedFacts      Json?     @map("extracted_facts")       // LLM #1 output
-  merchantOverrides   Json?     @map("merchant_overrides")    // Merchant edits (diff only)
-  resolvedFacts       Json?     @map("resolved_facts")        // merged(extracted, overrides)
-  promptPack          Json?     @map("prompt_pack")           // LLM #2 output: { product_context, variants[] }
-  promptPackVersion   Int       @default(0) @map("prompt_pack_version")
-  extractedAt         DateTime? @map("extracted_at")
-  
+  extractedFacts    Json?     @map("extracted_facts") // LLM #1 output
+  merchantOverrides Json?     @map("merchant_overrides") // Merchant edits (diff only)
+  resolvedFacts     Json?     @map("resolved_facts") // merged(extracted, overrides)
+  promptPack        Json?     @map("prompt_pack") // LLM #2 output: { product_context, variants[] }
+  promptPackVersion Int       @default(0) @map("prompt_pack_version")
+  extractedAt       DateTime? @map("extracted_at")
+
   // ==========================================================================
   // DEPRECATED: Keep for migration, stop using
   // ==========================================================================
-  renderInstructions    String?   @map("render_instructions") // Custom AI instructions for final render (optional)
-  renderInstructionsSeeItNow String? @map("render_instructions_see_it_now") // Custom AI instructions for See It Now hero shot renders (optional)
-  sceneRole              String?   @map("scene_role") // Placement rules: "Dominant" | "Integrated"
-  replacementRule        String?   @map("replacement_rule") // Placement rules: "Same Role Only" | "Similar Size or Position" | "Any Blocking Object" | "None"
-  allowSpaceCreation     Boolean?  @map("allow_space_creation") // Placement rules: Allow minimal space creation for placement
-  placementFields        Json?     @map("placement_fields") // Structured placement fields: { surface, material, orientation, shadow, dimensions: { height, width }, additionalNotes, fieldSource?: { [field]: "auto" | "merchant" } }
+  renderInstructions         String?  @map("render_instructions") // Custom AI instructions for final render (optional)
+  renderInstructionsSeeItNow String?  @map("render_instructions_see_it_now") // Custom AI instructions for See It Now hero shot renders (optional)
+  sceneRole                  String?  @map("scene_role") // Placement rules: "Dominant" | "Integrated"
+  replacementRule            String?  @map("replacement_rule") // Placement rules: "Same Role Only" | "Similar Size or Position" | "Any Blocking Object" | "None"
+  allowSpaceCreation         Boolean? @map("allow_space_creation") // Placement rules: Allow minimal space creation for placement
+  placementFields            Json?    @map("placement_fields") // Structured placement fields: { surface, material, orientation, shadow, dimensions: { height, width }, additionalNotes, fieldSource?: { [field]: "auto" | "merchant" } }
   // Field-level provenance (current state snapshot)
-  fieldConfidence       Json?     @map("field_confidence") // JSON: { fieldName: "high" | "medium" | "low" }
-  fieldSource           Json?     @map("field_source") // JSON: { fieldName: "auto" | "merchant" }
-  fieldOverrides        Json?     @map("field_overrides") // JSON: { fieldName: true | false }
-  fieldEvidence         Json?     @map("field_evidence") // JSON: { fieldName: "snippet/keywords/image cues" }
+  fieldConfidence            Json?    @map("field_confidence") // JSON: { fieldName: "high" | "medium" | "low" }
+  fieldSource                Json?    @map("field_source") // JSON: { fieldName: "auto" | "merchant" }
+  fieldOverrides             Json?    @map("field_overrides") // JSON: { fieldName: true | false }
+  fieldEvidence              Json?    @map("field_evidence") // JSON: { fieldName: "snippet/keywords/image cues" }
   // See It Now per-product prompt fields
-  generatedSeeItNowPrompt   String?   @map("generated_see_it_now_prompt") // LLM-generated complete product-specific prompt
-  seeItNowVariants          Json?     @map("see_it_now_variants") // JSON: Array of {id: string, prompt: string}
-  detectedArchetype         String?   @map("detected_archetype") // Detected archetype: oversized_architectural, large_furniture, medium_furniture, small_homewares, wall_mounted_decor
-  useGeneratedPrompt        Boolean   @default(false) @map("use_generated_prompt") // When true, uses per-product prompts instead of shop-level
-  
-  createdAt             DateTime  @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  generatedSeeItNowPrompt    String?  @map("generated_see_it_now_prompt") // LLM-generated complete product-specific prompt
+  seeItNowVariants           Json?    @map("see_it_now_variants") // JSON: Array of {id: string, prompt: string}
+  detectedArchetype          String?  @map("detected_archetype") // Detected archetype: oversized_architectural, large_furniture, medium_furniture, small_homewares, wall_mounted_decor
+  useGeneratedPrompt         Boolean  @default(false) @map("use_generated_prompt") // When true, uses per-product prompts instead of shop-level
+
+  createdAt DateTime @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
   renderJobs RenderJob[]
@@ -122,24 +124,24 @@ model ProductAsset {
 }
 
 model RoomSession {
-  id                    String    @id @default(uuid())
-  shopId                String    @map("shop_id")
-  originalRoomImageUrl  String?   @map("original_room_image_url") // Legacy: Signed URL (expires in 24h)
-  cleanedRoomImageUrl   String?   @map("cleaned_room_image_url")  // Legacy: Signed URL (expires in 24h)
-  originalRoomImageKey  String?   @map("original_room_image_key") // Stable GCS key (e.g. rooms/{shopId}/{sessionId}/room.jpg)
-  cleanedRoomImageKey   String?   @map("cleaned_room_image_key")  // Stable GCS key for cleaned image
-  canonicalRoomImageKey String?   @map("canonical_room_image_key") // Stable GCS key for canonical (authoritative) room image
-  canonicalRoomWidth    Int?      @map("canonical_room_width")     // Canonical room image width in pixels
-  canonicalRoomHeight   Int?      @map("canonical_room_height")    // Canonical room image height in pixels
-  canonicalRoomRatioLabel String? @map("canonical_room_ratio_label") // Gemini ratio label (e.g. "16:9")
-  canonicalRoomRatioValue Float?  @map("canonical_room_ratio_value") // Gemini ratio value (e.g. 16/9)
-  canonicalRoomCrop     Json?     @map("canonical_room_crop")      // JSON: { ratio_label, ratio_value, crop_rect_norm: { x, y, w, h } }
-  canonicalCreatedAt    DateTime? @map("canonical_created_at")     // Timestamp when canonical image was generated
-  geminiFileUri         String?   @map("gemini_file_uri")
-  geminiFileExpiresAt   DateTime? @map("gemini_file_expires_at")
-  createdAt             DateTime  @map("created_at")
-  expiresAt             DateTime  @map("expires_at")
-  lastUsedAt            DateTime? @map("last_used_at")
+  id                      String    @id @default(uuid())
+  shopId                  String    @map("shop_id")
+  originalRoomImageUrl    String?   @map("original_room_image_url") // Legacy: Signed URL (expires in 24h)
+  cleanedRoomImageUrl     String?   @map("cleaned_room_image_url") // Legacy: Signed URL (expires in 24h)
+  originalRoomImageKey    String?   @map("original_room_image_key") // Stable GCS key (e.g. rooms/{shopId}/{sessionId}/room.jpg)
+  cleanedRoomImageKey     String?   @map("cleaned_room_image_key") // Stable GCS key for cleaned image
+  canonicalRoomImageKey   String?   @map("canonical_room_image_key") // Stable GCS key for canonical (authoritative) room image
+  canonicalRoomWidth      Int?      @map("canonical_room_width") // Canonical room image width in pixels
+  canonicalRoomHeight     Int?      @map("canonical_room_height") // Canonical room image height in pixels
+  canonicalRoomRatioLabel String?   @map("canonical_room_ratio_label") // Gemini ratio label (e.g. "16:9")
+  canonicalRoomRatioValue Float?    @map("canonical_room_ratio_value") // Gemini ratio value (e.g. 16/9)
+  canonicalRoomCrop       Json?     @map("canonical_room_crop") // JSON: { ratio_label, ratio_value, crop_rect_norm: { x, y, w, h } }
+  canonicalCreatedAt      DateTime? @map("canonical_created_at") // Timestamp when canonical image was generated
+  geminiFileUri           String?   @map("gemini_file_uri")
+  geminiFileExpiresAt     DateTime? @map("gemini_file_expires_at")
+  createdAt               DateTime  @map("created_at")
+  expiresAt               DateTime  @map("expires_at")
+  lastUsedAt              DateTime? @map("last_used_at")
 
   shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
   renderJobs RenderJob[]
@@ -194,10 +196,10 @@ model UsageDaily {
 }
 
 model SavedRoomOwner {
-  id        String      @id @default(uuid())
-  shopId    String      @map("shop_id")
-  email     String      // Lowercased email address
-  createdAt DateTime    @default(now()) @map("created_at")
+  id        String   @id @default(uuid())
+  shopId    String   @map("shop_id")
+  email     String // Lowercased email address
+  createdAt DateTime @default(now()) @map("created_at")
 
   shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
   savedRooms SavedRoom[]
@@ -208,14 +210,14 @@ model SavedRoomOwner {
 }
 
 model SavedRoom {
-  id              String          @id @default(uuid())
-  shopId          String          @map("shop_id")
-  ownerId         String          @map("owner_id")
-  title           String?         // Optional user-provided title
-  originalImageKey String         @map("original_image_key") // GCS key for the original room image
-  cleanedImageKey String?         @map("cleaned_image_key")  // Optional GCS key for cleaned variant
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
+  id               String   @id @default(uuid())
+  shopId           String   @map("shop_id")
+  ownerId          String   @map("owner_id")
+  title            String? // Optional user-provided title
+  originalImageKey String   @map("original_image_key") // GCS key for the original room image
+  cleanedImageKey  String?  @map("cleaned_image_key") // Optional GCS key for cleaned variant
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   shop  Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
   owner SavedRoomOwner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
@@ -225,14 +227,14 @@ model SavedRoom {
 }
 
 model SeeItCapture {
-  id            String   @id @default(uuid())
-  shopId        String   @map("shop_id")
-  email         String
-  productId     String   @map("product_id")
-  productTitle  String?  @map("product_title")
-  renderJobId   String?  @map("render_job_id")
-  imageUrl      String?  @map("image_url")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id           String   @id @default(uuid())
+  shopId       String   @map("shop_id")
+  email        String
+  productId    String   @map("product_id")
+  productTitle String?  @map("product_title")
+  renderJobId  String?  @map("render_job_id")
+  imageUrl     String?  @map("image_url")
+  createdAt    DateTime @default(now()) @map("created_at")
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
@@ -252,7 +254,7 @@ model PrepEvent {
   eventType String   @map("event_type")
   payload   Json     @map("payload") // JSON: { before, after, confidence?, source?, ... }
 
-  shop       Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
   productAsset ProductAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   @@index([assetId])
@@ -276,9 +278,9 @@ model PromptVersion {
   scaleGuardrailsHash   String   @map("scale_guardrails_hash")
   configSnapshot        Json     @map("config_snapshot")
   createdAt             DateTime @default(now()) @map("created_at")
-  
+
   renderRuns RenderRun[]
-  
+
   @@map("prompt_versions")
 }
 
@@ -287,39 +289,49 @@ model PromptVersion {
 // =============================================================================
 
 model RenderRun {
-  id                  String   @id @default(uuid())
-  shopId              String   @map("shop_id")
-  productAssetId      String   @map("product_asset_id")
-  roomSessionId       String?  @map("room_session_id")
-  requestId           String   @map("request_id")
-  
-  promptPackVersion   Int      @map("prompt_pack_version")
-  model               String
-  
-  productImageHash    String   @map("product_image_hash")
-  productImageMeta    Json     @map("product_image_meta")
-  roomImageHash       String   @map("room_image_hash")
-  roomImageMeta       Json     @map("room_image_meta")
-  
-  resolvedFactsHash   String   @map("resolved_facts_hash")
-  resolvedFactsJson   Json     @map("resolved_facts_json")
-  promptPackHash      String   @map("prompt_pack_hash")
-  promptPackJson      Json     @map("prompt_pack_json")
-  
-  totalDurationMs     Int?     @map("total_duration_ms")
-  status              String   // "partial" | "complete" | "failed"
-  
-  createdAt           DateTime @default(now()) @map("created_at")
-  
-  shop           Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  productAsset   ProductAsset   @relation(fields: [productAssetId], references: [id], onDelete: Cascade)
-  promptVersion  PromptVersion  @relation(fields: [promptPackVersion], references: [version])
+  id             String  @id @default(uuid())
+  shopId         String  @map("shop_id")
+  productAssetId String  @map("product_asset_id")
+  roomSessionId  String? @map("room_session_id")
+  requestId      String  @map("request_id")
+
+  promptPackVersion Int    @map("prompt_pack_version")
+  model             String
+
+  productImageHash String @map("product_image_hash")
+  productImageMeta Json   @map("product_image_meta")
+  roomImageHash    String @map("room_image_hash")
+  roomImageMeta    Json   @map("room_image_meta")
+
+  resolvedFactsHash String @map("resolved_facts_hash")
+  resolvedFactsJson Json   @map("resolved_facts_json")
+  promptPackHash    String @map("prompt_pack_hash")
+  promptPackJson    Json   @map("prompt_pack_json")
+
+  totalDurationMs Int?   @map("total_duration_ms")
+  status          String // "partial" | "complete" | "failed"
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Observability v2 fields
+  traceId          String?   @map("trace_id")
+  startedAt        DateTime  @default(now()) @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  successCount     Int       @default(0) @map("success_count")
+  failCount        Int       @default(0) @map("fail_count")
+  timeoutCount     Int       @default(0) @map("timeout_count")
+  telemetryDropped Boolean   @default(false) @map("telemetry_dropped")
+
+  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productAsset   ProductAsset    @relation(fields: [productAssetId], references: [id], onDelete: Cascade)
+  promptVersion  PromptVersion   @relation(fields: [promptPackVersion], references: [version])
   variantResults VariantResult[]
-  
+
   @@index([shopId, createdAt])
   @@index([productAssetId])
   @@index([promptPackVersion])
   @@index([status])
+  @@index([traceId])
   @@map("render_runs")
 }
 
@@ -328,23 +340,92 @@ model RenderRun {
 // =============================================================================
 
 model VariantResult {
-  id              String   @id @default(uuid())
-  renderRunId     String   @map("render_run_id")
-  variantId       String   @map("variant_id")
-  finalPromptHash String   @map("final_prompt_hash")
-  
-  status          String   // "success" | "failed" | "timeout"
-  latencyMs       Int?     @map("latency_ms")
-  outputImageKey  String?  @map("output_image_key")
-  outputImageHash String?  @map("output_image_hash")
-  errorMessage    String?  @map("error_message")
-  
-  createdAt       DateTime @default(now()) @map("created_at")
-  
+  id              String @id @default(uuid())
+  renderRunId     String @map("render_run_id")
+  variantId       String @map("variant_id")
+  finalPromptHash String @map("final_prompt_hash")
+
+  status          String // "success" | "failed" | "timeout"
+  latencyMs       Int?    @map("latency_ms")
+  outputImageKey  String? @map("output_image_key")
+  outputImageHash String? @map("output_image_hash")
+  errorMessage    String? @map("error_message")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Observability v2 fields
+  startedAt        DateTime? @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  providerMs       Int?      @map("provider_ms")
+  uploadMs         Int?      @map("upload_ms")
+  errorCode        String?   @map("error_code")
+  outputArtifactId String?   @map("output_artifact_id")
+
   renderRun RenderRun @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
-  
+
   @@index([renderRunId])
   @@index([variantId])
   @@index([status])
   @@map("variant_results")
+}
+
+// =============================================================================
+// Observability v2: MonitorEvent - Fine-grained event stream
+// =============================================================================
+
+model MonitorEvent {
+  id                 String   @id @default(uuid())
+  ts                 DateTime @default(now())
+  shopId             String   @map("shop_id")
+  requestId          String   @map("request_id")
+  runId              String?  @map("run_id")
+  variantId          String?  @map("variant_id")
+  traceId            String?  @map("trace_id")
+  spanId             String?  @map("span_id")
+  parentSpanId       String?  @map("parent_span_id")
+  source             String
+  type               String
+  severity           String
+  schemaVersion      Int      @default(1) @map("schema_version")
+  payload            Json     @default("{}")
+  overflowArtifactId String?  @map("overflow_artifact_id")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@index([requestId])
+  @@index([runId])
+  @@index([type, ts])
+  @@map("monitor_events")
+}
+
+// =============================================================================
+// Observability v2: MonitorArtifact - GCS artifact tracking with retention
+// =============================================================================
+
+model MonitorArtifact {
+  id             String    @id @default(uuid())
+  ts             DateTime  @default(now())
+  shopId         String    @map("shop_id")
+  requestId      String    @map("request_id")
+  runId          String?   @map("run_id")
+  variantId      String?   @map("variant_id")
+  type           String
+  gcsKey         String    @map("gcs_key")
+  contentType    String    @map("content_type")
+  byteSize       Int       @map("byte_size")
+  sha256         String?
+  width          Int?
+  height         Int?
+  retentionClass String    @default("standard") @map("retention_class")
+  expiresAt      DateTime? @map("expires_at")
+  meta           Json?
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@index([requestId])
+  @@index([runId])
+  @@index([type])
+  @@map("monitor_artifacts")
 }
