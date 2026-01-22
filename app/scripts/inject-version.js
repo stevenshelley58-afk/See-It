@@ -19,7 +19,7 @@ const version = packageJson.version;
 console.log(`[Version Inject] Injecting version ${version} into theme extension...`);
 
 // Update Liquid template
-const liquidPath = join(__dirname, '..', 'extensions', 'see-it-extension', 'blocks', 'see-it-button.liquid');
+const liquidPath = join(__dirname, '..', 'extensions', 'see-it-extension', 'blocks', 'see-it-now-button.liquid');
 let liquidContent = readFileSync(liquidPath, 'utf-8');
 
 // Replace version badge (handle both formats)
@@ -32,7 +32,7 @@ writeFileSync(liquidPath, liquidContent, 'utf-8');
 console.log(`[Version Inject] Updated ${liquidPath}`);
 
 // Also update JS VERSION constant (if present)
-const jsPath = join(__dirname, '..', 'extensions', 'see-it-extension', 'assets', 'see-it-modal.js');
+const jsPath = join(__dirname, '..', 'extensions', 'see-it-extension', 'assets', 'see-it-now.js');
 let jsContent = readFileSync(jsPath, 'utf-8');
 
 // Only update if there's a clear VERSION pattern (avoid accidental replacements)
