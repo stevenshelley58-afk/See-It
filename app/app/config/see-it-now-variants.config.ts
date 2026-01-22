@@ -1,115 +1,76 @@
-export type SeeItNowVariantConfig = {
+/**
+ * Legacy compatibility shim (DO NOT ADD NEW DEPENDENCIES ON THIS FILE)
+ *
+ * Historically, See It Now used a “variant library” of creative prompts configured in settings
+ * and selectable per product.
+ *
+ * The new See It Now v2 pipeline uses a controlled V01–V08 bracket (not a creative library).
+ * Many parts of the admin UI still import this module, so it MUST NOT throw at runtime.
+ *
+ * The goal is to migrate callers to:
+ * - `app/app/config/prompts/variant-intents.config.ts` for V01–V08 definitions
+ * - `app/app/services/see-it-now/*` for the v2 pipeline
+ *
+ * Once all callers are migrated, this file can be deleted.
+ */
+
+import { VARIANT_INTENTS } from "./prompts/variant-intents.config";
+
+export interface SeeItNowVariantLibraryItem {
   id: string;
   prompt: string;
-};
-
-/**
- * Canonical 10-option See It Now variant library.
- *
- * - This is intentionally shared by:
- *   - Merchant UI (per-product selection/editing)
- *   - App proxy renderer (fallback defaults)
- *   - Settings defaults (shop-level seed)
- */
-export const SEE_IT_NOW_VARIANT_LIBRARY: SeeItNowVariantConfig[] = [
-  {
-    id: "safe-baseline",
-    prompt:
-      "Place the product in the most obvious, low-risk location where it would naturally belong in this room, prioritizing realism, correct scale, and physical plausibility.",
-  },
-  {
-    id: "conservative-scale",
-    prompt:
-      "Place the product in a natural location and scale it conservatively so it clearly fits the room without feeling visually dominant.",
-  },
-  {
-    id: "confident-scale",
-    prompt:
-      "Place the product in a natural location and scale it confidently so it feels intentionally sized for the space while remaining physically believable.",
-  },
-  {
-    id: "dominant-presence",
-    prompt:
-      "Place the product so it reads as a primary visual element in the room, drawing attention while still making physical and spatial sense.",
-  },
-  {
-    id: "integrated-placement",
-    prompt:
-      "Place the product so it feels integrated with existing elements in the room, allowing natural proximity or partial occlusion if it would realistically occur.",
-  },
-  {
-    id: "minimal-interaction",
-    prompt:
-      "Place the product in a clean, uncluttered area of the room with minimal interaction from surrounding objects, emphasizing clarity and realism.",
-  },
-  {
-    id: "alternative-location",
-    prompt:
-      "Place the product in a plausible but less obvious location than the most typical choice, while maintaining realistic scale and placement.",
-  },
-  {
-    id: "architectural-alignment",
-    prompt:
-      "Place the product aligned cleanly with architectural features in the room such as walls, corners, or vertical planes, emphasizing structural coherence.",
-  },
-  {
-    id: "spatial-balance",
-    prompt:
-      "Place the product in a position that creates visual balance within the room's composition, avoiding crowding or awkward spacing.",
-  },
-  {
-    id: "last-resort-realism",
-    prompt:
-      "Choose the placement and scale that would most likely result in a believable real photograph, even if it means a less dramatic composition.",
-  },
-];
-
-/**
- * Default to 5 selected variants (from the 10-option library).
- *
- * Merchants can adjust per product.
- */
-export const DEFAULT_SELECTED_SEE_IT_NOW_VARIANT_IDS: string[] = [
-  "safe-baseline",
-  "conservative-scale",
-  "confident-scale",
-  "integrated-placement",
-  "last-resort-realism",
-];
-
-export function pickDefaultSelectedSeeItNowVariants(
-  library: SeeItNowVariantConfig[] = SEE_IT_NOW_VARIANT_LIBRARY
-): SeeItNowVariantConfig[] {
-  const byId = new Map(library.map((v) => [v.id, v]));
-  return DEFAULT_SELECTED_SEE_IT_NOW_VARIANT_IDS.map((id) => byId.get(id))
-    .filter(Boolean)
-    .map((v) => ({ id: v!.id, prompt: v!.prompt }));
 }
 
+/**
+ * V01–V08 controlled bracket surfaced as a “library” for legacy UI.
+ * Prompt text is informational only; the v2 pipeline does not use these strings.
+ */
+export const SEE_IT_NOW_VARIANT_LIBRARY: SeeItNowVariantLibraryItem[] =
+  VARIANT_INTENTS.map((v) => ({
+    id: v.id,
+    prompt: [
+      v.intent,
+      v.scaleNote ? `Scale: ${v.scaleNote}` : null,
+      v.anchorRule ? `Anchor: ${v.anchorRule}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  }));
+
+/**
+ * Normalize a saved per-product variant array against the canonical library.
+ * - Ensures known IDs exist and have prompts
+ * - Preserves any legacy/custom variants that aren’t in the canonical set
+ */
 export function normalizeSeeItNowVariants(
-  selected: unknown,
-  library: SeeItNowVariantConfig[] = SEE_IT_NOW_VARIANT_LIBRARY
-): SeeItNowVariantConfig[] {
-  if (!Array.isArray(selected)) return [];
+  saved: unknown,
+  library: SeeItNowVariantLibraryItem[] = SEE_IT_NOW_VARIANT_LIBRARY
+): SeeItNowVariantLibraryItem[] {
+  const libById = new Map(library.map((v) => [v.id, v]));
 
-  const byId = new Map(library.map((v) => [v.id, v.prompt]));
-  const out: SeeItNowVariantConfig[] = [];
+  const arr = Array.isArray(saved) ? saved : [];
+  const normalized: SeeItNowVariantLibraryItem[] = [];
 
-  for (const raw of selected) {
-    const id = (raw as any)?.id;
-    const prompt = (raw as any)?.prompt;
-    if (typeof id !== "string" || !id.trim()) continue;
+  for (const item of arr) {
+    const id = (item as any)?.id?.toString?.() || "";
+    if (!id) continue;
 
-    const trimmedId = id.trim();
-    const trimmedPrompt =
-      typeof prompt === "string" && prompt.trim()
-        ? prompt.trim()
-        : (byId.get(trimmedId) ?? "");
+    const lib = libById.get(id);
+    const prompt =
+      ((item as any)?.prompt?.toString?.() ?? "").trim() || lib?.prompt || "";
 
-    // Keep unknown IDs (legacy/custom) but ensure prompt is a string.
-    out.push({ id: trimmedId, prompt: trimmedPrompt });
+    normalized.push({ id, prompt });
   }
 
-  return out;
+  return normalized;
 }
 
+/**
+ * Default selection (legacy behavior):
+ * The v2 bracket always runs V01–V08, so default to all.
+ */
+export function pickDefaultSelectedSeeItNowVariants(
+  library: SeeItNowVariantLibraryItem[] = SEE_IT_NOW_VARIANT_LIBRARY
+): SeeItNowVariantLibraryItem[] {
+  return [...library];
+}

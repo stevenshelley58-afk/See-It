@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Modal, BlockStack, Text } from '@shopify/polaris';
 import { PrepareTab } from './ProductDetailPanel/PrepareTab';
@@ -13,8 +13,14 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
     const fetcher = useFetcher();
     const [activeTab, setActiveTab] = useState('prepare'); // 'prepare' | 'placement'
     const [pendingMetadata, setPendingMetadata] = useState(null);
+    const [placementDirty, setPlacementDirty] = useState(false);
+    const [saveError, setSaveError] = useState(null);
+    const [saveInfo, setSaveInfo] = useState(null);
     const [isRefining, setIsRefining] = useState(false);
     const [editRequestId, setEditRequestId] = useState(0);
+    const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+    const [confirmIntent, setConfirmIntent] = useState(null); // { type: 'close' } | { type: 'tab', tab: 'prepare' | 'placement' }
+    const lastSubmittedMetadataRef = useRef(null);
 
     // Dynamic Footer Config from children
     // { primary: { label, onClick, disabled, variant }, secondary: { ... }, tertiary: { ... } }
@@ -27,24 +33,68 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
             setActiveTab('prepare');
             setFooterConfig(null);
             setEditRequestId(0);
+            setPendingMetadata(null);
+            setPlacementDirty(false);
+            setSaveError(null);
+            setSaveInfo(null);
+            setConfirmDiscardOpen(false);
+            setConfirmIntent(null);
         }
     }, [isOpen]);
 
     // Reset footer config when tab changes
     useEffect(() => {
         setFooterConfig(null);
+        setSaveError(null);
+        setSaveInfo(null);
     }, [activeTab]);
 
     if (!isOpen || !product) return null;
 
     const status = asset?.status || 'pending';
     const hasPrepared = !!(asset?.preparedImageUrlFresh || asset?.preparedImageUrl);
+    const isSaving = fetcher.state !== 'idle';
+    const shouldWarnUnsaved = activeTab === 'placement' && placementDirty;
 
-    const handlePlacementSave = useCallback(() => {
-        if (!pendingMetadata) {
-            onClose();
+    const discardPlacementEdits = useCallback(() => {
+        setPendingMetadata(null);
+        setPlacementDirty(false);
+        setSaveError(null);
+        setSaveInfo(null);
+    }, []);
+
+    const requestClose = useCallback(() => {
+        if (isSaving) return;
+        if (shouldWarnUnsaved) {
+            setConfirmIntent({ type: 'close' });
+            setConfirmDiscardOpen(true);
             return;
         }
+        onClose();
+    }, [onClose, shouldWarnUnsaved, isSaving]);
+
+    const requestTabChange = useCallback((nextTab) => {
+        if (isSaving) return;
+        if (nextTab === activeTab) return;
+        // Only warn when leaving placement with unsaved edits
+        if (activeTab === 'placement' && shouldWarnUnsaved) {
+            setConfirmIntent({ type: 'tab', tab: nextTab });
+            setConfirmDiscardOpen(true);
+            return;
+        }
+        setActiveTab(nextTab);
+    }, [activeTab, shouldWarnUnsaved, isSaving]);
+
+    const handlePlacementSave = useCallback(() => {
+        setSaveError(null);
+        setSaveInfo(null);
+
+        if (!pendingMetadata) {
+            requestClose();
+            return;
+        }
+
+        lastSubmittedMetadataRef.current = pendingMetadata;
 
         const formData = new FormData();
         formData.append("productId", product.id.split('/').pop());
@@ -86,18 +136,51 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
             if (pendingMetadata.seeItNowVariants !== undefined) {
                 formData.append("seeItNowVariants", JSON.stringify(pendingMetadata.seeItNowVariants));
             }
+
+            // NEW: merchantOverrides (sparse diff) for v2 pipeline - only send if dirty
+            if (pendingMetadata.merchantOverridesDirty === true) {
+                const overrides = pendingMetadata.merchantOverrides;
+                const isEmptyObject =
+                    overrides &&
+                    typeof overrides === 'object' &&
+                    !Array.isArray(overrides) &&
+                    Object.keys(overrides).length === 0;
+                if (!overrides || isEmptyObject) {
+                    // empty string => clears to null on the server
+                    formData.append("merchantOverrides", "");
+                } else {
+                    formData.append("merchantOverrides", JSON.stringify(overrides));
+                }
+            }
         } else {
             formData.append("instructions", JSON.stringify(pendingMetadata));
         }
 
+        setSaveInfo("Saving...");
         fetcher.submit(formData, {
             method: "post",
             action: "/api/products/update-instructions"
         });
+    }, [product.id, pendingMetadata, fetcher, requestClose]);
 
-        if (onSave) onSave(pendingMetadata);
-        onClose();
-    }, [product.id, pendingMetadata, fetcher, onClose, onSave]);
+    // Close only after we have a save response
+    useEffect(() => {
+        if (fetcher.state !== 'idle') return;
+        if (!fetcher.data) return;
+
+        if (fetcher.data.success) {
+            // Mark clean and close
+            setPlacementDirty(false);
+            setSaveError(null);
+            setSaveInfo(fetcher.data.message || "Saved");
+            if (onSave) onSave(lastSubmittedMetadataRef.current);
+            onClose();
+            return;
+        }
+
+        setSaveInfo(null);
+        setSaveError(fetcher.data.error || "Save failed");
+    }, [fetcher.state, fetcher.data, onClose, onSave]);
 
     // Get footer config for custom footer
     const getFooterConfig = () => {
@@ -132,12 +215,12 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                 label: 'Save',
                 onClick: handlePlacementSave,
                 disabled: false,
-                loading: fetcher.state !== 'idle',
+                loading: isSaving,
             },
             secondary: {
                 label: 'Cancel',
-                onClick: onClose,
-                disabled: false,
+                onClick: requestClose,
+                disabled: isSaving,
             },
             tertiary: null,
         };
@@ -160,17 +243,18 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
     const footerConfigData = getFooterConfig();
     
     return (
-        <Modal
-            open={isOpen}
-            onClose={onClose}
-            title={product.title}
-            large
-        >
+        <>
+            <Modal
+                open={isOpen}
+                onClose={requestClose}
+                title={product.title}
+                large
+            >
             <Modal.Section>
                 {/* Premium Tabs */}
                 <div className="flex gap-1 mb-6 -mx-6 px-6 border-b border-[#E5E5E5]">
                     <button
-                        onClick={() => setActiveTab('prepare')}
+                        onClick={() => requestTabChange('prepare')}
                         className={`px-4 py-3 text-sm font-semibold transition-all relative ${
                             activeTab === 'prepare'
                                 ? 'text-[#1A1A1A]'
@@ -183,7 +267,7 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                         )}
                     </button>
                     <button
-                        onClick={() => setActiveTab('placement')}
+                        onClick={() => requestTabChange('placement')}
                         className={`px-4 py-3 text-sm font-semibold transition-all relative ${
                             activeTab === 'placement'
                                 ? 'text-[#1A1A1A]'
@@ -196,6 +280,24 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                         )}
                     </button>
                 </div>
+
+                {/* Save feedback */}
+                {(saveError || saveInfo) && (
+                    <div className={`mb-4 -mt-2 px-4 py-3 rounded-lg border ${
+                        saveError
+                            ? 'bg-red-50 border-red-200 text-red-800'
+                            : (isSaving
+                                ? 'bg-neutral-50 border-neutral-200 text-neutral-800'
+                                : 'bg-emerald-50 border-emerald-200 text-emerald-800')
+                    }`}>
+                        <div className="text-sm font-semibold">
+                            {saveError ? 'Save failed' : (isSaving ? 'Saving…' : 'Saved')}
+                        </div>
+                        <div className="text-xs mt-1">
+                            {saveError || saveInfo}
+                        </div>
+                    </div>
+                )}
 
                 {/* Tab Content */}
                 {activeTab === 'prepare' ? (
@@ -212,7 +314,10 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                     <PlacementTab
                         product={product}
                         asset={asset}
-                        onChange={(meta) => setPendingMetadata(meta)}
+                        onChange={(meta) => {
+                            setPendingMetadata(meta);
+                            setPlacementDirty(!!meta?.dirty);
+                        }}
                     />
                 )}
             </Modal.Section>
@@ -261,6 +366,49 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                     )}
                 </div>
             </div>
-        </Modal>
+            </Modal>
+
+            {/* Discard changes confirm */}
+            <Modal
+                open={confirmDiscardOpen}
+                onClose={() => {
+                    setConfirmDiscardOpen(false);
+                    setConfirmIntent(null);
+                }}
+                title="Discard unsaved changes?"
+                primaryAction={{
+                    content: "Discard changes",
+                    destructive: true,
+                    onAction: () => {
+                        const intent = confirmIntent;
+                        setConfirmDiscardOpen(false);
+                        setConfirmIntent(null);
+                        discardPlacementEdits();
+                        if (intent?.type === 'tab' && intent.tab) {
+                            setActiveTab(intent.tab);
+                        } else {
+                            onClose();
+                        }
+                    }
+                }}
+                secondaryActions={[
+                    {
+                        content: "Keep editing",
+                        onAction: () => {
+                            setConfirmDiscardOpen(false);
+                            setConfirmIntent(null);
+                        }
+                    }
+                ]}
+            >
+                <Modal.Section>
+                    <BlockStack gap="200">
+                        <Text as="p">
+                            You have unsaved changes on the Placement tab. If you discard them, your See It Now overrides and prompt edits will be lost.
+                        </Text>
+                    </BlockStack>
+                </Modal.Section>
+            </Modal>
+        </>
     );
 }

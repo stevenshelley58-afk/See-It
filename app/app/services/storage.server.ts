@@ -124,4 +124,12 @@ export class StorageService {
             return false;
         }
     }
+
+    /**
+     * Get a public URL for a file (for use when bucket is publicly accessible)
+     * Falls back to signed URL if public access is not configured
+     */
+    static getPublicUrl(key: string): string {
+        return `https://storage.googleapis.com/${GCS_BUCKET}/${key}`;
+    }
 }

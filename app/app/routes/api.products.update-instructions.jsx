@@ -4,6 +4,11 @@ import prisma from "../db.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { emitPrepEvent } from "../services/prep-events.server";
 import { setSeeItLiveTag } from "../utils/shopify-tags.server";
+import {
+    buildPromptPack,
+    ensurePromptVersion,
+    resolveProductFacts,
+} from "../services/see-it-now/index";
 
 /**
  * POST /api/products/update-instructions
@@ -68,6 +73,38 @@ export const action = async ({ request }) => {
         if (formData.has("generatedSeeItNowPrompt")) {
             const raw = formData.get("generatedSeeItNowPrompt")?.toString() ?? "";
             generatedSeeItNowPrompt = raw.trim() || null;
+        }
+
+        // NEW: Merchant overrides (sparse diff) for See It Now v2 pipeline
+        // 3-state semantics:
+        // - missing field => no change
+        // - empty string => null (clear)
+        // - JSON object => set
+        let merchantOverrides = undefined;
+        if (formData.has("merchantOverrides")) {
+            const raw = formData.get("merchantOverrides")?.toString();
+            if (!raw || raw.trim() === "") {
+                merchantOverrides = null;
+            } else {
+                try {
+                    merchantOverrides = JSON.parse(raw);
+                    if (
+                        merchantOverrides === null ||
+                        typeof merchantOverrides !== "object" ||
+                        Array.isArray(merchantOverrides)
+                    ) {
+                        return json(
+                            { success: false, error: "merchantOverrides must be a JSON object" },
+                            { status: 400 }
+                        );
+                    }
+                } catch (e) {
+                    return json(
+                        { success: false, error: "Invalid merchantOverrides JSON format" },
+                        { status: 400 }
+                    );
+                }
+            }
         }
 
         let seeItNowVariants = undefined;
@@ -184,6 +221,9 @@ export const action = async ({ request }) => {
         if (useGeneratedPrompt !== undefined) {
             updateData.useGeneratedPrompt = useGeneratedPrompt;
         }
+        if (merchantOverrides !== undefined) {
+            updateData.merchantOverrides = merchantOverrides;
+        }
 
         // Handle enabled toggle and status transitions
         if (enabled !== null && asset) {
@@ -279,6 +319,56 @@ export const action = async ({ request }) => {
                 // Non-critical
             });
 
+            // If merchantOverrides were provided, attempt to rebuild v2 prompt pack immediately.
+            if (merchantOverrides !== undefined) {
+                try {
+                    if (!asset.extractedFacts) {
+                        return json({
+                            success: true,
+                            message:
+                                "Saved. See It Now facts are not extracted yet; prompt pack will generate after preparation.",
+                            assetId: asset.id,
+                            status: asset.status,
+                            enabled: asset.enabled || false,
+                            pipelineUpdated: false,
+                            pipelineStatus: "missing_extracted_facts",
+                        });
+                    }
+                    const promptPackVersion = await ensurePromptVersion();
+                    const resolvedFacts = resolveProductFacts(
+                        asset.extractedFacts,
+                        asset.merchantOverrides || null
+                    );
+                    const promptPack = await buildPromptPack(resolvedFacts, requestId);
+                    await prisma.productAsset.update({
+                        where: { id: asset.id },
+                        data: {
+                            resolvedFacts,
+                            promptPack,
+                            promptPackVersion,
+                        },
+                    });
+                    return json({
+                        success: true,
+                        message: "Saved and regenerated See It Now prompt pack",
+                        assetId: asset.id,
+                        status: asset.status,
+                        enabled: asset.enabled || false,
+                        pipelineUpdated: true,
+                        promptPackVersion,
+                    });
+                } catch (e) {
+                    const msg = e instanceof Error ? e.message : "Unknown error";
+                    return json(
+                        {
+                            success: false,
+                            error: `Saved placement fields, but failed to regenerate See It Now prompt pack: ${msg}`,
+                        },
+                        { status: 500 }
+                    );
+                }
+            }
+
             return json({
                 success: true,
                 message: "Instructions saved (new asset created)",
@@ -341,6 +431,59 @@ export const action = async ({ request }) => {
         ).catch(() => {
             // Non-critical
         });
+
+        // If merchantOverrides were provided, regenerate See It Now v2 prompt pack immediately.
+        if (merchantOverrides !== undefined) {
+            try {
+                if (!updatedAsset.extractedFacts) {
+                    return json({
+                        success: true,
+                        message:
+                            "Saved. See It Now facts are not extracted yet; prompt pack will generate after preparation.",
+                        assetId: asset.id,
+                        status: updatedAsset.status,
+                        enabled: updatedAsset.enabled,
+                        pipelineUpdated: false,
+                        pipelineStatus: "missing_extracted_facts",
+                    });
+                }
+
+                const promptPackVersion = await ensurePromptVersion();
+                const resolvedFacts = resolveProductFacts(
+                    updatedAsset.extractedFacts,
+                    updatedAsset.merchantOverrides || null
+                );
+                const promptPack = await buildPromptPack(resolvedFacts, requestId);
+
+                await prisma.productAsset.update({
+                    where: { id: asset.id },
+                    data: {
+                        resolvedFacts,
+                        promptPack,
+                        promptPackVersion,
+                    },
+                });
+
+                return json({
+                    success: true,
+                    message: "Saved and regenerated See It Now prompt pack",
+                    assetId: asset.id,
+                    status: updatedAsset.status,
+                    enabled: updatedAsset.enabled,
+                    pipelineUpdated: true,
+                    promptPackVersion,
+                });
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : "Unknown error";
+                return json(
+                    {
+                        success: false,
+                        error: `Saved placement fields, but failed to regenerate See It Now prompt pack: ${msg}`,
+                    },
+                    { status: 500 }
+                );
+            }
+        }
 
         return json({
             success: true,

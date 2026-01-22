@@ -1,5 +1,5 @@
 // See It Now - Hero Shot Generation Endpoint
-// Generates 5 AI-powered furniture placement variants in parallel
+// Uses 2-LLM pipeline: extractedFacts → resolvedFacts → promptPack → renderAllVariants
 //
 // Access: Only shops in SEE_IT_NOW_ALLOWED_SHOPS can use this feature
 
@@ -11,24 +11,20 @@ import { checkRateLimit } from "../rate-limit.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
-import { GoogleGenAI } from "@google/genai";
 import sharp from "sharp";
+import crypto from "crypto";
 import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
-
-// Import model config from centralized source
-import { GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
-
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 import { logSeeItNowEvent } from "~/services/session-logger.server";
 
+// NEW: Import from 2-LLM pipeline
 import {
-  SEE_IT_NOW_VARIANT_LIBRARY,
-  pickDefaultSelectedSeeItNowVariants,
-  normalizeSeeItNowVariants,
-  type SeeItNowVariantConfig,
-} from "~/config/see-it-now-variants.config";
-
-type VariantConfig = SeeItNowVariantConfig;
+  renderAllVariants,
+  type RenderInput,
+  type ProductPlacementFacts,
+  type PromptPack,
+  type ImageMeta,
+} from "../services/see-it-now/index";
 
 // ============================================================================
 // CORS Headers
@@ -38,8 +34,8 @@ function getCorsHeaders(shopDomain: string | null): Record<string, string> {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    "Pragma": "no-cache",
-    "Expires": "0",
+    Pragma: "no-cache",
+    Expires: "0",
   };
 
   if (shopDomain) {
@@ -50,27 +46,13 @@ function getCorsHeaders(shopDomain: string | null): Record<string, string> {
 }
 
 // ============================================================================
-// Gemini Client (lazy init)
-// ============================================================================
-let geminiClient: GoogleGenAI | null = null;
-function getGeminiClient(): GoogleGenAI {
-  if (!geminiClient) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY environment variable is not set');
-    }
-    geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  }
-  return geminiClient;
-}
-
-// ============================================================================
 // Image Download Helper
 // ============================================================================
 async function downloadToBuffer(
   url: string,
   logContext: ReturnType<typeof createLogContext>,
   maxDimension: number = 2048
-): Promise<Buffer> {
+): Promise<{ buffer: Buffer; meta: ImageMeta }> {
   validateTrustedUrl(url, "image URL");
 
   logger.info(
@@ -80,11 +62,16 @@ async function downloadToBuffer(
 
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Failed to fetch: ${response.status} ${response.statusText}`
+    );
   }
 
   const arrayBuffer = await response.arrayBuffer();
   const inputBuffer = Buffer.from(arrayBuffer);
+
+  // Get metadata before resize
+  const metadata = await sharp(inputBuffer).metadata();
 
   // Resize and normalize
   const buffer = await sharp(inputBuffer)
@@ -92,191 +79,32 @@ async function downloadToBuffer(
     .resize({
       width: maxDimension,
       height: maxDimension,
-      fit: 'inside',
-      withoutEnlargement: true
+      fit: "inside",
+      withoutEnlargement: true,
     })
     .png({ force: true })
     .toBuffer();
+
+  const meta: ImageMeta = {
+    width: metadata.width || 0,
+    height: metadata.height || 0,
+    bytes: buffer.length,
+    format: "png",
+  };
 
   logger.info(
     { ...logContext, stage: "download" },
     `[See It Now] Downloaded & Optimized: ${buffer.length} bytes`
   );
 
-  return buffer;
+  return { buffer, meta };
 }
 
-// ============================================================================
-// Types for structured placement fields
-// ============================================================================
-interface PlacementFields {
-  surface?: 'floor' | 'wall' | 'table' | 'ceiling' | 'shelf' | 'other' | null;
-  material?: 'fabric' | 'wood' | 'metal' | 'glass' | 'ceramic' | 'stone' | 'leather' | 'mixed' | 'other' | null;
-  orientation?: 'upright' | 'flat' | 'leaning' | 'wall-mounted' | 'hanging' | 'draped' | 'other' | null;
-  shadow?: 'contact' | 'cast' | 'soft' | 'none' | null;
-  dimensions?: { height?: number | null; width?: number | null } | null;
-  additionalNotes?: string | null;
-}
-
-// ============================================================================
-// Build Hero Shot Prompt
-// Concatenates: general prompt + product placement + variant creative direction
-// ============================================================================
-function buildHeroShotPrompt(
-  generalPrompt: string,
-  placementPrompt: string,
-  variantDirection: string
-): string {
-  const parts: string[] = [];
-
-  // CRITICAL: Explicit instruction for image generation
-  // Without this, Gemini may return text-only responses
-  parts.push(`Generate a photorealistic image that places the product into the room photo.`);
-
-  if (generalPrompt?.trim()) {
-    parts.push(generalPrompt.trim());
-  }
-  if (placementPrompt?.trim()) {
-    parts.push(placementPrompt.trim());
-  }
-  // Add variant-specific creative direction
-  if (variantDirection?.trim()) {
-    parts.push(`CREATIVE DIRECTION FOR THIS VARIANT: ${variantDirection.trim()}`);
-  }
-
-  // Final reminder to output only the image
-  parts.push(`Return ONLY the final composed image. No text.`);
-
-  return parts.join('\n\n');
-}
-
-// ============================================================================
-// Generate Single Variant
-// ============================================================================
-async function generateVariant(
-  roomBuffer: Buffer,
-  productBuffer: Buffer,
-  variant: VariantConfig,
-  generalPrompt: string,
-  placementPrompt: string,
-  logContext: ReturnType<typeof createLogContext>
-): Promise<{ id: string; base64: string; direction: string }> {
-  const variantLogContext = { ...logContext, variantId: variant.id };
-
-  logger.info(
-    { ...variantLogContext, stage: "gemini-call" },
-    `[See It Now] Generating variant: ${variant.id}`
-  );
-
-  const startTime = Date.now();
-  // Include the variant's creative direction in the prompt
-  const prompt = buildHeroShotPrompt(generalPrompt, placementPrompt, variant.prompt);
-
-  const client = getGeminiClient();
-
-  // Order matches prompt: "The first image is the product cutout. The second image is a real room photo."
-  const parts = [
-    { text: prompt },
-    { text: "PRODUCT CUTOUT (transparent background, isolated product):" },
-    {
-      inlineData: {
-        mimeType: 'image/png',
-        data: productBuffer.toString('base64')
-      }
-    },
-    { text: "CUSTOMER ROOM PHOTO (real room to place product into):" },
-    {
-      inlineData: {
-        mimeType: 'image/png',
-        data: roomBuffer.toString('base64')
-      }
-    }
-  ];
-
-  const response = await client.models.generateContent({
-    model: GEMINI_IMAGE_MODEL_FAST,
-    contents: parts,
-    config: {
-      responseModalities: ['TEXT', 'IMAGE'],
-    },
-  });
-
-  const duration = Date.now() - startTime;
-
-  // Extract image from response with improved diagnostics
-  const candidates = response.candidates;
-
-  // Check for response issues
-  if (!candidates || candidates.length === 0) {
-    logger.error(
-      { ...variantLogContext, stage: "gemini-no-candidates" },
-      `[See It Now] No candidates returned for variant ${variant.id}`
-    );
-    throw new Error(`[See It Now] No candidates in Gemini response for variant ${variant.id}`);
-  }
-
-  const finishReason = candidates[0].finishReason || 'UNKNOWN';
-  if (finishReason !== 'STOP') {
-    logger.warn(
-      { ...variantLogContext, stage: "gemini-finish-reason", finishReason },
-      `[See It Now] Unexpected finish reason for variant ${variant.id}: ${finishReason}`
-    );
-  }
-
-  if (candidates?.[0]?.content?.parts) {
-    for (const part of candidates[0].content.parts) {
-      if (part.inlineData?.data) {
-        logger.info(
-          { ...variantLogContext, stage: "gemini-complete" },
-          `[See It Now] Variant ${variant.id} generated in ${duration}ms`
-        );
-        return {
-          id: variant.id,
-          base64: part.inlineData.data,
-          direction: variant.prompt,
-        };
-      }
-    }
-  }
-
-  // More diagnostic error - log what parts we actually received
-  const partTypes = candidates?.[0]?.content?.parts?.map((p: { text?: string; inlineData?: { data: string } }) =>
-    p.text ? 'text' : p.inlineData ? 'image' : 'unknown'
-  ) || [];
-
-  logger.error(
-    { ...variantLogContext, stage: "gemini-no-image", finishReason, partTypes },
-    `[See It Now] No image in response for variant ${variant.id}. Parts: ${partTypes.join(', ')}`
-  );
-
-  throw new Error(`[See It Now] No image in Gemini response for variant ${variant.id}. Finish reason: ${finishReason}. Parts received: ${partTypes.join(', ') || 'none'}`);
-}
-
-// ============================================================================
-// Upload Variant to GCS
-// ============================================================================
-async function uploadVariant(
-  sessionId: string,
-  variantId: string,
-  base64Data: string,
-  logContext: ReturnType<typeof createLogContext>
-): Promise<{ id: string; imageUrl: string; imageKey: string }> {
-  const buffer = Buffer.from(base64Data, 'base64');
-
-  // Convert to JPEG for storage efficiency
-  const jpegBuffer = await sharp(buffer)
-    .jpeg({ quality: 90 })
-    .toBuffer();
-
-  const key = `see-it-now-renders/${sessionId}/${variantId}_${Date.now()}.jpg`;
-  const imageUrl = await StorageService.uploadBuffer(jpegBuffer, key, 'image/jpeg');
-
-  logger.info(
-    { ...logContext, stage: "upload", variantId },
-    `[See It Now] Uploaded variant ${variantId}: ${key}`
-  );
-
-  return { id: variantId, imageUrl, imageKey: key };
+/**
+ * Hash a buffer using SHA256 (first 16 chars)
+ */
+function hashBuffer(buffer: Buffer): string {
+  return crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
 }
 
 // ============================================================================
@@ -284,7 +112,9 @@ async function uploadVariant(
 // ============================================================================
 export const action = async ({ request }: ActionFunctionArgs) => {
   const requestId = getRequestId(request);
-  const logContext = createLogContext("render", requestId, "see-it-now-start", { version: 'see-it-now' });
+  const logContext = createLogContext("render", requestId, "see-it-now-start", {
+    version: "see-it-now-v2",
+  });
 
   const { session } = await authenticate.public.appProxy(request);
   const corsHeaders = getCorsHeaders(session?.shop ?? null);
@@ -303,7 +133,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // ============================================================================
-  // SEE IT NOW ALLOWLIST CHECK - Critical security gate
+  // SEE IT NOW ALLOWLIST CHECK
   // ============================================================================
   if (!isSeeItNowAllowedShop(session.shop)) {
     logger.info(
@@ -311,7 +141,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `[See It Now] Shop not in allowlist`
     );
     return json(
-      { error: "see_it_now_not_enabled", message: "See It Now features are not enabled for this shop" },
+      {
+        error: "see_it_now_not_enabled",
+        message: "See It Now features are not enabled for this shop",
+      },
       { status: 403, headers: corsHeaders }
     );
   }
@@ -348,7 +181,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Rate limiting
   if (!checkRateLimit(room_session_id)) {
     return json(
-      { error: "rate_limit_exceeded", message: "Too many requests. Please wait a moment." },
+      {
+        error: "rate_limit_exceeded",
+        message: "Too many requests. Please wait a moment.",
+      },
       { status: 429, headers: corsHeaders }
     );
   }
@@ -356,19 +192,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Fetch shop
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop },
-    select: { id: true, settingsJson: true }
+    select: { id: true },
   });
   if (!shop) {
     logger.error(
       { ...logContext, stage: "shop-lookup" },
       `[See It Now] Shop not found: ${session.shop}`
     );
-    return json({ error: "shop_not_found" }, { status: 404, headers: corsHeaders });
+    return json(
+      { error: "shop_not_found" },
+      { status: 404, headers: corsHeaders }
+    );
   }
 
-  const shopLogContext = { ...logContext, shopId: shop.id, productId: product_id };
+  const shopLogContext = {
+    ...logContext,
+    shopId: shop.id,
+    productId: product_id,
+  };
 
-  // Quota check (only increment ONCE for all 5 variants)
+  // Quota check
   try {
     await checkQuota(shop.id, "render", 1);
   } catch (error) {
@@ -381,7 +224,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Fetch RoomSession
   const roomSession = await prisma.roomSession.findUnique({
-    where: { id: room_session_id }
+    where: { id: room_session_id },
   });
 
   if (!roomSession) {
@@ -391,7 +234,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  // Fetch ProductAsset (including placement rules AND structured fields)
+  // Fetch ProductAsset with NEW pipeline fields
   const productAsset = await prisma.productAsset.findFirst({
     where: { shopId: shop.id, productId: product_id },
     select: {
@@ -400,38 +243,65 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       preparedImageKey: true,
       sourceImageUrl: true,
       status: true,
-      renderInstructions: true,
-      renderInstructionsSeeItNow: true,
-      sceneRole: true,
-      replacementRule: true,
-      allowSpaceCreation: true,
-      placementFields: true, // Structured metadata: surface, material, orientation, shadow, dimensions, additionalNotes
-      seeItNowVariants: true,
-    }
+      geminiFileUri: true,
+      geminiFileExpiresAt: true,
+      // NEW: 2-LLM pipeline fields
+      resolvedFacts: true,
+      promptPack: true,
+      promptPackVersion: true,
+    },
   });
 
   // Verify product is enabled for See It
   if (!productAsset || productAsset.status !== "live") {
     logger.warn(
       { ...shopLogContext, stage: "product-check" },
-      `[See It Now] Product ${product_id} not enabled for See It (status: ${productAsset?.status || 'no asset'})`
+      `[See It Now] Product ${product_id} not enabled (status: ${productAsset?.status || "no asset"})`
     );
 
-    return json({
-      success: false,
-      error: "product_not_enabled",
-      message: "This product is not enabled for See It visualization"
-    }, { headers: corsHeaders });
+    return json(
+      {
+        success: false,
+        error: "product_not_enabled",
+        message: "This product is not enabled for See It visualization",
+      },
+      { headers: corsHeaders }
+    );
+  }
+
+  // Validate pipeline data exists
+  if (!productAsset.resolvedFacts || !productAsset.promptPack) {
+    logger.warn(
+      { ...shopLogContext, stage: "pipeline-check" },
+      `[See It Now] Product ${product_id} missing pipeline data (resolvedFacts: ${!!productAsset.resolvedFacts}, promptPack: ${!!productAsset.promptPack})`
+    );
+
+    return json(
+      {
+        success: false,
+        error: "pipeline_not_ready",
+        message:
+          "Product prompt data is not ready. Please wait for processing to complete.",
+      },
+      { status: 422, headers: corsHeaders }
+    );
   }
 
   // Get room image URL
   let roomImageUrl: string;
   if (roomSession.cleanedRoomImageKey) {
-    roomImageUrl = await StorageService.getSignedReadUrl(roomSession.cleanedRoomImageKey, 60 * 60 * 1000);
+    roomImageUrl = await StorageService.getSignedReadUrl(
+      roomSession.cleanedRoomImageKey,
+      60 * 60 * 1000
+    );
   } else if (roomSession.originalRoomImageKey) {
-    roomImageUrl = await StorageService.getSignedReadUrl(roomSession.originalRoomImageKey, 60 * 60 * 1000);
+    roomImageUrl = await StorageService.getSignedReadUrl(
+      roomSession.originalRoomImageKey,
+      60 * 60 * 1000
+    );
   } else if (roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl) {
-    roomImageUrl = roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl!;
+    roomImageUrl =
+      roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl!;
   } else {
     return json(
       { error: "no_room_image", message: "No room image available" },
@@ -441,15 +311,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Get product image URL
   let productImageUrl: string | null = null;
-  if (productAsset?.preparedImageKey) {
+  if (productAsset.preparedImageKey) {
     try {
-      productImageUrl = await StorageService.getSignedReadUrl(productAsset.preparedImageKey, 60 * 60 * 1000);
+      productImageUrl = await StorageService.getSignedReadUrl(
+        productAsset.preparedImageKey,
+        60 * 60 * 1000
+      );
     } catch {
       productImageUrl = productAsset.preparedImageUrl ?? null;
     }
-  } else if (productAsset?.preparedImageUrl) {
+  } else if (productAsset.preparedImageUrl) {
     productImageUrl = productAsset.preparedImageUrl;
-  } else if (productAsset?.sourceImageUrl) {
+  } else if (productAsset.sourceImageUrl) {
     productImageUrl = productAsset.sourceImageUrl;
   }
 
@@ -462,195 +335,155 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   logger.info(
     { ...shopLogContext, stage: "see-it-now-generate-start" },
-    `[See It Now] Starting hero shot generation for product ${product_id}`
+    `[See It Now] Starting render for product ${product_id}`
   );
 
   try {
     // Download both images
-    const [roomBuffer, productBuffer] = await Promise.all([
-      downloadToBuffer(roomImageUrl, shopLogContext),
+    const [productImageData, roomImageData] = await Promise.all([
       downloadToBuffer(productImageUrl, shopLogContext),
+      downloadToBuffer(roomImageUrl, shopLogContext),
     ]);
 
-    // Generate a unique session ID for this See It Now render batch
-    const seeItNowSessionId = `see-it-now_${room_session_id}_${Date.now()}`;
+    // Check if Gemini URIs are still valid
+    const now = new Date();
+    const productGeminiUri =
+      productAsset.geminiFileUri &&
+      productAsset.geminiFileExpiresAt &&
+      productAsset.geminiFileExpiresAt > now
+        ? productAsset.geminiFileUri
+        : undefined;
 
-    // Simplified model:
-    // - General prompt is shop-level
-    // - Placement prompt is product-level (See It Now override, fallback to See It)
-    // - Variants are product-level selection (fallback to 5-of-10 defaults)
-    // Safely parse shop settings - handle empty strings and invalid JSON
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let settings: any = {};
-    if (shop.settingsJson && shop.settingsJson.trim()) {
-      try {
-        settings = JSON.parse(shop.settingsJson);
-      } catch (parseError) {
-        logger.warn(
-          { ...shopLogContext, stage: "settings-parse" },
-          `[See It Now] Failed to parse shop settings JSON, using defaults`
-        );
-      }
-    }
+    const roomGeminiUri =
+      roomSession.geminiFileUri &&
+      roomSession.geminiFileExpiresAt &&
+      roomSession.geminiFileExpiresAt > now
+        ? roomSession.geminiFileUri
+        : undefined;
 
-    const generalPrompt: string = settings.seeItNowPrompt || "";
+    // Build render input
+    const renderInput: RenderInput = {
+      shopId: shop.id,
+      productAssetId: productAsset.id,
+      roomSessionId: room_session_id,
+      requestId,
+      productImage: {
+        buffer: productImageData.buffer,
+        hash: hashBuffer(productImageData.buffer),
+        meta: productImageData.meta,
+        geminiUri: productGeminiUri,
+      },
+      roomImage: {
+        buffer: roomImageData.buffer,
+        hash: hashBuffer(roomImageData.buffer),
+        meta: roomImageData.meta,
+        geminiUri: roomGeminiUri,
+      },
+      resolvedFacts: productAsset.resolvedFacts as ProductPlacementFacts,
+      promptPack: productAsset.promptPack as PromptPack,
+      promptPackVersion: productAsset.promptPackVersion,
+    };
 
-    // Compute effective placement prompt: prefer renderInstructionsSeeItNow, fallback to renderInstructions
-    const now = productAsset?.renderInstructionsSeeItNow?.trim();
-    const fallback = productAsset?.renderInstructions?.trim();
-    const placementPrompt: string = now || fallback || "";
-
-    // Variant library can be shop-configured; fallback to canonical 10-option library.
-    // IMPORTANT: Guard against invalid/empty settings wiping the library (which would produce 0 variants and hard-fail).
-    const configuredVariantLibrary: VariantConfig[] =
-      Array.isArray(settings.seeItNowVariants) && settings.seeItNowVariants.length > 0
-        ? normalizeSeeItNowVariants(settings.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY)
-        : [];
-    const variantLibrary: VariantConfig[] =
-      configuredVariantLibrary.length > 0 ? configuredVariantLibrary : SEE_IT_NOW_VARIANT_LIBRARY;
-
-    // Per-product selected variants (merchant-adjustable). If missing, default to 5 selected.
-    const perProductSelected = normalizeSeeItNowVariants(
-      productAsset?.seeItNowVariants,
-      variantLibrary
-    );
-    let variants: VariantConfig[] =
-      perProductSelected.length > 0 ? perProductSelected : pickDefaultSelectedSeeItNowVariants(variantLibrary);
-
-    // Final safety net: never allow zero variants.
-    if (variants.length === 0) {
-      logger.warn(
-        { ...shopLogContext, stage: "variant-fallback" },
-        `[See It Now] Variant selection produced 0 variants; falling back to defaults`
-      );
-      variants = pickDefaultSelectedSeeItNowVariants(SEE_IT_NOW_VARIANT_LIBRARY);
-    }
-
-    logger.info(
-      { ...shopLogContext, stage: "prompt-selection" },
-      `[See It Now] Using prompts: placementPrompt length: ${placementPrompt.length}, generalPrompt length: ${generalPrompt.length}, variants: ${variants.length}`
-    );
-
-    // Generate all variants in PARALLEL
-    const variantPromises = variants.map(variant =>
-      generateVariant(
-        roomBuffer,
-        productBuffer,
-        variant,
-        generalPrompt,
-        placementPrompt,
-        shopLogContext
-      ).catch(error => {
-        logger.error(
-          { ...shopLogContext, stage: "variant-error", variantId: variant.id },
-          `[See It Now] Variant ${variant.id} failed`,
-          error
-        );
-        return null; // Allow partial success
-      })
-    );
-
-    const variantResults = await Promise.all(variantPromises);
-    const successfulVariants = variantResults.filter((v): v is NonNullable<typeof v> => v !== null);
-
-    if (successfulVariants.length === 0) {
-      // Log error to monitor
-      logSeeItNowEvent('error', {
-        sessionId: seeItNowSessionId,
-        shop: session.shop,
-        productId: product_id,
-        errorCode: 'all_variants_failed',
-        errorMessage: 'Failed to generate any variants',
-        step: 'variants_generated',
-      });
-
-      // IMPORTANT:
-      // Shopify App Proxy wraps 5xx responses in a storefront HTML error page.
-      // That creates the "HTML wall" symptom in the widget. Use a 4xx with JSON so
-      // the storefront can display a clean, actionable message.
-      return json(
-        {
-          success: false,
-          error: "all_variants_failed",
-          message: "Failed to generate any variants",
-          request_id: requestId,
-          version: "see-it-now",
-        },
-        { status: 422, headers: corsHeaders }
-      );
-    }
-
-    // Upload all successful variants in parallel
-    const uploadPromises = successfulVariants.map(variant =>
-      uploadVariant(seeItNowSessionId, variant.id, variant.base64, shopLogContext)
-        .then(result => ({
-          id: result.id,
-          image_url: result.imageUrl,
-          direction: variant.direction,
-        }))
-    );
-
-    const uploadedVariants = await Promise.all(uploadPromises);
+    // Call the new renderer
+    const result = await renderAllVariants(renderInput);
 
     // Increment quota ONCE for the entire batch
     await incrementQuota(shop.id, "render", 1);
 
     const duration = Date.now() - startTime;
 
-    logger.info(
-      { ...shopLogContext, stage: "see-it-now-complete", durationMs: duration, variantCount: uploadedVariants.length },
-      `[See It Now] Hero shot generation completed: ${uploadedVariants.length} variants in ${duration}ms`
+    // Build response variants with signed URLs
+    const responseVariants = await Promise.all(
+      result.variants
+        .filter((v) => v.status === "success" && v.imageKey)
+        .map(async (v) => ({
+          id: v.variantId,
+          image_url: await StorageService.getSignedReadUrl(
+            v.imageKey!,
+            60 * 60 * 1000
+          ),
+          latency_ms: v.latencyMs,
+        }))
     );
 
-    // Log successful generation to monitor
-    logSeeItNowEvent('variants_generated', {
-      sessionId: seeItNowSessionId,
+    if (responseVariants.length === 0) {
+      logSeeItNowEvent("error", {
+        sessionId: result.runId,
+        shop: session.shop,
+        productId: product_id,
+        errorCode: "all_variants_failed",
+        errorMessage: "Failed to generate any variants",
+        step: "variants_generated",
+      });
+
+      return json(
+        {
+          success: false,
+          error: "all_variants_failed",
+          message: "Failed to generate any variants",
+          request_id: requestId,
+          version: "see-it-now-v2",
+        },
+        { status: 422, headers: corsHeaders }
+      );
+    }
+
+    logger.info(
+      {
+        ...shopLogContext,
+        stage: "see-it-now-complete",
+        durationMs: duration,
+        variantCount: responseVariants.length,
+      },
+      `[See It Now] Render completed: ${responseVariants.length}/8 variants in ${duration}ms`
+    );
+
+    logSeeItNowEvent("variants_generated", {
+      sessionId: result.runId,
       shop: session.shop,
       productId: product_id,
       roomSessionId: room_session_id,
-      variantCount: uploadedVariants.length,
-      variantIds: uploadedVariants.map(v => v.id),
-      imageUrls: uploadedVariants.map(v => v.image_url),
+      variantCount: responseVariants.length,
+      variantIds: responseVariants.map((v) => v.id),
       durationMs: duration,
     });
 
     return json(
       {
-        session_id: seeItNowSessionId,
-        variants: uploadedVariants,
+        run_id: result.runId,
+        status: result.status,
+        variants: responseVariants,
         duration_ms: duration,
-        version: "see-it-now",
+        version: "see-it-now-v2",
       },
       { headers: corsHeaders }
     );
-
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
     logger.error(
       { ...shopLogContext, stage: "see-it-now-error" },
-      `[See It Now] Hero shot generation failed`,
+      `[See It Now] Render failed`,
       error
     );
 
-    // Log error to monitor
-    logSeeItNowEvent('error', {
-      sessionId: `see-it-now_${room_session_id}_${Date.now()}`,
+    logSeeItNowEvent("error", {
+      sessionId: `error_${Date.now()}`,
       shop: session.shop,
       productId: product_id,
       roomSessionId: room_session_id,
-      errorCode: 'generation_failed',
+      errorCode: "generation_failed",
       errorMessage: errorMessage,
-      step: 'variants_generated',
+      step: "variants_generated",
     });
 
-    // IMPORTANT: see comment above — avoid 5xx on app proxy for expected failures.
     return json(
       {
         success: false,
         error: "generation_failed",
         message: errorMessage,
         request_id: requestId,
-        version: "see-it-now",
+        version: "see-it-now-v2",
       },
       { status: 422, headers: corsHeaders }
     );

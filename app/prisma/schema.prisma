@@ -49,6 +49,7 @@ model Shop {
   savedRooms       SavedRoom[]
   seeItCaptures    SeeItCapture[]
   prepEvents       PrepEvent[]
+  renderRuns       RenderRun[]
 
   @@map("shops")
 }
@@ -71,14 +72,30 @@ model ProductAsset {
   errorMessage       String?  @map("error_message")
   retryCount         Int      @default(0) @map("retry_count") // Track retry attempts
   isDefault          Boolean  @default(false) @map("is_default") // Only one default per shop+product
+  
+  // Gemini file pre-upload
+  geminiFileUri         String?   @map("gemini_file_uri") // Pre-uploaded Gemini Files API URI
+  geminiFileExpiresAt   DateTime? @map("gemini_file_expires_at") // Gemini file expiration (48h from upload)
+  
+  // ==========================================================================
+  // NEW: See It Now Pipeline Fields
+  // ==========================================================================
+  extractedFacts      Json?     @map("extracted_facts")       // LLM #1 output
+  merchantOverrides   Json?     @map("merchant_overrides")    // Merchant edits (diff only)
+  resolvedFacts       Json?     @map("resolved_facts")        // merged(extracted, overrides)
+  promptPack          Json?     @map("prompt_pack")           // LLM #2 output: { product_context, variants[] }
+  promptPackVersion   Int       @default(0) @map("prompt_pack_version")
+  extractedAt         DateTime? @map("extracted_at")
+  
+  // ==========================================================================
+  // DEPRECATED: Keep for migration, stop using
+  // ==========================================================================
   renderInstructions    String?   @map("render_instructions") // Custom AI instructions for final render (optional)
   renderInstructionsSeeItNow String? @map("render_instructions_see_it_now") // Custom AI instructions for See It Now hero shot renders (optional)
   sceneRole              String?   @map("scene_role") // Placement rules: "Dominant" | "Integrated"
   replacementRule        String?   @map("replacement_rule") // Placement rules: "Same Role Only" | "Similar Size or Position" | "Any Blocking Object" | "None"
   allowSpaceCreation     Boolean?  @map("allow_space_creation") // Placement rules: Allow minimal space creation for placement
   placementFields        Json?     @map("placement_fields") // Structured placement fields: { surface, material, orientation, shadow, dimensions: { height, width }, additionalNotes, fieldSource?: { [field]: "auto" | "merchant" } }
-  geminiFileUri         String?   @map("gemini_file_uri") // Pre-uploaded Gemini Files API URI
-  geminiFileExpiresAt   DateTime? @map("gemini_file_expires_at") // Gemini file expiration (48h from upload)
   // Field-level provenance (current state snapshot)
   fieldConfidence       Json?     @map("field_confidence") // JSON: { fieldName: "high" | "medium" | "low" }
   fieldSource           Json?     @map("field_source") // JSON: { fieldName: "auto" | "merchant" }
@@ -89,12 +106,14 @@ model ProductAsset {
   seeItNowVariants          Json?     @map("see_it_now_variants") // JSON: Array of {id: string, prompt: string}
   detectedArchetype         String?   @map("detected_archetype") // Detected archetype: oversized_architectural, large_furniture, medium_furniture, small_homewares, wall_mounted_decor
   useGeneratedPrompt        Boolean   @default(false) @map("use_generated_prompt") // When true, uses per-product prompts instead of shop-level
+  
   createdAt             DateTime  @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
   shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
   renderJobs RenderJob[]
   prepEvents PrepEvent[]
+  renderRuns RenderRun[]
 
   @@index([shopId, productId])
   @@index([shopId, productId, isDefault]) // Index for finding default assets
@@ -240,4 +259,92 @@ model PrepEvent {
   @@index([shopId, timestamp])
   @@index([productId])
   @@map("prep_events")
+}
+
+// =============================================================================
+// NEW: PromptVersion - Track prompt config history
+// =============================================================================
+
+model PromptVersion {
+  id                    String   @id @default(uuid())
+  version               Int      @unique
+  extractorPromptHash   String   @map("extractor_prompt_hash")
+  builderPromptHash     String   @map("builder_prompt_hash")
+  globalPromptHash      String   @map("global_prompt_hash")
+  variantIntentsHash    String   @map("variant_intents_hash")
+  materialBehaviorsHash String   @map("material_behaviors_hash")
+  scaleGuardrailsHash   String   @map("scale_guardrails_hash")
+  configSnapshot        Json     @map("config_snapshot")
+  createdAt             DateTime @default(now()) @map("created_at")
+  
+  renderRuns RenderRun[]
+  
+  @@map("prompt_versions")
+}
+
+// =============================================================================
+// NEW: RenderRun - One per render request
+// =============================================================================
+
+model RenderRun {
+  id                  String   @id @default(uuid())
+  shopId              String   @map("shop_id")
+  productAssetId      String   @map("product_asset_id")
+  roomSessionId       String?  @map("room_session_id")
+  requestId           String   @map("request_id")
+  
+  promptPackVersion   Int      @map("prompt_pack_version")
+  model               String
+  
+  productImageHash    String   @map("product_image_hash")
+  productImageMeta    Json     @map("product_image_meta")
+  roomImageHash       String   @map("room_image_hash")
+  roomImageMeta       Json     @map("room_image_meta")
+  
+  resolvedFactsHash   String   @map("resolved_facts_hash")
+  resolvedFactsJson   Json     @map("resolved_facts_json")
+  promptPackHash      String   @map("prompt_pack_hash")
+  promptPackJson      Json     @map("prompt_pack_json")
+  
+  totalDurationMs     Int?     @map("total_duration_ms")
+  status              String   // "partial" | "complete" | "failed"
+  
+  createdAt           DateTime @default(now()) @map("created_at")
+  
+  shop           Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productAsset   ProductAsset   @relation(fields: [productAssetId], references: [id], onDelete: Cascade)
+  promptVersion  PromptVersion  @relation(fields: [promptPackVersion], references: [version])
+  variantResults VariantResult[]
+  
+  @@index([shopId, createdAt])
+  @@index([productAssetId])
+  @@index([promptPackVersion])
+  @@index([status])
+  @@map("render_runs")
+}
+
+// =============================================================================
+// NEW: VariantResult - One per variant per RenderRun
+// =============================================================================
+
+model VariantResult {
+  id              String   @id @default(uuid())
+  renderRunId     String   @map("render_run_id")
+  variantId       String   @map("variant_id")
+  finalPromptHash String   @map("final_prompt_hash")
+  
+  status          String   // "success" | "failed" | "timeout"
+  latencyMs       Int?     @map("latency_ms")
+  outputImageKey  String?  @map("output_image_key")
+  outputImageHash String?  @map("output_image_hash")
+  errorMessage    String?  @map("error_message")
+  
+  createdAt       DateTime @default(now()) @map("created_at")
+  
+  renderRun RenderRun @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
+  
+  @@index([renderRunId])
+  @@index([variantId])
+  @@index([status])
+  @@map("variant_results")
 }

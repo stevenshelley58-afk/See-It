@@ -6,11 +6,14 @@ import { incrementQuota } from "../quota.server";
 import { emitPrepEvent } from "./prep-events.server";
 import { extractStructuredFields, generateProductDescription } from "./description-writer.server";
 import { GoogleGenAI } from "@google/genai";
+
+// NEW: See It Now 2-LLM pipeline imports
 import {
-    SEE_IT_NOW_VARIANT_LIBRARY,
-    normalizeSeeItNowVariants,
-    pickDefaultSelectedSeeItNowVariants,
-} from "~/config/see-it-now-variants.config";
+    extractProductFacts,
+    resolveProductFacts,
+    buildPromptPack,
+    ensurePromptVersion,
+} from "./see-it-now/index";
 
 let processorInterval: NodeJS.Timeout | null = null;
 let isProcessing = false;
@@ -444,25 +447,22 @@ async function processPendingAssets(batchRequestId: string) {
                 }
 
                 if (success && prepareResult) {
-                    // Generate placement fields and prose prompt (only if not merchant-owned)
-                    // Check fieldSource to avoid overwriting merchant edits
-                    const existingFieldSource = asset.fieldSource && typeof asset.fieldSource === 'object'
-                        ? asset.fieldSource as Record<string, string>
-                        : {};
-
-                    const isMerchantOwned = (field: string) => existingFieldSource[field] === 'merchant';
-
-                    // Only generate if renderInstructions is missing or if it's not merchant-owned
-                    let renderInstructions = asset.renderInstructions;
-                    let placementFields = asset.placementFields && typeof asset.placementFields === 'object'
-                        ? asset.placementFields as Record<string, any>
-                        : null;
-                    let sceneRole = asset.sceneRole;
-                    let replacementRule = asset.replacementRule;
-                    let allowSpaceCreation = asset.allowSpaceCreation;
-
-                    // Fetch shop + product context (PDP) so the LLM can ground prompts in real product info.
-                    // This runs only during prepare (not at render time).
+                    // ========================================================================
+                    // NEW: See It Now 2-LLM Pipeline
+                    // ========================================================================
+                    
+                    // Get current prompt version
+                    let promptPackVersion = 0;
+                    try {
+                        promptPackVersion = await ensurePromptVersion();
+                    } catch (versionError) {
+                        logger.warn(
+                            createLogContext("prepare", itemRequestId, "prompt-version-failed", {}),
+                            `Failed to ensure prompt version: ${versionError instanceof Error ? versionError.message : String(versionError)}`
+                        );
+                    }
+                    
+                    // Fetch shop + product context for extraction
                     const shopRecord = await prisma.shop.findUnique({
                         where: { id: asset.shopId },
                         select: { shopDomain: true, accessToken: true, settingsJson: true },
@@ -485,6 +485,83 @@ async function processPendingAssets(batchRequestId: string) {
                         : "";
 
                     const combinedDescription = `${shopifyProduct?.description || ""}\n${shopifyProduct?.descriptionHtml || ""}\n${metafieldText}`.trim();
+                    
+                    // Step 1: Extract product facts (LLM #1)
+                    let extractedFacts = null;
+                    try {
+                        const extractionInput = {
+                            title: shopifyProduct?.title || asset.productTitle || "",
+                            description: combinedDescription || "",
+                            productType: shopifyProduct?.productType || asset.productType || null,
+                            vendor: shopifyProduct?.vendor || null,
+                            tags: (shopifyProduct?.tags || []) as string[],
+                            metafields: {},
+                            imageUrls: [asset.sourceImageUrl],
+                        };
+                        
+                        extractedFacts = await extractProductFacts(extractionInput, itemRequestId);
+                        
+                        logger.info(
+                            createLogContext("prepare", itemRequestId, "extraction-complete", {
+                                productKind: extractedFacts.identity?.product_kind,
+                                scaleClass: extractedFacts.relative_scale?.class,
+                            }),
+                            `Extraction complete for ${asset.productId}`
+                        );
+                    } catch (extractError) {
+                        logger.warn(
+                            createLogContext("prepare", itemRequestId, "extraction-failed", {}),
+                            `Extraction failed for ${asset.productId}, continuing with legacy flow: ${extractError instanceof Error ? extractError.message : String(extractError)}`
+                        );
+                    }
+                    
+                    // Step 2: Resolve facts (merge with any existing merchant overrides)
+                    let resolvedFacts = null;
+                    if (extractedFacts) {
+                        const merchantOverrides = asset.merchantOverrides as any || null;
+                        resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
+                    }
+                    
+                    // Step 3: Build prompt pack (LLM #2)
+                    let promptPack = null;
+                    if (resolvedFacts) {
+                        try {
+                            promptPack = await buildPromptPack(resolvedFacts, itemRequestId);
+                            
+                            logger.info(
+                                createLogContext("prepare", itemRequestId, "prompt-pack-complete", {
+                                    variantCount: promptPack.variants.length,
+                                }),
+                                `Prompt pack built for ${asset.productId}`
+                            );
+                        } catch (buildError) {
+                            logger.warn(
+                                createLogContext("prepare", itemRequestId, "prompt-pack-failed", {}),
+                                `Prompt pack build failed for ${asset.productId}: ${buildError instanceof Error ? buildError.message : String(buildError)}`
+                            );
+                        }
+                    }
+                    
+                    // ========================================================================
+                    // LEGACY: Generate placement fields and prose prompt (only if not merchant-owned)
+                    // Check fieldSource to avoid overwriting merchant edits
+                    const existingFieldSource = asset.fieldSource && typeof asset.fieldSource === 'object'
+                        ? asset.fieldSource as Record<string, string>
+                        : {};
+
+                    const isMerchantOwned = (field: string) => existingFieldSource[field] === 'merchant';
+
+                    // Only generate if renderInstructions is missing or if it's not merchant-owned
+                    let renderInstructions = asset.renderInstructions;
+                    let placementFields = asset.placementFields && typeof asset.placementFields === 'object'
+                        ? asset.placementFields as Record<string, any>
+                        : null;
+                    let sceneRole = asset.sceneRole;
+                    let replacementRule = asset.replacementRule;
+                    let allowSpaceCreation = asset.allowSpaceCreation;
+
+                    // Note: shopRecord, shopifyProduct, metafieldText, combinedDescription
+                    // are already fetched above in the new 2-LLM pipeline section
 
                     // NEW: Auto-generate placement config using image analysis if not already set
                     if (!renderInstructions && !isMerchantOwned('renderInstructions')) {
@@ -705,7 +782,14 @@ async function processPendingAssets(batchRequestId: string) {
                         geminiFileExpiresAt: prepareResult.geminiFileExpiresAt,
                         retryCount: 0, // Reset retry count on success
                         errorMessage: null,
-                        updatedAt: new Date()
+                        updatedAt: new Date(),
+                        
+                        // NEW: See It Now 2-LLM Pipeline fields
+                        ...(extractedFacts && { extractedFacts }),
+                        ...(resolvedFacts && { resolvedFacts }),
+                        ...(promptPack && { promptPack }),
+                        ...(promptPackVersion > 0 && { promptPackVersion }),
+                        ...(extractedFacts && { extractedAt: new Date() }),
                     };
 
                     // Only update renderInstructions if we generated one or if it was already set
@@ -727,22 +811,6 @@ async function processPendingAssets(batchRequestId: string) {
                     }
                     if (allowSpaceCreation !== null && allowSpaceCreation !== undefined) {
                         updateData.allowSpaceCreation = allowSpaceCreation;
-                    }
-
-                    // Ensure per-product See It Now variants exist (10 options, default 5 selected).
-                    // Do not overwrite if already set (merchant may have adjusted).
-                    const existingVariants = normalizeSeeItNowVariants(asset.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY);
-                    if (existingVariants.length === 0) {
-                        let library = SEE_IT_NOW_VARIANT_LIBRARY;
-                        try {
-                            const settings = shopRecord?.settingsJson ? JSON.parse(shopRecord.settingsJson) : {};
-                            if (Array.isArray(settings?.seeItNowVariants) && settings.seeItNowVariants.length > 0) {
-                                library = normalizeSeeItNowVariants(settings.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY);
-                            }
-                        } catch {
-                            // ignore - fallback to canonical library
-                        }
-                        updateData.seeItNowVariants = pickDefaultSelectedSeeItNowVariants(library);
                     }
 
                     // Update fieldSource to mark auto-generated fields

@@ -270,6 +270,77 @@ function formatVariantLabel(id) {
         .join(' ');
 }
 
+function isPlainObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getPath(obj, path) {
+    let cur = obj;
+    for (const key of path) {
+        if (!isPlainObject(cur)) return undefined;
+        cur = cur[key];
+    }
+    return cur;
+}
+
+function setPath(obj, path, value) {
+    const next = isPlainObject(obj) ? { ...obj } : {};
+    let cur = next;
+    for (let i = 0; i < path.length; i++) {
+        const key = path[i];
+        if (i === path.length - 1) {
+            cur[key] = value;
+        } else {
+            const existing = cur[key];
+            cur[key] = isPlainObject(existing) ? { ...existing } : {};
+            cur = cur[key];
+        }
+    }
+    return next;
+}
+
+function deletePath(obj, path) {
+    if (!isPlainObject(obj)) return {};
+    const next = { ...obj };
+    const stack = [];
+    let cur = next;
+    for (let i = 0; i < path.length; i++) {
+        const key = path[i];
+        if (!isPlainObject(cur)) return next;
+        stack.push({ parent: cur, key });
+        if (i === path.length - 1) {
+            delete cur[key];
+        } else {
+            const child = cur[key];
+            cur[key] = isPlainObject(child) ? { ...child } : {};
+            cur = cur[key];
+        }
+    }
+    // Clean up empty objects bottom-up
+    for (let i = stack.length - 1; i >= 0; i--) {
+        const { parent, key } = stack[i];
+        const val = parent[key];
+        if (isPlainObject(val) && Object.keys(val).length === 0) {
+            delete parent[key];
+        }
+    }
+    return next;
+}
+
+function stableStringify(value) {
+    if (!isPlainObject(value) && !Array.isArray(value)) return JSON.stringify(value);
+    const sort = (v) => {
+        if (Array.isArray(v)) return v.map(sort);
+        if (!isPlainObject(v)) return v;
+        const out = {};
+        for (const k of Object.keys(v).sort()) {
+            out[k] = sort(v[k]);
+        }
+        return out;
+    };
+    return JSON.stringify(sort(value));
+}
+
 // ============================================================================
 // COMPONENT
 // ============================================================================
@@ -364,6 +435,55 @@ export function PlacementTab({ product, asset, onChange }) {
         return normalized.length > 0 ? normalized : pickDefaultSelectedSeeItNowVariants(SEE_IT_NOW_VARIANT_LIBRARY);
     });
     const [variantsDirty, setVariantsDirty] = useState(false);
+
+    // See It Now v2 merchant overrides (sparse diff)
+    const initialMerchantOverridesKey = asset?.id || asset?.productId || 'unknown';
+    const initialMerchantOverrides = useMemo(() => {
+        if (isPlainObject(asset?.merchantOverrides)) return asset.merchantOverrides;
+        return {};
+    }, [asset?.merchantOverrides]);
+
+    const [merchantOverrides, setMerchantOverrides] = useState(initialMerchantOverrides);
+    const [merchantOverridesDirty, setMerchantOverridesDirty] = useState(false);
+
+    // Sync overrides when asset loads async (only if not dirty)
+    useEffect(() => {
+        if (merchantOverridesDirty) return;
+        setMerchantOverrides(initialMerchantOverrides);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialMerchantOverridesKey]);
+
+    // Compute dirty (compare to initial snapshot)
+    useEffect(() => {
+        const dirty =
+            stableStringify(merchantOverrides || {}) !==
+            stableStringify(initialMerchantOverrides || {});
+        setMerchantOverridesDirty(dirty);
+    }, [merchantOverrides, initialMerchantOverrides]);
+
+    const extractedFacts = useMemo(() => (isPlainObject(asset?.extractedFacts) ? asset.extractedFacts : null), [asset?.extractedFacts]);
+    const resolvedFacts = useMemo(() => (isPlainObject(asset?.resolvedFacts) ? asset.resolvedFacts : null), [asset?.resolvedFacts]);
+
+    const materialPrimaryValue =
+        getPath(merchantOverrides, ["material_profile", "primary"]) ??
+        getPath(resolvedFacts, ["material_profile", "primary"]) ??
+        getPath(extractedFacts, ["material_profile", "primary"]) ??
+        "unknown";
+    const materialPrimaryIsOverridden = getPath(merchantOverrides, ["material_profile", "primary"]) !== undefined;
+
+    const relativeScaleClassValue =
+        getPath(merchantOverrides, ["relative_scale", "class"]) ??
+        getPath(resolvedFacts, ["relative_scale", "class"]) ??
+        getPath(extractedFacts, ["relative_scale", "class"]) ??
+        "unknown";
+    const relativeScaleClassIsOverridden = getPath(merchantOverrides, ["relative_scale", "class"]) !== undefined;
+
+    const croppingPolicyValue =
+        getPath(merchantOverrides, ["render_behavior", "cropping_policy"]) ??
+        getPath(resolvedFacts, ["render_behavior", "cropping_policy"]) ??
+        getPath(extractedFacts, ["render_behavior", "cropping_policy"]) ??
+        "allow_small_crop";
+    const croppingPolicyIsOverridden = getPath(merchantOverrides, ["render_behavior", "cropping_policy"]) !== undefined;
 
     // Sync variants state when asset loads async (only if not dirty)
     useEffect(() => {
@@ -474,10 +594,13 @@ export function PlacementTab({ product, asset, onChange }) {
                     allowSpaceCreation: placementRulesFields.allowSpaceCreation !== undefined ? placementRulesFields.allowSpaceCreation : null,
                 },
                 seeItNowVariants: variantsDirty ? seeItNowVariants : undefined,
-                enabled: enabled
+                enabled: enabled,
+                merchantOverrides: merchantOverrides,
+                merchantOverridesDirty: merchantOverridesDirty,
+                dirty: !!merchantOverridesDirty || !!seeItNowDirty || !!variantsDirty || !!hasEdited,
             });
         }
-    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, seeItNowVariants, variantsDirty, onChange]);
+    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, seeItNowVariants, variantsDirty, merchantOverrides, merchantOverridesDirty, hasEdited, onChange]);
     
     // Update a field
     const updateField = useCallback((field, value) => {
@@ -610,6 +733,35 @@ export function PlacementTab({ product, asset, onChange }) {
     // Placement rule options
     const sceneRoles = ['Dominant', 'Integrated'];
     const replacementRules = ['Same Role Only', 'Similar Size or Position', 'Any Blocking Object', 'None'];
+
+    // See It Now v2 override options (must match `product-facts.schema.ts`)
+    const materialPrimaryOptions = [
+        "reclaimed_teak",
+        "painted_wood",
+        "glass",
+        "mirror",
+        "ceramic",
+        "metal",
+        "stone",
+        "fabric",
+        "leather",
+        "mixed",
+        "unknown",
+    ];
+    const relativeScaleClassOptions = [
+        "tiny",
+        "small",
+        "medium",
+        "large",
+        "oversized",
+        "architectural",
+        "unknown",
+    ];
+    const croppingPolicyOptions = [
+        "never_crop_product",
+        "allow_small_crop",
+        "allow_crop_if_needed",
+    ];
 
     return (
         <div className="space-y-8 fade-in">
@@ -847,6 +999,182 @@ export function PlacementTab({ product, asset, onChange }) {
             {/* Divider */}
             <div className="border-t border-neutral-200"></div>
             
+            {/* SECTION: See It Now Facts / Overrides */}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h3 className="text-lg font-bold text-neutral-900">See It Now Facts / Overrides</h3>
+                        <p className="text-sm text-neutral-500 mt-1">
+                            Optional merchant overrides for the v2 pipeline. These regenerate and save a new prompt pack when you click Save.
+                        </p>
+                    </div>
+                    <span className="text-xs text-neutral-500 bg-neutral-100 px-2 py-1 rounded-full">
+                        {extractedFacts ? 'Facts extracted' : 'Facts not extracted yet'}
+                    </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Material primary */}
+                    <div className="border border-neutral-200 rounded-xl p-4 bg-white">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-sm font-semibold text-neutral-800">Primary material</div>
+                                <div className="text-xs text-neutral-500 mt-0.5">Affects reflections and material rules</div>
+                            </div>
+                            <label className="flex items-center gap-2 text-xs text-neutral-600 select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={materialPrimaryIsOverridden}
+                                    onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setMerchantOverrides((prev) => {
+                                            const base = prev || {};
+                                            if (!checked) return deletePath(base, ["material_profile", "primary"]);
+                                            return setPath(base, ["material_profile", "primary"], materialPrimaryValue || "unknown");
+                                        });
+                                    }}
+                                    className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                                />
+                                Override
+                            </label>
+                        </div>
+                        <select
+                            value={materialPrimaryValue}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                setMerchantOverrides((prev) => setPath(prev || {}, ["material_profile", "primary"], v));
+                            }}
+                            disabled={!materialPrimaryIsOverridden}
+                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${
+                                materialPrimaryIsOverridden
+                                    ? 'border-neutral-300 bg-white text-neutral-900'
+                                    : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                            }`}
+                        >
+                            {materialPrimaryOptions.map((opt) => (
+                                <option key={opt} value={opt}>
+                                    {opt}
+                                </option>
+                            ))}
+                        </select>
+                        {!materialPrimaryIsOverridden && (
+                            <div className="mt-2 text-xs text-neutral-400">
+                                Using extracted/resolved value: <span className="font-mono">{materialPrimaryValue}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Relative scale class */}
+                    <div className="border border-neutral-200 rounded-xl p-4 bg-white">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-sm font-semibold text-neutral-800">Relative scale</div>
+                                <div className="text-xs text-neutral-500 mt-0.5">Helps size the product in room context</div>
+                            </div>
+                            <label className="flex items-center gap-2 text-xs text-neutral-600 select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={relativeScaleClassIsOverridden}
+                                    onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setMerchantOverrides((prev) => {
+                                            const base = prev || {};
+                                            if (!checked) return deletePath(base, ["relative_scale", "class"]);
+                                            return setPath(base, ["relative_scale", "class"], relativeScaleClassValue || "unknown");
+                                        });
+                                    }}
+                                    className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                                />
+                                Override
+                            </label>
+                        </div>
+                        <select
+                            value={relativeScaleClassValue}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                setMerchantOverrides((prev) => setPath(prev || {}, ["relative_scale", "class"], v));
+                            }}
+                            disabled={!relativeScaleClassIsOverridden}
+                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${
+                                relativeScaleClassIsOverridden
+                                    ? 'border-neutral-300 bg-white text-neutral-900'
+                                    : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                            }`}
+                        >
+                            {relativeScaleClassOptions.map((opt) => (
+                                <option key={opt} value={opt}>
+                                    {opt}
+                                </option>
+                            ))}
+                        </select>
+                        {!relativeScaleClassIsOverridden && (
+                            <div className="mt-2 text-xs text-neutral-400">
+                                Using extracted/resolved value: <span className="font-mono">{relativeScaleClassValue}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Cropping policy */}
+                    <div className="border border-neutral-200 rounded-xl p-4 bg-white">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-sm font-semibold text-neutral-800">Cropping policy</div>
+                                <div className="text-xs text-neutral-500 mt-0.5">Controls whether the product may be cropped</div>
+                            </div>
+                            <label className="flex items-center gap-2 text-xs text-neutral-600 select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={croppingPolicyIsOverridden}
+                                    onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setMerchantOverrides((prev) => {
+                                            const base = prev || {};
+                                            if (!checked) return deletePath(base, ["render_behavior", "cropping_policy"]);
+                                            return setPath(base, ["render_behavior", "cropping_policy"], croppingPolicyValue || "allow_small_crop");
+                                        });
+                                    }}
+                                    className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                                />
+                                Override
+                            </label>
+                        </div>
+                        <select
+                            value={croppingPolicyValue}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                setMerchantOverrides((prev) => setPath(prev || {}, ["render_behavior", "cropping_policy"], v));
+                            }}
+                            disabled={!croppingPolicyIsOverridden}
+                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${
+                                croppingPolicyIsOverridden
+                                    ? 'border-neutral-300 bg-white text-neutral-900'
+                                    : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                            }`}
+                        >
+                            {croppingPolicyOptions.map((opt) => (
+                                <option key={opt} value={opt}>
+                                    {opt}
+                                </option>
+                            ))}
+                        </select>
+                        {!croppingPolicyIsOverridden && (
+                            <div className="mt-2 text-xs text-neutral-400">
+                                Using extracted/resolved value: <span className="font-mono">{croppingPolicyValue}</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {merchantOverridesDirty && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                        You have unsaved See It Now overrides. Click <strong>Save</strong> to regenerate and persist the v2 prompt pack.
+                    </div>
+                )}
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-neutral-200"></div>
+
             {/* SECTION 2: Placement Prompts (See It and See It Now) */}
             <div className="space-y-4">
                 <div className="flex items-center justify-between">
