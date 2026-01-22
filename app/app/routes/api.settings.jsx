@@ -1,7 +1,6 @@
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { SEE_IT_NOW_VARIANT_LIBRARY } from "../config/see-it-now-variants.config";
 
 const DEFAULT_SETTINGS = {
     style_preset: "neutral",
@@ -9,9 +8,7 @@ const DEFAULT_SETTINGS = {
     show_quota: false,
     seeItPrompt: "",
     seeItNowPrompt: "",
-    coordinateInstructions: "",
-    // See It Now variant prompts - 10 parallel requests with different placement strategies
-    seeItNowVariants: SEE_IT_NOW_VARIANT_LIBRARY
+    coordinateInstructions: ""
 };
 
 // GET /api/settings — read settings (spec Routes → Admin API)
@@ -40,17 +37,17 @@ export const action = async ({ request }) => {
     }
 
     const body = await request.json();
-    
+
     // Merge with existing settings to preserve other fields
     const shop = await prisma.shop.findUnique({
         where: { shopDomain: session.shop },
         select: { settingsJson: true }
     });
-    
+
     const existingSettings = shop?.settingsJson
         ? JSON.parse(shop.settingsJson)
         : DEFAULT_SETTINGS;
-    
+
     const settings = {
         ...existingSettings,
         style_preset: body.style_preset ?? existingSettings.style_preset ?? DEFAULT_SETTINGS.style_preset,
@@ -58,8 +55,7 @@ export const action = async ({ request }) => {
         show_quota: body.show_quota ?? existingSettings.show_quota ?? DEFAULT_SETTINGS.show_quota,
         seeItPrompt: body.seeItPrompt !== undefined ? body.seeItPrompt : (existingSettings.seeItPrompt ?? DEFAULT_SETTINGS.seeItPrompt),
         seeItNowPrompt: body.seeItNowPrompt !== undefined ? body.seeItNowPrompt : (existingSettings.seeItNowPrompt ?? DEFAULT_SETTINGS.seeItNowPrompt),
-        coordinateInstructions: body.coordinateInstructions !== undefined ? body.coordinateInstructions : (existingSettings.coordinateInstructions ?? DEFAULT_SETTINGS.coordinateInstructions),
-        seeItNowVariants: body.seeItNowVariants !== undefined ? body.seeItNowVariants : (existingSettings.seeItNowVariants ?? DEFAULT_SETTINGS.seeItNowVariants)
+        coordinateInstructions: body.coordinateInstructions !== undefined ? body.coordinateInstructions : (existingSettings.coordinateInstructions ?? DEFAULT_SETTINGS.coordinateInstructions)
     };
 
     await prisma.shop.update({
@@ -69,6 +65,3 @@ export const action = async ({ request }) => {
 
     return json({ ok: true, settings });
 };
-
-
-

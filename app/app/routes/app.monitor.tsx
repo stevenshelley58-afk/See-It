@@ -79,7 +79,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   return json({
-    runs: runs.map((run) => ({
+    runs: runs.map((run: any) => ({
       id: run.id,
       createdAt: run.createdAt.toISOString(),
       productTitle: run.productAsset?.productTitle || "Unknown",
@@ -88,13 +88,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       promptPackVersion: run.promptPackVersion,
       totalDurationMs: run.totalDurationMs,
       variantCount: run.variantResults.length,
-      successCount: run.variantResults.filter((v) => v.status === "success")
+      successCount: run.variantResults.filter((v: any) => v.status === "success")
         .length,
     })),
     totalCount,
     page,
     totalPages: Math.ceil(totalCount / PAGE_SIZE),
-    versions: versions.map((v) => v.version),
+    versions: versions.map((v: any) => v.version),
   });
 };
 
@@ -182,7 +182,7 @@ export default function MonitorPage() {
         <ChoiceList
           title="Version"
           titleHidden
-          choices={versions.map((v) => ({
+          choices={versions.map((v: any) => ({
             label: `v${v}`,
             value: v.toString(),
           }))}
@@ -215,7 +215,7 @@ export default function MonitorPage() {
       : []),
   ];
 
-  const rows = runs.map((run) => [
+  const rows = runs.map((run: any) => [
     new Date(run.createdAt).toLocaleString(),
     run.productTitle,
     <Badge
@@ -252,6 +252,8 @@ export default function MonitorPage() {
               filters={filters}
               appliedFilters={appliedFilters}
               onClearAll={handleClearAll}
+              onQueryChange={() => { }}
+              onQueryClear={() => { }}
               hideQueryField
             />
             <DataTable
@@ -305,52 +307,70 @@ function RenderRunModal({
 }) {
   const [runDetails, setRunDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Fetch run details on mount
-  // Fetch run details on mount
-  useEffect(() => {
-    let active = true;
+  const fetchData = useCallback(() => {
+    setLoading(true);
+    setError(null);
     fetch(`/api/monitor/run/${runId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (active) {
-          setRunDetails(data);
-          setLoading(false);
-        }
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch run details");
+        return res.json();
       })
-      .catch(() => {
-        if (active) setLoading(false);
+      .then((data) => {
+        setRunDetails(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        setError(err.message);
+        setLoading(false);
       });
-    return () => { active = false; };
   }, [runId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   return (
     <Modal
       open={true}
       onClose={onClose}
       title="Render Run Details"
-      large
+      size="large"
     >
       <Modal.Section>
         {loading ? (
-          <p>Loading...</p>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}>
+            <p>Loading run details...</p>
+          </div>
+        ) : error ? (
+          <div style={{ padding: '1rem', textAlign: 'center' }}>
+            <p style={{ color: 'red', marginBottom: '1rem' }}>Error: {error}</p>
+            <Button onClick={fetchData}>Retry</Button>
+          </div>
         ) : runDetails ? (
           <TextContainer>
-            <p>
-              <strong>Run ID:</strong> {runDetails.id}
-            </p>
-            <p>
-              <strong>Status:</strong> {runDetails.status}
-            </p>
-            <p>
-              <strong>Duration:</strong>{" "}
-              {runDetails.totalDurationMs
-                ? `${(runDetails.totalDurationMs / 1000).toFixed(1)}s`
-                : "-"}
-            </p>
-            <p>
-              <strong>Prompt Version:</strong> v{runDetails.promptPackVersion}
-            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <p>
+                  <strong>Run ID:</strong> {runDetails.id}
+                </p>
+                <p>
+                  <strong>Status:</strong> {runDetails.status}
+                </p>
+                <p>
+                  <strong>Duration:</strong>{" "}
+                  {runDetails.totalDurationMs
+                    ? `${(runDetails.totalDurationMs / 1000).toFixed(1)}s`
+                    : "-"}
+                </p>
+                <p>
+                  <strong>Prompt Version:</strong> v{runDetails.promptPackVersion}
+                </p>
+              </div>
+              <Button size="slim" onClick={fetchData}>Refresh</Button>
+            </div>
 
             <h3 style={{ marginTop: "16px" }}>Variants</h3>
             <div
@@ -446,7 +466,7 @@ function RenderRunModal({
             </pre>
           </TextContainer>
         ) : (
-          <p>Failed to load run details</p>
+          <p>Result not found</p>
         )}
       </Modal.Section>
     </Modal>

@@ -339,29 +339,76 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   );
 
   try {
-    // Download both images
+    // Download both images in parallel
+    // We still download to buffer to calculate hash/meta for RenderRun provenance
+    // and to fallback if Gemini cache is missed.
     const [productImageData, roomImageData] = await Promise.all([
       downloadToBuffer(productImageUrl, shopLogContext),
       downloadToBuffer(roomImageUrl, shopLogContext),
     ]);
 
-    // Check if Gemini URIs are still valid
-    const now = new Date();
-    const productGeminiUri =
-      productAsset.geminiFileUri &&
-      productAsset.geminiFileExpiresAt &&
-      productAsset.geminiFileExpiresAt > now
-        ? productAsset.geminiFileUri
-        : undefined;
+    // Optimize: Upload/Reuse Gemini Files
+    const productFilename = `product-${productAsset.id}-${Date.now()}.png`;
+    const roomFilename = `room-${roomSession.id}-${Date.now()}.jpg`;
 
-    const roomGeminiUri =
-      roomSession.geminiFileUri &&
-      roomSession.geminiFileExpiresAt &&
-      roomSession.geminiFileExpiresAt > now
-        ? roomSession.geminiFileUri
-        : undefined;
+    // Import helper dynamically or assume updated imports at top
+    // Note: ensure 'navigate to' or 'add import' for getOrRefreshGeminiFile if not present.
+    // I will assume I added the import in the top block modification or will enable it here.
+    const { getOrRefreshGeminiFile } = await import("../services/gemini-files.server");
 
-    // Build render input
+    const [productGeminiFile, roomGeminiFile] = await Promise.all([
+      getOrRefreshGeminiFile(
+        productAsset.geminiFileUri,
+        productAsset.geminiFileExpiresAt,
+        productImageData.buffer,
+        "image/png",
+        productFilename,
+        requestId
+      ),
+      getOrRefreshGeminiFile(
+        roomSession.geminiFileUri,
+        roomSession.geminiFileExpiresAt,
+        roomImageData.buffer,
+        "image/jpeg",
+        roomFilename,
+        requestId
+      )
+    ]);
+
+    // Update DB with new/refreshed URIs (fire and forget or await)
+    const dbUpdates = [];
+    if (productGeminiFile.uri !== productAsset.geminiFileUri ||
+      productGeminiFile.expiresAt.getTime() !== productAsset.geminiFileExpiresAt?.getTime()) {
+      dbUpdates.push(
+        prisma.productAsset.update({
+          where: { id: productAsset.id },
+          data: {
+            geminiFileUri: productGeminiFile.uri,
+            geminiFileExpiresAt: productGeminiFile.expiresAt
+          }
+        })
+      );
+    }
+
+    if (roomGeminiFile.uri !== roomSession.geminiFileUri ||
+      roomGeminiFile.expiresAt.getTime() !== roomSession.geminiFileExpiresAt?.getTime()) {
+      dbUpdates.push(
+        prisma.roomSession.update({
+          where: { id: roomSession.id },
+          data: {
+            geminiFileUri: roomGeminiFile.uri,
+            geminiFileExpiresAt: roomGeminiFile.expiresAt
+          }
+        })
+      );
+    }
+
+    // Don't block rendering on DB updates
+    Promise.all(dbUpdates).catch(err => {
+      logger.error({ ...shopLogContext, stage: "db-update-error" }, "Failed to update Gemini URIs in DB", err);
+    });
+
+    // Build render input with Gemini URIs
     const renderInput: RenderInput = {
       shopId: shop.id,
       productAssetId: productAsset.id,
@@ -371,13 +418,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         buffer: productImageData.buffer,
         hash: hashBuffer(productImageData.buffer),
         meta: productImageData.meta,
-        geminiUri: productGeminiUri,
+        geminiUri: productGeminiFile.uri,
       },
       roomImage: {
         buffer: roomImageData.buffer,
         hash: hashBuffer(roomImageData.buffer),
         meta: roomImageData.meta,
-        geminiUri: roomGeminiUri,
+        geminiUri: roomGeminiFile.uri,
       },
       resolvedFacts: productAsset.resolvedFacts as ProductPlacementFacts,
       promptPack: productAsset.promptPack as PromptPack,

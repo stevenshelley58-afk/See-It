@@ -29,7 +29,7 @@ export async function removeBackgroundFast(
     imageUrl: string,
     requestId: string = "bg-remove"
 ): Promise<BackgroundRemovalResult> {
-    const logContext = createLogContext("bg-remove", requestId, "start", {});
+    const logContext = createLogContext("prepare", requestId, "start", {});
     const startTime = Date.now();
 
     const apiToken = process.env.PRODIA_API_TOKEN;
@@ -77,7 +77,7 @@ export async function removeBackgroundFast(
 
         // Image input part
         const extension = contentType.includes('png') ? 'png' :
-                         contentType.includes('webp') ? 'webp' : 'jpg';
+            contentType.includes('webp') ? 'webp' : 'jpg';
         parts.push(Buffer.from(
             `--${boundary}\r\n` +
             `Content-Disposition: form-data; name="input"; filename="input.${extension}"\r\n` +

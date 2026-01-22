@@ -16,11 +16,11 @@ function getCorsHeaders(shopDomain: string | null): Record<string, string> {
         "Pragma": "no-cache",
         "Expires": "0",
     };
-    
+
     if (shopDomain) {
         headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
     }
-    
+
     return headers;
 }
 
@@ -53,7 +53,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     const requestId = getRequestId(request);
-    const logContext = createLogContext("product-prepared", requestId, "start", {
+    const logContext = createLogContext("render", requestId, "start", {
         shopId: shop.id,
         productId
     });

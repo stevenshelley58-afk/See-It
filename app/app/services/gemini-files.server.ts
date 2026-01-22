@@ -51,19 +51,19 @@ export async function uploadToGeminiFiles(
     displayName: string,
     requestId: string = "gemini-upload"
 ): Promise<GeminiFileInfo> {
-    const logContext = createLogContext("gemini-files", requestId, "upload", { displayName });
-    
+    const logContext = createLogContext("render", requestId, "upload", { displayName });
+
     logger.info(logContext, `Uploading to Gemini Files API: ${displayName} (${buffer.length} bytes)`);
-    
+
     const startTime = Date.now();
-    
+
     try {
         const client = getGeminiClient();
-        
+
         // Convert Buffer to Blob for upload
         // The SDK accepts Blob in Node.js environment
-        const blob = new Blob([buffer], { type: mimeType });
-        
+        const blob = new Blob([buffer as any], { type: mimeType });
+
         const uploadResult = await client.files.upload({
             file: blob,
             config: {
@@ -71,9 +71,9 @@ export async function uploadToGeminiFiles(
                 displayName,
             },
         });
-        
+
         const duration = Date.now() - startTime;
-        
+
         // Parse expiration time from response
         // The SDK returns expirationTime as a string in ISO format
         let expiresAt: Date;
@@ -83,12 +83,12 @@ export async function uploadToGeminiFiles(
             // Fallback: calculate 48 hours from now
             expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
         }
-        
+
         logger.info(
             { ...logContext, stage: "complete" },
             `Gemini file uploaded in ${duration}ms: ${uploadResult.uri} (expires: ${expiresAt.toISOString()})`
         );
-        
+
         return {
             uri: uploadResult.uri!,
             name: uploadResult.name!,
@@ -115,12 +115,12 @@ export async function uploadToGeminiFiles(
  */
 export function isGeminiFileValid(expiresAt: Date | null | undefined): boolean {
     if (!expiresAt) return false;
-    
+
     // Add 1 hour safety buffer
     const safetyBuffer = 60 * 60 * 1000; // 1 hour in ms
     const now = Date.now();
     const expirationTime = expiresAt.getTime();
-    
+
     return now < (expirationTime - safetyBuffer);
 }
 
@@ -146,10 +146,10 @@ export async function getOrRefreshGeminiFile(
     // Check if existing file is still valid
     if (existingUri && isGeminiFileValid(existingExpiry)) {
         logger.info(
-            createLogContext("gemini-files", requestId, "cache-hit", { displayName }),
+            createLogContext("render", requestId, "cache-hit", { displayName }),
             `Using cached Gemini file: ${existingUri}`
         );
-        
+
         return {
             uri: existingUri,
             name: existingUri.split('/').pop() || 'unknown',
@@ -157,13 +157,13 @@ export async function getOrRefreshGeminiFile(
             expiresAt: existingExpiry!,
         };
     }
-    
+
     // Need to upload new file
     logger.info(
-        createLogContext("gemini-files", requestId, "cache-miss", { displayName }),
+        createLogContext("render", requestId, "cache-miss", { displayName }),
         `Gemini file expired or missing, uploading new file`
     );
-    
+
     return uploadToGeminiFiles(buffer, mimeType, displayName, requestId);
 }
 
@@ -183,20 +183,20 @@ export async function uploadUrlToGeminiFiles(
     displayName: string,
     requestId: string = "gemini-url-upload"
 ): Promise<GeminiFileInfo> {
-    const logContext = createLogContext("gemini-files", requestId, "url-upload", { displayName });
-    
+    const logContext = createLogContext("render", requestId, "url-upload", { displayName });
+
     logger.info(logContext, `Downloading and uploading to Gemini: ${url.substring(0, 80)}...`);
-    
+
     try {
         // Download the file
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
         }
-        
+
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
-        
+
         // Upload to Gemini
         return uploadToGeminiFiles(buffer, mimeType, displayName, requestId);
     } catch (error) {

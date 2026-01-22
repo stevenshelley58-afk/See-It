@@ -79,6 +79,10 @@ export async function runPrepareFlowForProduct(
             assetId = asset.id;
         }
 
+        if (!assetId) {
+            throw new Error("Failed to resolve assetId for prepare flow");
+        }
+
         // Simulate GCS failure
         if (options.simulate?.gcsFailure) {
             logger.warn(logContext, "Simulating GCS failure");
@@ -101,13 +105,14 @@ export async function runPrepareFlowForProduct(
         }
 
         // Run actual prepare (this will fail if simulate options are set above)
-        const preparedImageUrl = await prepareProduct(
+        const prepareResult = await prepareProduct(
             options.sourceImageUrl,
             options.shopId,
             options.productId,
             assetId,
             requestId
         );
+        const preparedImageUrl = prepareResult.url;
 
         // Update asset
         const updated = await prisma.productAsset.update({

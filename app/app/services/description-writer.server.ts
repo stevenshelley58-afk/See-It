@@ -86,48 +86,48 @@ export async function generateProductDescription(
     fields: StructuredFields,
     requestId: string = "desc-writer"
 ): Promise<GeneratedDescription> {
-    
-    const logContext = createLogContext("description", requestId, "generate", {
+
+    const logContext = createLogContext("prepare", requestId, "generate", {
         productTitle: product.title,
         surface: fields.surface,
         material: fields.material
     });
-    
+
     logger.info(logContext, "Generating product description");
-    
+
     // Build the context for the writer
     const contextParts: string[] = [];
-    
+
     // Product title and type
     contextParts.push(`Product: ${product.title}`);
     if (product.productType) {
         contextParts.push(`Type: ${product.productType}`);
     }
-    
+
     // Structured fields
     contextParts.push(`Material: ${fields.material}`);
     contextParts.push(`Typical placement: ${fields.surface}`);
     contextParts.push(`Orientation: ${fields.orientation}`);
-    
+
     if (fields.dimensions?.height || fields.dimensions?.width) {
         const dims: string[] = [];
         if (fields.dimensions.height) dims.push(`${fields.dimensions.height}cm tall`);
         if (fields.dimensions.width) dims.push(`${fields.dimensions.width}cm wide`);
         contextParts.push(`Dimensions: ${dims.join(', ')}`);
     }
-    
+
     // Original product description (if useful)
     if (product.description && product.description.length > 20) {
         // Truncate if too long
         const truncated = product.description.slice(0, 500);
         contextParts.push(`Original description: "${truncated}"`);
     }
-    
+
     // Merchant's additional notes
     if (fields.additionalNotes?.trim()) {
         contextParts.push(`Special notes from merchant: "${fields.additionalNotes.trim()}"`);
     }
-    
+
     const fullPrompt = `${DESCRIPTION_WRITER_PROMPT}
 
 ${contextParts.join('\n')}
@@ -136,7 +136,7 @@ Write the description now (one paragraph, 3-5 sentences):`;
 
     try {
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-        
+
         const response = await ai.models.generateContent({
             model: DESCRIPTION_MODEL,
             contents: fullPrompt,
@@ -145,24 +145,24 @@ Write the description now (one paragraph, 3-5 sentences):`;
                 maxOutputTokens: 300,
             }
         });
-        
+
         const description = response.text?.trim();
-        
+
         if (!description || description.length < 50) {
             throw new Error("Generated description too short or empty");
         }
-        
+
         // Clean up any markdown or quotes the model might have added
         const cleanDescription = description
             .replace(/^["']|["']$/g, '')  // Remove surrounding quotes
             .replace(/^\*\*|\*\*$/g, '')  // Remove markdown bold
             .trim();
-        
+
         logger.info(
             { ...logContext, stage: "complete" },
             `Generated description: ${cleanDescription.length} chars`
         );
-        
+
         return {
             description: cleanDescription,
             confidence: 'high',
@@ -170,13 +170,13 @@ Write the description now (one paragraph, 3-5 sentences):`;
             generatedAt: new Date().toISOString(),
             rawPrompt: fullPrompt, // Include full prompt for telemetry/lineage
         };
-        
+
     } catch (error: any) {
         logger.error(logContext, "Description generation failed", error);
-        
+
         // Fallback: create a basic description from structured data
         const fallback = createFallbackDescription(product, fields);
-        
+
         return {
             description: fallback,
             confidence: 'low',
@@ -193,23 +193,23 @@ Write the description now (one paragraph, 3-5 sentences):`;
 
 function createFallbackDescription(product: ProductData, fields: StructuredFields): string {
     const parts: string[] = [];
-    
+
     // Basic product description
     const article = /^[aeiou]/i.test(product.title) ? 'An' : 'A';
     parts.push(`${article} ${product.title.toLowerCase()}`);
-    
+
     // Material
     if (fields.material && fields.material !== 'other') {
         parts.push(`made of ${fields.material}`);
     }
-    
+
     // Dimensions
     if (fields.dimensions?.height && fields.dimensions?.width) {
         parts.push(`approximately ${fields.dimensions.height}cm × ${fields.dimensions.width}cm`);
     } else if (fields.dimensions?.height) {
         parts.push(`approximately ${fields.dimensions.height}cm tall`);
     }
-    
+
     return parts.join(', ') + '.';
 }
 
@@ -237,7 +237,7 @@ const MATERIAL_KEYWORDS: Record<string, string[]> = {
 
 export function extractStructuredFields(product: ProductData): StructuredFields {
     const allText = `${product.title} ${product.description || ''} ${product.productType || ''} ${(product.tags || []).join(' ')}`.toLowerCase();
-    
+
     // Find surface
     let surface: StructuredFields['surface'] = 'floor';
     for (const [surf, keywords] of Object.entries(SURFACE_KEYWORDS)) {
@@ -246,7 +246,7 @@ export function extractStructuredFields(product: ProductData): StructuredFields 
             break;
         }
     }
-    
+
     // Find material
     let material: StructuredFields['material'] = 'other';
     for (const [mat, keywords] of Object.entries(MATERIAL_KEYWORDS)) {
@@ -255,7 +255,7 @@ export function extractStructuredFields(product: ProductData): StructuredFields 
             break;
         }
     }
-    
+
     // Infer orientation
     let orientation: StructuredFields['orientation'] = 'upright';
     if (allText.includes('rug') || allText.includes('carpet') || allText.includes('mat')) {
@@ -267,10 +267,10 @@ export function extractStructuredFields(product: ProductData): StructuredFields 
     } else if (surface === 'ceiling') {
         orientation = 'hanging';
     }
-    
+
     // Extract dimensions from description
     const dimensions = extractDimensions(product.description || '');
-    
+
     return {
         surface,
         orientation,

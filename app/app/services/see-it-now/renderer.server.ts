@@ -28,8 +28,8 @@ function hashBuffer(buffer: Buffer): string {
 async function renderSingleVariant(
   variantId: string,
   finalPrompt: string,
-  productBuffer: Buffer,
-  roomBuffer: Buffer,
+  productImage: { buffer: Buffer; geminiUri?: string },
+  roomImage: { buffer: Buffer; geminiUri?: string },
   logContext: ReturnType<typeof createLogContext>
 ): Promise<VariantRenderResult> {
   const startTime = Date.now();
@@ -45,24 +45,44 @@ async function renderSingleVariant(
   // Build contents array
   // Order: [prepared_product_image, customer_room_image, final_prompt]
   // customer_room_image MUST be last image for aspect ratio adoption
-  const parts: any[] = [
-    // 1. Product image (first)
-    {
+  const parts: any[] = [];
+
+  // 1. Product image
+  if (productImage.geminiUri) {
+    parts.push({
+      fileData: {
+        mimeType: "image/png",
+        fileUri: productImage.geminiUri,
+      },
+    });
+  } else {
+    parts.push({
       inlineData: {
         mimeType: "image/png",
-        data: productBuffer.toString("base64"),
+        data: productImage.buffer.toString("base64"),
       },
-    },
-    // 2. Room image (second - last image)
-    {
+    });
+  }
+
+  // 2. Room image
+  if (roomImage.geminiUri) {
+    parts.push({
+      fileData: {
+        mimeType: "image/jpeg",
+        fileUri: roomImage.geminiUri,
+      },
+    });
+  } else {
+    parts.push({
       inlineData: {
         mimeType: "image/jpeg",
-        data: roomBuffer.toString("base64"),
+        data: roomImage.buffer.toString("base64"),
       },
-    },
-    // 3. Prompt (last)
-    { text: finalPrompt },
-  ];
+    });
+  }
+
+  // 3. Prompt (last)
+  parts.push({ text: finalPrompt });
 
   // Create timeout promise
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -150,6 +170,9 @@ async function uploadVariantImage(
 /**
  * Render all 8 variants in parallel
  */
+/**
+ * Render all 8 variants in parallel with Early Return optimization
+ */
 export async function renderAllVariants(
   input: RenderInput
 ): Promise<RenderRunResult> {
@@ -187,72 +210,99 @@ export async function renderAllVariants(
     status: "partial", // Will update when complete
   });
 
+  // Track results
+  const results: VariantRenderResult[] = [];
+  let successCount = 0;
+  let completedCount = 0;
+  const totalVariants = input.promptPack.variants.length;
+
+  // Create a resolver for early return
+  let resolveEarly: (value: void | PromiseLike<void>) => void;
+  const earlyReturnPromise = new Promise<void>((resolve) => {
+    resolveEarly = resolve;
+  });
+
   // Fire all variants in parallel
-  const variantPromises = input.promptPack.variants.map((variant) => {
+  input.promptPack.variants.forEach((variant) => {
     const finalPrompt = assembleFinalPrompt(
       input.promptPack.product_context,
       variant.variation
     );
 
-    return renderSingleVariant(
+    renderSingleVariant(
       variant.id,
       finalPrompt,
-      input.productImage.buffer,
-      input.roomImage.buffer,
+      input.productImage, // Pass full object (buffer + geminiUri)
+      input.roomImage,    // Pass full object
       logContext
-    );
+    ).then(async (result) => {
+      // Handle completion
+      let imageKey: string | undefined;
+
+      if (result.status === "success" && result.imageBase64) {
+        try {
+          // Upload to GCS
+          // Note: In a real early-return scenario, we might want to do this async
+          // but for now we await it to ensure the key is ready before we count it as success
+          imageKey = await uploadVariantImage(runId, result.variantId, result.imageBase64);
+        } catch (err) {
+          logger.error(
+            { ...logContext, variantId: result.variantId },
+            `Failed to upload variant image: ${err}`
+          );
+        }
+      }
+
+      // Record result
+      const finalResult = { ...result, imageKey };
+      results.push(finalResult);
+
+      completedCount++;
+      if (result.status === "success") {
+        successCount++;
+      }
+
+      const elapsed = Date.now() - startTime;
+
+      // Early Return Check:
+      // Condition: (4+ successes AND >10s elapsed) OR (All completed)
+      // Check for completion
+      if (completedCount === totalVariants) {
+        resolveEarly();
+      } else if (successCount >= 4 && elapsed > 10000) {
+        // Trigger early return
+        resolveEarly();
+      }
+
+      // Persist to DB
+      const v = input.promptPack.variants.find(v => v.id === result.variantId);
+      const p = v ? assembleFinalPrompt(input.promptPack.product_context, v.variation) : "";
+
+      await writeVariantResult({
+        renderRunId: runId,
+        variantId: result.variantId,
+        finalPromptHash: hashPrompt(p),
+        status: result.status,
+        latencyMs: result.latencyMs,
+        outputImageKey: imageKey,
+        outputImageHash: result.imageHash,
+        errorMessage: result.errorMessage,
+      }).catch(e => console.error("Failed to write variant result", e));
+
+    });
   });
 
-  const results = await Promise.all(variantPromises);
+  // Wait for Early Return condition or All Complete
+  // We also set a hard safety timeout of 60s (just in case)
+  const safetyTimeout = new Promise<void>(r => setTimeout(r, 60000));
 
-  // Upload successful images and write variant results
-  const finalResults: VariantRenderResult[] = [];
-
-  for (const result of results) {
-    let imageKey: string | undefined;
-
-    if (result.status === "success" && result.imageBase64) {
-      try {
-        imageKey = await uploadVariantImage(runId, result.variantId, result.imageBase64);
-      } catch (err) {
-        logger.error(
-          { ...logContext, variantId: result.variantId },
-          `Failed to upload variant image: ${err}`
-        );
-      }
-    }
-
-    const variant = input.promptPack.variants.find(
-      (v) => v.id === result.variantId
-    );
-    const finalPrompt = variant
-      ? assembleFinalPrompt(input.promptPack.product_context, variant.variation)
-      : "";
-
-    // Write variant result
-    await writeVariantResult({
-      renderRunId: runId,
-      variantId: result.variantId,
-      finalPromptHash: hashPrompt(finalPrompt),
-      status: result.status,
-      latencyMs: result.latencyMs,
-      outputImageKey: imageKey,
-      outputImageHash: result.imageHash,
-      errorMessage: result.errorMessage,
-    });
-
-    finalResults.push({
-      ...result,
-      imageKey,
-    });
-  }
+  await Promise.race([earlyReturnPromise, safetyTimeout]);
 
   const totalDurationMs = Date.now() - startTime;
-  const successCount = finalResults.filter((r) => r.status === "success").length;
 
   // Determine final status
   let status: "complete" | "partial" | "failed";
-  if (successCount === 8) {
+  if (successCount === totalVariants) {
     status = "complete";
   } else if (successCount > 0) {
     status = "partial";
@@ -268,13 +318,13 @@ export async function renderAllVariants(
 
   logger.info(
     { ...logContext, stage: "complete" },
-    `Render run complete: ${successCount}/8 variants, ${totalDurationMs}ms, status=${status}`
+    `Render run returning early/complete: ${successCount}/${totalVariants} successes (completed: ${completedCount}), ${totalDurationMs}ms, status=${status}`
   );
 
   return {
     runId,
     status,
     totalDurationMs,
-    variants: finalResults,
+    variants: results,
   };
 }

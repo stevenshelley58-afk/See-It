@@ -74,6 +74,23 @@ interface PlacementConfig {
     allowSpaceCreation: boolean | null;
 }
 
+interface RenderPromptTelemetry {
+    prompt: string;
+    model: string;
+    aspectRatio: string;
+    useRoomUri: boolean;
+    useProductUri: boolean;
+    placement: { x: number; y: number; scale: number } | { box_px: { center_x_px: number; center_y_px: number; width_px: number } };
+    stylePreset: string;
+    placementPrompt?: string;
+    canonicalRoomKey?: string | null;
+    canonicalRoomWidth?: number | null;
+    canonicalRoomHeight?: number | null;
+    canonicalRoomRatio?: string | null;
+    productResizedWidth?: number;
+    productResizedHeight?: number;
+}
+
 /**
  * Auto-generate placement configuration using AI vision
  * Analyzes product image and title to create render instructions
@@ -307,7 +324,14 @@ async function processPendingAssets(batchRequestId: string) {
                 retryCount: { lt: MAX_RETRY_ATTEMPTS }
             },
             take: 5,
-            orderBy: { createdAt: "asc" }
+            orderBy: { createdAt: "asc" },
+            select: {
+                id: true,
+                productId: true,
+                retryCount: true,
+                shopId: true,
+                sourceImageUrl: true,
+            }
         });
 
         if (pendingAssets.length === 0) {
@@ -322,9 +346,9 @@ async function processPendingAssets(batchRequestId: string) {
         logger.info(
             createLogContext("prepare", batchRequestId, "batch-start-assets", {
                 count: pendingAssets.length,
-                assetIds: pendingAssets.map(a => a.id).join(',')
+                assetIds: pendingAssets.map((asset: { id: string }) => asset.id).join(',')
             }),
-            `Processing ${pendingAssets.length} pending assets: [${pendingAssets.map(a => `${a.productId}(retry:${a.retryCount})`).join(', ')}]`
+            `Processing ${pendingAssets.length} pending assets: [${pendingAssets.map((asset: { productId: string; retryCount: number | null }) => `${asset.productId}(retry:${asset.retryCount})`).join(', ')}]`
         );
 
         for (const asset of pendingAssets) {
@@ -1038,6 +1062,20 @@ async function processPendingRenderJobs(batchRequestId: string) {
                         `Starting render job (attempt ${currentRetryCount + 1}/${MAX_RETRY_ATTEMPTS})`
                     );
 
+                    // Fetch shop for settings
+                    const shop = await prisma.shop.findUnique({
+                        where: { id: job.shopId },
+                        select: { settingsJson: true }
+                    });
+                    const settings = shop?.settingsJson ? JSON.parse(shop.settingsJson) : {};
+                    const generalPrompt = settings.seeItPrompt || '';
+                    const coordinateInstructions = settings.coordinateInstructions || '';
+
+                    // 1. Get Product Image URL (generate fresh URL if key is available)
+                    const productAsset = await prisma.productAsset.findFirst({
+                        where: { shopId: job.shopId, productId: job.productId }
+                    });
+
                     // Emit render_job_started event
                     if (productAsset?.id) {
                         emitPrepEvent(
@@ -1061,20 +1099,6 @@ async function processPendingRenderJobs(batchRequestId: string) {
                         });
                     }
 
-                    // Fetch shop for settings
-                    const shop = await prisma.shop.findUnique({
-                        where: { id: job.shopId },
-                        select: { settingsJson: true }
-                    });
-                    const settings = shop?.settingsJson ? JSON.parse(shop.settingsJson) : {};
-                    const generalPrompt = settings.seeItPrompt || '';
-                    const coordinateInstructions = settings.coordinateInstructions || '';
-
-                    // 1. Get Product Image URL (generate fresh URL if key is available)
-                    const productAsset = await prisma.productAsset.findFirst({
-                        where: { shopId: job.shopId, productId: job.productId }
-                    });
-
                     let productImageUrl: string | null = null;
                     let config: Record<string, unknown> = {};
                     try {
@@ -1090,7 +1114,7 @@ async function processPendingRenderJobs(batchRequestId: string) {
                         productImageUrl = productAsset.preparedImageUrl;
                     } else if (productAsset?.sourceImageUrl) {
                         productImageUrl = productAsset.sourceImageUrl;
-                    } else if (config?.product_image_url) {
+                    } else if (typeof config?.product_image_url === "string") {
                         productImageUrl = config.product_image_url;
                     }
 
@@ -1135,16 +1159,7 @@ async function processPendingRenderJobs(batchRequestId: string) {
                     let lastError: unknown = null;
                     let success = false;
                     let compositeResult: { imageUrl: string; imageKey: string } | null = null;
-                    let capturedTelemetry: {
-                        prompt: string;
-                        model: string;
-                        aspectRatio: string;
-                        useRoomUri: boolean;
-                        useProductUri: boolean;
-                        placement: { x: number; y: number; scale: number };
-                        stylePreset: string;
-                        placementPrompt?: string;
-                    } | null = null;
+                    let capturedTelemetry: RenderPromptTelemetry | null = null;
 
                     for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS && !success; attempt++) {
                         try {
@@ -1231,14 +1246,16 @@ async function processPendingRenderJobs(batchRequestId: string) {
 
                         await incrementQuota(job.shopId, "render", 1);
 
-                        // Emit render_prompt_built event (if we captured telemetry)
-                        if (productAsset?.id && capturedTelemetry) {
-                            // Simple hash function for prompt grouping (non-cryptographic)
-                            const promptHash = capturedTelemetry.prompt.split('').reduce((acc, char) => {
+                        const telemetry = capturedTelemetry as RenderPromptTelemetry | null;
+                        const promptHash = telemetry?.prompt
+                            ? telemetry.prompt.split('').reduce((acc: number, char: string) => {
                                 const hash = ((acc << 5) - acc) + char.charCodeAt(0);
                                 return hash & hash;
-                            }, 0).toString(36);
+                            }, 0).toString(36)
+                            : undefined;
 
+                        // Emit render_prompt_built event (if we captured telemetry)
+                        if (productAsset?.id && telemetry) {
                             emitPrepEvent(
                                 {
                                     assetId: productAsset.id,
@@ -1250,15 +1267,15 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                         renderJobId: job.id,
                                         roomSessionId: job.roomSessionId || undefined,
                                         provider: "gemini",
-                                        model: capturedTelemetry.model,
-                                        aspectRatio: capturedTelemetry.aspectRatio,
-                                        prompt: capturedTelemetry.prompt,
+                                        model: telemetry.model,
+                                        aspectRatio: telemetry.aspectRatio,
+                                        prompt: telemetry.prompt,
                                         promptHash,
-                                        placement: capturedTelemetry.placement,
-                                        stylePreset: capturedTelemetry.stylePreset,
-                                        placementPrompt: capturedTelemetry.placementPrompt || undefined,
-                                        useRoomUri: capturedTelemetry.useRoomUri,
-                                        useProductUri: capturedTelemetry.useProductUri,
+                                        placement: telemetry.placement,
+                                        stylePreset: telemetry.stylePreset,
+                                        placementPrompt: telemetry.placementPrompt || undefined,
+                                        useRoomUri: telemetry.useRoomUri,
+                                        useProductUri: telemetry.useProductUri,
                                     },
                                 },
                                 null,
@@ -1282,10 +1299,7 @@ async function processPendingRenderJobs(batchRequestId: string) {
                                         roomSessionId: job.roomSessionId || undefined,
                                         outputImageKey: compositeResult.imageKey,
                                         outputImageUrl: compositeResult.imageUrl,
-                                        promptHash: capturedTelemetry ? (capturedTelemetry.prompt.split('').reduce((acc, char) => {
-                                            const hash = ((acc << 5) - acc) + char.charCodeAt(0);
-                                            return hash & hash;
-                                        }, 0).toString(36)) : undefined,
+                                        promptHash,
                                     },
                                 },
                                 null,

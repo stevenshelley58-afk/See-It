@@ -25,7 +25,7 @@ export async function setSeeItLiveTag(
   enabled: boolean
 ): Promise<{ success: boolean; error?: string }> {
   const gid = `gid://shopify/Product/${productId}`;
-  
+
   try {
     if (enabled) {
       // Add the tag
@@ -51,19 +51,19 @@ export async function setSeeItLiveTag(
       );
 
       const data = await response.json();
-      
+
       if (data.data?.tagsAdd?.userErrors?.length > 0) {
         const errors = data.data.tagsAdd.userErrors;
         const errorMsg = errors.map((e: { message: string }) => e.message).join(", ");
         logger.warn(
-          { stage: "tag-add", productId },
+          { stage: "tag-add", productId, flow: "system", requestId: "internal" },
           `Tag add userErrors: ${errorMsg}`
         );
         return { success: false, error: errorMsg };
       }
 
       logger.info(
-        { stage: "tag-add", productId },
+        { stage: "tag-add", productId, flow: "system", requestId: "internal" },
         `Added "${SEE_IT_LIVE_TAG}" tag to product`
       );
     } else {
@@ -90,19 +90,19 @@ export async function setSeeItLiveTag(
       );
 
       const data = await response.json();
-      
+
       if (data.data?.tagsRemove?.userErrors?.length > 0) {
         const errors = data.data.tagsRemove.userErrors;
         const errorMsg = errors.map((e: { message: string }) => e.message).join(", ");
         logger.warn(
-          { stage: "tag-remove", productId },
+          { stage: "tag-remove", productId, flow: "system", requestId: "internal" },
           `Tag remove userErrors: ${errorMsg}`
         );
         return { success: false, error: errorMsg };
       }
 
       logger.info(
-        { stage: "tag-remove", productId },
+        { stage: "tag-remove", productId, flow: "system", requestId: "internal" },
         `Removed "${SEE_IT_LIVE_TAG}" tag from product`
       );
     }
@@ -111,7 +111,7 @@ export async function setSeeItLiveTag(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
     logger.error(
-      { stage: enabled ? "tag-add" : "tag-remove", productId },
+      { stage: enabled ? "tag-add" : "tag-remove", productId, flow: "system", requestId: "internal" },
       `Failed to ${enabled ? "add" : "remove"} tag: ${errorMsg}`,
       error
     );

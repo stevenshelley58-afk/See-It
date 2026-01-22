@@ -73,11 +73,11 @@ function buildCompositePrompt(
     coords: { x: number; y: number; width_px?: number; height_px?: number; center_x_px?: number; center_y_px?: number; canonical_width?: number; canonical_height?: number }
 ): string {
     const parts: string[] = [];
-    
+
     if (generalPrompt?.trim()) {
         parts.push(generalPrompt.trim());
     }
-    
+
     if (coordinateInstructions?.trim()) {
         // Replace placeholders with actual values
         let processed = coordinateInstructions.trim();
@@ -85,7 +85,7 @@ function buildCompositePrompt(
         processed = processed.replace(/\{\{Y\}\}/g, coords.y.toFixed(2));
         processed = processed.replace(/\{\{WIDTH_PX\}\}/g, String(coords.width_px || ''));
         processed = processed.replace(/\{\{HEIGHT_PX\}\}/g, String(coords.height_px || ''));
-        
+
         // Calculate center_x_px and center_y_px if not provided but we have canonical dimensions
         let center_x_px = coords.center_x_px;
         let center_y_px = coords.center_y_px;
@@ -95,17 +95,17 @@ function buildCompositePrompt(
         if (!center_y_px && coords.canonical_height) {
             center_y_px = Math.round(coords.y * coords.canonical_height);
         }
-        
+
         processed = processed.replace(/\{\{CENTER_X_PX\}\}/g, String(center_x_px || ''));
         processed = processed.replace(/\{\{CENTER_Y_PX\}\}/g, String(center_y_px || ''));
-        
+
         parts.push(processed);
     }
-    
+
     if (placementPrompt?.trim()) {
         parts.push(placementPrompt.trim());
     }
-    
+
     return parts.join('\n\n');
 }
 
@@ -336,7 +336,7 @@ async function callGemini(
             });
         }
     }
-    
+
     // Log the complete parts array structure (without base64 data)
     const partsSummary = parts.map(p => {
         if (p.text) return { type: 'text', content: p.text.substring(0, 200) };
@@ -557,10 +557,7 @@ export async function prepareProduct(
                         `Attempting background removal with ${attempt.label}, mimeType: ${attempt.mimeType}`
                     );
 
-                    // Convert Buffer to Blob - @imgly/background-removal-node expects web-standard Blob, not Node Buffer
-                    const inputBlob = new Blob([attemptBuffer], { type: attempt.mimeType });
-
-                    const resultBlob = await removeBackground(inputBlob, {
+                    const resultBlob = await removeBackground(attemptBuffer, {
                         output: {
                             format: 'image/png',
                             quality: 1.0
@@ -628,25 +625,25 @@ export async function prepareProduct(
         // This ensures PNG dimensions match the actual visible product content.
         try {
             const beforeMeta = await sharp(outputBuffer).metadata();
-            
+
             // Get raw RGBA pixel data to find actual content bounds
             const { data, info } = await sharp(outputBuffer)
                 .ensureAlpha()
                 .raw()
                 .toBuffer({ resolveWithObject: true });
-            
+
             const { width, height, channels } = info;
-            
+
             // Find bounding box of non-transparent pixels (alpha > 128 to ignore semi-transparent fringes)
             let minX = width, minY = height, maxX = 0, maxY = 0;
             let foundContent = false;
             const ALPHA_THRESHOLD = 128; // Ignore pixels less than 50% opaque
-            
+
             for (let y = 0; y < height; y++) {
                 for (let x = 0; x < width; x++) {
                     const idx = (y * width + x) * channels;
                     const alpha = data[idx + 3]; // Alpha channel is 4th byte (RGBA)
-                    
+
                     if (alpha > ALPHA_THRESHOLD) {
                         foundContent = true;
                         if (x < minX) minX = x;
@@ -656,18 +653,18 @@ export async function prepareProduct(
                     }
                 }
             }
-            
+
             if (foundContent && maxX >= minX && maxY >= minY) {
                 const cropWidth = maxX - minX + 1;
                 const cropHeight = maxY - minY + 1;
-                
+
                 // Only crop if we're actually reducing size
                 if (cropWidth < width || cropHeight < height) {
                     const trimmedBuffer = await sharp(outputBuffer)
                         .extract({ left: minX, top: minY, width: cropWidth, height: cropHeight })
                         .png()
                         .toBuffer();
-                    
+
                     outputBuffer = trimmedBuffer;
                     logger.info(
                         { ...logContext, stage: "trim" },
@@ -800,8 +797,8 @@ export async function compositeScene(
     const logContext = createLogContext("render", requestId, "start", {});
 
     // Check if we can use pre-uploaded Gemini files
-    const useRoomUri = options?.roomGeminiUri && isGeminiFileValid(options.roomGeminiExpiresAt);
-    const useProductUri = options?.productGeminiUri && isGeminiFileValid(options.productGeminiExpiresAt);
+    const useRoomUri = Boolean(options?.roomGeminiUri && isGeminiFileValid(options.roomGeminiExpiresAt));
+    const useProductUri = Boolean(options?.productGeminiUri && isGeminiFileValid(options.productGeminiExpiresAt));
 
     logger.info(logContext, `Processing scene composite with Gemini (direct fusion)${placementPrompt ? ' - with placement prompt' : ''}${useRoomUri ? ' [room: Gemini URI]' : ''}${useProductUri ? ' [product: Gemini URI]' : ''}`);
 
@@ -839,22 +836,27 @@ export async function compositeScene(
         // Product maintains aspect ratio while fitting inside the specified box
         const boxWidth = (placement as any).width_px;
         const boxHeight = (placement as any).height_px;
-        
+
+        let resizeTargetWidth: number | null = null;
+        let resizeTargetHeight: number | null = null;
+
         if (Number.isFinite(boxWidth) && Number.isFinite(boxHeight) && boxWidth > 0 && boxHeight > 0) {
             // New format: fit product within bounding box (maintains aspect ratio)
             const clampedBoxWidth = Math.max(32, Math.min(roomWidth, boxWidth));
             const clampedBoxHeight = Math.max(32, Math.min(roomHeight, boxHeight));
-            
+            resizeTargetWidth = clampedBoxWidth;
+            resizeTargetHeight = clampedBoxHeight;
+
             logger.info(
                 { ...logContext, stage: "resize" },
                 `Fitting product within bounding box: ${clampedBoxWidth}x${clampedBoxHeight}px (product original: ${productMetadata.width}x${productMetadata.height})`
             );
-            
+
             // Use 'inside' fit - product fits within box, maintains aspect ratio
             resizedProduct = await sharp(productBuffer)
-                .resize({ 
-                    width: clampedBoxWidth, 
-                    height: clampedBoxHeight, 
+                .resize({
+                    width: clampedBoxWidth,
+                    height: clampedBoxHeight,
                     fit: 'inside'  // CRITICAL: fit inside bounding box, maintain aspect ratio
                 })
                 .png()
@@ -862,12 +864,13 @@ export async function compositeScene(
         } else if (Number.isFinite(boxWidth) && boxWidth > 0) {
             // Fallback: width only (legacy format)
             const clampedWidth = Math.max(32, Math.min(roomWidth, boxWidth));
-            
+            resizeTargetWidth = clampedWidth;
+
             logger.info(
                 { ...logContext, stage: "resize" },
                 `Resizing product to width only (legacy): ${clampedWidth}px`
             );
-            
+
             resizedProduct = await sharp(productBuffer)
                 .resize({ width: clampedWidth })
                 .png()
@@ -876,12 +879,13 @@ export async function compositeScene(
             // Ultimate fallback: use scale-based sizing
             const widthFromScale = Math.round(productMetadata.width * (placement.scale || 1));
             const clampedWidth = Math.max(32, Math.min(roomWidth, widthFromScale));
-            
+            resizeTargetWidth = clampedWidth;
+
             logger.info(
                 { ...logContext, stage: "resize" },
                 `Resizing product using scale (legacy): ${placement.scale} -> ${clampedWidth}px`
             );
-            
+
             resizedProduct = await sharp(productBuffer)
                 .resize({ width: clampedWidth })
                 .png()
@@ -893,8 +897,10 @@ export async function compositeScene(
 
         // Get actual resized dimensions (Sharp maintains aspect ratio)
         const resizedMetadata = await sharp(resizedProduct).metadata();
-        const resizedWidth = resizedMetadata.width || clampedWidth;
-        const resizedHeight = resizedMetadata.height || Math.round(clampedWidth * (productMetadata.height / productMetadata.width));
+        const resizedWidth = resizedMetadata.width || resizeTargetWidth || productMetadata.width;
+        const resizedHeight = resizedMetadata.height
+            || resizeTargetHeight
+            || (resizeTargetWidth ? Math.round(resizeTargetWidth * (productMetadata.height / productMetadata.width)) : productMetadata.height);
 
         logger.info(
             { ...logContext, stage: "resize" },
@@ -922,13 +928,13 @@ export async function compositeScene(
             { ...logContext, stage: "pre-gemini" },
             `Sending to Gemini: room=${roomWidth}×${roomHeight}, ratio=${closestRatio.label}, placement=(${placement.x.toFixed(2)}, ${placement.y.toFixed(2)}), product_resized=${resizedWidth}×${resizedHeight}px`
         );
-        
+
         // Log the actual prompt being sent
         logger.info(
             { ...logContext, stage: "prompt" },
             `Gemini prompt: ${prompt.substring(0, 500)}${prompt.length > 500 ? '...' : ''}`
         );
-        
+
         // Log image dimensions being sent
         const roomMeta = await sharp(roomBuffer!).metadata();
         const productMeta = await sharp(resizedProduct!).metadata();
@@ -1066,4 +1072,3 @@ export async function compositeScene(
         resizedProduct = null;
     }
 }
-

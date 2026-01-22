@@ -44,7 +44,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   // Generate signed URLs for variant images
   const variantsWithUrls = await Promise.all(
-    run.variantResults.map(async (v) => ({
+    run.variantResults.map(async (v: any) => ({
       variantId: v.variantId,
       status: v.status,
       latencyMs: v.latencyMs,

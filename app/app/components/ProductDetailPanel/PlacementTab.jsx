@@ -1,11 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '../ui';
-import {
-    SEE_IT_NOW_VARIANT_LIBRARY,
-    pickDefaultSelectedSeeItNowVariants,
-    normalizeSeeItNowVariants,
-} from '../../config/see-it-now-variants.config';
+
 
 /**
  * PlacementTab - Product preparation for rendering
@@ -429,12 +425,7 @@ export function PlacementTab({ product, asset, onChange }) {
     const [seeItNowPrompt, setSeeItNowPrompt] = useState(asset?.renderInstructionsSeeItNow || '');
     const [seeItNowDirty, setSeeItNowDirty] = useState(false);
 
-    // See It Now variants: 10-option library, with per-product selection (default 5 selected)
-    const [seeItNowVariants, setSeeItNowVariants] = useState(() => {
-        const normalized = normalizeSeeItNowVariants(asset?.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY);
-        return normalized.length > 0 ? normalized : pickDefaultSelectedSeeItNowVariants(SEE_IT_NOW_VARIANT_LIBRARY);
-    });
-    const [variantsDirty, setVariantsDirty] = useState(false);
+
 
     // See It Now v2 merchant overrides (sparse diff)
     const initialMerchantOverridesKey = asset?.id || asset?.productId || 'unknown';
@@ -485,18 +476,7 @@ export function PlacementTab({ product, asset, onChange }) {
         "allow_small_crop";
     const croppingPolicyIsOverridden = getPath(merchantOverrides, ["render_behavior", "cropping_policy"]) !== undefined;
 
-    // Sync variants state when asset loads async (only if not dirty)
-    useEffect(() => {
-        if (variantsDirty) return;
-        const normalized = normalizeSeeItNowVariants(asset?.seeItNowVariants, SEE_IT_NOW_VARIANT_LIBRARY);
-        if (normalized.length > 0) {
-            setSeeItNowVariants(normalized);
-            return;
-        }
-        // If asset has no saved variants (older data), show the default 5 selection in the UI.
-        setSeeItNowVariants(pickDefaultSelectedSeeItNowVariants(SEE_IT_NOW_VARIANT_LIBRARY));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [asset?.seeItNowVariants, variantsDirty]);
+
 
     // Enable toggle state
     const [enabled, setEnabled] = useState(asset?.enabled || false);
@@ -593,14 +573,12 @@ export function PlacementTab({ product, asset, onChange }) {
                     replacementRule: placementRulesFields.replacementRule || null,
                     allowSpaceCreation: placementRulesFields.allowSpaceCreation !== undefined ? placementRulesFields.allowSpaceCreation : null,
                 },
-                seeItNowVariants: variantsDirty ? seeItNowVariants : undefined,
-                enabled: enabled,
                 merchantOverrides: merchantOverrides,
                 merchantOverridesDirty: merchantOverridesDirty,
-                dirty: !!merchantOverridesDirty || !!seeItNowDirty || !!variantsDirty || !!hasEdited,
+                dirty: !!merchantOverridesDirty || !!seeItNowDirty || !!hasEdited,
             });
         }
-    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, seeItNowVariants, variantsDirty, merchantOverrides, merchantOverridesDirty, hasEdited, onChange]);
+    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, merchantOverrides, merchantOverridesDirty, hasEdited, onChange]);
 
     // Update a field
     const updateField = useCallback((field, value) => {
@@ -664,65 +642,7 @@ export function PlacementTab({ product, asset, onChange }) {
         setHasEdited(true);
     }, [hasEdited, description]);
 
-    const handleResetVariants = useCallback(() => {
-        setSeeItNowVariants(pickDefaultSelectedSeeItNowVariants(SEE_IT_NOW_VARIANT_LIBRARY));
-        setVariantsDirty(true);
-    }, []);
 
-    const libraryIdSet = useMemo(
-        () => new Set((SEE_IT_NOW_VARIANT_LIBRARY || []).map((v) => v.id)),
-        []
-    );
-
-    const selectedById = useMemo(() => {
-        const map = new Map();
-        (seeItNowVariants || []).forEach((v) => {
-            if (v?.id) map.set(v.id, v);
-        });
-        return map;
-    }, [seeItNowVariants]);
-
-    const selectedLibraryCount = useMemo(() => {
-        let count = 0;
-        for (const id of libraryIdSet) {
-            if (selectedById.has(id)) count += 1;
-        }
-        return count;
-    }, [libraryIdSet, selectedById]);
-
-    const extraVariants = useMemo(() => {
-        return (seeItNowVariants || []).filter((v) => v?.id && !libraryIdSet.has(v.id));
-    }, [seeItNowVariants, libraryIdSet]);
-
-    const toggleLibraryVariant = useCallback((variantId, enabled) => {
-        const lib = (SEE_IT_NOW_VARIANT_LIBRARY || []).find((v) => v.id === variantId);
-        if (!lib) return;
-
-        setSeeItNowVariants((prev) => {
-            const current = Array.isArray(prev) ? prev : [];
-            const exists = current.some((v) => v?.id === variantId);
-            if (enabled && !exists) {
-                return [...current, { id: lib.id, prompt: lib.prompt }];
-            }
-            if (!enabled && exists) {
-                return current.filter((v) => v?.id !== variantId);
-            }
-            return current;
-        });
-        setVariantsDirty(true);
-    }, []);
-
-    const updateVariantPrompt = useCallback((variantId, newPrompt) => {
-        setSeeItNowVariants((prev) => {
-            const current = Array.isArray(prev) ? prev : [];
-            const idx = current.findIndex((v) => v?.id === variantId);
-            if (idx === -1) return current;
-            const next = [...current];
-            next[idx] = { ...next[idx], prompt: newPrompt };
-            return next;
-        });
-        setVariantsDirty(true);
-    }, []);
 
     // Options for dropdowns
     const surfaces = ['floor', 'wall', 'table', 'ceiling', 'shelf', 'other'];
@@ -788,8 +708,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={s}
                                     onClick={() => updateField('surface', s)}
                                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.surface === s
-                                            ? 'bg-neutral-900 text-white'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                        ? 'bg-neutral-900 text-white'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
                                         }`}
                                 >
                                     {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -810,8 +730,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={m}
                                     onClick={() => updateField('material', m)}
                                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.material === m
-                                            ? 'bg-neutral-900 text-white'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                        ? 'bg-neutral-900 text-white'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
                                         }`}
                                 >
                                     {m.charAt(0).toUpperCase() + m.slice(1)}
@@ -832,8 +752,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={o}
                                     onClick={() => updateField('orientation', o)}
                                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.orientation === o
-                                            ? 'bg-neutral-900 text-white'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                        ? 'bg-neutral-900 text-white'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
                                         }`}
                                 >
                                     {o.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
@@ -854,8 +774,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={s}
                                     onClick={() => updateField('shadow', s)}
                                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.shadow === s
-                                            ? 'bg-neutral-900 text-white'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                        ? 'bg-neutral-900 text-white'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
                                         }`}
                                 >
                                     {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -940,8 +860,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={role}
                                     onClick={() => setPlacementRulesFields(prev => ({ ...prev, sceneRole: role }))}
                                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${placementRulesFields.sceneRole === role
-                                            ? 'bg-neutral-900 text-white'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                        ? 'bg-neutral-900 text-white'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
                                         }`}
                                 >
                                     {role}
@@ -962,8 +882,8 @@ export function PlacementTab({ product, asset, onChange }) {
                                     key={rule}
                                     onClick={() => setPlacementRulesFields(prev => ({ ...prev, replacementRule: rule }))}
                                     className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all text-left ${placementRulesFields.replacementRule === rule
-                                            ? 'bg-neutral-900 text-white'
-                                            : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                        ? 'bg-neutral-900 text-white'
+                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
                                         }`}
                                 >
                                     {rule}
@@ -1040,8 +960,8 @@ export function PlacementTab({ product, asset, onChange }) {
                             }}
                             disabled={!materialPrimaryIsOverridden}
                             className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${materialPrimaryIsOverridden
-                                    ? 'border-neutral-300 bg-white text-neutral-900'
-                                    : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                                ? 'border-neutral-300 bg-white text-neutral-900'
+                                : 'border-neutral-200 bg-neutral-50 text-neutral-500'
                                 }`}
                         >
                             {materialPrimaryOptions.map((opt) => (
@@ -1089,8 +1009,8 @@ export function PlacementTab({ product, asset, onChange }) {
                             }}
                             disabled={!relativeScaleClassIsOverridden}
                             className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${relativeScaleClassIsOverridden
-                                    ? 'border-neutral-300 bg-white text-neutral-900'
-                                    : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                                ? 'border-neutral-300 bg-white text-neutral-900'
+                                : 'border-neutral-200 bg-neutral-50 text-neutral-500'
                                 }`}
                         >
                             {relativeScaleClassOptions.map((opt) => (
@@ -1138,8 +1058,8 @@ export function PlacementTab({ product, asset, onChange }) {
                             }}
                             disabled={!croppingPolicyIsOverridden}
                             className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${croppingPolicyIsOverridden
-                                    ? 'border-neutral-300 bg-white text-neutral-900'
-                                    : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                                ? 'border-neutral-300 bg-white text-neutral-900'
+                                : 'border-neutral-200 bg-neutral-50 text-neutral-500'
                                 }`}
                         >
                             {croppingPolicyOptions.map((opt) => (

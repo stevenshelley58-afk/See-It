@@ -68,7 +68,7 @@ export async function emitPrepEvent(
   session?: { userId?: string | number | bigint; email?: string } | null,
   requestId?: string
 ): Promise<void> {
-  const logContext = createLogContext("prep", requestId || "prep-event", "emit", {
+  const logContext = createLogContext("prepare", requestId || "prep-event", "emit", {
     assetId: data.assetId,
     eventType: data.eventType,
   });

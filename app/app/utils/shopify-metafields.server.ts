@@ -4,7 +4,7 @@
  * Helper functions for managing product metafields via Shopify Admin API.
  */
 
-import { logger } from "./logger.server";
+import { logger, createLogContext } from "./logger.server";
 
 /**
  * Set the See It enabled metafield on a product.
@@ -22,6 +22,10 @@ export async function setSeeItEnabledMetafield(
   enabled: boolean
 ): Promise<{ success: boolean; error?: string }> {
   const gid = `gid://shopify/Product/${productId}`;
+  const logContext = createLogContext("shopify-sync", "metafield", "metafield-set", {
+    productId,
+    enabled,
+  });
   
   try {
     const response = await admin.graphql(
@@ -61,14 +65,14 @@ export async function setSeeItEnabledMetafield(
       const errors = data.data.metafieldsSet.userErrors;
       const errorMsg = errors.map((e: { message: string }) => e.message).join(", ");
       logger.warn(
-        { stage: "metafield-set", productId },
+        logContext,
         `Metafield userErrors: ${errorMsg}`
       );
       return { success: false, error: errorMsg };
     }
 
     logger.info(
-      { stage: "metafield-set", productId, enabled },
+      logContext,
       `Set see_it.enabled metafield to ${enabled}`
     );
 
@@ -76,7 +80,7 @@ export async function setSeeItEnabledMetafield(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
     logger.error(
-      { stage: "metafield-set", productId },
+      logContext,
       `Failed to set metafield: ${errorMsg}`,
       error
     );

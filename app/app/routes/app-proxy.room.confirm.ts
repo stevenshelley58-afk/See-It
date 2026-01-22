@@ -66,7 +66,7 @@ function getCorsHeaders(shopDomain: string | null): Record<string, string> {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const requestId = getRequestId(request);
-    const logContext = createLogContext("room-confirm", requestId, "start", {});
+    const logContext = createLogContext("system", requestId, "start", {});
 
     const { session } = await authenticate.public.appProxy(request);
     const corsHeaders = getCorsHeaders(session?.shop ?? null);
