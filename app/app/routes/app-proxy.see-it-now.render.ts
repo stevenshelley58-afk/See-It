@@ -15,7 +15,7 @@ import sharp from "sharp";
 import crypto from "crypto";
 import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
-import { logSeeItNowEvent } from "~/services/session-logger.server";
+import { emit, EventSource, EventType } from "~/services/telemetry";
 
 // NEW: Import from 2-LLM pipeline
 import {
@@ -301,6 +301,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     shopId: shop.id,
     productId: product_id,
   };
+
+  // Emit SF_RENDER_REQUESTED event
+  emit({
+    shopId: shop.id,
+    requestId,
+    source: EventSource.APP_PROXY,
+    type: EventType.SF_RENDER_REQUESTED,
+    payload: {
+      productId: product_id,
+      roomSessionId: room_session_id,
+    },
+  });
 
   // Quota check
   try {
@@ -638,15 +650,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
 
     if (responseVariants.length === 0) {
-      logSeeItNowEvent("error", {
-        sessionId: result.runId,
-        shop: session.shop,
-        productId: product_id,
-        errorCode: "all_variants_failed",
-        errorMessage: "Failed to generate any variants",
-        step: "variants_generated",
-      });
-
       return json(
         {
           success: false,
@@ -669,16 +672,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `[See It Now] Render completed: ${responseVariants.length}/8 variants in ${duration}ms`
     );
 
-    logSeeItNowEvent("variants_generated", {
-      sessionId: result.runId,
-      shop: session.shop,
-      productId: product_id,
-      roomSessionId: room_session_id,
-      variantCount: responseVariants.length,
-      variantIds: responseVariants.map((v) => v.id),
-      durationMs: duration,
-    });
-
     return json(
       {
         run_id: result.runId,
@@ -697,16 +690,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `[See It Now] Render failed`,
       error
     );
-
-    logSeeItNowEvent("error", {
-      sessionId: `error_${Date.now()}`,
-      shop: session.shop,
-      productId: product_id,
-      roomSessionId: room_session_id,
-      errorCode: "generation_failed",
-      errorMessage: errorMessage,
-      step: "variants_generated",
-    });
 
     return json(
       {

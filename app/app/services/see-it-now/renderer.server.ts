@@ -5,8 +5,12 @@ import { logger, createLogContext } from "~/utils/logger.server";
 import { GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
 import { StorageService } from "~/services/storage.server";
 import { assembleFinalPrompt, hashPrompt } from "./prompt-assembler.server";
-import { writeRenderRun, writeVariantResult } from "./monitor.server";
-import prisma from "~/db.server";
+import {
+  startRun,
+  recordVariantStart,
+  recordVariantResult,
+  completeRun,
+} from "~/services/telemetry";
 import type {
   RenderInput,
   RenderRunResult,
@@ -191,12 +195,12 @@ export async function renderAllVariants(
   );
 
   // Write RenderRun record first
-  await writeRenderRun({
-    id: runId,
+  await startRun({
+    runId,
     shopId: input.shopId,
+    requestId: input.requestId,
     productAssetId: input.productAssetId,
     roomSessionId: input.roomSessionId,
-    requestId: input.requestId,
     promptPackVersion: input.promptPackVersion,
     model: GEMINI_IMAGE_MODEL_FAST,
     productImageHash: input.productImage.hash,
@@ -204,10 +208,9 @@ export async function renderAllVariants(
     roomImageHash: input.roomImage.hash,
     roomImageMeta: input.roomImage.meta,
     resolvedFactsHash: hashPrompt(JSON.stringify(input.resolvedFacts)),
-    resolvedFactsJson: input.resolvedFacts,
+    resolvedFactsJson: input.resolvedFacts as unknown as Record<string, unknown>,
     promptPackHash: hashPrompt(JSON.stringify(input.promptPack)),
-    promptPackJson: input.promptPack,
-    status: "partial", // Will update when complete
+    promptPackJson: input.promptPack as unknown as Record<string, unknown>,
   });
 
   // Track results
@@ -224,6 +227,14 @@ export async function renderAllVariants(
 
   // Fire all variants in parallel
   input.promptPack.variants.forEach((variant) => {
+    // Record variant start (fire-and-forget)
+    recordVariantStart({
+      runId,
+      variantId: variant.id,
+      requestId: input.requestId,
+      shopId: input.shopId,
+    });
+
     const finalPrompt = assembleFinalPrompt(
       input.promptPack.product_context,
       variant.variation
@@ -278,14 +289,17 @@ export async function renderAllVariants(
       const v = input.promptPack.variants.find(v => v.id === result.variantId);
       const p = v ? assembleFinalPrompt(input.promptPack.product_context, v.variation) : "";
 
-      await writeVariantResult({
+      await recordVariantResult({
         renderRunId: runId,
         variantId: result.variantId,
         finalPromptHash: hashPrompt(p),
+        requestId: input.requestId,
+        shopId: input.shopId,
         status: result.status,
         latencyMs: result.latencyMs,
         outputImageKey: imageKey,
         outputImageHash: result.imageHash,
+        errorCode: result.status === "timeout" ? "TIMEOUT" : result.status === "failed" ? "PROVIDER_ERROR" : undefined,
         errorMessage: result.errorMessage,
       }).catch(e => console.error("Failed to write variant result", e));
 
@@ -311,9 +325,15 @@ export async function renderAllVariants(
   }
 
   // Update RenderRun with final status
-  await prisma.renderRun.update({
-    where: { id: runId },
-    data: { status, totalDurationMs },
+  await completeRun({
+    runId,
+    requestId: input.requestId,
+    shopId: input.shopId,
+    status,
+    totalDurationMs,
+    successCount,
+    failCount: results.filter((r) => r.status === "failed").length,
+    timeoutCount: results.filter((r) => r.status === "timeout").length,
   });
 
   logger.info(
