@@ -1,105 +1,158 @@
-// Health API Response
+// =============================================================================
+// Health API - matches backend ExternalHealthStats
+// =============================================================================
+
 export interface HealthResponse {
   status: "healthy" | "degraded" | "unhealthy";
-  timestamp: string;
-  version?: string;
-  checks?: {
-    database?: HealthCheck;
-    redis?: HealthCheck;
-    worker?: HealthCheck;
-  };
-  metrics?: HealthMetrics;
+  failureRate1h: number;
+  failureRate24h: number;
+  totalRuns1h: number;
+  totalRuns24h: number;
+  latencyP50: number | null;
+  latencyP95: number | null;
+  providerErrors24h: number;
+  storageErrors24h: number;
 }
 
-export interface HealthCheck {
-  status: "healthy" | "degraded" | "unhealthy";
-  latency_ms?: number;
-  message?: string;
-}
+// =============================================================================
+// Runs API - matches backend ExternalRunsListResponse
+// =============================================================================
 
-export interface HealthMetrics {
-  failure_rate_1h?: number;
-  failure_rate_24h?: number;
-  latency_p50_ms?: number;
-  latency_p95_ms?: number;
-  recent_errors?: RecentError[];
-}
-
-export interface RecentError {
-  error: string;
-  count: number;
-  last_seen: string;
-}
-
-// Runs API Response
 export interface RunsListResponse {
-  runs: Run[];
-  pagination: Pagination;
+  runs: RunListItem[];
+  cursor: string | null;
+  total?: number;
 }
 
-export interface Run {
+export interface RunListItem {
   id: string;
-  shop_id: string;
-  shop_name?: string;
-  status: RunStatus;
-  started_at: string;
-  completed_at?: string;
-  duration_ms?: number;
-  error?: string;
+  createdAt: string;
+  shopId: string;
+  shopDomain: string;
+  productTitle: string | null;
+  productId: string | null;
+  status: string;
+  promptPackVersion: number;
+  model: string;
+  totalDurationMs: number | null;
+  variantCount: number;
+  successCount: number;
+  failCount: number;
+  timeoutCount: number;
+  requestId: string;
+  traceId: string | null;
 }
 
-export type RunStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
+// =============================================================================
+// Run Detail - matches backend ExternalRunDetail
+// =============================================================================
 
-// Shops API Response
+export interface RunDetail {
+  id: string;
+  createdAt: string;
+  completedAt: string | null;
+  requestId: string;
+  traceId: string | null;
+  shopId: string;
+  shopDomain: string;
+  productAssetId: string;
+  productTitle: string | null;
+  productId: string | null;
+  roomSessionId: string | null;
+  status: string;
+  promptPackVersion: number;
+  model: string;
+  totalDurationMs: number | null;
+  successCount: number;
+  failCount: number;
+  timeoutCount: number;
+  telemetryDropped: boolean;
+  variants: VariantResult[];
+  resolvedFactsJson?: Record<string, unknown>;
+  promptPackJson?: Record<string, unknown>;
+}
+
+export interface VariantResult {
+  id: string;
+  variantId: string;
+  status: string;
+  latencyMs: number | null;
+  providerMs: number | null;
+  uploadMs: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  imageUrl: string | null;
+}
+
+// =============================================================================
+// Shops API - matches backend ExternalShopListItem
+// =============================================================================
+
 export interface ShopsListResponse {
-  shops: Shop[];
-  pagination: Pagination;
+  shops: ShopListItem[];
+  cursor: string | null;
+  total?: number;
 }
 
-export interface Shop {
-  id: string;
-  name: string;
-  domain: string;
-  status: ShopStatus;
-  last_run_at?: string;
-  total_runs?: number;
-  failure_rate?: number;
+export interface ShopListItem {
+  shopId: string;
+  shopDomain: string;
+  runsInWindow: number;
+  successRateInWindow: number; // 0-100 percentage
+  lastRunAt: string | null;
 }
 
-export type ShopStatus = "active" | "inactive" | "suspended";
+// =============================================================================
+// Shop Detail - matches backend ExternalShopDetail
+// =============================================================================
 
+export interface ShopDetail {
+  shop: {
+    shopId: string;
+    shopDomain: string;
+    plan: string;
+    createdAt: string;
+  };
+  recentRuns: RunListItem[];
+  topErrors: { message: string; count: number }[];
+  health: {
+    failureRate1h: number;
+    failureRate24h: number;
+    failureRate7d: number;
+    totalRuns1h: number;
+    totalRuns24h: number;
+    totalRuns7d: number;
+    latencyP50: number | null;
+    latencyP95: number | null;
+    providerErrors24h: number;
+    storageErrors24h: number;
+    telemetryDropped24h: number;
+  };
+}
+
+// =============================================================================
+// Query params
+// =============================================================================
+
+export interface RunsParams {
+  limit?: number;
+  cursor?: string;
+  status?: string;
+  shopId?: string;
+}
+
+export interface ShopsParams {
+  limit?: number;
+  cursor?: string;
+  windowDays?: number;
+}
+
+// =============================================================================
 // Common types
-export interface Pagination {
-  page: number;
-  per_page: number;
-  total: number;
-  total_pages: number;
-}
+// =============================================================================
 
 export interface ApiError {
   error: string;
   message: string;
   details?: Record<string, unknown>;
-}
-
-// Query filter types
-export interface RunsFilters {
-  page?: number;
-  per_page?: number;
-  status?: RunStatus;
-  shop_id?: string;
-  since?: string;
-  until?: string;
-}
-
-export interface ShopsFilters {
-  page?: number;
-  per_page?: number;
-  status?: ShopStatus;
-  search?: string;
 }
