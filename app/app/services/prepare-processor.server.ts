@@ -1442,13 +1442,14 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
 
         if (Array.isArray(allowedShopIds) && allowedShopIds.length === 0) return false;
 
-        const candidates = await prisma.productAsset.findMany({
+        const asset = await prisma.productAsset.findFirst({
             where: {
                 status: "live",
                 ...(Array.isArray(allowedShopIds) ? { shopId: { in: allowedShopIds } } : {}),
+                // promptPackVersion is set >0 when the v2 pipeline has successfully produced a prompt pack.
+                promptPackVersion: 0,
             },
             orderBy: { updatedAt: "asc" },
-            take: 25,
             select: {
                 id: true,
                 shopId: true,
@@ -1471,17 +1472,8 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
             },
         });
 
-        const asset = candidates.find((a: any) => {
-            const shopDomain = a.shop?.shopDomain;
-            if (!shopDomain || !isSeeItNowAllowedShop(shopDomain)) return false;
-
-            // Missing any pipeline field means v2 render will fail.
-            const missingPipeline =
-                !a.extractedFacts || !a.resolvedFacts || !a.promptPack || !a.promptPackVersion;
-            return missingPipeline;
-        });
-
         if (!asset) return false;
+        if (asset.shop?.shopDomain && !isSeeItNowAllowedShop(asset.shop.shopDomain)) return false;
 
         const itemRequestId = generateRequestId();
         const shopDomain = asset.shop?.shopDomain || "(unknown-shop)";
