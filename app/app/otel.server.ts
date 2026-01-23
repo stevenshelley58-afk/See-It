@@ -14,7 +14,9 @@ import { Resource } from "@opentelemetry/resources";
 // semantic-conventions is CommonJS, must use default import
 import semconv from "@opentelemetry/semantic-conventions";
 const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, ATTR_DEPLOYMENT_ENVIRONMENT } = semconv;
-import { PrismaInstrumentation } from "@prisma/instrumentation";
+// prisma/instrumentation is also CommonJS
+import prismaInstr from "@prisma/instrumentation";
+const { PrismaInstrumentation } = prismaInstr;
 import { trace, context, SpanStatusCode, type Span } from "@opentelemetry/api";
 import * as grpc from "@grpc/grpc-js";
 import * as fs from "fs";
