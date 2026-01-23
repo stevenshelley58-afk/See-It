@@ -19,6 +19,9 @@ import {
 import { PrismaInstrumentation } from "@prisma/instrumentation";
 import { trace, context, SpanStatusCode, type Span } from "@opentelemetry/api";
 import * as grpc from "@grpc/grpc-js";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 // Re-export for use in other modules
 export { trace, context, SpanStatusCode, type Span };
@@ -32,6 +35,50 @@ const GOOGLE_TRACE_ENDPOINT = "cloudtrace.googleapis.com:443";
 
 let sdk: NodeSDK | null = null;
 let initialized = false;
+
+/**
+ * Setup Google Cloud credentials from GOOGLE_CREDENTIALS_JSON env var.
+ * Writes the decoded JSON to a temp file and sets GOOGLE_APPLICATION_CREDENTIALS.
+ */
+function setupCredentials(): boolean {
+  // Already have file-based credentials
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    return true;
+  }
+
+  // Check for base64-encoded credentials (used in Railway/production)
+  const credentialsJson = process.env.GOOGLE_CREDENTIALS_JSON;
+  if (credentialsJson) {
+    try {
+      const decoded = Buffer.from(credentialsJson, "base64").toString("utf-8");
+      // Validate it's valid JSON
+      JSON.parse(decoded);
+
+      // Write to temp file
+      const tempDir = os.tmpdir();
+      const credPath = path.join(tempDir, "gcp-credentials.json");
+      fs.writeFileSync(credPath, decoded, { mode: 0o600 });
+
+      // Set the env var for OTEL and other GCP libraries
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
+      console.log("[OTEL] Wrote GCP credentials to temp file");
+      return true;
+    } catch (error) {
+      console.error(
+        "[OTEL] Failed to decode GOOGLE_CREDENTIALS_JSON:",
+        error instanceof Error ? error.message : error
+      );
+      return false;
+    }
+  }
+
+  // Check for GCP default credentials (running on GCP)
+  if (process.env.GOOGLE_CLOUD_PROJECT) {
+    return true;
+  }
+
+  return false;
+}
 
 /**
  * Initialize OpenTelemetry SDK with Google Cloud Trace exporter.
@@ -49,15 +96,11 @@ export function initTracing(): boolean {
     return false;
   }
 
-  // Check for Google Cloud credentials
-  const hasCredentials =
-    process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-    process.env.GOOGLE_CLOUD_PROJECT;
-
-  if (!hasCredentials) {
+  // Setup credentials from various sources
+  if (!setupCredentials()) {
     console.log(
       "[OTEL] No Google Cloud credentials found - tracing disabled. " +
-        "Set GOOGLE_APPLICATION_CREDENTIALS or run on GCP with default credentials."
+        "Set GOOGLE_CREDENTIALS_JSON, GOOGLE_APPLICATION_CREDENTIALS, or run on GCP."
     );
     return false;
   }
