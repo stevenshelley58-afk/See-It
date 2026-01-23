@@ -1,168 +1,153 @@
 import { NextRequest, NextResponse } from "next/server";
 
 type RouteContext = {
-  params: Promise<{ path: string[] }>;
+  params: { path: string[] };
 };
+
+function jsonError(status: number, error: string, message: string): NextResponse {
+  return NextResponse.json({ error, message }, { status });
+}
+
+function isSafePathSegment(segment: string): boolean {
+  if (!segment) return false;
+  if (segment === "." || segment === "..") return false;
+  if (segment.includes("/") || segment.includes("\\")) return false;
+
+  for (let i = 0; i < segment.length; i += 1) {
+    const code = segment.charCodeAt(i);
+    if (code <= 31 || code === 127) return false;
+  }
+
+  return true;
+}
+
+async function proxyToExternalApi(
+  request: NextRequest,
+  context: RouteContext
+): Promise<NextResponse> {
+  const railwayUrl = process.env.RAILWAY_API_URL;
+  const apiToken = process.env.MONITOR_API_TOKEN;
+
+  // Security: Tokens NEVER exposed to client
+  if (!railwayUrl) {
+    return jsonError(500, "config_error", "RAILWAY_API_URL not configured");
+  }
+  if (!apiToken) {
+    return jsonError(500, "config_error", "MONITOR_API_TOKEN not configured");
+  }
+
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(railwayUrl);
+  } catch {
+    return jsonError(500, "config_error", "RAILWAY_API_URL is not a valid URL");
+  }
+  if (baseUrl.protocol !== "https:" && baseUrl.protocol !== "http:") {
+    return jsonError(500, "config_error", "RAILWAY_API_URL must be http(s)");
+  }
+
+  const { path } = context.params;
+  if (!Array.isArray(path) || path.length === 0 || path.length > 20) {
+    return jsonError(400, "bad_request", "Invalid path");
+  }
+  if (!path.every(isSafePathSegment)) {
+    return jsonError(400, "bad_request", "Invalid path");
+  }
+
+  const upstreamPath = path.join("/");
+  if (upstreamPath.length > 2048) {
+    return jsonError(414, "bad_request", "Path too long");
+  }
+
+  // Build upstream URL: ${RAILWAY_API_URL}/external/v1/<path>
+  const upstreamUrl = new URL(`/external/v1/${upstreamPath}`, baseUrl);
+
+  // Copy query params (except _reveal)
+  const revealRequested = request.nextUrl.searchParams.get("_reveal") === "true";
+  request.nextUrl.searchParams.forEach((value, key) => {
+    if (key !== "_reveal") upstreamUrl.searchParams.append(key, value);
+  });
+
+  // Headers - tokens added server-side only
+  const headers: HeadersInit = {
+    Authorization: `Bearer ${apiToken}`,
+    Accept: "application/json",
+  };
+
+  // Add reveal header if requested and configured
+  if (revealRequested && process.env.MONITOR_REVEAL_TOKEN) {
+    headers["X-Monitor-Reveal"] = process.env.MONITOR_REVEAL_TOKEN;
+  }
+
+  const method = request.method.toUpperCase();
+  let body: ArrayBuffer | undefined;
+
+  if (method !== "GET" && method !== "HEAD") {
+    const contentType = request.headers.get("content-type");
+    if (contentType) headers["Content-Type"] = contentType;
+
+    const rawBody = await request.arrayBuffer();
+    if (rawBody.byteLength > 0) body = rawBody;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  let upstreamResponse: Response;
+  try {
+    upstreamResponse = await fetch(upstreamUrl.toString(), {
+      method,
+      headers,
+      body,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const responseHeaders = new Headers();
+  const upstreamContentType = upstreamResponse.headers.get("content-type");
+  if (upstreamContentType) responseHeaders.set("content-type", upstreamContentType);
+  responseHeaders.set("cache-control", "no-store");
+
+  return new NextResponse(upstreamResponse.body, {
+    status: upstreamResponse.status,
+    headers: responseHeaders,
+  });
+}
+
+function proxyError(error: unknown): NextResponse {
+  console.error("Proxy error:", error);
+
+  // Static message to avoid leaking internal details
+  const message =
+    error instanceof Error && error.name === "AbortError"
+      ? "Upstream request timed out"
+      : "Failed to reach Railway API";
+
+  return jsonError(502, "proxy_error", message);
+}
 
 export async function GET(
   request: NextRequest,
   context: RouteContext
 ): Promise<NextResponse> {
-  const railwayUrl = process.env.RAILWAY_API_URL;
-  const apiToken = process.env.MONITOR_API_TOKEN;
-
-  // Validate environment configuration
-  if (!railwayUrl) {
-    return NextResponse.json(
-      { error: "config_error", message: "RAILWAY_API_URL not configured" },
-      { status: 500 }
-    );
-  }
-
-  if (!apiToken) {
-    return NextResponse.json(
-      { error: "config_error", message: "MONITOR_API_TOKEN not configured" },
-      { status: 500 }
-    );
-  }
-
   try {
-    // Build upstream URL: ${RAILWAY_API_URL}/external/v1/<path>
-    const { path } = await context.params;
-    const pathSegments = path.join("/");
-    const upstreamUrl = new URL(`/external/v1/${pathSegments}`, railwayUrl);
-
-    // Copy query params from request (except _reveal)
-    const revealRequested =
-      request.nextUrl.searchParams.get("_reveal") === "true";
-    request.nextUrl.searchParams.forEach((value, key) => {
-      if (key !== "_reveal") {
-        upstreamUrl.searchParams.set(key, value);
-      }
-    });
-
-    // Build headers - tokens added server-side only
-    const headers: HeadersInit = {
-      Authorization: `Bearer ${apiToken}`,
-      Accept: "application/json",
-    };
-
-    // Add reveal header if requested and configured
-    if (revealRequested && process.env.MONITOR_REVEAL_TOKEN) {
-      headers["X-Monitor-Reveal"] = process.env.MONITOR_REVEAL_TOKEN;
-    }
-
-    // Proxy request to upstream
-    const upstreamResponse = await fetch(upstreamUrl.toString(), {
-      method: "GET",
-      headers,
-    });
-
-    // Parse response body
-    let body: unknown;
-    const contentType = upstreamResponse.headers.get("content-type");
-    if (contentType?.includes("application/json")) {
-      body = await upstreamResponse.json();
-    } else {
-      body = await upstreamResponse.text();
-    }
-
-    // Return upstream response with same status
-    return NextResponse.json(body, {
-      status: upstreamResponse.status,
-      headers: {
-        "Cache-Control": "no-store",
-      },
-    });
+    return await proxyToExternalApi(request, context);
   } catch (error) {
-    console.error("Proxy error:", error);
-
-    // Return 502 Bad Gateway on proxy failure
-    return NextResponse.json(
-      {
-        error: "proxy_error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to proxy request to upstream API",
-      },
-      { status: 502 }
-    );
+    return proxyError(error);
   }
 }
 
-// Support POST requests for future mutations
 export async function POST(
   request: NextRequest,
   context: RouteContext
 ): Promise<NextResponse> {
-  const railwayUrl = process.env.RAILWAY_API_URL;
-  const apiToken = process.env.MONITOR_API_TOKEN;
-
-  if (!railwayUrl || !apiToken) {
-    return NextResponse.json(
-      { error: "config_error", message: "API configuration missing" },
-      { status: 500 }
-    );
-  }
-
   try {
-    const { path } = await context.params;
-    const pathSegments = path.join("/");
-    const upstreamUrl = new URL(`/external/v1/${pathSegments}`, railwayUrl);
-
-    // Copy query params
-    request.nextUrl.searchParams.forEach((value, key) => {
-      if (key !== "_reveal") {
-        upstreamUrl.searchParams.set(key, value);
-      }
-    });
-
-    const headers: HeadersInit = {
-      Authorization: `Bearer ${apiToken}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    };
-
-    const revealRequested =
-      request.nextUrl.searchParams.get("_reveal") === "true";
-    if (revealRequested && process.env.MONITOR_REVEAL_TOKEN) {
-      headers["X-Monitor-Reveal"] = process.env.MONITOR_REVEAL_TOKEN;
-    }
-
-    const body = await request.text();
-
-    const upstreamResponse = await fetch(upstreamUrl.toString(), {
-      method: "POST",
-      headers,
-      body: body || undefined,
-    });
-
-    let responseBody: unknown;
-    const contentType = upstreamResponse.headers.get("content-type");
-    if (contentType?.includes("application/json")) {
-      responseBody = await upstreamResponse.json();
-    } else {
-      responseBody = await upstreamResponse.text();
-    }
-
-    return NextResponse.json(responseBody, {
-      status: upstreamResponse.status,
-      headers: {
-        "Cache-Control": "no-store",
-      },
-    });
+    return await proxyToExternalApi(request, context);
   } catch (error) {
-    console.error("Proxy error:", error);
-    return NextResponse.json(
-      {
-        error: "proxy_error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to proxy request to upstream API",
-      },
-      { status: 502 }
-    );
+    return proxyError(error);
   }
 }
+
