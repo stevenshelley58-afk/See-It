@@ -77,14 +77,11 @@ export async function GET(
   } catch (error) {
     console.error("Proxy error:", error);
 
-    // Return 502 Bad Gateway on proxy failure
+    // Return 502 Bad Gateway on proxy failure - static message to avoid leaking internal details
     return NextResponse.json(
       {
         error: "proxy_error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to proxy request to upstream API",
+        message: "Failed to reach Railway API",
       },
       { status: 502 }
     );
@@ -154,13 +151,11 @@ export async function POST(
     });
   } catch (error) {
     console.error("Proxy error:", error);
+    // Static message to avoid leaking internal details
     return NextResponse.json(
       {
         error: "proxy_error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to proxy request to upstream API",
+        message: "Failed to reach Railway API",
       },
       { status: 502 }
     );
