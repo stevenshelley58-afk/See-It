@@ -11,11 +11,9 @@
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
 import { Resource } from "@opentelemetry/resources";
-import {
-  ATTR_SERVICE_NAME,
-  ATTR_SERVICE_VERSION,
-  ATTR_DEPLOYMENT_ENVIRONMENT,
-} from "@opentelemetry/semantic-conventions";
+// semantic-conventions is CommonJS, must use default import
+import semconv from "@opentelemetry/semantic-conventions";
+const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, ATTR_DEPLOYMENT_ENVIRONMENT } = semconv;
 import { PrismaInstrumentation } from "@prisma/instrumentation";
 import { trace, context, SpanStatusCode, type Span } from "@opentelemetry/api";
 import * as grpc from "@grpc/grpc-js";
