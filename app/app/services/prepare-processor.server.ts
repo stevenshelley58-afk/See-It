@@ -6,6 +6,7 @@ import { incrementQuota } from "../quota.server";
 import { emitPrepEvent } from "./prep-events.server";
 import { extractStructuredFields, generateProductDescription } from "./description-writer.server";
 import { GoogleGenAI } from "@google/genai";
+import { Prisma } from "@prisma/client";
 import { getSeeItNowAllowedShops, isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 
 // NEW: See It Now 2-LLM pipeline imports
@@ -1446,8 +1447,11 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
             where: {
                 status: "live",
                 ...(Array.isArray(allowedShopIds) ? { shopId: { in: allowedShopIds } } : {}),
-                // promptPackVersion is set >0 when the v2 pipeline has successfully produced a prompt pack.
-                promptPackVersion: 0,
+                OR: [
+                    { extractedFacts: { equals: Prisma.DbNull } },
+                    { resolvedFacts: { equals: Prisma.DbNull } },
+                    { promptPack: { equals: Prisma.DbNull } },
+                ],
             },
             orderBy: { updatedAt: "asc" },
             select: {
