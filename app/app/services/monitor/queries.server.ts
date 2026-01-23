@@ -1073,7 +1073,7 @@ export async function getShopDetailExternal(
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const failedVariants = await prisma.variantResult.findMany({
     where: {
-      run: { shopId },
+      renderRun: { shopId },
       status: "error",
       createdAt: { gte: oneDayAgo },
       errorMessage: { not: null },
