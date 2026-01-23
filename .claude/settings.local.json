@@ -38,7 +38,11 @@
       "Bash(shopify app:*)",
       "Bash(claude mcp add:*)",
       "Bash(npx:*)",
-      "Bash(claude mcp list:*)"
+      "Bash(claude mcp list:*)",
+      "mcp__claude_ai_Vercel__list_teams",
+      "mcp__claude_ai_Vercel__list_projects",
+      "mcp__claude_ai_Vercel__list_deployments",
+      "mcp__claude_ai_Vercel__get_project"
     ],
     "deny": [],
     "ask": []
