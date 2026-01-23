@@ -13,7 +13,10 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
 import { Resource } from "@opentelemetry/resources";
 // semantic-conventions is CommonJS, must use default import
 import semconv from "@opentelemetry/semantic-conventions";
-const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, ATTR_DEPLOYMENT_ENVIRONMENT } = semconv;
+const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } = semconv as any;
+const ATTR_DEPLOYMENT_ENVIRONMENT_NAME: string =
+  (semconv as any).ATTR_DEPLOYMENT_ENVIRONMENT_NAME ||
+  "deployment.environment.name";
 // prisma/instrumentation is also CommonJS
 import prismaInstr from "@prisma/instrumentation";
 const { PrismaInstrumentation } = prismaInstr;
@@ -117,7 +120,7 @@ export function initTracing(): boolean {
     const resource = new Resource({
       [ATTR_SERVICE_NAME]: SERVICE_NAME,
       [ATTR_SERVICE_VERSION]: SERVICE_VERSION,
-      [ATTR_DEPLOYMENT_ENVIRONMENT]: ENVIRONMENT,
+      [ATTR_DEPLOYMENT_ENVIRONMENT_NAME]: ENVIRONMENT,
     });
 
     // Initialize the SDK with Prisma instrumentation
