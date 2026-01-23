@@ -546,7 +546,7 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
                     let extractedFacts = null;
                     try {
                         const extractionInput = {
-                            title: shopifyProduct?.title || asset.productTitle || "",
+                            title: shopifyProduct?.title || asset.productTitle || `Product ${asset.productId}`,
                             description: combinedDescription || "",
                             productType: shopifyProduct?.productType || asset.productType || null,
                             vendor: shopifyProduct?.vendor || null,

@@ -429,7 +429,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       const extractionInput: ExtractionInput = {
-        title: shopifyProduct?.title || productAsset.productTitle || "",
+        title:
+          shopifyProduct?.title ||
+          productAsset.productTitle ||
+          `Product ${product_id}`,
         description: combinedDescription || "",
         productType: shopifyProduct?.productType || productAsset.productType || null,
         vendor: shopifyProduct?.vendor || null,
