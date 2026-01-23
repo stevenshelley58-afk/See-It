@@ -44,7 +44,7 @@ Test the image processing pipeline with fixtures:
 
 2. Run tests:
 ```typescript
-import { runAllPipelineTests } from "./pipeline/imagePipeline.test";
+import { runAllPipelineTests } from "./pipeline/imagePipeline.harness";
 const results = await runAllPipelineTests();
 ```
 
@@ -53,7 +53,7 @@ const results = await runAllPipelineTests();
 Test the prepare route with various scenarios:
 
 ```typescript
-import { runAllPrepareRouteTests } from "./integration/prepareRoute.test";
+import { runAllPrepareRouteTests } from "./integration/prepareRoute.harness";
 const results = await runAllPrepareRouteTests(
     "test-shop-id",
     "test-product-id",
@@ -69,7 +69,7 @@ To run manually:
 
 ```bash
 cd app
-node -r ts-node/register app/tests/pipeline/imagePipeline.test.ts
+node -r ts-node/register app/tests/pipeline/imagePipeline.harness.ts
 ```
 
 ## Notes

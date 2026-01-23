@@ -9,7 +9,7 @@
  */
 
 import { getGcsClient } from "../utils/gcs-client.server";
-import { indexExistingArtifact, ArtifactType, RetentionClass } from "./telemetry";
+import { storeArtifact, ArtifactType, RetentionClass } from "./telemetry";
 
 const SESSION_BUCKET = process.env.GCS_SESSION_BUCKET || 'see-it-sessions';
 
@@ -235,15 +235,14 @@ async function doLogSeeItNowEvent(
   // This makes session logs visible in the monitor UI
   if (data.shopId && eventType === 'session_ended') {
     try {
-      const gcsKey = `gs://${SESSION_BUCKET}/${basePath}/session.json`;
-      await indexExistingArtifact({
+      // Store a copy in the main monitor bucket so MonitorArtifact URLs work
+      await storeArtifact({
         shopId: data.shopId,
         requestId: data.requestId || data.sessionId,
         runId: data.runId,
         type: ArtifactType.SESSION_LOG,
-        existingGcsKey: gcsKey,
+        buffer: Buffer.from(sessionContent),
         contentType: 'application/json',
-        byteSize: Buffer.byteLength(sessionContent),
         retentionClass: RetentionClass.STANDARD,
         meta: {
           sessionId: data.sessionId,

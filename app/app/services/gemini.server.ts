@@ -167,7 +167,8 @@ const storage = getGcsClient();
 async function downloadToBuffer(
     url: string,
     logContext: ReturnType<typeof createLogContext>,
-    maxDimension: number = 2048
+    maxDimension: number = 2048,
+    format: 'png' | 'jpeg' = 'png'
 ): Promise<Buffer> {
     // Validate URL to prevent SSRF attacks
     // Allow both Shopify CDN (product images) and GCS (processed/room images)
@@ -183,7 +184,7 @@ async function downloadToBuffer(
     }
 
     logger.info(
-        { ...logContext, stage: "download" },
+        { ...logContext, stage: "download", format },
         `Downloading image from trusted source: ${url.substring(0, 80)}...`
     );
 
@@ -208,21 +209,22 @@ async function downloadToBuffer(
         // Resize pipeline: Buffer -> Sharp (Resize) -> Buffer
         // IMPORTANT: .rotate() with no args auto-orients based on EXIF and removes the tag
         // This fixes rotation issues with phone photos that have EXIF orientation metadata
-        const buffer = await sharp(inputBuffer)
+        const pipeline = sharp(inputBuffer)
             .rotate() // Auto-orient based on EXIF, then strip EXIF orientation tag
             .resize({
                 width: maxDimension,
                 height: maxDimension,
                 fit: 'inside',
                 withoutEnlargement: true
-            })
-            // Convert to PNG by default to standardize internal processing
-            .png({ force: true })
-            .toBuffer();
+            });
+
+        const buffer = format === 'png'
+            ? await pipeline.png({ force: true }).toBuffer()
+            : await pipeline.jpeg({ quality: 90, force: true }).toBuffer();
 
         logger.info(
             { ...logContext, stage: "download-optimize" },
-            `Downloaded & Optimized: ${buffer.length} bytes (max ${maxDimension}px)`
+            `Downloaded & Optimized (${format}): ${buffer.length} bytes (max ${maxDimension}px)`
         );
 
         return buffer;
@@ -307,30 +309,34 @@ async function callGemini(
         // Check if it's a LabeledImage (has label and buffer properties)
         if (typeof item === 'object' && 'label' in item && 'buffer' in item) {
             const labeled = item as LabeledImage;
-            // Get image metadata for logging
+            // Get image metadata for logging and correct MIME detection
             const imgMeta = await sharp(labeled.buffer).metadata();
+            const mimeType = imgMeta.format === 'jpeg' ? 'image/jpeg' : `image/${imgMeta.format || 'png'}`;
+
             logger.info(
                 { ...context, stage: "gemini-image" },
-                `${labeled.label}: ${imgMeta.width}×${imgMeta.height}px, ${labeled.buffer.length} bytes (${(labeled.buffer.length / 1024).toFixed(1)}KB)`
+                `${labeled.label}: ${imgMeta.width}×${imgMeta.height}px, ${labeled.buffer.length} bytes (${(labeled.buffer.length / 1024).toFixed(1)}KB), mime: ${mimeType}`
             );
             // Add label text before the image
             parts.push({ text: `${labeled.label}:` });
             parts.push({
                 inlineData: {
-                    mimeType: 'image/png',
+                    mimeType: mimeType,
                     data: labeled.buffer.toString('base64')
                 }
             });
         } else if (Buffer.isBuffer(item)) {
             // Legacy: plain Buffer without label
             const imgMeta = await sharp(item).metadata();
+            const mimeType = imgMeta.format === 'jpeg' ? 'image/jpeg' : `image/${imgMeta.format || 'png'}`;
+
             logger.info(
                 { ...context, stage: "gemini-image" },
-                `Image: ${imgMeta.width}×${imgMeta.height}px, ${item.length} bytes (${(item.length / 1024).toFixed(1)}KB)`
+                `Image: ${imgMeta.width}×${imgMeta.height}px, ${item.length} bytes (${(item.length / 1024).toFixed(1)}KB), mime: ${mimeType}`
             );
             parts.push({
                 inlineData: {
-                    mimeType: 'image/png',
+                    mimeType: mimeType,
                     data: item.toString('base64')
                 }
             });
@@ -809,9 +815,10 @@ export async function compositeScene(
 
     try {
         // STEP 1: Download both images in parallel
+        // Product cutout MUST be PNG, Room photograph should be JPEG for speed
         const [productResult, roomResult] = await Promise.all([
-            downloadToBuffer(preparedProductImageUrl, logContext),
-            downloadToBuffer(roomImageUrl, logContext)
+            downloadToBuffer(preparedProductImageUrl, logContext, 2048, 'png'),
+            downloadToBuffer(roomImageUrl, logContext, 2048, 'jpeg')
         ]);
         productBuffer = productResult;
         roomBuffer = roomResult;

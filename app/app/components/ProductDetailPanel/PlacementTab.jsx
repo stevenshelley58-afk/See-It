@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '../ui';
+import { buildPlacementTabMetadata } from './placementTabMetadata';
 
 
 /**
@@ -556,29 +557,20 @@ export function PlacementTab({ product, asset, onChange }) {
     useEffect(() => {
         if (onChange) {
             // Pass renderInstructions (placement prompt), placementFields, placement rules config, See It Now prompt, and enabled
-            onChange({
-                renderInstructions: description || null,
-                renderInstructionsSeeItNow: seeItNowPrompt,
-                renderInstructionsSeeItNowDirty: seeItNowDirty,
-                placementFields: {
-                    surface: fields.surface,
-                    material: fields.material,
-                    orientation: fields.orientation,
-                    shadow: fields.shadow,
-                    dimensions: fields.dimensions || { height: null, width: null },
-                    additionalNotes: fields.additionalNotes || '',
-                },
-                placementRulesConfig: {
-                    sceneRole: placementRulesFields.sceneRole || null,
-                    replacementRule: placementRulesFields.replacementRule || null,
-                    allowSpaceCreation: placementRulesFields.allowSpaceCreation !== undefined ? placementRulesFields.allowSpaceCreation : null,
-                },
-                merchantOverrides: merchantOverrides,
-                merchantOverridesDirty: merchantOverridesDirty,
-                dirty: !!merchantOverridesDirty || !!seeItNowDirty || !!hasEdited,
-            });
+            onChange(buildPlacementTabMetadata({
+                description,
+                seeItNowPrompt,
+                seeItNowDirty,
+                fields,
+                placementRulesFields,
+                merchantOverrides,
+                merchantOverridesDirty,
+                hasEdited,
+                enabled,
+                originalEnabled: asset?.enabled || false,
+            }));
         }
-    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, merchantOverrides, merchantOverridesDirty, hasEdited, onChange]);
+    }, [description, seeItNowPrompt, seeItNowDirty, fields, placementRulesFields, enabled, asset?.enabled, merchantOverrides, merchantOverridesDirty, hasEdited, onChange]);
 
     // Update a field
     const updateField = useCallback((field, value) => {

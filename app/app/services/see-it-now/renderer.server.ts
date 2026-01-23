@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import sharp from "sharp";
 import crypto from "crypto";
 import { logger, createLogContext } from "~/utils/logger.server";
-import { GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
+import { GEMINI_IMAGE_MODEL_FAST, GEMINI_IMAGE_MODEL_PRO } from "~/config/ai-models.config";
 import { StorageService } from "~/services/storage.server";
 import { assembleFinalPrompt, hashPrompt } from "./prompt-assembler.server";
 import {
@@ -12,12 +12,18 @@ import {
   completeRun,
 } from "~/services/telemetry";
 import type {
+  ImageMeta,
   RenderInput,
   RenderRunResult,
   VariantRenderResult,
 } from "./types";
 
 const VARIANT_TIMEOUT_MS = 45000; // 45 seconds per variant
+
+// Env-based toggle for model selection (allows PRO for high-quality testing)
+const RENDER_MODEL = process.env.SEE_IT_NOW_RENDER_MODEL === "PRO" 
+  ? GEMINI_IMAGE_MODEL_PRO 
+  : GEMINI_IMAGE_MODEL_FAST;
 
 /**
  * Hash a buffer using SHA256 (first 16 chars)
@@ -32,8 +38,8 @@ function hashBuffer(buffer: Buffer): string {
 async function renderSingleVariant(
   variantId: string,
   finalPrompt: string,
-  productImage: { buffer: Buffer; geminiUri?: string },
-  roomImage: { buffer: Buffer; geminiUri?: string },
+  productImage: { buffer: Buffer; meta: ImageMeta; geminiUri?: string },
+  roomImage: { buffer: Buffer; meta: ImageMeta; geminiUri?: string },
   logContext: ReturnType<typeof createLogContext>
 ): Promise<VariantRenderResult> {
   const startTime = Date.now();
@@ -51,18 +57,21 @@ async function renderSingleVariant(
   // customer_room_image MUST be last image for aspect ratio adoption
   const parts: any[] = [];
 
+  const productMime = `image/${productImage.meta.format === "jpeg" ? "jpeg" : productImage.meta.format}`;
+  const roomMime = `image/${roomImage.meta.format === "jpeg" ? "jpeg" : roomImage.meta.format}`;
+
   // 1. Product image
   if (productImage.geminiUri) {
     parts.push({
       fileData: {
-        mimeType: "image/png",
+        mimeType: productMime,
         fileUri: productImage.geminiUri,
       },
     });
   } else {
     parts.push({
       inlineData: {
-        mimeType: "image/png",
+        mimeType: productMime,
         data: productImage.buffer.toString("base64"),
       },
     });
@@ -72,14 +81,14 @@ async function renderSingleVariant(
   if (roomImage.geminiUri) {
     parts.push({
       fileData: {
-        mimeType: "image/jpeg",
+        mimeType: roomMime,
         fileUri: roomImage.geminiUri,
       },
     });
   } else {
     parts.push({
       inlineData: {
-        mimeType: "image/jpeg",
+        mimeType: roomMime,
         data: roomImage.buffer.toString("base64"),
       },
     });
@@ -96,7 +105,7 @@ async function renderSingleVariant(
   try {
     const result = await Promise.race([
       client.models.generateContent({
-        model: GEMINI_IMAGE_MODEL_FAST,
+        model: RENDER_MODEL,
         contents: [{ role: "user", parts }],
         config: { responseModalities: ["TEXT", "IMAGE"] as any },
       }),
@@ -202,7 +211,7 @@ export async function renderAllVariants(
     productAssetId: input.productAssetId,
     roomSessionId: input.roomSessionId,
     promptPackVersion: input.promptPackVersion,
-    model: GEMINI_IMAGE_MODEL_FAST,
+    model: RENDER_MODEL,
     productImageHash: input.productImage.hash,
     productImageMeta: input.productImage.meta,
     roomImageHash: input.roomImage.hash,

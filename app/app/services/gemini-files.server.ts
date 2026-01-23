@@ -37,6 +37,61 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 /**
+ * Validate magic bytes match the expected MIME type
+ */
+export function validateMagicBytes(buffer: Buffer, mimeType: string) {
+    if (!buffer || buffer.length < 2) {
+        throw new Error(`Magic bytes mismatch: buffer too small for ${mimeType}`);
+    }
+
+    if (mimeType === "image/png") {
+        // PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
+        const header = buffer.slice(0, 8).toString("hex").toUpperCase();
+        if (header !== "89504E470D0A1A0A") {
+            throw new Error(`Magic bytes mismatch: expected PNG header, got ${header}`);
+        }
+        return;
+    }
+
+    if (mimeType === "image/jpeg") {
+        // JPEG magic bytes: FF D8 FF
+        const header = buffer.slice(0, 3).toString("hex").toUpperCase();
+        if (header !== "FFD8FF") {
+            throw new Error(`Magic bytes mismatch: expected JPEG header, got ${header}`);
+        }
+        return;
+    }
+
+    if (mimeType === "image/webp") {
+        // WebP: "RIFF" .... "WEBP"
+        if (buffer.length < 12) {
+            throw new Error(`Magic bytes mismatch: buffer too small for WEBP (${buffer.length} bytes)`);
+        }
+        const riff = buffer.slice(0, 4).toString("ascii");
+        const webp = buffer.slice(8, 12).toString("ascii");
+        if (riff !== "RIFF" || webp !== "WEBP") {
+            const header = buffer.slice(0, 12).toString("hex").toUpperCase();
+            throw new Error(`Magic bytes mismatch: expected WEBP (RIFF....WEBP), got ${header}`);
+        }
+        return;
+    }
+
+    if (mimeType === "image/bmp") {
+        // BMP: "BM"
+        const bm = buffer.slice(0, 2).toString("ascii");
+        if (bm !== "BM") {
+            const header = buffer.slice(0, 8).toString("hex").toUpperCase();
+            throw new Error(`Magic bytes mismatch: expected BMP header (BM), got ${header}`);
+        }
+        return;
+    }
+
+    throw new Error(
+        `Unsupported image MIME type for magic-bytes validation: ${mimeType}`
+    );
+}
+
+/**
  * Upload a buffer to Gemini Files API
  * 
  * @param buffer - Image data to upload
@@ -51,13 +106,16 @@ export async function uploadToGeminiFiles(
     displayName: string,
     requestId: string = "gemini-upload"
 ): Promise<GeminiFileInfo> {
-    const logContext = createLogContext("render", requestId, "upload", { displayName });
+    const logContext = createLogContext("render", requestId, "upload", { displayName, mimeType });
 
     logger.info(logContext, `Uploading to Gemini Files API: ${displayName} (${buffer.length} bytes)`);
 
     const startTime = Date.now();
 
     try {
+        // Hard guard: validate bytes match MIME
+        validateMagicBytes(buffer, mimeType);
+
         const client = getGeminiClient();
 
         // Convert Buffer to Blob for upload

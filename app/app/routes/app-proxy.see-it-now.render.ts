@@ -16,6 +16,10 @@ import crypto from "crypto";
 import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 import { emit, EventSource, EventType } from "~/services/telemetry";
+import {
+  getOrRefreshGeminiFile,
+  validateMagicBytes,
+} from "../services/gemini-files.server";
 
 // NEW: Import from 2-LLM pipeline
 import {
@@ -56,12 +60,13 @@ function getCorsHeaders(shopDomain: string | null): Record<string, string> {
 async function downloadToBuffer(
   url: string,
   logContext: ReturnType<typeof createLogContext>,
-  maxDimension: number = 2048
+  maxDimension: number = 2048,
+  format: "png" | "jpeg" = "png"
 ): Promise<{ buffer: Buffer; meta: ImageMeta }> {
   validateTrustedUrl(url, "image URL");
 
   logger.info(
-    { ...logContext, stage: "download" },
+    { ...logContext, stage: "download", format },
     `[See It Now] Downloading image: ${url.substring(0, 80)}...`
   );
 
@@ -75,34 +80,63 @@ async function downloadToBuffer(
   const arrayBuffer = await response.arrayBuffer();
   const inputBuffer = Buffer.from(arrayBuffer);
 
-  // Get metadata before resize
-  const metadata = await sharp(inputBuffer).metadata();
-
   // Resize and normalize
-  const buffer = await sharp(inputBuffer)
-    .rotate()
+  const pipeline = sharp(inputBuffer)
+    .rotate() // Auto-orient based on EXIF
     .resize({
       width: maxDimension,
       height: maxDimension,
       fit: "inside",
       withoutEnlargement: true,
-    })
-    .png({ force: true })
-    .toBuffer();
+    });
 
+  const { data: buffer, info } =
+    format === "png"
+      ? await pipeline.png({ force: true }).toBuffer({ resolveWithObject: true })
+      : await pipeline
+          .jpeg({ quality: 90, force: true })
+          .toBuffer({ resolveWithObject: true });
+
+  // IMPORTANT: Use final encoded dimensions (post-resize) for meta
   const meta: ImageMeta = {
-    width: metadata.width || 0,
-    height: metadata.height || 0,
+    width: info.width || 0,
+    height: info.height || 0,
     bytes: buffer.length,
-    format: "png",
+    format: format,
   };
 
   logger.info(
     { ...logContext, stage: "download" },
-    `[See It Now] Downloaded & Optimized: ${buffer.length} bytes`
+    `[See It Now] Downloaded & Optimized (${format}): ${buffer.length} bytes`
   );
 
   return { buffer, meta };
+}
+
+async function downloadRawToBuffer(
+  url: string,
+  logContext: ReturnType<typeof createLogContext>
+): Promise<Buffer> {
+  validateTrustedUrl(url, "image URL");
+
+  logger.info(
+    { ...logContext, stage: "download-raw" },
+    `[See It Now] Downloading raw image: ${url.substring(0, 80)}...`
+  );
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (buffer.length === 0) {
+    throw new Error("Downloaded image was empty");
+  }
+  return buffer;
 }
 
 /**
@@ -487,20 +521,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // Get room image URL
+  // FAST PATH: Prefer canonicalRoomImageKey (already rotated/resized JPEG from confirm route)
   let roomImageUrl: string;
-  if (roomSession.cleanedRoomImageKey) {
+  let roomImageSource: "canonical" | "cleaned" | "original" | "url" = "url";
+  if (roomSession.canonicalRoomImageKey) {
+    roomImageUrl = await StorageService.getSignedReadUrl(
+      roomSession.canonicalRoomImageKey,
+      60 * 60 * 1000
+    );
+    roomImageSource = "canonical";
+  } else if (roomSession.cleanedRoomImageKey) {
     roomImageUrl = await StorageService.getSignedReadUrl(
       roomSession.cleanedRoomImageKey,
       60 * 60 * 1000
     );
+    roomImageSource = "cleaned";
   } else if (roomSession.originalRoomImageKey) {
     roomImageUrl = await StorageService.getSignedReadUrl(
       roomSession.originalRoomImageKey,
       60 * 60 * 1000
     );
+    roomImageSource = "original";
   } else if (roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl) {
     roomImageUrl =
       roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl!;
+    roomImageSource = "url";
   } else {
     return json(
       { error: "no_room_image", message: "No room image available" },
@@ -539,21 +584,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     // Download both images in parallel
-    // We still download to buffer to calculate hash/meta for RenderRun provenance
-    // and to fallback if Gemini cache is missed.
+    // Product is forced to PNG (cutout), Room is JPEG (photograph)
     const [productImageData, roomImageData] = await Promise.all([
-      downloadToBuffer(productImageUrl, shopLogContext),
-      downloadToBuffer(roomImageUrl, shopLogContext),
+      downloadToBuffer(productImageUrl, shopLogContext, 2048, "png"),
+      roomImageSource === "canonical"
+        ? (async () => {
+            const buffer = await downloadRawToBuffer(roomImageUrl, shopLogContext);
+            return {
+              buffer,
+              meta: {
+                width: roomSession.canonicalRoomWidth || 0,
+                height: roomSession.canonicalRoomHeight || 0,
+                bytes: buffer.length,
+                format: "jpeg",
+              },
+            };
+          })()
+        : downloadToBuffer(roomImageUrl, shopLogContext, 2048, "jpeg"),
     ]);
 
-    // Optimize: Upload/Reuse Gemini Files
-    const productFilename = `product-${productAsset.id}-${Date.now()}.png`;
-    const roomFilename = `room-${roomSession.id}-${Date.now()}.jpg`;
+    // Hard guard: magic bytes validation (prevents MIME/bytes mismatch corruption)
+    validateMagicBytes(productImageData.buffer, "image/png");
+    validateMagicBytes(roomImageData.buffer, "image/jpeg");
 
-    // Import helper dynamically or assume updated imports at top
-    // Note: ensure 'navigate to' or 'add import' for getOrRefreshGeminiFile if not present.
-    // I will assume I added the import in the top block modification or will enable it here.
-    const { getOrRefreshGeminiFile } = await import("../services/gemini-files.server");
+    // Optimize: Upload/Reuse Gemini Files
+    const productFilename = `product-${productAsset.id}.png`;
+    const roomFilename = `room-${roomSession.id}.jpg`;
 
     const [productGeminiFile, roomGeminiFile] = await Promise.all([
       getOrRefreshGeminiFile(

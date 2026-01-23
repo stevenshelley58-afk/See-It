@@ -140,7 +140,7 @@ async function pruneExpiredArtifacts(): Promise<{
       }
 
       // Delete the artifact records
-      const ids = expiredArtifacts.map((a) => a.id);
+      const ids = expiredArtifacts.map((a: { id: string }) => a.id);
       const result = await prisma.monitorArtifact.deleteMany({
         where: { id: { in: ids } },
       });
