@@ -1,3 +1,6 @@
+// OpenTelemetry MUST be imported first to instrument all subsequent imports
+import "./otel.server";
+
 import { PassThrough } from "stream";
 import { renderToPipeableStream } from "react-dom/server";
 import { RemixServer } from "@remix-run/react";

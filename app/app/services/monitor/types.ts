@@ -143,3 +143,14 @@ export interface HealthStatsV1 {
   storageErrors24h: number;
   telemetryDropped24h: number;
 }
+
+// =============================================================================
+// Debug Bundle
+// =============================================================================
+
+export interface DebugBundleV1 {
+  exportedAt: string;
+  run: RunDetailV1;
+  events: EventV1[];
+  artifacts: ArtifactV1[];
+}

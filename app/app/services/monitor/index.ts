@@ -10,6 +10,7 @@ export {
   getRunEvents,
   getRunArtifacts,
   getHealthStats,
+  exportDebugBundle,
 } from "./queries.server";
 
 export type {
@@ -24,4 +25,5 @@ export type {
   ArtifactV1,
   ArtifactListResponseV1,
   HealthStatsV1,
+  DebugBundleV1,
 } from "./types";

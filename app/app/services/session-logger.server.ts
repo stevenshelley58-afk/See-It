@@ -1,11 +1,15 @@
 /**
  * Session Logger - Fire-and-forget logging for See It sessions
- * 
+ *
  * Logs session data to GCS bucket 'see-it-sessions' for monitoring.
  * CRITICAL: Never await in calling code - this must not block user flows.
+ *
+ * Integrates with MonitorArtifact when shopId is provided - session logs
+ * are indexed as artifacts for visibility in the monitor UI.
  */
 
 import { getGcsClient } from "../utils/gcs-client.server";
+import { indexExistingArtifact, ArtifactType, RetentionClass } from "./telemetry";
 
 const SESSION_BUCKET = process.env.GCS_SESSION_BUCKET || 'see-it-sessions';
 
@@ -30,6 +34,12 @@ export interface SeeItNowEventData {
   productId?: string;
   productTitle?: string;
   timestamp?: string;
+
+  // Optional telemetry integration fields
+  // When provided, session logs are indexed as MonitorArtifact
+  shopId?: string; // Internal shop ID (not domain)
+  runId?: string; // RenderRun ID for correlation
+  requestId?: string; // Request ID for correlation
   
   // session_started
   device?: {
@@ -215,10 +225,38 @@ async function doLogSeeItNowEvent(
   }
 
   // Save session
-  await sessionFile.save(JSON.stringify(session, null, 2), {
+  const sessionContent = JSON.stringify(session, null, 2);
+  await sessionFile.save(sessionContent, {
     contentType: 'application/json',
     resumable: false,
   });
+
+  // Index session log as MonitorArtifact when shopId is provided
+  // This makes session logs visible in the monitor UI
+  if (data.shopId && eventType === 'session_ended') {
+    try {
+      const gcsKey = `gs://${SESSION_BUCKET}/${basePath}/session.json`;
+      await indexExistingArtifact({
+        shopId: data.shopId,
+        requestId: data.requestId || data.sessionId,
+        runId: data.runId,
+        type: ArtifactType.SESSION_LOG,
+        existingGcsKey: gcsKey,
+        contentType: 'application/json',
+        byteSize: Buffer.byteLength(sessionContent),
+        retentionClass: RetentionClass.STANDARD,
+        meta: {
+          sessionId: data.sessionId,
+          shop: data.shop,
+          status: session.status,
+          eventCount: session.events.length,
+        },
+      });
+    } catch {
+      // Ignore - artifact indexing is secondary
+      console.warn('[SessionLogger] Failed to index session as artifact');
+    }
+  }
 
   // Update shop index (best effort)
   try {

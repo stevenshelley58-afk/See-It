@@ -15,6 +15,7 @@ import type {
   EventListResponseV1,
   ArtifactListResponseV1,
   HealthStatsV1,
+  DebugBundleV1,
 } from "./types";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -326,5 +327,29 @@ export async function getHealthStats(shopId: string): Promise<HealthStatsV1> {
     providerErrors24h: providerErrors,
     storageErrors24h: storageErrors,
     telemetryDropped24h: telemetryDropped24h,
+  };
+}
+
+/**
+ * Export debug bundle - assembles all run data for ZIP export.
+ */
+export async function exportDebugBundle(
+  runId: string,
+  shopId: string
+): Promise<DebugBundleV1 | null> {
+  // Fetch all data in parallel
+  const [run, eventsResult, artifactsResult] = await Promise.all([
+    getRunDetail(runId, shopId),
+    getRunEvents(runId, shopId),
+    getRunArtifacts(runId, shopId),
+  ]);
+
+  if (!run) return null;
+
+  return {
+    exportedAt: new Date().toISOString(),
+    run,
+    events: eventsResult.events,
+    artifacts: artifactsResult.artifacts,
   };
 }

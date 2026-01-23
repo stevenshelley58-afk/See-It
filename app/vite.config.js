@@ -78,6 +78,15 @@ export default defineConfig({
         // Database client (server-only)
         "@prisma/client",
         ".prisma/client",
+        // OpenTelemetry (server-only, includes native gRPC bindings)
+        "@opentelemetry/sdk-node",
+        "@opentelemetry/exporter-trace-otlp-grpc",
+        "@opentelemetry/resources",
+        "@opentelemetry/sdk-trace-node",
+        "@opentelemetry/semantic-conventions",
+        "@opentelemetry/api",
+        "@prisma/instrumentation",
+        "@grpc/grpc-js",
       ],
     },
   },
