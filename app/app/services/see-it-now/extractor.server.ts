@@ -10,7 +10,7 @@ import type { ProductPlacementFacts, ExtractionInput } from "./types";
 // Use an env override so we can change models without a redeploy.
 // Default stays on a widely-available Gemini API model.
 const EXTRACTION_MODEL =
-  process.env.SEE_IT_NOW_EXTRACTOR_MODEL || "gemini-2.0-flash";
+  process.env.SEE_IT_NOW_EXTRACTOR_MODEL || "gemini-2.5-flash";
 
 export async function extractProductFacts(
   input: ExtractionInput,

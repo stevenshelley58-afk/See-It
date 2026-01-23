@@ -1448,9 +1448,9 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
                 status: "live",
                 ...(Array.isArray(allowedShopIds) ? { shopId: { in: allowedShopIds } } : {}),
                 OR: [
-                    { extractedFacts: { equals: Prisma.DbNull } },
-                    { resolvedFacts: { equals: Prisma.DbNull } },
-                    { promptPack: { equals: Prisma.DbNull } },
+                    { extractedFacts: { equals: Prisma.AnyNull } },
+                    { resolvedFacts: { equals: Prisma.AnyNull } },
+                    { promptPack: { equals: Prisma.AnyNull } },
                 ],
             },
             orderBy: { updatedAt: "asc" },

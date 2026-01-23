@@ -11,7 +11,7 @@ import type { ProductPlacementFacts, PromptPack } from "./types";
 // Use an env override so we can change models without a redeploy.
 // Default stays on a widely-available Gemini API model.
 const PROMPT_BUILDER_MODEL =
-  process.env.SEE_IT_NOW_PROMPT_BUILDER_MODEL || "gemini-2.0-flash";
+  process.env.SEE_IT_NOW_PROMPT_BUILDER_MODEL || "gemini-2.5-flash";
 
 export async function buildPromptPack(
   resolvedFacts: ProductPlacementFacts,
