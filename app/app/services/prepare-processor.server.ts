@@ -6,6 +6,7 @@ import { incrementQuota } from "../quota.server";
 import { emitPrepEvent } from "./prep-events.server";
 import { extractStructuredFields, generateProductDescription } from "./description-writer.server";
 import { GoogleGenAI } from "@google/genai";
+import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 
 // NEW: See It Now 2-LLM pipeline imports
 import {
@@ -315,7 +316,7 @@ async function fetchShopifyProductForPrompt(
     }
 }
 
-async function processPendingAssets(batchRequestId: string) {
+async function processPendingAssets(batchRequestId: string): Promise<boolean> {
     try {
         // Fetch pending assets that haven't exceeded retry limit
         const pendingAssets = await prisma.productAsset.findMany({
@@ -340,7 +341,7 @@ async function processPendingAssets(batchRequestId: string) {
                 createLogContext("prepare", batchRequestId, "batch-idle", {}),
                 "No pending assets to process"
             );
-            return;
+            return false;
         }
 
         logger.info(
@@ -989,6 +990,8 @@ async function processPendingAssets(batchRequestId: string) {
                 }
             }
         }
+
+        return true;
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
         logger.error(
@@ -998,6 +1001,7 @@ async function processPendingAssets(batchRequestId: string) {
             `Asset processing loop crashed: ${errorMessage}`,
             error
         );
+        return false;
     }
 }
 
@@ -1022,7 +1026,7 @@ function extractGcsKeyFromUrl(signedUrl: string): string | null {
     }
 }
 
-async function processPendingRenderJobs(batchRequestId: string) {
+async function processPendingRenderJobs(batchRequestId: string): Promise<boolean> {
     try {
         // Fetch queued jobs that haven't exceeded retry limit
         const pendingJobs = await prisma.renderJob.findMany({
@@ -1034,6 +1038,10 @@ async function processPendingRenderJobs(batchRequestId: string) {
             orderBy: { createdAt: "asc" },
             include: { roomSession: true }
         });
+
+        if (pendingJobs.length === 0) {
+            return false;
+        }
 
         if (pendingJobs.length > 0) {
             logger.info(
@@ -1394,8 +1402,182 @@ async function processPendingRenderJobs(batchRequestId: string) {
             }
         }
 
+        return true;
     } catch (error) {
         logger.error(createLogContext("prepare", batchRequestId, "job-loop-error", {}), "Error in render job loop", error);
+        return false;
+    }
+}
+
+const SEE_IT_NOW_PIPELINE_BACKFILL_INTERVAL_MS = 20_000;
+let lastSeeItNowPipelineBackfillAt = 0;
+
+/**
+ * Best-effort backfill for See It Now v2 pipeline fields on live assets.
+ *
+ * Why: older live assets can exist without extractedFacts/resolvedFacts/promptPack
+ * (e.g., prepared before v2 shipped). Those assets cause /app-proxy/see-it-now/render
+ * to return 422 "pipeline_not_ready". This keeps the storefront working without
+ * forcing merchants to re-prepare products.
+ */
+async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<boolean> {
+    const now = Date.now();
+    if (now - lastSeeItNowPipelineBackfillAt < SEE_IT_NOW_PIPELINE_BACKFILL_INTERVAL_MS) {
+        return false;
+    }
+
+    // Throttle DB polling even when there is nothing to do.
+    lastSeeItNowPipelineBackfillAt = now;
+
+    try {
+        const candidates = await prisma.productAsset.findMany({
+            where: { status: "live" },
+            orderBy: { updatedAt: "asc" },
+            take: 25,
+            select: {
+                id: true,
+                shopId: true,
+                productId: true,
+                productTitle: true,
+                productType: true,
+                sourceImageUrl: true,
+                preparedImageUrl: true,
+                extractedFacts: true,
+                merchantOverrides: true,
+                resolvedFacts: true,
+                promptPack: true,
+                promptPackVersion: true,
+                shop: {
+                    select: {
+                        shopDomain: true,
+                        accessToken: true,
+                    },
+                },
+            },
+        });
+
+        const asset = candidates.find((a: any) => {
+            const shopDomain = a.shop?.shopDomain;
+            if (!shopDomain || !isSeeItNowAllowedShop(shopDomain)) return false;
+
+            // Missing any pipeline field means v2 render will fail.
+            const missingPipeline =
+                !a.extractedFacts || !a.resolvedFacts || !a.promptPack || !a.promptPackVersion;
+            return missingPipeline;
+        });
+
+        if (!asset) return false;
+
+        const itemRequestId = generateRequestId();
+        const shopDomain = asset.shop?.shopDomain || "(unknown-shop)";
+        const accessToken = asset.shop?.accessToken || null;
+
+        logger.info(
+            createLogContext("prepare", itemRequestId, "pipeline-backfill-start", {
+                assetId: asset.id,
+                shopId: asset.shopId,
+                productId: asset.productId,
+                shopDomain,
+            }),
+            `Backfilling See It Now pipeline for live product ${asset.productId}`
+        );
+
+        const shopifyProduct = accessToken
+            ? await fetchShopifyProductForPrompt(shopDomain, accessToken, asset.productId, itemRequestId)
+            : null;
+
+        const metafieldText = Array.isArray(shopifyProduct?.metafields?.edges)
+            ? shopifyProduct!.metafields!.edges!
+                .map((e) => e?.node?.value)
+                .filter(Boolean)
+                .join(" ")
+            : "";
+
+        const combinedDescription = `${shopifyProduct?.description || ""}\n${shopifyProduct?.descriptionHtml || ""}\n${metafieldText}`.trim();
+
+        const metafieldsRecord: Record<string, string> = {};
+        if (Array.isArray(shopifyProduct?.metafields?.edges)) {
+            for (const edge of shopifyProduct!.metafields!.edges!) {
+                const node = edge?.node;
+                if (node?.namespace && node?.key && node?.value) {
+                    metafieldsRecord[`${node.namespace}.${node.key}`] = node.value;
+                }
+            }
+        }
+
+        // Collect up to 3 unique images (starting with stored URLs).
+        const uniqueImages = new Set<string>();
+        if (asset.sourceImageUrl && asset.sourceImageUrl !== "pending") uniqueImages.add(asset.sourceImageUrl);
+        if (asset.preparedImageUrl && asset.preparedImageUrl !== "pending") uniqueImages.add(asset.preparedImageUrl);
+
+        if (Array.isArray(shopifyProduct?.images?.edges)) {
+            for (const edge of shopifyProduct!.images!.edges!) {
+                const url = edge?.node?.url;
+                if (url) uniqueImages.add(url);
+                if (uniqueImages.size >= 3) break;
+            }
+        }
+
+        const title = shopifyProduct?.title || asset.productTitle || `Product ${asset.productId}`;
+        if (!title || uniqueImages.size === 0) {
+            logger.warn(
+                createLogContext("prepare", itemRequestId, "pipeline-backfill-skip", {
+                    shopDomain,
+                    hasTitle: !!title,
+                    imageCount: uniqueImages.size,
+                }),
+                "Skipping See It Now pipeline backfill: insufficient product data"
+            );
+            return false;
+        }
+
+        const extractionInput = {
+            title,
+            description: combinedDescription || "",
+            productType: shopifyProduct?.productType || asset.productType || null,
+            vendor: shopifyProduct?.vendor || null,
+            tags: (shopifyProduct?.tags || []) as string[],
+            metafields: metafieldsRecord,
+            imageUrls: Array.from(uniqueImages),
+        };
+
+        const needsExtract = !asset.extractedFacts;
+        const extractedFacts = (asset.extractedFacts as any) || await extractProductFacts(extractionInput, itemRequestId);
+        const merchantOverrides = (asset.merchantOverrides as any) || null;
+        const resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
+        const promptPackVersion = await ensurePromptVersion();
+        const promptPack = await buildPromptPack(resolvedFacts, itemRequestId);
+
+        await prisma.productAsset.update({
+            where: { id: asset.id },
+            data: {
+                extractedFacts,
+                resolvedFacts,
+                promptPack,
+                promptPackVersion,
+                ...(needsExtract && { extractedAt: new Date() }),
+                ...(shopifyProduct?.title && { productTitle: shopifyProduct.title }),
+                ...(shopifyProduct?.productType && { productType: shopifyProduct.productType }),
+            },
+        });
+
+        logger.info(
+            createLogContext("prepare", itemRequestId, "pipeline-backfill-complete", {
+                assetId: asset.id,
+                shopDomain,
+                productId: asset.productId,
+                promptPackVersion,
+            }),
+            `Backfilled See It Now pipeline for live product ${asset.productId}`
+        );
+
+        return true;
+    } catch (error) {
+        logger.warn(
+            createLogContext("prepare", batchRequestId, "pipeline-backfill-error", {}),
+            `See It Now pipeline backfill failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+        return false;
     }
 }
 
@@ -1478,8 +1660,13 @@ async function runProcessorCycle() {
         );
     }
 
-    await processPendingAssets(batchRequestId);
-    await processPendingRenderJobs(batchRequestId);
+    const didAssets = await processPendingAssets(batchRequestId);
+    const didJobs = await processPendingRenderJobs(batchRequestId);
+
+    // Only attempt v2 pipeline backfills when the system is otherwise idle.
+    if (!didAssets && !didJobs) {
+        await processMissingSeeItNowPipeline(batchRequestId);
+    }
 
     isProcessing = false;
 }
