@@ -6,7 +6,7 @@ import { incrementQuota } from "../quota.server";
 import { emitPrepEvent } from "./prep-events.server";
 import { extractStructuredFields, generateProductDescription } from "./description-writer.server";
 import { GoogleGenAI } from "@google/genai";
-import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
+import { getSeeItNowAllowedShops, isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 
 // NEW: See It Now 2-LLM pipeline imports
 import {
@@ -1430,8 +1430,23 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
     lastSeeItNowPipelineBackfillAt = now;
 
     try {
+        const allowlist = getSeeItNowAllowedShops();
+        const allowedShopIds = allowlist.allowAll
+            ? null
+            : (
+                await prisma.shop.findMany({
+                    where: { shopDomain: { in: allowlist.shops } },
+                    select: { id: true },
+                })
+            ).map((s: any) => s.id);
+
+        if (Array.isArray(allowedShopIds) && allowedShopIds.length === 0) return false;
+
         const candidates = await prisma.productAsset.findMany({
-            where: { status: "live" },
+            where: {
+                status: "live",
+                ...(Array.isArray(allowedShopIds) ? { shopId: { in: allowedShopIds } } : {}),
+            },
             orderBy: { updatedAt: "asc" },
             take: 25,
             select: {
