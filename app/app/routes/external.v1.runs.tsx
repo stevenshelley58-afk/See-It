@@ -53,10 +53,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     console.error("[external.v1.runs] Error:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return jsonError(
       "internal_error",
       500,
-      "An unexpected error occurred"
+      errorMessage
     );
   }
 };
