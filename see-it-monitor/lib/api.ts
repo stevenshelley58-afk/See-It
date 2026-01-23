@@ -1,11 +1,11 @@
 import type {
   HealthResponse,
   RunsListResponse,
-  RunsFilters,
-  Run,
+  RunsParams,
+  RunDetail,
   ShopsListResponse,
-  ShopsFilters,
-  Shop,
+  ShopsParams,
+  ShopDetail,
   ApiError,
 } from "./types";
 
@@ -64,35 +64,35 @@ export async function getHealth(): Promise<HealthResponse> {
 }
 
 /**
- * Get list of runs
+ * Get list of runs (cursor-based pagination)
  */
-export async function getRuns(filters?: RunsFilters): Promise<RunsListResponse> {
+export async function getRuns(params?: RunsParams): Promise<RunsListResponse> {
   return fetchApi<RunsListResponse>("runs", {
-    params: filters as Record<string, string | number | boolean | undefined>,
+    params: params as Record<string, string | number | boolean | undefined>,
   });
 }
 
 /**
  * Get a single run by ID
  */
-export async function getRun(id: string, reveal?: boolean): Promise<Run> {
-  return fetchApi<Run>(`runs/${id}`, { reveal });
+export async function getRun(id: string, reveal?: boolean): Promise<RunDetail> {
+  return fetchApi<RunDetail>(`runs/${id}`, { reveal });
 }
 
 /**
- * Get list of shops
+ * Get list of shops (cursor-based pagination)
  */
-export async function getShops(filters?: ShopsFilters): Promise<ShopsListResponse> {
+export async function getShops(params?: ShopsParams): Promise<ShopsListResponse> {
   return fetchApi<ShopsListResponse>("shops", {
-    params: filters as Record<string, string | number | boolean | undefined>,
+    params: params as Record<string, string | number | boolean | undefined>,
   });
 }
 
 /**
  * Get a single shop by ID
  */
-export async function getShop(id: string, reveal?: boolean): Promise<Shop> {
-  return fetchApi<Shop>(`shops/${id}`, { reveal });
+export async function getShop(id: string, reveal?: boolean): Promise<ShopDetail> {
+  return fetchApi<ShopDetail>(`shops/${id}`, { reveal });
 }
 
 /**
@@ -102,12 +102,12 @@ export const queryKeys = {
   health: ["health"] as const,
   runs: {
     all: ["runs"] as const,
-    list: (filters?: RunsFilters) => ["runs", "list", filters] as const,
+    list: (params?: RunsParams) => ["runs", "list", params] as const,
     detail: (id: string) => ["runs", "detail", id] as const,
   },
   shops: {
     all: ["shops"] as const,
-    list: (filters?: ShopsFilters) => ["shops", "list", filters] as const,
+    list: (params?: ShopsParams) => ["shops", "list", params] as const,
     detail: (id: string) => ["shops", "detail", id] as const,
   },
 };

@@ -8,6 +8,20 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * Normalize error message for grouping (removes variable parts)
+ */
+export function normalizeErrorMessage(message: string | null | undefined): string {
+  if (!message) return "unknown_error";
+  return message
+    .toLowerCase()
+    .trim()
+    .replace(/\d+/g, "#") // Replace digits with #
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "{uuid}") // Replace UUIDs
+    .replace(/\s+/g, " ") // Collapse whitespace
+    .slice(0, 80); // Limit length
+}
+
+/**
  * Format a date string for display
  */
 export function formatDate(dateString: string): string {
@@ -112,21 +126,49 @@ export function getStatusColor(
 /**
  * Get run status color class
  */
-export function getRunStatusColor(
-  status: "pending" | "running" | "completed" | "failed" | "cancelled"
-): string {
+export function getRunStatusColor(status: string): string {
   switch (status) {
     case "pending":
+    case "queued":
       return "text-gray-600 bg-gray-100";
     case "running":
+    case "in_progress":
       return "text-blue-600 bg-blue-100";
+    case "complete":
     case "completed":
+    case "success":
       return "text-green-600 bg-green-100";
     case "failed":
+    case "error":
       return "text-red-600 bg-red-100";
-    case "cancelled":
+    case "partial":
       return "text-yellow-600 bg-yellow-100";
+    case "cancelled":
+    case "timeout":
+      return "text-orange-600 bg-orange-100";
     default:
       return "text-gray-600 bg-gray-100";
+  }
+}
+
+/**
+ * Get run status badge variant
+ */
+export function getRunStatusVariant(
+  status: string
+): "default" | "success" | "warning" | "error" {
+  switch (status) {
+    case "complete":
+    case "completed":
+    case "success":
+      return "success";
+    case "failed":
+    case "error":
+      return "error";
+    case "partial":
+    case "timeout":
+      return "warning";
+    default:
+      return "default";
   }
 }
