@@ -1,27 +1,27 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback } from "react";
+import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { Search, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface HeaderProps {
-  onRefresh?: () => void;
+  onRefresh?: () => void | Promise<void>;
   isRefreshing?: boolean;
 }
 
 export function Header({ onRefresh, isRefreshing }: HeaderProps) {
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const queryClient = useQueryClient();
+  const fetchingCount = useIsFetching();
 
-  // Auto-refresh indicator
-  useEffect(() => {
-    if (!autoRefresh || !onRefresh) return;
+  const refresh = useCallback(() => {
+    if (onRefresh) {
+      return Promise.resolve(onRefresh());
+    }
+    return queryClient.invalidateQueries();
+  }, [onRefresh, queryClient]);
 
-    const interval = setInterval(() => {
-      onRefresh();
-    }, 30000); // 30 seconds
-
-    return () => clearInterval(interval);
-  }, [autoRefresh, onRefresh]);
+  const refreshing = isRefreshing ?? fetchingCount > 0;
 
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4">
@@ -40,31 +40,15 @@ export function Header({ onRefresh, isRefreshing }: HeaderProps) {
 
       {/* Actions */}
       <div className="flex items-center gap-4">
-        {/* Auto-refresh toggle */}
-        <button
-          onClick={() => setAutoRefresh(!autoRefresh)}
-          className={cn(
-            "flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors",
-            autoRefresh
-              ? "bg-primary-100 text-primary-700"
-              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-          )}
-        >
-          <RefreshCw
-            className={cn("h-4 w-4", isRefreshing && "animate-spin")}
-          />
-          {autoRefresh ? "Auto-refresh on" : "Auto-refresh off"}
-        </button>
-
         {/* Manual refresh */}
         <button
-          onClick={onRefresh}
-          disabled={isRefreshing}
+          onClick={() => void refresh()}
+          disabled={refreshing}
           className="p-2 rounded-md hover:bg-gray-100 transition-colors disabled:opacity-50"
           title="Refresh now"
         >
           <RefreshCw
-            className={cn("h-5 w-5 text-gray-600", isRefreshing && "animate-spin")}
+            className={cn("h-5 w-5 text-gray-600", refreshing && "animate-spin")}
           />
         </button>
       </div>
