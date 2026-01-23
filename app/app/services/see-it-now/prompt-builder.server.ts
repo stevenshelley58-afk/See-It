@@ -7,6 +7,7 @@ import {
 import { getMaterialRulesForPrompt } from "~/config/prompts/material-behaviors.config";
 import { getVariantIntentsForPrompt } from "~/config/prompts/variant-intents.config";
 import type { ProductPlacementFacts, PromptPack } from "./types";
+import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
 
 // Use an env override so we can change models without a redeploy.
 // Default stays on a widely-available Gemini API model.
@@ -15,13 +16,30 @@ const PROMPT_BUILDER_MODEL =
 
 export async function buildPromptPack(
   resolvedFacts: ProductPlacementFacts,
-  requestId: string
+  requestId: string,
+  shopId?: string
 ): Promise<PromptPack> {
   const logContext = createLogContext("prepare", requestId, "prompt-build-start", {
     productKind: resolvedFacts.identity?.product_kind,
   });
 
   logger.info(logContext, "Building prompt pack");
+
+  // Emit builder started event
+  if (shopId) {
+    emit({
+      shopId,
+      requestId,
+      source: EventSource.PROMPT_BUILDER,
+      type: EventType.PROMPT_BUILDER_STARTED,
+      severity: Severity.INFO,
+      payload: {
+        productKind: resolvedFacts.identity?.product_kind,
+        materialPrimary: resolvedFacts.material_profile?.primary,
+        model: PROMPT_BUILDER_MODEL,
+      },
+    });
+  }
 
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY not set");
@@ -107,6 +125,21 @@ export async function buildPromptPack(
       { ...logContext, stage: "complete" },
       `Prompt pack built: ${pack.variants.length} variants`
     );
+
+    // Emit builder completed event
+    if (shopId) {
+      emit({
+        shopId,
+        requestId,
+        source: EventSource.PROMPT_BUILDER,
+        type: EventType.PROMPT_BUILDER_COMPLETED,
+        severity: Severity.INFO,
+        payload: {
+          variantCount: pack.variants.length,
+          hasProductContext: !!pack.product_context,
+        },
+      });
+    }
 
     return pack;
   } catch (error) {

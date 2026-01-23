@@ -4,6 +4,8 @@ import { StorageService } from "../services/storage.server";
 import prisma from "../db.server";
 import { validateContentType } from "../utils/validation.server";
 import { PLANS } from "../billing";
+import { emit, EventSource, EventType, Severity } from "../services/telemetry";
+import { getRequestId } from "../utils/request-context.server";
 
 // Maximum file size: 10MB
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -132,6 +134,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const extension = extensionMap[contentType] || "jpg";
     const filename = `room.${extension}`;
 
+    const requestId = getRequestId(request);
+
+    // Emit upload started event
+    emit({
+        shopId: shop.id,
+        requestId,
+        source: EventSource.APP_PROXY,
+        type: EventType.SF_UPLOAD_STARTED,
+        severity: Severity.INFO,
+        payload: {
+            contentType,
+            shopDomain,
+        },
+    });
+
     const roomSession = await prisma.roomSession.create({
         data: {
             shopId: shop.id,
@@ -157,6 +174,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
 
         console.log(`[RoomUpload] Created session ${roomSession.id} for shop ${shopDomain} with content type ${contentType}`);
+
+        // Emit upload completed event
+        emit({
+            shopId: shop.id,
+            requestId,
+            source: EventSource.APP_PROXY,
+            type: EventType.SF_UPLOAD_COMPLETED,
+            severity: Severity.INFO,
+            payload: {
+                roomSessionId: roomSession.id,
+                contentType,
+                gcsKey: key,
+            },
+        });
 
         // Return both spec-aligned snake_case fields and existing camelCase for compatibility
         return json({

@@ -25,7 +25,8 @@
     "prisma": "prisma",
     "set-unlimited": "node scripts/set-unlimited-credits.js",
     "graphql-codegen": "graphql-codegen",
-    "vite": "vite"
+    "vite": "vite",
+    "monitor:prune": "curl -X GET http://localhost:3000/cron/monitor-prune -H 'Authorization: Bearer ${CRON_SECRET}'"
   },
   "type": "module",
   "engines": {

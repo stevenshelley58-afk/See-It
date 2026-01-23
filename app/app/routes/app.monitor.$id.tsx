@@ -33,6 +33,7 @@ import {
   Banner,
 } from "@shopify/polaris";
 import { ClipboardIcon, ChevronDownIcon, ChevronUpIcon } from "@shopify/polaris-icons";
+import { useRouteError, isRouteErrorResponse } from "@remix-run/react";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -523,6 +524,37 @@ export default function MonitorRunDetailPage() {
           )}
         </Modal.Section>
       </Modal>
+    </Page>
+  );
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  let title = "Error loading run details";
+  let message = "An unexpected error occurred while loading the run details.";
+
+  if (isRouteErrorResponse(error)) {
+    title = `Error ${error.status}`;
+    message = error.data || error.statusText;
+  } else if (error instanceof Error) {
+    message = error.message;
+  }
+
+  return (
+    <Page title="Run Details" backAction={{ content: "Back to Monitor", url: "/app/monitor" }}>
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Banner title={title} tone="critical">
+                <p>{message}</p>
+              </Banner>
+              <Button url="/app/monitor">Back to Monitor</Button>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }

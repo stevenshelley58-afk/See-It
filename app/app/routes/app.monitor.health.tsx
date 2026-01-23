@@ -20,7 +20,10 @@ import {
   InlineStack,
   BlockStack,
   Box,
+  Banner,
+  Button,
 } from "@shopify/polaris";
+import { useRouteError, isRouteErrorResponse } from "@remix-run/react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -200,6 +203,37 @@ export default function MonitorHealthPage() {
                 </div>
               </InlineStack>
             </Box>
+          </Card>
+        </Layout.Section>
+      </Layout>
+    </Page>
+  );
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  let title = "Error loading health dashboard";
+  let message = "An unexpected error occurred while loading the health dashboard.";
+
+  if (isRouteErrorResponse(error)) {
+    title = `Error ${error.status}`;
+    message = error.data || error.statusText;
+  } else if (error instanceof Error) {
+    message = error.message;
+  }
+
+  return (
+    <Page title="Monitor Health" backAction={{ content: "Runs", url: "/app/monitor" }}>
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Banner title={title} tone="critical">
+                <p>{message}</p>
+              </Banner>
+              <Button url="/app/monitor/health">Try Again</Button>
+            </BlockStack>
           </Card>
         </Layout.Section>
       </Layout>

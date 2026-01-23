@@ -30,7 +30,10 @@ import {
   Text,
   InlineStack,
   Box,
+  Banner,
+  BlockStack,
 } from "@shopify/polaris";
+import { useRouteError, isRouteErrorResponse } from "@remix-run/react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -351,6 +354,37 @@ export default function MonitorRunsPage() {
                 </InlineStack>
               </Box>
             )}
+          </Card>
+        </Layout.Section>
+      </Layout>
+    </Page>
+  );
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  let title = "Error loading monitor";
+  let message = "An unexpected error occurred while loading the monitor.";
+
+  if (isRouteErrorResponse(error)) {
+    title = `Error ${error.status}`;
+    message = error.data || error.statusText;
+  } else if (error instanceof Error) {
+    message = error.message;
+  }
+
+  return (
+    <Page title="See It Now Monitor" backAction={{ content: "Products", url: "/app" }}>
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Banner title={title} tone="critical">
+                <p>{message}</p>
+              </Banner>
+              <Button url="/app/monitor">Try Again</Button>
+            </BlockStack>
           </Card>
         </Layout.Section>
       </Layout>
