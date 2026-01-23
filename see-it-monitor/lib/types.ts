@@ -85,6 +85,43 @@ export interface VariantResult {
 }
 
 // =============================================================================
+// Run Events - for /runs/:id/events endpoint
+// =============================================================================
+
+export interface RunEvent {
+  id: string;
+  ts: string;                    // ISO timestamp
+  severity: string;              // e.g., "info", "warn", "error"
+  source: string;                // e.g., "renderer", "provider", "storage"
+  type: string;                  // e.g., "variant_started", "variant_completed"
+  variantId: string | null;      // Linked variant (if applicable)
+  payload: Record<string, unknown> | null; // Event-specific data (may be redacted)
+}
+
+export interface RunEventsResponse {
+  events: RunEvent[];
+}
+
+// =============================================================================
+// Run Artifacts - for /runs/:id/artifacts endpoint
+// =============================================================================
+
+export interface RunArtifact {
+  id: string;
+  type: string;                  // e.g., "variant_output", "room_input", "prompt"
+  contentType: string;           // MIME type: "image/png", "application/json"
+  byteSize: number;
+  dimensions: { width: number; height: number } | null;
+  sha256: string;
+  url: string | null;            // Signed URL (may be null if reveal=false)
+  createdAt: string;
+}
+
+export interface RunArtifactsResponse {
+  artifacts: RunArtifact[];
+}
+
+// =============================================================================
 // Shops API - matches backend ExternalShopListItem
 // =============================================================================
 

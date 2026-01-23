@@ -3,6 +3,8 @@ import type {
   RunsListResponse,
   RunsParams,
   RunDetail,
+  RunEventsResponse,
+  RunArtifactsResponse,
   ShopsListResponse,
   ShopsParams,
   ShopDetail,
@@ -80,6 +82,26 @@ export async function getRun(id: string, reveal?: boolean): Promise<RunDetail> {
 }
 
 /**
+ * Get events for a run by ID
+ */
+export async function getRunEvents(
+  id: string,
+  reveal?: boolean
+): Promise<RunEventsResponse> {
+  return fetchApi<RunEventsResponse>(`runs/${id}/events`, { reveal });
+}
+
+/**
+ * Get artifacts for a run by ID
+ */
+export async function getRunArtifacts(
+  id: string,
+  reveal?: boolean
+): Promise<RunArtifactsResponse> {
+  return fetchApi<RunArtifactsResponse>(`runs/${id}/artifacts`, { reveal });
+}
+
+/**
  * Get list of shops (cursor-based pagination)
  */
 export async function getShops(params?: ShopsParams): Promise<ShopsListResponse> {
@@ -104,6 +126,8 @@ export const queryKeys = {
     all: ["runs"] as const,
     list: (params?: RunsParams) => ["runs", "list", params] as const,
     detail: (id: string) => ["runs", "detail", id] as const,
+    events: (id: string) => ["runs", "events", id] as const,
+    artifacts: (id: string) => ["runs", "artifacts", id] as const,
   },
   shops: {
     all: ["shops"] as const,

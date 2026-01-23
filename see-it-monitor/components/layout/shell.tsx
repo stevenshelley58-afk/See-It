@@ -1,3 +1,6 @@
+"use client";
+import { useState, useEffect } from "react";
+import { Copy, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ShellProps {
@@ -140,5 +143,148 @@ export function Badge({ children, variant = "default", className }: BadgeProps) 
     >
       {children}
     </span>
+  );
+}
+
+// =============================================================================
+// CopyButton - One-click copy with feedback
+// =============================================================================
+
+interface CopyButtonProps {
+  value: string;
+  label?: string;
+  className?: string;
+}
+
+export function CopyButton({ value, label, className }: CopyButtonProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={cn(
+        "inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded",
+        "text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors",
+        className
+      )}
+      title={`Copy ${label || "value"}`}
+    >
+      {copied ? (
+        <>
+          <Check className="h-3 w-3 text-green-500" />
+          <span className="text-green-600">Copied</span>
+        </>
+      ) : (
+        <>
+          <Copy className="h-3 w-3" />
+          {label && <span>{label}</span>}
+        </>
+      )}
+    </button>
+  );
+}
+
+// =============================================================================
+// Modal - Simple overlay with escape key close
+// =============================================================================
+
+interface ModalProps {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  children: React.ReactNode;
+}
+
+export function Modal({ open, onClose, title, children }: ModalProps) {
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    if (open) {
+      document.addEventListener("keydown", handleEscape);
+      document.body.style.overflow = "hidden";
+    }
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+      document.body.style.overflow = "";
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/50" />
+      <div
+        className="relative bg-white rounded-lg shadow-xl max-w-4xl max-h-[90vh] overflow-auto m-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {title && (
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+            <button
+              onClick={onClose}
+              className="p-1 rounded hover:bg-gray-100 text-gray-500"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        )}
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// Toggle - Simple toggle switch
+// =============================================================================
+
+interface ToggleProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label?: string;
+  disabled?: boolean;
+}
+
+export function Toggle({ checked, onChange, label, disabled }: ToggleProps) {
+  return (
+    <label className="inline-flex items-center gap-2 cursor-pointer">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          "relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors",
+          "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
+          checked ? "bg-blue-600" : "bg-gray-200",
+          disabled && "opacity-50 cursor-not-allowed"
+        )}
+      >
+        <span
+          className={cn(
+            "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform",
+            "translate-y-0.5",
+            checked ? "translate-x-4" : "translate-x-0.5"
+          )}
+        />
+      </button>
+      {label && <span className="text-sm text-gray-700">{label}</span>}
+    </label>
   );
 }
