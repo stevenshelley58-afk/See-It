@@ -10,6 +10,7 @@ import {
   validateShopId,
   requireShopAccessAndPermission,
 } from "@/lib/api-utils";
+import { resolveShopId } from "@/lib/shop-resolver";
 import { listPromptsForShop } from "@/lib/prompt-service";
 
 type RouteContext = {
@@ -22,10 +23,16 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const params = await context.params;
-    const shopId = validateShopId(params.shopId);
+    const validatedId = validateShopId(params.shopId);
 
-    if (!shopId) {
+    if (!validatedId) {
       return jsonError(400, "bad_request", "Invalid or missing shopId");
+    }
+
+    // Resolve shop ID (supports UUID, domain name, or "SYSTEM")
+    const shopId = await resolveShopId(validatedId);
+    if (!shopId) {
+      return jsonError(404, "not_found", `Shop not found: ${validatedId}`);
     }
 
     // Verify authentication and shop access

@@ -14,6 +14,7 @@ import {
   getIpAddress,
   getUserAgent,
 } from "@/lib/api-utils";
+import { resolveShopId } from "@/lib/shop-resolver";
 import type {
   RuntimeConfigResponse,
   UpdateRuntimeConfigRequest,
@@ -68,10 +69,16 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { shopId: rawShopId } = await params;
-    const shopId = validateShopId(rawShopId);
+    const validatedId = validateShopId(rawShopId);
 
-    if (!shopId) {
+    if (!validatedId) {
       return jsonError(400, "bad_request", "Invalid or missing shopId");
+    }
+
+    // Resolve shop ID (supports UUID or domain name like "bohoem58")
+    const shopId = await resolveShopId(validatedId);
+    if (!shopId) {
+      return jsonError(404, "not_found", `Shop not found: ${validatedId}`);
     }
 
     // Verify authentication and shop access
@@ -150,10 +157,16 @@ export async function PATCH(
 ): Promise<NextResponse> {
   try {
     const { shopId: rawShopId } = await params;
-    const shopId = validateShopId(rawShopId);
+    const validatedId = validateShopId(rawShopId);
 
-    if (!shopId) {
+    if (!validatedId) {
       return jsonError(400, "bad_request", "Invalid or missing shopId");
+    }
+
+    // Resolve shop ID (supports UUID or domain name like "bohoem58")
+    const shopId = await resolveShopId(validatedId);
+    if (!shopId) {
+      return jsonError(404, "not_found", `Shop not found: ${validatedId}`);
     }
 
     // Verify authentication, shop access, and admin permission

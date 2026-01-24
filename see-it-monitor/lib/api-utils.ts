@@ -47,6 +47,14 @@ export function validateShopId(shopId: string | undefined): string | null {
 }
 
 /**
+ * Check if a string looks like a UUID
+ */
+export function isUUID(str: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+}
+
+/**
  * Parse JSON body safely
  */
 export async function parseJsonBody<T>(request: Request): Promise<T | null> {
