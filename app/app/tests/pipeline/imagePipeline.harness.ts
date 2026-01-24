@@ -8,7 +8,9 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
-import { removeBackground } from "@imgly/background-removal-node";
+import { validateMagicBytes } from "../../services/gemini-files.server";
+import { prepareProductImage } from "../../services/image-prep/product-prep.server";
+import { trimTransparentPaddingPng } from "../../services/image-prep/trim-alpha.server";
 
 // Test fixtures directory (create these manually with real Shopify CDN responses)
 const FIXTURES_DIR = join(__dirname, "../../../tests/fixtures");
@@ -23,32 +25,31 @@ export async function testPngPipeline(): Promise<boolean> {
     const buffer = readFileSync(pngPath);
 
     // Stage: convert (should already be PNG, but test conversion)
-    const converted = await sharp(buffer).png({ force: true }).toBuffer();
+    const converted = await sharp(buffer).ensureAlpha().png({ force: true }).toBuffer();
 
     if (converted.length === 0) {
       throw new Error("PNG conversion produced empty buffer");
     }
 
-    // Stage: bg-remove
-    const resultBlob = await removeBackground(converted, {
-      mimeType: "image/png",
-      output: {
-        format: "image/png",
-        quality: 1.0,
-      },
-    } as any);
-
-    const arrayBuffer = await resultBlob.arrayBuffer();
-    const outputBuffer = Buffer.from(arrayBuffer);
-
-    if (outputBuffer.length === 0) {
-      throw new Error("Background removal produced empty buffer");
+    // Stage: trim-alpha (deterministic)
+    const trimmed = await trimTransparentPaddingPng(converted);
+    validateMagicBytes(trimmed, "image/png");
+    const trimmedMeta = await sharp(trimmed).metadata();
+    if (!trimmedMeta.hasAlpha) {
+      throw new Error("Expected alpha channel after trim");
     }
 
-    // Verify it's still PNG
-    const metadata = await sharp(outputBuffer).metadata();
-    if (metadata.format !== "png") {
-      throw new Error(`Expected PNG, got ${metadata.format}`);
+    // Stage: PhotoRoom (optional, requires PHOTOROOM_API_KEY)
+    if (process.env.PHOTOROOM_API_KEY) {
+      const { preparedPng } = await prepareProductImage({
+        sourceBuffer: buffer,
+        sourceContentType: "image/png",
+        requestId: "harness",
+        strategy: "harness",
+      });
+      validateMagicBytes(preparedPng, "image/png");
+      const meta = await sharp(preparedPng).metadata();
+      if (!meta.hasAlpha) throw new Error("Expected PhotoRoom output to have alpha");
     }
 
     return true;
@@ -67,7 +68,7 @@ export async function testJpgToPngPipeline(): Promise<boolean> {
     const buffer = readFileSync(jpgPath);
 
     // Stage: convert JPG to PNG
-    const pngBuffer = await sharp(buffer).png({ force: true }).toBuffer();
+    const pngBuffer = await sharp(buffer).ensureAlpha().png({ force: true }).toBuffer();
 
     if (pngBuffer.length === 0) {
       throw new Error("JPG to PNG conversion produced empty buffer");
@@ -79,21 +80,8 @@ export async function testJpgToPngPipeline(): Promise<boolean> {
       throw new Error(`Expected PNG after conversion, got ${metadata.format}`);
     }
 
-    // Stage: bg-remove
-    const resultBlob = await removeBackground(pngBuffer, {
-      mimeType: "image/png",
-      output: {
-        format: "image/png",
-        quality: 1.0,
-      },
-    } as any);
-
-    const arrayBuffer = await resultBlob.arrayBuffer();
-    const outputBuffer = Buffer.from(arrayBuffer);
-
-    if (outputBuffer.length === 0) {
-      throw new Error("Background removal produced empty buffer");
-    }
+    const trimmed = await trimTransparentPaddingPng(pngBuffer);
+    validateMagicBytes(trimmed, "image/png");
 
     return true;
   } catch (error) {
@@ -111,7 +99,7 @@ export async function testWebPToPngPipeline(): Promise<boolean> {
     const buffer = readFileSync(webpPath);
 
     // Stage: convert WebP to PNG
-    const pngBuffer = await sharp(buffer).png({ force: true }).toBuffer();
+    const pngBuffer = await sharp(buffer).ensureAlpha().png({ force: true }).toBuffer();
 
     if (pngBuffer.length === 0) {
       throw new Error("WebP to PNG conversion produced empty buffer");
@@ -122,6 +110,9 @@ export async function testWebPToPngPipeline(): Promise<boolean> {
     if (metadata.format !== "png") {
       throw new Error(`Expected PNG after conversion, got ${metadata.format}`);
     }
+
+    const trimmed = await trimTransparentPaddingPng(pngBuffer);
+    validateMagicBytes(trimmed, "image/png");
 
     return true;
   } catch (error) {
