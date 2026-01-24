@@ -63,7 +63,7 @@ function TemplateEditor({
   // Extract variables from template
   const variables = useMemo(() => {
     const matches = value.match(/\{\{([\w.]+)\}\}/g) || [];
-    return [...new Set(matches.map((m) => m.slice(2, -2)))];
+    return Array.from(new Set(matches.map((m) => m.slice(2, -2))));
   }, [value]);
 
   return (
