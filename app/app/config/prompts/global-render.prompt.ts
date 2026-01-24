@@ -14,6 +14,15 @@ IMAGE ROLES
 
 MANDATORY RULES
 
+0. COMPOSITION: Place the product from prepared_product_image into customer_room_image. The room remains the base image.
+
+0b. LIGHTING MATCH: Match direction, softness, intensity, and color temperature of the room light. Ensure the product's contact shadow matches room cues.
+
+0c. PHOTOGRAPHIC MATCH: Match the room photo's camera height and perspective. Match lens look and depth of field behavior to the room.
+
+0d. PRESERVATION:
+Do not redesign the product. Preserve exact geometry, proportions, materials, texture, and color.
+
 1. ASPECT RATIO: Output must match the aspect ratio and full frame of customer_room_image exactly.
 
 2. ROOM PRESERVATION: Change only what is required to realistically insert the product into customer_room_image. Keep everything else exactly the same — geometry, furnishings, colors, lighting, objects.

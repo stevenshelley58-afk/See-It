@@ -36,6 +36,7 @@ PRODUCT_CONTEXT REQUIREMENTS:
 
 VARIATION REQUIREMENTS:
 - Each variation describes WHERE and HOW to place the product
+- Each variation MUST include a short camera/framing clause (1-2 sentences) describing viewpoint/framing consistency (camera height, perspective, lens look, and depth of field) relative to customer_room_image
 - Follow the intent and scale strategy specified for each variant ID
 - V01, V04, V06 must reference a specific in-frame scale anchor
 - V02 must be 15-25% smaller than V01
