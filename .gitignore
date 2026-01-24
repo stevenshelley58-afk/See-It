@@ -51,6 +51,11 @@ prisma/dev.sqlite-journal
 # Test files
 test-*.js
 
+# Local helper scripts (keep untracked)
+setup-deploy.bat
+deploy.bat
+cleanup-deployment.bat
+
 # Secrets - NEVER commit
 *.credentials*.txt
 env.txt
