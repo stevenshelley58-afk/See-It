@@ -611,7 +611,7 @@ function AuditLogPanel({ shopId }: AuditLogPanelProps) {
                   onClick={() => toggleEntry(entry.id)}
                   className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-gray-50"
                 >
-                  {entry.changes ? (
+                  {(entry.before || entry.after) ? (
                     isExpanded ? (
                       <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
                     ) : (
@@ -629,10 +629,10 @@ function AuditLogPanel({ shopId }: AuditLogPanelProps) {
                   </span>
                   <span className="text-xs text-gray-500 shrink-0">{entry.actor}</span>
                 </button>
-                {isExpanded && entry.changes && (
+                {isExpanded && !!(entry.before || entry.after) && (
                   <div className="px-4 pb-3 pl-10">
                     <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-48">
-                      {JSON.stringify(entry.changes, null, 2)}
+                      {JSON.stringify({ before: entry.before, after: entry.after }, null, 2)}
                     </pre>
                   </div>
                 )}
