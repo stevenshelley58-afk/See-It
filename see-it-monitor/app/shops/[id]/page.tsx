@@ -512,7 +512,7 @@ function PromptsPanel({ shopId }: PromptsPanelProps) {
               <div>
                 <p className="text-sm font-medium text-gray-900">{prompt.name}</p>
                 <p className="text-xs text-gray-500">
-                  v{prompt.activeVersion || "N/A"} &middot; {prompt.defaultModel}
+                  v{prompt.activeVersion?.version ?? "N/A"} &middot; {prompt.activeVersion?.model ?? prompt.defaultModel}
                 </p>
               </div>
               <div className="flex items-center gap-2">
