@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Play, Store, LayoutDashboard } from "lucide-react";
+import { Activity, Play, Store, LayoutDashboard, FileText, Sliders, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -20,6 +20,21 @@ const navItems = [
     label: "Shops",
     href: "/shops",
     icon: Store,
+  },
+  {
+    label: "Prompts",
+    href: "/prompts",
+    icon: FileText,
+  },
+  {
+    label: "Controls",
+    href: "/controls",
+    icon: Sliders,
+  },
+  {
+    label: "Settings",
+    href: "/settings",
+    icon: Settings,
   },
 ];
 
