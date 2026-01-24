@@ -36,6 +36,28 @@ import {
 } from "../services/see-it-now/index";
 
 // ============================================================================
+// Error Response Helper
+// ============================================================================
+function errorJson(
+  error: string,
+  message: string,
+  requestId: string,
+  headers: Record<string, string>,
+  status: number = 400,
+  _extra: unknown = null
+) {
+  return json(
+    {
+      success: false,
+      error,
+      message,
+      request_id: requestId,
+    },
+    { status, headers }
+  );
+}
+
+// ============================================================================
 // CORS Headers
 // ============================================================================
 function getCorsHeaders(shopDomain: string | null): Record<string, string> {
