@@ -1,6 +1,5 @@
 -- Prompt control plane: ensure llm_calls FK constraints exist.
--- This migration is production-safe: it only applies constraints when the
--- referenced tables exist, and it no-ops otherwise (so deploys don't fail).
+-- This migration cleans up orphaned references before adding constraints.
 
 DO $$
 BEGIN
@@ -11,9 +10,13 @@ BEGIN
   END IF;
 
   -- ==========================================================================
-  -- llm_calls.variant_result_id -> variant_results(id) (ON DELETE SET NULL)
+  -- Clean up orphaned variant_result_id references
   -- ==========================================================================
   IF to_regclass('public.variant_results') IS NOT NULL THEN
+    UPDATE "llm_calls" SET "variant_result_id" = NULL
+    WHERE "variant_result_id" IS NOT NULL
+      AND "variant_result_id" NOT IN (SELECT "id" FROM "variant_results");
+
     IF NOT EXISTS (
       SELECT 1 FROM information_schema.table_constraints
       WHERE constraint_name = 'llm_calls_variant_result_id_fkey'
@@ -29,9 +32,13 @@ BEGIN
   END IF;
 
   -- ==========================================================================
-  -- llm_calls.prompt_version_id -> prompt_control_versions(id) (ON DELETE SET NULL)
+  -- Clean up orphaned prompt_version_id references
   -- ==========================================================================
   IF to_regclass('public.prompt_control_versions') IS NOT NULL THEN
+    UPDATE "llm_calls" SET "prompt_version_id" = NULL
+    WHERE "prompt_version_id" IS NOT NULL
+      AND "prompt_version_id" NOT IN (SELECT "id" FROM "prompt_control_versions");
+
     IF EXISTS (
       SELECT 1 FROM information_schema.table_constraints
       WHERE constraint_name = 'llm_calls_prompt_version_id_fkey'
@@ -49,9 +56,13 @@ BEGIN
   END IF;
 
   -- ==========================================================================
-  -- llm_calls.render_run_id -> render_runs(id) (ON DELETE CASCADE)
+  -- Clean up orphaned render_run_id references (delete orphaned rows)
   -- ==========================================================================
   IF to_regclass('public.render_runs') IS NOT NULL THEN
+    DELETE FROM "llm_calls"
+    WHERE "render_run_id" IS NOT NULL
+      AND "render_run_id" NOT IN (SELECT "id" FROM "render_runs");
+
     IF NOT EXISTS (
       SELECT 1 FROM information_schema.table_constraints
       WHERE constraint_name = 'llm_calls_render_run_id_fkey'
@@ -67,9 +78,13 @@ BEGIN
   END IF;
 
   -- ==========================================================================
-  -- llm_calls.test_run_id -> prompt_test_runs(id) (ON DELETE CASCADE)
+  -- Clean up orphaned test_run_id references (delete orphaned rows)
   -- ==========================================================================
   IF to_regclass('public.prompt_test_runs') IS NOT NULL THEN
+    DELETE FROM "llm_calls"
+    WHERE "test_run_id" IS NOT NULL
+      AND "test_run_id" NOT IN (SELECT "id" FROM "prompt_test_runs");
+
     IF NOT EXISTS (
       SELECT 1 FROM information_schema.table_constraints
       WHERE constraint_name = 'llm_calls_test_run_id_fkey'
