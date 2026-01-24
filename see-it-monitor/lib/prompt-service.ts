@@ -4,6 +4,7 @@
 // =============================================================================
 
 import { createHash } from "crypto";
+import { Prisma } from "@prisma/client";
 import prisma from "./db";
 import type {
   PromptSummary,
@@ -356,7 +357,7 @@ export async function createVersion(
           developerTemplate: developerTemplate ?? null,
           userTemplate: userTemplate ?? null,
           model: model ?? null,
-          params: params ?? null,
+          params: params ?? Prisma.DbNull,
           templateHash,
           changeNotes: changeNotes ?? null,
           createdBy,
@@ -380,7 +381,7 @@ export async function createVersion(
       targetType: "prompt_version",
       targetId: version.id,
       targetName: `${promptName} v${version.version}`,
-      before: null,
+      before: Prisma.DbNull,
       after: {
         id: version.id,
         version: version.version,
@@ -498,7 +499,7 @@ export async function activateVersion(
         targetName: promptName,
         before: result.previousActiveId
           ? { activeVersionId: result.previousActiveId }
-          : null,
+          : Prisma.DbNull,
         after: {
           activeVersionId: result.newActiveId,
         },
@@ -818,7 +819,7 @@ export async function testPrompt(
       targetType: "prompt_test_run",
       targetId: testRun.id,
       targetName: promptName,
-      before: null,
+      before: Prisma.DbNull,
       after: {
         testRunId: testRun.id,
         promptName,
