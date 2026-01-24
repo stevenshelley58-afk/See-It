@@ -123,7 +123,8 @@ async function rollbackVersion(
 async function runTest(
   shopId: string,
   promptName: string,
-  request: TestPromptRequest
+  request: TestPromptRequest,
+  options?: { signal?: AbortSignal }
 ): Promise<TestPromptResponse> {
   const url = new URL(
     `${INTERNAL_API_BASE}/shops/${shopId}/prompts/${promptName}/test`,
@@ -133,6 +134,7 @@ async function runTest(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
+    signal: options?.signal,
   });
   if (!response.ok) {
     throw new Error(`Test failed: ${response.status}`);
@@ -637,9 +639,19 @@ export default function PromptDetailPage() {
   };
 
   // Handler for run test
-  const handleRunTest = async (request: TestPromptRequest): Promise<TestPromptResponse> => {
+  const handleRunTest = async (
+    request: TestPromptRequest,
+    options?: { signal?: AbortSignal }
+  ): Promise<TestPromptResponse> => {
     // Simulate test run - replace with actual API call
-    await new Promise((r) => setTimeout(r, 2000));
+    // Support cancellation in mock mode by racing with abort signal
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(resolve, 2000);
+      options?.signal?.addEventListener("abort", () => {
+        clearTimeout(timeout);
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    });
     return {
       testRunId: "test_123",
       status: "succeeded",
@@ -668,7 +680,7 @@ export default function PromptDetailPage() {
       ],
       resolutionHash: "hash123456",
     };
-    // return runTest(shopId, promptName, request);
+    // return runTest(shopId, promptName, request, options);
   };
 
   // Handler for promote to draft

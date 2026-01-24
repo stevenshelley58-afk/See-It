@@ -41,9 +41,16 @@ export {
   getCallsForTestRun,
   getPromptCallStats,
   getDailyCostForShop,
+  // Deduplication/caching
+  getRequestHash,
+  findCachedRender,
+  recordCacheHit,
+  updateLLMCallWithOutput,
+  findRecentCallForRun,
   type StartLLMCallInput,
   type CompleteLLMCallInput,
   type PromptStats,
+  type CachedRenderResult,
   // Legacy type aliases
   type StartCallInput,
   type CompleteCallInput,

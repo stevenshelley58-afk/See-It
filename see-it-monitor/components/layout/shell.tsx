@@ -222,24 +222,31 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
 
   if (!open) return null;
 
+  const titleId = title ? "modal-title" : undefined;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       onClick={onClose}
+      role="presentation"
     >
-      <div className="absolute inset-0 bg-black/50" />
+      <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
       <div
         className="relative bg-white rounded-lg shadow-xl max-w-4xl max-h-[90vh] overflow-auto m-4"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
       >
         {title && (
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+            <h2 id={titleId} className="text-lg font-semibold text-gray-900">{title}</h2>
             <button
               onClick={onClose}
               className="p-1 rounded hover:bg-gray-100 text-gray-500"
+              aria-label="Close modal"
             >
-              <X className="h-5 w-5" />
+              <X className="h-5 w-5" aria-hidden="true" />
             </button>
           </div>
         )}

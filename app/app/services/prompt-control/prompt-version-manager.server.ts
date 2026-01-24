@@ -245,13 +245,14 @@ export async function activateVersion(input: ActivateVersionInput) {
       });
     }
 
-    // 5. Activate the new version
+    // 5. Activate the new version, storing the previous active version for rollback
     const activatedVersion = await tx.promptVersion.update({
       where: { id: versionId },
       data: {
         status: "ACTIVE",
         activatedAt: new Date(),
         activatedBy,
+        previousActiveVersionId: currentActive?.id ?? null,
       },
     });
 
@@ -323,17 +324,22 @@ export async function rollbackToPreviousVersion(input: {
       throw new Error(`No active version found for "${promptName}"`);
     }
 
-    // 3. Find most recent archived version (the one we're rolling back to)
-    const previousVersion = await tx.promptVersion.findFirst({
-      where: {
-        promptDefinitionId: definition.id,
-        status: "ARCHIVED",
-      },
-      orderBy: { activatedAt: "desc" },
+    // 3. Find the previous version using the stored rollback chain
+    if (!currentActive.previousActiveVersionId) {
+      throw new Error(`No previous version found to rollback to for "${promptName}". This may be the first version ever activated.`);
+    }
+
+    const previousVersion = await tx.promptVersion.findUnique({
+      where: { id: currentActive.previousActiveVersionId },
     });
 
     if (!previousVersion) {
-      throw new Error(`No previous version found to rollback to for "${promptName}"`);
+      throw new Error(`Previous version "${currentActive.previousActiveVersionId}" no longer exists`);
+    }
+
+    if (previousVersion.status !== "ARCHIVED") {
+      // Should not happen in normal flow, but handle gracefully
+      throw new Error(`Previous version is in unexpected state: ${previousVersion.status}`);
     }
 
     // 4. Archive current active
@@ -342,13 +348,14 @@ export async function rollbackToPreviousVersion(input: {
       data: { status: "ARCHIVED" },
     });
 
-    // 5. Re-activate previous version
+    // 5. Re-activate previous version, updating the chain to point to what we just deactivated
     const reactivatedVersion = await tx.promptVersion.update({
       where: { id: previousVersion.id },
       data: {
         status: "ACTIVE",
         activatedAt: new Date(),
         activatedBy: rolledBackBy,
+        previousActiveVersionId: currentActive.id, // Enable rolling forward again if needed
       },
     });
 

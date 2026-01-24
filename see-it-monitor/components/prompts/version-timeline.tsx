@@ -166,6 +166,7 @@ function VersionRow({
         <button
           onClick={() => onViewDetail(version.id)}
           className="px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded transition-colors"
+          aria-label={`View details for version ${version.version}`}
         >
           View
         </button>
@@ -174,13 +175,13 @@ function VersionRow({
             onClick={() => onActivate(version.id)}
             disabled={activating}
             className="px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 rounded transition-colors disabled:opacity-50 flex items-center gap-1"
-            title="Rollback to this version"
+            aria-label={`Activate version ${version.version}`}
           >
             {isActivating ? (
-              <span className="animate-spin">...</span>
+              <span className="animate-spin" aria-label="Activating">...</span>
             ) : (
               <>
-                <RotateCcw className="h-3 w-3" />
+                <RotateCcw className="h-3 w-3" aria-hidden="true" />
                 Activate
               </>
             )}
@@ -338,6 +339,8 @@ export function VersionTimeline({
           <button
             onClick={() => setExpanded(!expanded)}
             className="p-1 hover:bg-gray-100 rounded transition-colors"
+            aria-expanded={expanded}
+            aria-label={expanded ? "Collapse version timeline" : "Expand version timeline"}
           >
             {expanded ? (
               <ChevronDown className="h-5 w-5 text-gray-500" />

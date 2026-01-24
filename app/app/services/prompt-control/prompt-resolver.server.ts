@@ -366,8 +366,200 @@ export async function resolvePrompt(
 }
 
 // =============================================================================
-// Build Full Config Snapshot
+// Build Full Config Snapshot (OPTIMIZED - batch loading)
 // =============================================================================
+
+// Type for pre-loaded prompt definition with active version
+interface LoadedDefinition {
+  id: string;
+  shopId: string;
+  name: string;
+  defaultModel: string;
+  defaultParams: unknown;
+  versions: Array<{
+    id: string;
+    version: number;
+    status: string;
+    systemTemplate: string | null;
+    developerTemplate: string | null;
+    userTemplate: string | null;
+    model: string | null;
+    params: unknown;
+    templateHash: string;
+  }>;
+}
+
+/**
+ * Resolve a prompt from pre-loaded definition data (in-memory, no DB queries)
+ * This is the core resolution logic extracted for batch processing
+ */
+function resolvePromptFromData(
+  promptName: string,
+  shopDefinition: LoadedDefinition | undefined,
+  systemDefinition: LoadedDefinition | undefined,
+  variables: Record<string, string>,
+  override: PromptOverride | undefined,
+  runtimeConfig: RuntimeConfigSnapshot
+): ResolvePromptResult {
+  // 1. Check if prompt is disabled
+  if (runtimeConfig.disabledPrompts.includes(promptName)) {
+    return {
+      resolved: null,
+      blocked: true,
+      blockReason: `Prompt "${promptName}" is disabled in runtime config`,
+    };
+  }
+
+  // 2. Select definition - shop first, then system fallback
+  const definition = shopDefinition ?? systemDefinition;
+  const isSystemFallback = !shopDefinition && !!systemDefinition;
+
+  if (!definition) {
+    return {
+      resolved: null,
+      blocked: true,
+      blockReason: `Prompt "${promptName}" not found for shop or system`,
+    };
+  }
+
+  const activeVersion = definition.versions[0] || null;
+
+  if (!activeVersion && !override) {
+    return {
+      resolved: null,
+      blocked: true,
+      blockReason: `No active version for "${promptName}" and no override provided`,
+    };
+  }
+
+  // 3. Resolve templates (override > version)
+  const systemTemplate = override?.systemTemplate ?? activeVersion?.systemTemplate ?? null;
+  const developerTemplate = override?.developerTemplate ?? activeVersion?.developerTemplate ?? null;
+  const userTemplate = override?.userTemplate ?? activeVersion?.userTemplate ?? null;
+
+  // Must have at least one template
+  if (!systemTemplate && !developerTemplate && !userTemplate) {
+    return {
+      resolved: null,
+      blocked: true,
+      blockReason: `No templates found for "${promptName}"`,
+    };
+  }
+
+  // 4. Resolve model (override > version > definition default > force fallback)
+  let model = override?.model ?? activeVersion?.model ?? definition.defaultModel;
+
+  // Apply force fallback if configured
+  if (runtimeConfig.forceFallbackModel) {
+    model = runtimeConfig.forceFallbackModel;
+  }
+
+  // Check model allow list
+  if (runtimeConfig.modelAllowList.length > 0 && !runtimeConfig.modelAllowList.includes(model)) {
+    return {
+      resolved: null,
+      blocked: true,
+      blockReason: `Model "${model}" not in allow list: [${runtimeConfig.modelAllowList.join(", ")}]`,
+    };
+  }
+
+  // 5. Resolve params (merge: definition defaults < version < override)
+  const params: Record<string, unknown> = {
+    ...((definition.defaultParams as Record<string, unknown>) ?? {}),
+    ...((activeVersion?.params as Record<string, unknown>) ?? {}),
+    ...(override?.params ?? {}),
+  };
+
+  // Apply caps
+  if (typeof params.max_tokens === "number" && runtimeConfig.caps.maxTokensOutput) {
+    params.max_tokens = Math.min(params.max_tokens, runtimeConfig.caps.maxTokensOutput);
+  }
+
+  // 6. Render templates with variables
+  const renderedSystem = renderTemplate(systemTemplate, variables);
+  const renderedDeveloper = renderTemplate(developerTemplate, variables);
+  const renderedUser = renderTemplate(userTemplate, variables);
+
+  // 7. Build messages array
+  const messages: PromptMessage[] = [];
+  if (renderedSystem) messages.push({ role: "system", content: renderedSystem });
+  if (renderedDeveloper) messages.push({ role: "developer", content: renderedDeveloper });
+  if (renderedUser) messages.push({ role: "user", content: renderedUser });
+
+  // 8. Get templateHash from version (DO NOT RECOMPUTE)
+  const templateHash = activeVersion?.templateHash ?? sha256("no-version");
+
+  // 9. Compute resolutionHash (this IS computed - it's the actual rendered call)
+  const resolutionHash = computeResolutionHash(messages, model, params);
+
+  // 10. Track which overrides were applied
+  const overridesApplied: string[] = [];
+  if (override?.systemTemplate !== undefined) overridesApplied.push("systemTemplate");
+  if (override?.developerTemplate !== undefined) overridesApplied.push("developerTemplate");
+  if (override?.userTemplate !== undefined) overridesApplied.push("userTemplate");
+  if (override?.model !== undefined) overridesApplied.push("model");
+  if (override?.params !== undefined) overridesApplied.push("params");
+
+  // 11. Determine source
+  let source: ResolvedPrompt["source"] = "active";
+  if (overridesApplied.length > 0) {
+    source = "override";
+  } else if (isSystemFallback) {
+    source = "system-fallback";
+  }
+
+  // 12. Build resolved prompt
+  const resolved: ResolvedPrompt = {
+    promptDefinitionId: definition.id,
+    promptVersionId: activeVersion?.id ?? null,
+    version: activeVersion?.version ?? null,
+    templateHash,
+    model,
+    params,
+    messages,
+    templates: {
+      system: systemTemplate,
+      developer: developerTemplate,
+      user: userTemplate,
+    },
+    resolutionHash,
+    source,
+    overridesApplied,
+  };
+
+  return { resolved, blocked: false };
+}
+
+/**
+ * Batch load all prompt definitions for given names from both shop and system tenants
+ * Returns a map keyed by `${shopId}:${name}` for easy lookup
+ */
+async function batchLoadDefinitions(
+  shopId: string,
+  promptNames: string[]
+): Promise<Map<string, LoadedDefinition>> {
+  // Single query to load ALL definitions from both shop and system tenants
+  const definitions = await prisma.promptDefinition.findMany({
+    where: {
+      shopId: { in: [shopId, SYSTEM_TENANT_ID] },
+      name: { in: promptNames },
+    },
+    include: {
+      versions: {
+        where: { status: "ACTIVE" },
+        take: 1,
+      },
+    },
+  });
+
+  // Build lookup map: `${shopId}:${name}` -> definition
+  const map = new Map<string, LoadedDefinition>();
+  for (const def of definitions) {
+    map.set(`${def.shopId}:${def.name}`, def as LoadedDefinition);
+  }
+
+  return map;
+}
 
 export async function buildResolvedConfigSnapshot(input: {
   shopId: string;
@@ -377,8 +569,17 @@ export async function buildResolvedConfigSnapshot(input: {
 }): Promise<ResolvedConfigSnapshot> {
   const { shopId, promptNames, variables, overrides } = input;
 
-  // Load runtime config ONCE
+  // ==========================================================================
+  // OPTIMIZED: Only 2 DB queries total regardless of promptNames.length
+  // 1. Load runtime config
+  // 2. Batch load all definitions with active versions
+  // ==========================================================================
+
+  // Query 1: Load runtime config ONCE
   const runtimeConfig = await loadRuntimeConfig(shopId);
+
+  // Query 2: Batch load ALL definitions (shop + system) in single query
+  const definitionsMap = await batchLoadDefinitions(shopId, promptNames);
 
   const snapshot: ResolvedConfigSnapshot = {
     resolvedAt: new Date().toISOString(),
@@ -387,15 +588,20 @@ export async function buildResolvedConfigSnapshot(input: {
     blockedPrompts: {},
   };
 
-  // Resolve each prompt (passing runtimeConfig, not re-fetching)
+  // Resolve each prompt IN MEMORY (no additional DB queries)
   for (const promptName of promptNames) {
-    const result = await resolvePrompt({
-      shopId,
+    // Look up shop definition and system fallback from pre-loaded map
+    const shopDefinition = definitionsMap.get(`${shopId}:${promptName}`);
+    const systemDefinition = definitionsMap.get(`${SYSTEM_TENANT_ID}:${promptName}`);
+
+    const result = resolvePromptFromData(
       promptName,
+      shopDefinition,
+      systemDefinition,
       variables,
-      override: overrides?.[promptName],
-      runtimeConfig, // Pass in, don't re-fetch
-    });
+      overrides?.[promptName],
+      runtimeConfig
+    );
 
     if (result.resolved) {
       snapshot.prompts[promptName] = result.resolved;

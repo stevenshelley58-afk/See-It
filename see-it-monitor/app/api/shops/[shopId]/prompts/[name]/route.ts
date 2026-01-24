@@ -4,7 +4,12 @@
 // =============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { jsonError, jsonSuccess, validateShopId } from "@/lib/api-utils";
+import {
+  jsonError,
+  jsonSuccess,
+  validateShopId,
+  requireShopAccessAndPermission,
+} from "@/lib/api-utils";
 import { getPromptDetail } from "@/lib/prompt-service";
 
 type RouteContext = {
@@ -26,6 +31,16 @@ export async function GET(
 
     if (!promptName || typeof promptName !== "string") {
       return jsonError(400, "bad_request", "Invalid or missing prompt name");
+    }
+
+    // Verify authentication and shop access
+    const authResult = requireShopAccessAndPermission(
+      request,
+      shopId,
+      "VIEW_PROMPTS"
+    );
+    if ("error" in authResult) {
+      return authResult.error;
     }
 
     // Decode URL-encoded name (e.g., "global_render" might be encoded)

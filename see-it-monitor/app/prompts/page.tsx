@@ -136,6 +136,8 @@ function PromptRow({ prompt, shopId }: { prompt: PromptSummary; shopId: string }
         "block border-b border-gray-100 last:border-0 transition-colors",
         prompt.isDisabled ? "bg-gray-50/50" : "hover:bg-gray-50"
       )}
+      role="row"
+      aria-label={`${prompt.name}: ${prompt.description || "No description"}`}
     >
       <div className="px-6 py-4">
         <div className="flex items-center justify-between gap-4">
@@ -453,26 +455,33 @@ export default function PromptsPage() {
           ) : filteredPrompts.length === 0 ? (
             <EmptyState hasFilters={hasFilters} />
           ) : (
-            <div>
+            <div role="table" aria-label="Prompts list">
               {/* Table Header */}
-              <div className="px-6 py-3 border-b border-gray-100 bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1 min-w-0">Name / Model / Last Changed</div>
-                  <div className="w-24 text-center">Status</div>
-                  <div className="flex items-center gap-4">
-                    <div className="w-[60px] text-center">p50</div>
-                    <div className="w-[60px] text-center">p95</div>
-                    <div className="w-[60px] text-center">Success</div>
-                    <div className="w-[60px] text-center">Avg Cost</div>
+              <div role="rowgroup">
+                <div
+                  role="row"
+                  className="px-6 py-3 border-b border-gray-100 bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div role="columnheader" className="flex-1 min-w-0">Name / Model / Last Changed</div>
+                    <div role="columnheader" className="w-24 text-center">Status</div>
+                    <div className="flex items-center gap-4">
+                      <div role="columnheader" className="w-[60px] text-center">p50</div>
+                      <div role="columnheader" className="w-[60px] text-center">p95</div>
+                      <div role="columnheader" className="w-[60px] text-center">Success</div>
+                      <div role="columnheader" className="w-[60px] text-center">Avg Cost</div>
+                    </div>
+                    <div className="w-5" aria-hidden="true" />
                   </div>
-                  <div className="w-5" />
                 </div>
               </div>
 
               {/* Rows */}
-              {filteredPrompts.map((prompt) => (
-                <PromptRow key={prompt.id} prompt={prompt} shopId={selectedShopId} />
-              ))}
+              <div role="rowgroup">
+                {filteredPrompts.map((prompt) => (
+                  <PromptRow key={prompt.id} prompt={prompt} shopId={selectedShopId} />
+                ))}
+              </div>
             </div>
           )}
         </CardContent>

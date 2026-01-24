@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Play,
   RefreshCw,
@@ -42,7 +42,10 @@ interface TestPanelProps {
   activeVersionId: string | null;
   draftVersionId: string | null;
   defaultVariables?: Record<string, string>;
-  onRunTest: (request: TestPromptRequest) => Promise<TestPromptResponse>;
+  onRunTest: (
+    request: TestPromptRequest,
+    options?: { signal?: AbortSignal }
+  ) => Promise<TestPromptResponse>;
   onPromoteToDraft?: (overrides: PromptOverride) => Promise<void>;
 }
 
@@ -267,23 +270,31 @@ function OverrideSection({
   onToggle: (enabled: boolean) => void;
   children: React.ReactNode;
 }) {
+  const contentId = `override-${label.toLowerCase().replace(/\s+/g, "-")}`;
+
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
       <button
         onClick={() => onToggle(!enabled)}
         className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 transition-colors"
+        aria-expanded={enabled}
+        aria-controls={contentId}
       >
         <span className="text-sm font-medium text-gray-700">{label}</span>
         <div className="flex items-center gap-2">
           {enabled && <Badge variant="warning" className="text-xs">Override</Badge>}
           {enabled ? (
-            <ChevronDown className="h-4 w-4 text-gray-500" />
+            <ChevronDown className="h-4 w-4 text-gray-500" aria-hidden="true" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-gray-500" />
+            <ChevronRight className="h-4 w-4 text-gray-500" aria-hidden="true" />
           )}
         </div>
       </button>
-      {enabled && <div className="p-3 border-t border-gray-200">{children}</div>}
+      {enabled && (
+        <div id={contentId} className="p-3 border-t border-gray-200">
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -462,6 +473,16 @@ export function TestPanel({
   const [result, setResult] = useState<TestPromptResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // AbortController ref for request cancellation
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Cleanup: abort any in-flight request on unmount
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
   // Test inputs
   const [variables, setVariables] = useState<Record<string, string>>(defaultVariables);
   const [imageRefs, setImageRefs] = useState<string[]>([]);
@@ -519,14 +540,24 @@ export function TestPanel({
 
   // Run test
   const handleRunTest = async () => {
+    // Cancel any in-flight request before starting a new one
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
     setRunning(true);
     setError(null);
     setResult(null);
 
     try {
-      const response = await onRunTest(buildRequest());
+      const response = await onRunTest(buildRequest(), {
+        signal: abortControllerRef.current.signal,
+      });
       setResult(response);
     } catch (e) {
+      // Don't show error for aborted requests (user cancelled or navigated away)
+      if ((e as Error).name === "AbortError") {
+        return;
+      }
       setError((e as Error).message || "Test failed");
     } finally {
       setRunning(false);

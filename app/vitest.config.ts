@@ -7,7 +7,8 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["app/tests/**/*.test.ts"],
-    exclude: ["node_modules", "build"],
+    // Exclude integration tests from regular test runs - they require a real database
+    exclude: ["node_modules", "build", "app/tests/**/*.integration.test.ts"],
     testTimeout: 30000,
     hookTimeout: 30000,
   },

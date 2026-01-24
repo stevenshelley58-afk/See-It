@@ -9,7 +9,7 @@ import {
   jsonSuccess,
   validateShopId,
   parseJsonBody,
-  getActor,
+  requireShopAccessAndPermission,
 } from "@/lib/api-utils";
 import { createVersion } from "@/lib/prompt-service";
 import type { CreateVersionRequest } from "@/lib/types-prompt-control";
@@ -35,6 +35,18 @@ export async function POST(
       return jsonError(400, "bad_request", "Invalid or missing prompt name");
     }
 
+    // Verify authentication, shop access, and permission to create versions
+    const authResult = requireShopAccessAndPermission(
+      request,
+      shopId,
+      "CREATE_VERSION"
+    );
+    if ("error" in authResult) {
+      return authResult.error;
+    }
+
+    const { session } = authResult;
+
     // Decode URL-encoded name
     const decodedName = decodeURIComponent(promptName);
 
@@ -54,11 +66,8 @@ export async function POST(
       );
     }
 
-    // Get actor from request
-    const createdBy = getActor(request);
-
-    // Create the version
-    const version = await createVersion(shopId, decodedName, body, createdBy);
+    // Create the version using actor from authenticated session
+    const version = await createVersion(shopId, decodedName, body, session.actor);
 
     return jsonSuccess(version, 201);
   } catch (error) {

@@ -4,7 +4,12 @@
 // =============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { jsonError, jsonSuccess, validateShopId, getActor } from "@/lib/api-utils";
+import {
+  jsonError,
+  jsonSuccess,
+  validateShopId,
+  requireShopAccessAndPermission,
+} from "@/lib/api-utils";
 import { rollbackToPreviousVersion } from "@/lib/prompt-service";
 
 type RouteContext = {
@@ -28,14 +33,23 @@ export async function POST(
       return jsonError(400, "bad_request", "Invalid or missing prompt name");
     }
 
+    // Verify authentication, shop access, and permission to rollback versions
+    const authResult = requireShopAccessAndPermission(
+      request,
+      shopId,
+      "ROLLBACK_VERSION"
+    );
+    if ("error" in authResult) {
+      return authResult.error;
+    }
+
+    const { session } = authResult;
+
     // Decode URL-encoded name
     const decodedName = decodeURIComponent(promptName);
 
-    // Get actor from request
-    const rolledBackBy = getActor(request);
-
-    // Perform rollback
-    const result = await rollbackToPreviousVersion(shopId, decodedName, rolledBackBy);
+    // Perform rollback using actor from authenticated session
+    const result = await rollbackToPreviousVersion(shopId, decodedName, session.actor);
 
     return jsonSuccess(result);
   } catch (error) {

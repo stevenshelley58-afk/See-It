@@ -418,6 +418,7 @@ model VariantResult {
   outputArtifactId String?   @map("output_artifact_id")
 
   renderRun RenderRun @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
+  llmCalls  LLMCall[]
 
   @@index([renderRunId])
   @@index([variantId])
@@ -544,6 +545,10 @@ model PromptVersion {
   activatedAt DateTime? @map("activated_at")
   activatedBy String?   @map("activated_by")
 
+  // Rollback chain: tracks the version that was active when this version was activated
+  // Enables reliable rollback without relying on timestamp ordering
+  previousActiveVersionId String? @map("previous_active_version_id")
+
   promptDefinition PromptDefinition @relation(fields: [promptDefinitionId], references: [id], onDelete: Cascade)
   llmCalls         LLMCall[]
 
@@ -641,13 +646,16 @@ model LLMCall {
 
   // Relations
   shop          Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  promptVersion PromptVersion? @relation(fields: [promptVersionId], references: [id])
+  promptVersion PromptVersion? @relation(fields: [promptVersionId], references: [id], onDelete: SetNull)
+  variantResult VariantResult? @relation(fields: [variantResultId], references: [id], onDelete: SetNull)
   renderRun     RenderRun?     @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
   testRun       PromptTestRun? @relation(fields: [testRunId], references: [id], onDelete: Cascade)
 
   @@index([shopId, createdAt])
   @@index([renderRunId])
   @@index([testRunId])
+  @@index([variantResultId])
+  @@index([promptVersionId])
   @@index([promptName, createdAt])
   @@index([status, createdAt])
   @@map("llm_calls")

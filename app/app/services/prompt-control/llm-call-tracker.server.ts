@@ -62,14 +62,26 @@ function sha256(data: string): string {
 /**
  * Compute request hash for deduplication
  * CRITICAL: Sort imageRefs for stable hashing
+ *
+ * @param promptName - Name of the prompt
+ * @param resolutionHash - Hash from prompt resolution
+ * @param imageRefs - Array of image references (URIs)
+ * @param promptContentHash - Optional hash of the actual prompt content (for variant-specific deduplication)
  */
 function computeRequestHash(
   promptName: string,
   resolutionHash: string,
-  imageRefs: string[]
+  imageRefs: string[],
+  promptContentHash?: string
 ): string {
   const sortedImageRefs = [...imageRefs].sort();
-  return sha256(JSON.stringify({ promptName, resolutionHash, imageRefs: sortedImageRefs }));
+  return sha256(JSON.stringify({
+    promptName,
+    resolutionHash,
+    imageRefs: sortedImageRefs,
+    // Include prompt content hash if provided (for variant-specific deduplication)
+    ...(promptContentHash && { promptContentHash })
+  }));
 }
 
 // =============================================================================
@@ -82,15 +94,19 @@ function computeRequestHash(
  * Returns the call ID
  */
 export async function startLLMCall(input: StartLLMCallInput): Promise<string> {
-  const requestHash = computeRequestHash(
-    input.promptName,
-    input.resolutionHash,
-    input.imageRefs
-  );
-
   // Build input reference (truncated for storage, not full content)
   // preview: first 500 chars of combined message content for debugging
   const allContent = input.messages.map((m) => m.content).join("\n");
+
+  // Compute prompt content hash for variant-specific deduplication
+  const promptContentHash = sha256(allContent);
+
+  const requestHash = computeRequestHash(
+    input.promptName,
+    input.resolutionHash,
+    input.imageRefs,
+    promptContentHash // Include actual prompt content for per-variant uniqueness
+  );
   const inputRef = {
     messageCount: input.messages.length,
     imageCount: input.imageRefs.length,
@@ -228,6 +244,181 @@ export async function trackedLLMCall<T>(
 
     throw error;
   }
+}
+
+// =============================================================================
+// Request Hash (exported for cache lookups)
+// =============================================================================
+
+/**
+ * Compute request hash for deduplication (exported for external use)
+ * CRITICAL: Sort imageRefs for stable hashing
+ *
+ * @param promptName - Name of the prompt
+ * @param resolutionHash - Hash from prompt resolution
+ * @param imageRefs - Array of image references (URIs)
+ * @param promptContentHash - Optional hash of actual prompt content (for variant-specific deduplication)
+ */
+export function getRequestHash(
+  promptName: string,
+  resolutionHash: string,
+  imageRefs: string[],
+  promptContentHash?: string
+): string {
+  return computeRequestHash(promptName, resolutionHash, imageRefs, promptContentHash);
+}
+
+// =============================================================================
+// Cache Lookup for Deduplication
+// =============================================================================
+
+/**
+ * Default cache TTL: 1 hour
+ * Cached results older than this will not be returned
+ */
+const DEFAULT_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+export interface CachedRenderResult {
+  outputImageKey: string;
+  outputImageHash: string | null;
+  originalCallId: string;
+  cachedAt: Date;
+}
+
+/**
+ * Find a cached successful render result by request hash
+ * Returns the output image key if found within TTL, null otherwise
+ *
+ * @param shopId - Shop ID for scoping
+ * @param requestHash - Hash computed from promptName + resolutionHash + imageRefs
+ * @param ttlMs - Cache TTL in milliseconds (default: 1 hour)
+ */
+export async function findCachedRender(
+  shopId: string,
+  requestHash: string,
+  ttlMs: number = DEFAULT_CACHE_TTL_MS
+): Promise<CachedRenderResult | null> {
+  const minDate = new Date(Date.now() - ttlMs);
+
+  // Query for a successful LLM call with matching request hash
+  // The outputImageKey is stored in outputRef after successful upload
+  const cachedCall = await prisma.lLMCall.findFirst({
+    where: {
+      shopId,
+      requestHash,
+      status: "SUCCEEDED",
+      createdAt: { gte: minDate },
+    },
+    select: {
+      id: true,
+      createdAt: true,
+      outputRef: true,
+    },
+    orderBy: { createdAt: "desc" }, // Most recent first
+  });
+
+  if (!cachedCall?.outputRef) {
+    return null;
+  }
+
+  // Extract outputImageKey from outputRef JSON
+  const outputRef = cachedCall.outputRef as { outputImageKey?: string; outputImageHash?: string } | null;
+  if (!outputRef?.outputImageKey) {
+    return null;
+  }
+
+  return {
+    outputImageKey: outputRef.outputImageKey,
+    outputImageHash: outputRef.outputImageHash ?? null,
+    originalCallId: cachedCall.id,
+    cachedAt: cachedCall.createdAt,
+  };
+}
+
+/**
+ * Record a cache hit - creates a minimal LLM call record indicating the result was served from cache
+ * This ensures we have visibility into cache utilization and cost savings
+ */
+export async function recordCacheHit(input: {
+  shopId: string;
+  renderRunId?: string;
+  variantResultId?: string;
+  promptName: string;
+  promptVersionId: string | null;
+  model: string;
+  resolutionHash: string;
+  requestHash: string;
+  originalCallId: string;
+}): Promise<string> {
+  const call = await prisma.lLMCall.create({
+    data: {
+      shopId: input.shopId,
+      renderRunId: input.renderRunId ?? null,
+      variantResultId: input.variantResultId ?? null,
+      promptName: input.promptName,
+      promptVersionId: input.promptVersionId,
+      model: input.model,
+      resolutionHash: input.resolutionHash,
+      requestHash: input.requestHash,
+      status: "SUCCEEDED",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      latencyMs: 0, // Cache hit = 0 latency
+      tokensIn: 0,  // No tokens used
+      tokensOut: 0,
+      costEstimate: 0, // No cost
+      inputRef: {
+        cacheHit: true,
+        originalCallId: input.originalCallId,
+      },
+      outputRef: {
+        cacheHit: true,
+        originalCallId: input.originalCallId,
+      },
+    },
+  });
+
+  return call.id;
+}
+
+/**
+ * Update an LLMCall with the output image key after upload
+ * This enables future cache lookups to retrieve the rendered image
+ */
+export async function updateLLMCallWithOutput(
+  callId: string,
+  outputImageKey: string,
+  variantResultId?: string
+): Promise<void> {
+  await prisma.lLMCall.update({
+    where: { id: callId },
+    data: {
+      variantResultId: variantResultId ?? undefined,
+      outputRef: {
+        outputImageKey, // Store directly for easy cache retrieval
+      },
+    },
+  });
+}
+
+/**
+ * Find the most recent LLMCall for a renderRun (for linking to variant results)
+ */
+export async function findRecentCallForRun(
+  renderRunId: string,
+  requestHash: string
+): Promise<string | null> {
+  const call = await prisma.lLMCall.findFirst({
+    where: {
+      renderRunId,
+      requestHash,
+      status: "SUCCEEDED",
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+
+  return call?.id ?? null;
 }
 
 // =============================================================================

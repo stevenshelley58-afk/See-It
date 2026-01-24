@@ -5,15 +5,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
+import {
+  jsonError,
+  jsonSuccess,
+  validateShopId,
+  requireShopAccessAndPermission,
+} from "@/lib/api-utils";
 import type { AuditLogEntry, AuditAction } from "@/lib/types-prompt-control";
-
-// =============================================================================
-// Helper: JSON Error Response
-// =============================================================================
-
-function jsonError(status: number, error: string, message: string): NextResponse {
-  return NextResponse.json({ error, message }, { status });
-}
 
 // =============================================================================
 // Types
@@ -46,10 +44,21 @@ export async function GET(
   { params }: { params: Promise<{ shopId: string }> }
 ): Promise<NextResponse> {
   try {
-    const { shopId } = await params;
+    const { shopId: rawShopId } = await params;
+    const shopId = validateShopId(rawShopId);
 
-    if (!shopId || typeof shopId !== "string") {
-      return jsonError(400, "bad_request", "shopId is required");
+    if (!shopId) {
+      return jsonError(400, "bad_request", "Invalid or missing shopId");
+    }
+
+    // Verify authentication and shop access
+    const authResult = requireShopAccessAndPermission(
+      request,
+      shopId,
+      "VIEW_AUDIT_LOG"
+    );
+    if ("error" in authResult) {
+      return authResult.error;
     }
 
     // Parse query parameters
@@ -146,7 +155,7 @@ export async function GET(
       nextCursor,
     };
 
-    return NextResponse.json(response);
+    return jsonSuccess(response);
   } catch (error) {
     console.error("GET /api/shops/[shopId]/audit-log error:", error);
     return jsonError(500, "internal_error", "Failed to fetch audit log");

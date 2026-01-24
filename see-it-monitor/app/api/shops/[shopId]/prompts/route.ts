@@ -4,7 +4,12 @@
 // =============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { jsonError, jsonSuccess, validateShopId } from "@/lib/api-utils";
+import {
+  jsonError,
+  jsonSuccess,
+  validateShopId,
+  requireShopAccessAndPermission,
+} from "@/lib/api-utils";
 import { listPromptsForShop } from "@/lib/prompt-service";
 
 type RouteContext = {
@@ -21,6 +26,16 @@ export async function GET(
 
     if (!shopId) {
       return jsonError(400, "bad_request", "Invalid or missing shopId");
+    }
+
+    // Verify authentication and shop access
+    const authResult = requireShopAccessAndPermission(
+      request,
+      shopId,
+      "VIEW_PROMPTS"
+    );
+    if ("error" in authResult) {
+      return authResult.error;
     }
 
     const response = await listPromptsForShop(shopId);

@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "shopify": "shopify",
     "prisma": "prisma",
     "set-unlimited": "node scripts/set-unlimited-credits.js",

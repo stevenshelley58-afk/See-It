@@ -156,7 +156,11 @@ function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
           <AlertCircle className="h-5 w-5 text-red-500" />
         )}
         <span className="text-sm font-medium">{toast.message}</span>
-        <button onClick={onClose} className="ml-2 hover:opacity-70">
+        <button
+          onClick={onClose}
+          className="ml-2 hover:opacity-70"
+          aria-label="Dismiss notification"
+        >
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -198,6 +202,7 @@ function TagList({
             <button
               onClick={() => onChange(values.filter((x) => x !== v))}
               className="hover:text-red-500 transition-colors"
+              aria-label={`Remove ${v}`}
             >
               <X className="h-3 w-3" />
             </button>
@@ -227,6 +232,7 @@ function TagList({
             <button
               onClick={() => setAdding(true)}
               className="inline-flex items-center gap-1 px-2 py-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+              aria-label={`Add ${label.toLowerCase()}`}
             >
               <Plus className="h-3 w-3" /> Add
             </button>
@@ -262,7 +268,14 @@ function ProgressBar({
           {showPercent && <span>{percent.toFixed(1)}%</span>}
         </div>
       )}
-      <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+      <div
+        className="w-full h-2 bg-gray-200 rounded-full overflow-hidden"
+        role="progressbar"
+        aria-valuenow={value}
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-label={label || "Progress"}
+      >
         <div
           className={cn("h-full rounded-full transition-all duration-500", color)}
           style={{ width: `${percent}%` }}
@@ -302,7 +315,12 @@ function ShopSelector({
           </option>
         ))}
       </select>
-      {isLoading && <RefreshCw className="h-4 w-4 animate-spin text-gray-400" />}
+      {isLoading && (
+        <RefreshCw
+          className="h-4 w-4 animate-spin text-gray-400"
+          aria-label="Loading shops"
+        />
+      )}
     </div>
   );
 }

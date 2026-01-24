@@ -6,19 +6,19 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
+import {
+  jsonError,
+  jsonSuccess,
+  validateShopId,
+  requireShopAccessAndPermission,
+  getIpAddress,
+  getUserAgent,
+} from "@/lib/api-utils";
 import type {
   RuntimeConfigResponse,
   UpdateRuntimeConfigRequest,
   AuditAction,
 } from "@/lib/types-prompt-control";
-
-// =============================================================================
-// Helper: JSON Error Response
-// =============================================================================
-
-function jsonError(status: number, error: string, message: string): NextResponse {
-  return NextResponse.json({ error, message }, { status });
-}
 
 // =============================================================================
 // Helper: Get Daily Cost for Shop
@@ -67,10 +67,21 @@ export async function GET(
   { params }: { params: Promise<{ shopId: string }> }
 ): Promise<NextResponse> {
   try {
-    const { shopId } = await params;
+    const { shopId: rawShopId } = await params;
+    const shopId = validateShopId(rawShopId);
 
-    if (!shopId || typeof shopId !== "string") {
-      return jsonError(400, "bad_request", "shopId is required");
+    if (!shopId) {
+      return jsonError(400, "bad_request", "Invalid or missing shopId");
+    }
+
+    // Verify authentication and shop access
+    const authResult = requireShopAccessAndPermission(
+      request,
+      shopId,
+      "VIEW_RUNTIME_CONFIG"
+    );
+    if ("error" in authResult) {
+      return authResult.error;
     }
 
     // Get or create runtime config
@@ -120,7 +131,7 @@ export async function GET(
       },
     };
 
-    return NextResponse.json(response);
+    return jsonSuccess(response);
   } catch (error) {
     console.error("GET /api/shops/[shopId]/runtime-config error:", error);
     return jsonError(500, "internal_error", "Failed to fetch runtime config");
@@ -138,11 +149,24 @@ export async function PATCH(
   { params }: { params: Promise<{ shopId: string }> }
 ): Promise<NextResponse> {
   try {
-    const { shopId } = await params;
+    const { shopId: rawShopId } = await params;
+    const shopId = validateShopId(rawShopId);
 
-    if (!shopId || typeof shopId !== "string") {
-      return jsonError(400, "bad_request", "shopId is required");
+    if (!shopId) {
+      return jsonError(400, "bad_request", "Invalid or missing shopId");
     }
+
+    // Verify authentication, shop access, and admin permission
+    const authResult = requireShopAccessAndPermission(
+      request,
+      shopId,
+      "UPDATE_RUNTIME_CONFIG"
+    );
+    if ("error" in authResult) {
+      return authResult.error;
+    }
+
+    const { session } = authResult;
 
     // Parse request body
     let body: UpdateRuntimeConfigRequest;
@@ -194,10 +218,10 @@ export async function PATCH(
       where: { shopId },
     });
 
-    // Get actor from header or default to "system"
-    const actor = request.headers.get("x-actor") || "system";
-    const ipAddress = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || null;
-    const userAgent = request.headers.get("user-agent") || null;
+    // Get actor from authenticated session
+    const actor = session.actor;
+    const ipAddress = getIpAddress(request);
+    const userAgent = getUserAgent(request);
 
     // Build update data
     const updateData: Record<string, unknown> = {
@@ -260,7 +284,7 @@ export async function PATCH(
         targetType: "ShopRuntimeConfig",
         targetId: updatedConfig.id,
         targetName: "runtime-config",
-        before: beforeState,
+        before: beforeState ?? undefined,
         after: afterState,
         ipAddress,
         userAgent,
@@ -292,7 +316,7 @@ export async function PATCH(
       },
     };
 
-    return NextResponse.json(response);
+    return jsonSuccess(response);
   } catch (error) {
     console.error("PATCH /api/shops/[shopId]/runtime-config error:", error);
     return jsonError(500, "internal_error", "Failed to update runtime config");

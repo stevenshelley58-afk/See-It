@@ -1,7 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+// =============================================================================
+// GET /api/runs/[runId]/llm-calls
+// Fetches all LLM calls for a specific render run
+// =============================================================================
 
-const prisma = new PrismaClient();
+import { NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/db";
+import {
+  jsonError,
+  jsonSuccess,
+  requireAuth,
+  getAuthSession,
+} from "@/lib/api-utils";
 
 type RouteContext = {
   params: Promise<{ runId: string }>;
@@ -10,21 +19,47 @@ type RouteContext = {
 /**
  * GET /api/runs/[runId]/llm-calls
  * Fetches all LLM calls for a specific render run
+ *
+ * Note: This route verifies the authenticated user has access to the
+ * shop that owns the render run, rather than having the shopId in the URL.
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: RouteContext
 ): Promise<NextResponse> {
   const { runId } = await context.params;
 
   if (!runId) {
-    return NextResponse.json(
-      { error: "bad_request", message: "Run ID is required" },
-      { status: 400 }
-    );
+    return jsonError(400, "bad_request", "Run ID is required");
   }
 
+  // Verify authentication
+  const authResult = requireAuth(request);
+  if ("error" in authResult) {
+    return authResult.error;
+  }
+
+  const { session } = authResult;
+
   try {
+    // First, find the render run and get its shopId
+    // Note: RenderRun model is in the main app schema, we need to access it
+    // For now, we get the shopId from the first LLM call
+    const firstCall = await prisma.lLMCall.findFirst({
+      where: { renderRunId: runId },
+      select: { shopId: true },
+    });
+
+    if (!firstCall) {
+      return jsonError(404, "not_found", "Render run not found or has no LLM calls");
+    }
+
+    // Verify the user has access to this shop
+    if (!session.hasFullAccess && !session.allowedShops.includes(firstCall.shopId)) {
+      return jsonError(403, "forbidden", "Access denied to this render run");
+    }
+
+    // Fetch all LLM calls for this run
     const llmCalls = await prisma.lLMCall.findMany({
       where: {
         renderRunId: runId,
@@ -64,15 +99,12 @@ export async function GET(
       finishedAt: call.finishedAt ? call.finishedAt.toISOString() : null,
     }));
 
-    return NextResponse.json({
+    return jsonSuccess({
       llmCalls: serializedCalls,
       count: serializedCalls.length,
     });
   } catch (error) {
     console.error("Failed to fetch LLM calls:", error);
-    return NextResponse.json(
-      { error: "database_error", message: "Failed to fetch LLM calls" },
-      { status: 500 }
-    );
+    return jsonError(500, "database_error", "Failed to fetch LLM calls");
   }
 }

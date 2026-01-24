@@ -9,7 +9,7 @@ import {
   jsonSuccess,
   validateShopId,
   parseJsonBody,
-  getActor,
+  requireShopAccessAndPermission,
 } from "@/lib/api-utils";
 import { activateVersion } from "@/lib/prompt-service";
 import type { ActivateVersionRequest } from "@/lib/types-prompt-control";
@@ -35,6 +35,18 @@ export async function POST(
       return jsonError(400, "bad_request", "Invalid or missing prompt name");
     }
 
+    // Verify authentication, shop access, and permission to activate versions
+    const authResult = requireShopAccessAndPermission(
+      request,
+      shopId,
+      "ACTIVATE_VERSION"
+    );
+    if ("error" in authResult) {
+      return authResult.error;
+    }
+
+    const { session } = authResult;
+
     // Decode URL-encoded name
     const decodedName = decodeURIComponent(promptName);
 
@@ -50,11 +62,8 @@ export async function POST(
       return jsonError(400, "validation_error", "versionId is required");
     }
 
-    // Get actor from request
-    const activatedBy = getActor(request);
-
-    // Activate the version
-    const result = await activateVersion(shopId, decodedName, body.versionId, activatedBy);
+    // Activate the version using actor from authenticated session
+    const result = await activateVersion(shopId, decodedName, body.versionId, session.actor);
 
     return jsonSuccess(result);
   } catch (error) {

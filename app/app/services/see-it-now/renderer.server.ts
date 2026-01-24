@@ -15,7 +15,13 @@ import {
 import {
   buildResolvedConfigSnapshot,
   trackedLLMCall,
+  getRequestHash,
+  findCachedRender,
+  recordCacheHit,
+  updateLLMCallWithOutput,
+  findRecentCallForRun,
   type ResolvedConfigSnapshot,
+  type CachedRenderResult,
 } from "~/services/prompt-control";
 import type {
   ImageMeta,
@@ -159,6 +165,61 @@ async function renderSingleVariant(
     imageRefs.push(roomImage.geminiUri);
   }
 
+  // ==========================================================================
+  // DEDUPLICATION: Check cache before making LLM call
+  // ==========================================================================
+  if (trackingContext) {
+    // Compute hash of finalPrompt for variant-specific deduplication
+    const finalPromptHash = crypto.createHash("sha256").update(finalPrompt).digest("hex").slice(0, 16);
+
+    const requestHash = getRequestHash(
+      "global_render",
+      trackingContext.resolutionHash,
+      imageRefs,
+      finalPromptHash // Include variant-specific prompt content
+    );
+
+    try {
+      const cached = await findCachedRender(trackingContext.shopId, requestHash);
+
+      if (cached) {
+        const cacheLatencyMs = Date.now() - startTime;
+
+        logger.info(
+          { ...variantLogContext, stage: "cache-hit", originalCallId: cached.originalCallId },
+          `Cache hit for variant ${variantId} - returning cached result from ${cached.cachedAt.toISOString()}`
+        );
+
+        // Record cache hit for observability
+        await recordCacheHit({
+          shopId: trackingContext.shopId,
+          renderRunId: trackingContext.renderRunId,
+          promptName: "global_render",
+          promptVersionId: trackingContext.promptVersionId,
+          model: RENDER_MODEL,
+          resolutionHash: trackingContext.resolutionHash,
+          requestHash,
+          originalCallId: cached.originalCallId,
+        });
+
+        return {
+          variantId,
+          status: "success",
+          latencyMs: cacheLatencyMs,
+          imageKey: cached.outputImageKey, // Return cached imageKey directly
+          imageHash: cached.outputImageHash ?? undefined,
+          // No imageBase64 - caller will see imageKey is set and skip upload
+        };
+      }
+    } catch (cacheErr) {
+      // Cache lookup failed - log and continue with normal render
+      logger.warn(
+        { ...variantLogContext, stage: "cache-error" },
+        `Cache lookup failed (continuing with LLM call): ${cacheErr instanceof Error ? cacheErr.message : String(cacheErr)}`
+      );
+    }
+  }
+
   // Define the LLM call executor
   const executeGeminiCall = async () => {
     const result = await Promise.race([
@@ -235,7 +296,12 @@ async function renderSingleVariant(
         executeGeminiCall
       );
     } else {
-      // Fallback: execute without tracking (for backward compatibility)
+      // Safety net: execute without tracking if somehow trackingContext is undefined
+      // This should not happen in normal operation - all code paths now create a tracking context
+      logger.error(
+        { ...variantLogContext, stage: "tracking-missing" },
+        "UNEXPECTED: No tracking context available - LLM call will not be tracked"
+      );
       const result = await executeGeminiCall();
       imageBase64 = result.result;
     }
@@ -365,12 +431,44 @@ export async function renderAllVariants(
         productImageUrl: input.productImage.geminiUri,
         roomImageUrl: input.roomImage.geminiUri,
       };
+    } else {
+      // Prompt not found in snapshot - might be blocked or not defined
+      // Still create tracking context with minimal info
+      logger.warn(
+        { ...logContext, stage: "prompt-control-missing" },
+        `global_render prompt not found in snapshot (blocked: ${JSON.stringify(configSnapshot.blockedPrompts["global_render"] || "no")})`
+      );
+
+      trackingContext = {
+        shopId: input.shopId,
+        renderRunId: runId,
+        promptVersionId: null,
+        resolutionHash: "prompt-not-found:global_render",
+        productImageUrl: input.productImage.geminiUri,
+        roomImageUrl: input.roomImage.geminiUri,
+      };
     }
   } catch (err) {
-    // Log but don't fail - prompt control is additive, not blocking
+    // Log warning but create minimal tracking context so LLM calls are still recorded
     logger.warn(
       { ...logContext, stage: "prompt-control-error" },
-      `Failed to build config snapshot (continuing without tracking): ${err instanceof Error ? err.message : String(err)}`
+      `Failed to build config snapshot (continuing with degraded tracking): ${err instanceof Error ? err.message : String(err)}`
+    );
+
+    // Create minimal tracking context - ensures LLM calls are still logged
+    // even when prompt resolution fails. This maintains observability.
+    trackingContext = {
+      shopId: input.shopId,
+      renderRunId: runId,
+      promptVersionId: null, // Unknown due to resolution failure
+      resolutionHash: "unresolved:" + (err instanceof Error ? err.message : "unknown").slice(0, 50),
+      productImageUrl: input.productImage.geminiUri,
+      roomImageUrl: input.roomImage.geminiUri,
+    };
+
+    logger.info(
+      { ...logContext, stage: "prompt-control-fallback" },
+      `Created fallback tracking context for shopId=${input.shopId}, runId=${runId}`
     );
   }
 
@@ -472,14 +570,63 @@ export async function renderAllVariants(
       trackingContext     // Pass tracking context for LLM call tracking
     ).then(async (result) => {
       // Handle completion
-      let imageKey: string | undefined;
+      let imageKey: string | undefined = result.imageKey; // Preserve cached imageKey if present
 
-      if (result.status === "success" && result.imageBase64) {
+      if (result.status === "success" && result.imageBase64 && !result.imageKey) {
+        // Only upload if we have imageBase64 and no cached imageKey
         try {
           // Upload to GCS
           // Note: In a real early-return scenario, we might want to do this async
           // but for now we await it to ensure the key is ready before we count it as success
           imageKey = await uploadVariantImage(runId, result.variantId, result.imageBase64);
+
+          // =======================================================================
+          // DEDUPLICATION: Update LLMCall with outputImageKey for future cache hits
+          // =======================================================================
+          if (trackingContext && imageKey) {
+            try {
+              // Rebuild imageRefs (same logic as renderSingleVariant)
+              const imageRefs: string[] = [];
+              if (trackingContext.productImageUrl) {
+                imageRefs.push(trackingContext.productImageUrl);
+              } else if (input.productImage.geminiUri) {
+                imageRefs.push(input.productImage.geminiUri);
+              }
+              if (trackingContext.roomImageUrl) {
+                imageRefs.push(trackingContext.roomImageUrl);
+              } else if (input.roomImage.geminiUri) {
+                imageRefs.push(input.roomImage.geminiUri);
+              }
+
+              // Compute the same requestHash used for tracking
+              const finalPromptHash = crypto.createHash("sha256")
+                .update(finalPrompt)
+                .digest("hex")
+                .slice(0, 16);
+              const requestHash = getRequestHash(
+                "global_render",
+                trackingContext.resolutionHash,
+                imageRefs,
+                finalPromptHash
+              );
+
+              // Find the LLMCall and update it with the imageKey
+              const callId = await findRecentCallForRun(runId, requestHash);
+              if (callId) {
+                await updateLLMCallWithOutput(callId, imageKey);
+                logger.debug(
+                  { ...logContext, variantId: result.variantId, callId },
+                  `Updated LLMCall with outputImageKey for cache`
+                );
+              }
+            } catch (cacheUpdateErr) {
+              // Non-fatal: cache update failure shouldn't block the render
+              logger.warn(
+                { ...logContext, variantId: result.variantId },
+                `Failed to update LLMCall with imageKey (non-fatal): ${cacheUpdateErr instanceof Error ? cacheUpdateErr.message : String(cacheUpdateErr)}`
+              );
+            }
+          }
         } catch (err) {
           logger.error(
             { ...logContext, variantId: result.variantId },
@@ -488,7 +635,7 @@ export async function renderAllVariants(
         }
       }
 
-      // Record result
+      // Record result (imageKey may come from cache or fresh upload)
       const finalResult = { ...result, imageKey };
       results.push(finalResult);
 
