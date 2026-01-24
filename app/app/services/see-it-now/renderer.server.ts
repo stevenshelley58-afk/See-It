@@ -32,10 +32,73 @@ import type {
 
 const VARIANT_TIMEOUT_MS = 45000; // 45 seconds per variant
 
-// Env-based toggle for model selection (allows PRO for high-quality testing)
-const RENDER_MODEL = process.env.SEE_IT_NOW_RENDER_MODEL === "PRO" 
-  ? GEMINI_IMAGE_MODEL_PRO 
-  : GEMINI_IMAGE_MODEL_FAST;
+// Env-based toggle for model selection (allows forcing PRO for testing)
+const BASE_RENDER_MODEL =
+  process.env.SEE_IT_NOW_RENDER_MODEL === "PRO"
+    ? GEMINI_IMAGE_MODEL_PRO
+    : GEMINI_IMAGE_MODEL_FAST;
+
+// Gemini-compatible aspect ratios (label values per Gemini docs)
+const GEMINI_SUPPORTED_RATIOS: Array<{ label: string; value: number }> = [
+  { label: "1:1", value: 1.0 },
+  { label: "4:5", value: 0.8 },
+  { label: "5:4", value: 1.25 },
+  { label: "3:4", value: 0.75 },
+  { label: "4:3", value: 4 / 3 },
+  { label: "2:3", value: 2 / 3 },
+  { label: "3:2", value: 1.5 },
+  { label: "9:16", value: 9 / 16 },
+  { label: "16:9", value: 16 / 9 },
+  { label: "21:9", value: 21 / 9 },
+];
+
+function findClosestGeminiRatioLabel(width: number, height: number): string | null {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  const inputRatio = width / height;
+  let closest = GEMINI_SUPPORTED_RATIOS[0];
+  let minDiff = Math.abs(inputRatio - closest.value);
+  for (const r of GEMINI_SUPPORTED_RATIOS) {
+    const diff = Math.abs(inputRatio - r.value);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closest = r;
+    }
+  }
+  return closest.label;
+}
+
+class VariantBlockedError extends Error {
+  public readonly code: "SAFETY_BLOCK" | "PROMPT_BLOCK";
+  public readonly finishReason?: string | null;
+  public readonly blockReason?: string | null;
+  public readonly safetyRatings?: unknown;
+  public readonly causeId: string;
+
+  constructor(args: {
+    code: "SAFETY_BLOCK" | "PROMPT_BLOCK";
+    message: string;
+    finishReason?: string | null;
+    blockReason?: string | null;
+    safetyRatings?: unknown;
+    causeId: string;
+  }) {
+    super(args.message);
+    this.name = "VariantBlockedError";
+    this.code = args.code;
+    this.finishReason = args.finishReason;
+    this.blockReason = args.blockReason;
+    this.safetyRatings = args.safetyRatings;
+    this.causeId = args.causeId;
+  }
+}
+
+function extractFinishReasonFromMessage(message: string | undefined): string | null {
+  if (!message) return null;
+  const m = message.match(/finishReason=([^)]+)\)/i);
+  return m?.[1]?.trim() ?? null;
+}
 
 export type RenderAllVariantsMode = "early_return" | "wait_all";
 
@@ -196,7 +259,7 @@ async function renderSingleVariant(
           renderRunId: trackingContext.renderRunId,
           promptName: "global_render",
           promptVersionId: trackingContext.promptVersionId,
-          model: RENDER_MODEL,
+          model: BASE_RENDER_MODEL,
           resolutionHash: trackingContext.resolutionHash,
           requestHash,
           originalCallId: cached.originalCallId,
@@ -222,72 +285,154 @@ async function renderSingleVariant(
 
   // Define the LLM call executor
   const executeGeminiCall = async () => {
-    const result = await Promise.race([
-      client.models.generateContent({
-        model: RENDER_MODEL,
-        contents: [{ role: "user", parts }],
-        config: { responseModalities: ["TEXT", "IMAGE"] as any },
-      }),
-      timeoutPromise,
-    ]);
+    const roomWidth = roomImage.meta?.width;
+    const roomHeight = roomImage.meta?.height;
+    const aspectRatio = findClosestGeminiRatioLabel(roomWidth, roomHeight);
 
-    // Extract image from response
-    let imageBase64: string | undefined;
+    logger.info(
+      { ...variantLogContext, stage: "aspect-ratio", roomWidth, roomHeight, aspectRatio },
+      `Variant ${variantId} aspect ratio resolved: ${aspectRatio ?? "none"}`
+    );
 
-    const candidates = (result as any)?.candidates;
-    if (candidates?.[0]?.content?.parts) {
-      for (const part of candidates[0].content.parts) {
-        if ((part as any)?.inlineData?.data) {
-          imageBase64 = (part as any).inlineData.data;
-          break;
+    const callOnce = async (model: string) => {
+      const config: any = { responseModalities: ["TEXT", "IMAGE"] as any };
+      if (aspectRatio) {
+        config.imageConfig = { aspectRatio };
+      }
+
+      const result = await Promise.race([
+        client.models.generateContent({
+          model,
+          contents: [{ role: "user", parts }],
+          config,
+        }),
+        timeoutPromise,
+      ]);
+
+      const candidates = (result as any)?.candidates;
+      const finishReason = candidates?.[0]?.finishReason ?? null;
+      const safetyRatings =
+        candidates?.[0]?.safetyRatings ?? (result as any)?.promptFeedback?.safetyRatings ?? undefined;
+      const promptBlockReason = (result as any)?.promptFeedback?.blockReason ?? null;
+
+      if (promptBlockReason) {
+        const upper = String(promptBlockReason).toUpperCase();
+        const code = upper.includes("SAFETY") ? "SAFETY_BLOCK" : "PROMPT_BLOCK";
+        throw new VariantBlockedError({
+          code,
+          // Message is persisted to LLMCall.errorMessage via trackedLLMCall; keep it informative but safe.
+          message: `Blocked by safety filters (code=${code}, finishReason=${String(finishReason ?? "")}, blockReason=${String(promptBlockReason)})`,
+          finishReason,
+          blockReason: promptBlockReason,
+          safetyRatings,
+          causeId: crypto.randomUUID().slice(0, 8),
+        });
+      }
+
+      // Extract image from response
+      let imageBase64: string | undefined;
+      if (candidates?.[0]?.content?.parts) {
+        for (const part of candidates[0].content.parts) {
+          if ((part as any)?.inlineData?.data) {
+            imageBase64 = (part as any).inlineData.data;
+            break;
+          }
         }
       }
-    }
 
-    if (!imageBase64) {
-      throw new Error("No image in response");
-    }
+      if (!imageBase64) {
+        const frUpper = String(finishReason ?? "").toUpperCase();
+        if (frUpper.includes("SAFETY") || frUpper.includes("BLOCK")) {
+          throw new VariantBlockedError({
+            code: "SAFETY_BLOCK",
+            message: `Blocked by safety filters (code=SAFETY_BLOCK, finishReason=${String(finishReason ?? "")})`,
+            finishReason,
+            blockReason: null,
+            safetyRatings,
+            causeId: crypto.randomUUID().slice(0, 8),
+          });
+        }
+        const reasonSuffix = finishReason ? ` (finishReason=${String(finishReason)})` : "";
+        throw new Error(`No image in response${reasonSuffix}`);
+      }
 
-    // Extract usage metadata if available
-    const usageMetadata = (result as any)?.usageMetadata;
-    const tokensIn = usageMetadata?.promptTokenCount ?? undefined;
-    const tokensOut = usageMetadata?.candidatesTokenCount ?? undefined;
+      // Extract usage metadata if available
+      const usageMetadata = (result as any)?.usageMetadata;
+      const tokensIn = usageMetadata?.promptTokenCount ?? undefined;
+      const tokensOut = usageMetadata?.candidatesTokenCount ?? undefined;
 
-    // Estimate cost (rough estimate based on Gemini pricing)
-    // Gemini 2.0 Flash: ~$0.10/1M input tokens, ~$0.40/1M output tokens
-    // Image inputs are typically ~250 tokens per image
-    let costEstimate: number | undefined;
-    if (tokensIn !== undefined || tokensOut !== undefined) {
-      const inCost = ((tokensIn ?? 0) / 1_000_000) * 0.10;
-      const outCost = ((tokensOut ?? 0) / 1_000_000) * 0.40;
-      costEstimate = inCost + outCost;
-    }
+      // Estimate cost (rough estimate based on Gemini pricing)
+      let costEstimate: number | undefined;
+      if (tokensIn !== undefined || tokensOut !== undefined) {
+        const inCost = ((tokensIn ?? 0) / 1_000_000) * 0.10;
+        const outCost = ((tokensOut ?? 0) / 1_000_000) * 0.40;
+        costEstimate = inCost + outCost;
+      }
 
-    return {
-      result: imageBase64,
-      usage: {
-        tokensIn,
-        tokensOut,
-        cost: costEstimate,
-      },
-      providerModel: RENDER_MODEL,
-      outputPreview: imageBase64 ? `[IMAGE:${imageBase64.length} bytes]` : undefined,
+      return {
+        imageBase64,
+        usage: { tokensIn, tokensOut, cost: costEstimate },
+        providerModel: model,
+        providerMeta: {
+          finishReason,
+          blockReason: promptBlockReason,
+          safetyRatings,
+          aspectRatio,
+          roomWidth,
+          roomHeight,
+        },
+      };
     };
+
+    // Interactive default: FAST by default; PRO only on defined fallback condition (retry after FAST failure).
+    const baseModel = BASE_RENDER_MODEL;
+    const allowFallbackToPro = baseModel === GEMINI_IMAGE_MODEL_FAST;
+
+    try {
+      const first = await callOnce(baseModel);
+      return {
+        result: first,
+        usage: first.usage,
+        providerModel: first.providerModel,
+        outputPreview: first.imageBase64 ? `[IMAGE:${first.imageBase64.length} bytes]` : undefined,
+      };
+    } catch (err: any) {
+      const isTimeout = err?.message === "Timeout" || err?.name === "TimeoutError";
+      const isBlocked = err instanceof VariantBlockedError;
+      if (allowFallbackToPro && !isTimeout && !isBlocked) {
+        logger.warn(
+          { ...variantLogContext, stage: "model-fallback", from: baseModel, to: GEMINI_IMAGE_MODEL_PRO },
+          `Variant ${variantId} retrying with PRO after FAST failure: ${err?.message ?? String(err)}`
+        );
+        const second = await callOnce(GEMINI_IMAGE_MODEL_PRO);
+        return {
+          result: second,
+          usage: second.usage,
+          providerModel: second.providerModel,
+          outputPreview: second.imageBase64 ? `[IMAGE:${second.imageBase64.length} bytes]` : undefined,
+        };
+      }
+      throw err;
+    }
   };
 
   try {
-    let imageBase64: string;
+    let geminiResult: {
+      imageBase64: string;
+      providerModel: string;
+      providerMeta?: any;
+    };
 
     // If we have tracking context, wrap the call with trackedLLMCall
     if (trackingContext) {
-      imageBase64 = await trackedLLMCall(
+      geminiResult = await trackedLLMCall(
         {
           shopId: trackingContext.shopId,
           renderRunId: trackingContext.renderRunId,
           variantResultId: undefined, // We could add this if needed
           promptName: "global_render",
           promptVersionId: trackingContext.promptVersionId,
-          model: RENDER_MODEL,
+          model: BASE_RENDER_MODEL,
           messages: [{ role: "user", content: finalPrompt }],
           params: { responseModalities: ["TEXT", "IMAGE"] },
           imageRefs,
@@ -303,9 +448,10 @@ async function renderSingleVariant(
         "UNEXPECTED: No tracking context available - LLM call will not be tracked"
       );
       const result = await executeGeminiCall();
-      imageBase64 = result.result;
+      geminiResult = result.result;
     }
 
+    const imageBase64 = geminiResult.imageBase64;
     const latencyMs = Date.now() - startTime;
 
     logger.info(
@@ -319,13 +465,27 @@ async function renderSingleVariant(
       latencyMs,
       imageBase64,
       imageHash: hashBuffer(Buffer.from(imageBase64, "base64")),
-    };
+      // Additive metadata for callers/persistence (does not change existing consumers)
+      providerModel: geminiResult.providerModel,
+      providerMeta: geminiResult.providerMeta,
+    } as any;
   } catch (error: any) {
     const latencyMs = Date.now() - startTime;
     const isTimeout = error.message === "Timeout";
+    const isBlocked = error instanceof VariantBlockedError;
+    const inferredFinishReason = !isBlocked
+      ? extractFinishReasonFromMessage(error instanceof Error ? error.message : undefined)
+      : null;
 
     logger.error(
-      { ...variantLogContext, stage: "error" },
+      {
+        ...variantLogContext,
+        stage: "error",
+        errorCode: isTimeout ? "TIMEOUT" : isBlocked ? error.code : "PROVIDER_ERROR",
+        finishReason: isBlocked ? error.finishReason : inferredFinishReason ?? undefined,
+        blockReason: isBlocked ? error.blockReason : undefined,
+        causeId: isBlocked ? error.causeId : undefined,
+      },
       `Variant ${variantId} failed: ${error.message}`
     );
 
@@ -333,7 +493,26 @@ async function renderSingleVariant(
       variantId,
       status: isTimeout ? "timeout" : "failed",
       latencyMs,
-      errorMessage: error.message?.slice(0, 500),
+      // Keep client-facing message user-safe (do not leak internal block reasons)
+      errorMessage: isBlocked
+        ? "Your request was blocked by safety filters. Please try a different prompt."
+        : isTimeout
+          ? "The render timed out. Please try again."
+          : "The render failed. Please try again.",
+      // Additive structured error (keeps existing consumers working via errorMessage)
+      error: {
+        code: isTimeout ? "TIMEOUT" : isBlocked ? error.code : "PROVIDER_ERROR",
+        message: isBlocked
+          ? "Your request was blocked by safety filters. Please try a different prompt."
+          : isTimeout
+            ? "The render timed out. Please try again."
+            : "The render failed. Please try again.",
+        requestId: logContext.requestId,
+        variantId,
+        finishReason: isBlocked ? error.finishReason ?? null : inferredFinishReason ?? undefined,
+        blockReason: isBlocked ? error.blockReason ?? null : undefined,
+        causeId: isBlocked ? error.causeId : undefined,
+      },
     };
   }
 }
@@ -379,7 +558,7 @@ export async function renderAllVariants(
 
   logger.info(
     logContext,
-    `Starting render run with ${input.promptPack.variants.length} variants`
+    `Starting render run with ${input.promptPack.variants.length} variants (baseModel=${BASE_RENDER_MODEL})`
   );
 
   // ==========================================================================
@@ -482,7 +661,7 @@ export async function renderAllVariants(
     productAssetId: input.productAssetId,
     roomSessionId: input.roomSessionId,
     promptPackVersion: input.promptPackVersion,
-    model: RENDER_MODEL,
+    model: BASE_RENDER_MODEL,
     productImageHash: input.productImage.hash,
     productImageMeta: input.productImage.meta,
     roomImageHash: input.roomImage.hash,
@@ -516,7 +695,7 @@ export async function renderAllVariants(
       options.onRunStarted({
         runId,
         totalVariants: input.promptPack.variants.length,
-        model: RENDER_MODEL,
+        model: BASE_RENDER_MODEL,
       });
     } catch (e) {
       logger.warn(
@@ -613,7 +792,14 @@ export async function renderAllVariants(
               // Find the LLMCall and update it with the imageKey
               const callId = await findRecentCallForRun(runId, requestHash);
               if (callId) {
-                await updateLLMCallWithOutput(callId, imageKey);
+                await updateLLMCallWithOutput(callId, imageKey, undefined, {
+                  outputImageHash: result.imageHash,
+                  seeItNow: {
+                    variantId: result.variantId,
+                    providerModel: (result as any).providerModel,
+                    providerMeta: (result as any).providerMeta,
+                  },
+                });
                 logger.debug(
                   { ...logContext, variantId: result.variantId, callId },
                   `Updated LLMCall with outputImageKey for cache`
