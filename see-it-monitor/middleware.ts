@@ -17,10 +17,12 @@ import { jwtVerify } from "jose";
 // =============================================================================
 
 /**
- * Routes that require authentication
- * All /api/shops/* routes require auth
+ * Routes that are public (no auth required)
+ *
+ * Note: Everything else under /api/* is treated as protected so that:
+ * - internal APIs (e.g. /api/shops/*, /api/runs/*) are consistent
+ * - the /api/external/* proxy isn't accidentally publicly callable in production
  */
-const PROTECTED_PATHS = ["/api/shops"];
 
 /**
  * Routes that are public (no auth required)
@@ -49,12 +51,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check if this is a protected path
-  const isProtected = PROTECTED_PATHS.some((path) => pathname.startsWith(path));
-
-  if (!isProtected) {
-    return NextResponse.next();
-  }
+  // All other /api/* routes require auth
 
   // Get auth configuration
   const jwtSecret = process.env.JWT_SECRET || process.env.MONITOR_API_TOKEN;
@@ -74,7 +71,35 @@ export async function middleware(request: NextRequest) {
   // Get Authorization header
   const authHeader = request.headers.get("Authorization");
 
+  // Implicit auth fallback: if no Authorization header, check if implicit auth is enabled
   if (!authHeader) {
+    // Check if implicit dashboard auth is allowed
+    const allowImplicitAuth =
+      process.env.NODE_ENV !== "production" ||
+      process.env.MONITOR_ALLOW_IMPLICIT_DASHBOARD_AUTH === "true";
+
+    if (allowImplicitAuth && monitorApiToken) {
+      // Create admin session using MONITOR_API_TOKEN (same as ApiKey branch)
+      const session = {
+        actor: "dashboard@see-it.app",
+        actorName: "Dashboard User",
+        role: "admin" as const,
+        allowedShops: [] as string[],
+        hasFullAccess: true,
+        token: "implicit",
+      };
+
+      const requestHeaders = new Headers(request.headers);
+      requestHeaders.set(AUTH_SESSION_HEADER, JSON.stringify(session));
+
+      return NextResponse.next({
+        request: {
+          headers: requestHeaders,
+        },
+      });
+    }
+
+    // No implicit auth allowed or no token configured
     return new NextResponse(
       JSON.stringify({
         error: "unauthorized",
