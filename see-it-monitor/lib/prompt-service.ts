@@ -802,7 +802,7 @@ export async function testPrompt(
     where: { id: testRun.id },
     data: {
       status: "succeeded",
-      output: mockOutput,
+      output: mockOutput as unknown as Prisma.InputJsonValue,
       latencyMs,
       tokensIn: 0,
       tokensOut: 0,
