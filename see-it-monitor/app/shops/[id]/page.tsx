@@ -512,12 +512,12 @@ function PromptsPanel({ shopId }: PromptsPanelProps) {
               <div>
                 <p className="text-sm font-medium text-gray-900">{prompt.name}</p>
                 <p className="text-xs text-gray-500">
-                  v{prompt.activeVersion || "N/A"} &middot; {prompt.model}
+                  v{prompt.activeVersion || "N/A"} &middot; {prompt.defaultModel}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <Badge variant={prompt.isActive ? "success" : "default"}>
-                  {prompt.isActive ? "Active" : "Inactive"}
+                <Badge variant={!prompt.isDisabled ? "success" : "default"}>
+                  {!prompt.isDisabled ? "Active" : "Disabled"}
                 </Badge>
               </div>
             </div>
