@@ -1,0 +1,878 @@
+// See It Now - Streaming Hero Shot Endpoint (SSE)
+// Streams variant results as they complete so storefront can show images progressively.
+
+import { type LoaderFunctionArgs } from "@remix-run/node";
+import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
+import { checkQuota, incrementQuota } from "../quota.server";
+import { checkRateLimit } from "../rate-limit.server";
+import { StorageService } from "../services/storage.server";
+import { logger, createLogContext } from "../utils/logger.server";
+import { getRequestId } from "../utils/request-context.server";
+import sharp from "sharp";
+import crypto from "crypto";
+import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
+import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
+import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
+import {
+  getOrRefreshGeminiFile,
+  validateMagicBytes,
+} from "../services/gemini-files.server";
+import { selectPreparedImage } from "../services/product-asset/select-prepared-image.server";
+
+import {
+  renderAllVariants,
+  type RenderInput,
+  type ProductPlacementFacts,
+  type PromptPack,
+  type ImageMeta,
+  type ExtractionInput,
+  extractProductFacts,
+  resolveProductFacts,
+  buildPromptPack,
+  ensurePromptVersion,
+} from "../services/see-it-now/index";
+
+// ============================================================================
+// CORS Headers
+// ============================================================================
+function getCorsHeaders(shopDomain: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    Pragma: "no-cache",
+    Expires: "0",
+  };
+
+  if (shopDomain) {
+    headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
+  }
+
+  return headers;
+}
+
+// ============================================================================
+// Image Download Helpers (copied from render route for parity)
+// ============================================================================
+async function downloadToBuffer(
+  url: string,
+  logContext: ReturnType<typeof createLogContext>,
+  maxDimension: number = 2048,
+  format: "png" | "jpeg" = "png"
+): Promise<{ buffer: Buffer; meta: ImageMeta }> {
+  validateTrustedUrl(url, "image URL");
+
+  logger.info(
+    { ...logContext, stage: "download", format },
+    `[See It Now] Downloading image: ${url.substring(0, 80)}...`
+  );
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const inputBuffer = Buffer.from(arrayBuffer);
+
+  const pipeline = sharp(inputBuffer)
+    .rotate()
+    .resize({
+      width: maxDimension,
+      height: maxDimension,
+      fit: "inside",
+      withoutEnlargement: true,
+    });
+
+  const { data: buffer, info } =
+    format === "png"
+      ? await pipeline.png({ force: true }).toBuffer({ resolveWithObject: true })
+      : await pipeline
+          .jpeg({ quality: 90, force: true })
+          .toBuffer({ resolveWithObject: true });
+
+  const meta: ImageMeta = {
+    width: info.width || 0,
+    height: info.height || 0,
+    bytes: buffer.length,
+    format,
+  };
+
+  logger.info(
+    { ...logContext, stage: "download" },
+    `[See It Now] Downloaded & Optimized (${format}): ${buffer.length} bytes`
+  );
+
+  return { buffer, meta };
+}
+
+async function downloadRawToBuffer(
+  url: string,
+  logContext: ReturnType<typeof createLogContext>
+): Promise<Buffer> {
+  validateTrustedUrl(url, "image URL");
+
+  logger.info(
+    { ...logContext, stage: "download-raw" },
+    `[See It Now] Downloading raw image: ${url.substring(0, 80)}...`
+  );
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (buffer.length === 0) throw new Error("Downloaded image was empty");
+  return buffer;
+}
+
+function hashBuffer(buffer: Buffer): string {
+  return crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
+}
+
+type ShopifyProductForPrompt = {
+  title?: string | null;
+  description?: string | null;
+  descriptionHtml?: string | null;
+  productType?: string | null;
+  vendor?: string | null;
+  tags?: string[] | null;
+  images?: { edges?: Array<{ node?: { url?: string } }> } | null;
+  metafields?: {
+    edges?: Array<{
+      node?: { namespace?: string; key?: string; value?: string };
+    }>;
+  } | null;
+};
+
+async function fetchShopifyProductForPrompt(
+  shopDomain: string,
+  accessToken: string,
+  productId: string,
+  requestId: string
+): Promise<ShopifyProductForPrompt | null> {
+  if (!accessToken || accessToken === "pending") return null;
+
+  const endpoint = `https://${shopDomain}/admin/api/2025-01/graphql.json`;
+  const query = `#graphql
+    query GetProductForPrompt($id: ID!) {
+      product(id: $id) {
+        title
+        description
+        descriptionHtml
+        productType
+        vendor
+        tags
+        images(first: 3) {
+          edges {
+            node {
+              url
+            }
+          }
+        }
+        metafields(first: 20) {
+          edges {
+            node {
+              namespace
+              key
+              value
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": accessToken,
+      },
+      body: JSON.stringify({
+        query,
+        variables: { id: `gid://shopify/Product/${productId}` },
+      }),
+    });
+
+    if (!res.ok) {
+      logger.warn(
+        createLogContext("render", requestId, "shopify-product-fetch", {
+          status: res.status,
+          statusText: res.statusText,
+        }),
+        `Failed to fetch product from Shopify Admin API (HTTP ${res.status})`
+      );
+      return null;
+    }
+
+    const json = await res.json().catch(() => null);
+    return (json?.data?.product as ShopifyProductForPrompt | undefined) || null;
+  } catch (err) {
+    logger.warn(
+      createLogContext("render", requestId, "shopify-product-fetch", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+      "Failed to fetch product from Shopify Admin API (network/parsing)"
+    );
+    return null;
+  }
+}
+
+function sseHeaders(corsHeaders: Record<string, string>): HeadersInit {
+  return {
+    ...corsHeaders,
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  };
+}
+
+type StandardErrorPayload = {
+  code: string;
+  message: string;
+  requestId: string;
+  runId: string | null;
+};
+
+type ProgressPayload = {
+  total: 8;
+  succeeded: number;
+  failed: number;
+  inFlight: number;
+};
+
+function toStandardErrorPayload(
+  code: string,
+  message: string,
+  requestId: string,
+  runId: string | null
+): StandardErrorPayload {
+  return { code, message, requestId, runId };
+}
+
+function createSerializedSseSender(
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  isClosed: () => boolean
+) {
+  // Serialize writes so async callbacks can't interleave SSE frames.
+  let queue = Promise.resolve();
+
+  const enqueue = (text: string) => {
+    queue = queue.then(() => {
+      if (isClosed()) return;
+      controller.enqueue(encoder.encode(text));
+    });
+    queue.catch(() => {});
+  };
+
+  const send = (event: string, data: unknown) => {
+    enqueue(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const comment = (text: string) => {
+    enqueue(`: ${text}\n\n`);
+  };
+
+  return { send, comment };
+}
+
+// ============================================================================
+// GET /apps/see-it/see-it-now/stream?room_session_id=...&product_id=...
+// ============================================================================
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const requestId = getRequestId(request);
+  const logContext = createLogContext("render", requestId, "see-it-now-start", {
+    version: "see-it-now-v2-stream",
+  });
+
+  const { session } = await authenticate.public.appProxy(request);
+  const corsHeaders = getCorsHeaders(session?.shop ?? null);
+
+  // Handle preflight
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  if (!session) {
+    logger.warn(
+      { ...logContext, stage: "auth" },
+      `[See It Now] App proxy auth failed: no session`
+    );
+    return new Response("forbidden", { status: 403, headers: corsHeaders });
+  }
+
+  // Allowlist
+  if (!isSeeItNowAllowedShop(session.shop)) {
+    return new Response("see_it_now_not_enabled", { status: 403, headers: corsHeaders });
+  }
+
+  const url = new URL(request.url);
+  const room_session_id = url.searchParams.get("room_session_id") || undefined;
+  const product_id = url.searchParams.get("product_id") || undefined;
+
+  if (!room_session_id) {
+    return new Response("missing_room_session", { status: 400, headers: corsHeaders });
+  }
+  if (!product_id) {
+    return new Response("missing_product_id", { status: 400, headers: corsHeaders });
+  }
+
+  // Rate limiting
+  if (!checkRateLimit(room_session_id)) {
+    return new Response("rate_limit_exceeded", { status: 429, headers: corsHeaders });
+  }
+
+  // Fetch shop
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain: session.shop },
+    select: { id: true, accessToken: true, shopDomain: true },
+  });
+  if (!shop) {
+    logger.error(
+      { ...logContext, stage: "shop-lookup" },
+      `[See It Now] Shop not found: ${session.shop}`
+    );
+    return new Response("shop_not_found", { status: 404, headers: corsHeaders });
+  }
+
+  // Emit SF_RENDER_REQUESTED event (parity with non-stream endpoint)
+  emit({
+    shopId: shop.id,
+    requestId,
+    source: EventSource.APP_PROXY,
+    type: EventType.SF_RENDER_REQUESTED,
+    severity: Severity.INFO,
+    payload: { productId: product_id, roomSessionId: room_session_id },
+  });
+
+  // Quota check
+  try {
+    await checkQuota(shop.id, "render", 1);
+  } catch (error) {
+    if (error instanceof Response) {
+      const headers = { ...corsHeaders, "Content-Type": "text/plain" };
+      return new Response(await error.text(), { status: error.status, headers });
+    }
+    throw error;
+  }
+
+  const startTime = Date.now();
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder();
+
+      let closed = false;
+      const { send, comment } = createSerializedSseSender(
+        controller,
+        encoder,
+        () => closed
+      );
+
+      const keepAlive = setInterval(() => {
+        if (closed) return;
+        comment("ping");
+      }, 15000);
+
+      const progress: ProgressPayload = {
+        total: 8,
+        succeeded: 0,
+        failed: 0,
+        inFlight: 0,
+      };
+      let progressTimer: ReturnType<typeof setInterval> | null = null;
+
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(keepAlive);
+        if (progressTimer) clearInterval(progressTimer);
+        try {
+          controller.close();
+        } catch {
+          // ignore
+        }
+      };
+
+      // If client disconnects, stop writing (we do not cancel the underlying render)
+      request.signal.addEventListener("abort", () => close(), { once: true });
+
+      (async () => {
+        let activeRunId: string | null = null;
+        try {
+          // Fetch RoomSession
+          const roomSession = await prisma.roomSession.findUnique({
+            where: { id: room_session_id },
+          });
+          if (!roomSession) {
+            send(
+              "error",
+              toStandardErrorPayload(
+                "room_not_found",
+                "Room session not found",
+                requestId,
+                null
+              )
+            );
+            close();
+            return;
+          }
+
+          // Fetch ProductAsset with NEW pipeline fields
+          const productAsset = await prisma.productAsset.findFirst({
+            where: { shopId: shop.id, productId: product_id },
+            select: {
+              id: true,
+              productTitle: true,
+              productType: true,
+              preparedImageUrl: true,
+              preparedImageKey: true,
+              preparedProductImageVersion: true,
+              sourceImageUrl: true,
+              status: true,
+              geminiFileUri: true,
+              geminiFileExpiresAt: true,
+              extractedFacts: true,
+              merchantOverrides: true,
+              resolvedFacts: true,
+              promptPack: true,
+              promptPackVersion: true,
+            },
+          });
+
+          if (!productAsset || productAsset.status !== "live") {
+            send(
+              "error",
+              toStandardErrorPayload(
+                "product_not_enabled",
+                "This product is not enabled for See It visualization",
+                requestId,
+                null
+              )
+            );
+            close();
+            return;
+          }
+
+          let resolvedFacts = productAsset.resolvedFacts as ProductPlacementFacts | null;
+          let promptPack = productAsset.promptPack as PromptPack | null;
+          let promptPackVersion = productAsset.promptPackVersion;
+
+          // Validate pipeline data exists (attempt backfill for legacy assets)
+          if (!resolvedFacts || !promptPack) {
+            try {
+              const shopifyProduct = shop.accessToken
+                ? await fetchShopifyProductForPrompt(
+                    shop.shopDomain,
+                    shop.accessToken,
+                    product_id,
+                    requestId
+                  )
+                : null;
+
+              const metafieldText = Array.isArray(shopifyProduct?.metafields?.edges)
+                ? shopifyProduct!.metafields!.edges!
+                    .map((e) => e?.node?.value)
+                    .filter(Boolean)
+                    .join(" ")
+                : "";
+
+              const combinedDescription = `${shopifyProduct?.description || ""}\n${shopifyProduct?.descriptionHtml || ""}\n${metafieldText}`.trim();
+
+              const metafieldsRecord: Record<string, string> = {};
+              if (Array.isArray(shopifyProduct?.metafields?.edges)) {
+                for (const edge of shopifyProduct!.metafields!.edges!) {
+                  const node = edge?.node;
+                  if (node?.namespace && node?.key && node?.value) {
+                    metafieldsRecord[`${node.namespace}.${node.key}`] = node.value;
+                  }
+                }
+              }
+
+              const uniqueImages = new Set<string>();
+              if (productAsset.sourceImageUrl) uniqueImages.add(productAsset.sourceImageUrl);
+              if (productAsset.preparedImageUrl) uniqueImages.add(productAsset.preparedImageUrl);
+
+              if (Array.isArray(shopifyProduct?.images?.edges)) {
+                for (const edge of shopifyProduct!.images!.edges!) {
+                  const u = edge?.node?.url;
+                  if (u) uniqueImages.add(u);
+                  if (uniqueImages.size >= 3) break;
+                }
+              }
+
+              const extractionInput: ExtractionInput = {
+                title:
+                  shopifyProduct?.title ||
+                  productAsset.productTitle ||
+                  `Product ${product_id}`,
+                description: combinedDescription || "",
+                productType: shopifyProduct?.productType || productAsset.productType || null,
+                vendor: shopifyProduct?.vendor || null,
+                tags: (shopifyProduct?.tags || []) as string[],
+                metafields: metafieldsRecord,
+                imageUrls: Array.from(uniqueImages),
+              };
+
+              if (extractionInput.title && extractionInput.imageUrls.length > 0) {
+                const extractedFacts = await extractProductFacts(extractionInput, requestId);
+                const merchantOverrides =
+                  (productAsset.merchantOverrides as Record<string, unknown> | null) ||
+                  null;
+                resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
+                promptPackVersion = await ensurePromptVersion();
+                promptPack = await buildPromptPack(resolvedFacts, requestId);
+
+                await prisma.productAsset.update({
+                  where: { id: productAsset.id },
+                  data: {
+                    extractedFacts,
+                    resolvedFacts,
+                    promptPack,
+                    promptPackVersion,
+                    extractedAt: new Date(),
+                    productTitle: shopifyProduct?.title || productAsset.productTitle || undefined,
+                    productType: shopifyProduct?.productType || productAsset.productType || undefined,
+                  },
+                });
+              }
+            } catch (e) {
+              const isExtractorInvalid =
+                e instanceof Error && e.name === "ExtractorOutputError";
+
+              if (isExtractorInvalid) {
+                // Best-effort: persist a failure marker without changing schema.
+                await prisma.productAsset
+                  .update({
+                    where: { id: productAsset.id },
+                    data: {
+                      errorMessage: `[See It Now] extraction_failed (requestId=${requestId}): ${e.message}`,
+                    },
+                  })
+                  .catch(() => {});
+              }
+
+              logger.warn(
+                { ...logContext, stage: "pipeline-backfill-error" },
+                `[See It Now] Pipeline backfill failed: ${
+                  e instanceof Error ? e.message : String(e)
+                }`
+              );
+
+              // Fail closed for malformed/invalid extractor output (do not silently degrade).
+              if (isExtractorInvalid) {
+                send(
+                  "error",
+                  toStandardErrorPayload(
+                    "pipeline_not_ready",
+                    "Product prompt extraction failed. Please try again later.",
+                    requestId,
+                    null
+                  )
+                );
+                close();
+                return;
+              }
+            }
+          }
+
+          if (!resolvedFacts || !promptPack) {
+            send(
+              "error",
+              toStandardErrorPayload(
+                "pipeline_not_ready",
+                "Product prompt data is not ready. Please try again.",
+                requestId,
+                null
+              )
+            );
+            close();
+            return;
+          }
+
+          // Room image URL - prefer canonical
+          let roomImageUrl: string;
+          let roomImageSource: "canonical" | "cleaned" | "original" | "url" = "url";
+          if (roomSession.canonicalRoomImageKey) {
+            roomImageUrl = await StorageService.getSignedReadUrl(
+              roomSession.canonicalRoomImageKey,
+              60 * 60 * 1000
+            );
+            roomImageSource = "canonical";
+          } else if (roomSession.cleanedRoomImageKey) {
+            roomImageUrl = await StorageService.getSignedReadUrl(
+              roomSession.cleanedRoomImageKey,
+              60 * 60 * 1000
+            );
+            roomImageSource = "cleaned";
+          } else if (roomSession.originalRoomImageKey) {
+            roomImageUrl = await StorageService.getSignedReadUrl(
+              roomSession.originalRoomImageKey,
+              60 * 60 * 1000
+            );
+            roomImageSource = "original";
+          } else if (roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl) {
+            roomImageUrl = roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl!;
+            roomImageSource = "url";
+          } else {
+            send(
+              "error",
+              toStandardErrorPayload(
+                "no_room_image",
+                "No room image available",
+                requestId,
+                null
+              )
+            );
+            close();
+            return;
+          }
+
+          // Product image URL
+          let productImageUrl: string | null = null;
+          const selected = selectPreparedImage(productAsset);
+          if (selected?.key) {
+            if (selected.key.startsWith("http://") || selected.key.startsWith("https://")) {
+              productImageUrl = selected.key;
+            } else {
+              try {
+                productImageUrl = await StorageService.getSignedReadUrl(
+                  selected.key,
+                  60 * 60 * 1000
+                );
+              } catch {
+                productImageUrl = productAsset.preparedImageUrl ?? null;
+              }
+            }
+          } else if (productAsset.sourceImageUrl) {
+            productImageUrl = productAsset.sourceImageUrl;
+          }
+
+          if (!productImageUrl) {
+            send(
+              "error",
+              toStandardErrorPayload(
+                "no_product_image",
+                "No product image available",
+                requestId,
+                null
+              )
+            );
+            close();
+            return;
+          }
+
+          // Download both images in parallel
+          const [productImageData, roomImageData] = await Promise.all([
+            downloadToBuffer(productImageUrl, logContext, 2048, "png"),
+            roomImageSource === "canonical"
+              ? (async () => {
+                  const buffer = await downloadRawToBuffer(roomImageUrl, logContext);
+                  return {
+                    buffer,
+                    meta: {
+                      width: roomSession.canonicalRoomWidth || 0,
+                      height: roomSession.canonicalRoomHeight || 0,
+                      bytes: buffer.length,
+                      format: "jpeg" as const,
+                    },
+                  };
+                })()
+              : downloadToBuffer(roomImageUrl, logContext, 2048, "jpeg"),
+          ]);
+
+          validateMagicBytes(productImageData.buffer, "image/png");
+          validateMagicBytes(roomImageData.buffer, "image/jpeg");
+
+          // Optimize: Upload/Reuse Gemini Files
+          const productFilename = `product-${productAsset.id}.png`;
+          const roomFilename = `room-${roomSession.id}.jpg`;
+
+          const [productGeminiFile, roomGeminiFile] = await Promise.all([
+            getOrRefreshGeminiFile(
+              productAsset.geminiFileUri,
+              productAsset.geminiFileExpiresAt,
+              productImageData.buffer,
+              "image/png",
+              productFilename,
+              requestId
+            ),
+            getOrRefreshGeminiFile(
+              roomSession.geminiFileUri,
+              roomSession.geminiFileExpiresAt,
+              roomImageData.buffer,
+              "image/jpeg",
+              roomFilename,
+              requestId
+            ),
+          ]);
+
+          // Update DB with new/refreshed URIs (non-blocking)
+          const dbUpdates: Array<Promise<unknown>> = [];
+          if (
+            productGeminiFile.uri !== productAsset.geminiFileUri ||
+            productGeminiFile.expiresAt.getTime() !==
+              productAsset.geminiFileExpiresAt?.getTime()
+          ) {
+            dbUpdates.push(
+              prisma.productAsset.update({
+                where: { id: productAsset.id },
+                data: {
+                  geminiFileUri: productGeminiFile.uri,
+                  geminiFileExpiresAt: productGeminiFile.expiresAt,
+                },
+              })
+            );
+          }
+
+          if (
+            roomGeminiFile.uri !== roomSession.geminiFileUri ||
+            roomGeminiFile.expiresAt.getTime() !== roomSession.geminiFileExpiresAt?.getTime()
+          ) {
+            dbUpdates.push(
+              prisma.roomSession.update({
+                where: { id: roomSession.id },
+                data: {
+                  geminiFileUri: roomGeminiFile.uri,
+                  geminiFileExpiresAt: roomGeminiFile.expiresAt,
+                },
+              })
+            );
+          }
+          Promise.all(dbUpdates).catch(() => {});
+
+          const renderInput: RenderInput = {
+            shopId: shop.id,
+            productAssetId: productAsset.id,
+            roomSessionId: room_session_id,
+            requestId,
+            productImage: {
+              buffer: productImageData.buffer,
+              hash: hashBuffer(productImageData.buffer),
+              meta: productImageData.meta,
+              geminiUri: productGeminiFile.uri,
+            },
+            roomImage: {
+              buffer: roomImageData.buffer,
+              hash: hashBuffer(roomImageData.buffer),
+              meta: roomImageData.meta,
+              geminiUri: roomGeminiFile.uri,
+            },
+            resolvedFacts,
+            promptPack,
+            promptPackVersion,
+          };
+
+          let firstImageSent = false;
+
+          const result = await renderAllVariants(renderInput, {
+            mode: "wait_all",
+            onRunStarted: (info) => {
+              activeRunId = info.runId;
+              progress.succeeded = 0;
+              progress.failed = 0;
+              progress.inFlight = info.totalVariants;
+              send("run_started", {
+                run_id: info.runId,
+                variant_count: info.totalVariants,
+              });
+
+              // Heartbeat progress every ~3s while rendering.
+              if (!progressTimer) {
+                progressTimer = setInterval(() => {
+                  send("progress", { ...progress });
+                }, 3000);
+              }
+              send("progress", { ...progress });
+            },
+            onEarlyReturn: (info) => {
+              send("ready", {
+                run_id: info.runId,
+                success_count: info.successCount,
+                completed_count: info.completedCount,
+                elapsed_ms: info.elapsedMs,
+              });
+            },
+            onVariantCompleted: async (v) => {
+              // Maintain progress counts.
+              if (v.status === "success") progress.succeeded += 1;
+              else progress.failed += 1;
+              progress.inFlight = Math.max(0, progress.inFlight - 1);
+              send("progress", { ...progress });
+
+              // Stream only when we have an image URL, otherwise still inform client of failures/timeouts.
+              if (v.status === "success" && v.imageKey) {
+                let imageUrl: string | null = null;
+                try {
+                  imageUrl = await StorageService.getSignedReadUrl(
+                    v.imageKey,
+                    60 * 60 * 1000
+                  );
+                } catch {
+                  imageUrl = null;
+                }
+
+                send("variant", {
+                  id: v.variantId,
+                  status: v.status,
+                  latency_ms: v.latencyMs,
+                  image_url: imageUrl,
+                });
+
+                if (!firstImageSent && imageUrl) {
+                  firstImageSent = true;
+                  send("first_image", { run_id: activeRunId });
+                }
+              } else {
+                send("variant", {
+                  id: v.variantId,
+                  status: v.status,
+                  latency_ms: v.latencyMs,
+                  error_message: v.errorMessage || null,
+                });
+              }
+            },
+          });
+
+          // Increment quota ONCE for the entire batch (parity with non-stream route)
+          await incrementQuota(shop.id, "render", 1);
+
+          const durationMs = Date.now() - startTime;
+
+          const successVariants = result.variants
+            .filter((v) => v.status === "success" && v.imageKey)
+            .map((v) => v.variantId);
+
+          send("complete", {
+            run_id: result.runId,
+            status: result.status,
+            duration_ms: durationMs,
+            success_variant_ids: successVariants,
+          });
+          close();
+        } catch (e) {
+          send(
+            "error",
+            toStandardErrorPayload(
+              "generation_failed",
+              e instanceof Error ? e.message : String(e),
+              requestId,
+              activeRunId
+            )
+          );
+          close();
+        }
+      })();
+    },
+  });
+
+  return new Response(stream, { headers: sseHeaders(corsHeaders) });
+};
+

@@ -51,6 +51,8 @@ document.addEventListener('DOMContentLoaded', function () {
     'Almost there...',
   ];
 
+  const TOTAL_VARIANTS = 8;
+
   const SWIPE_THRESHOLD = 0.25;
   const SWIPE_VELOCITY_THRESHOLD = 0.3;
 
@@ -82,6 +84,11 @@ document.addEventListener('DOMContentLoaded', function () {
     productTitle: '',
     productImageUrl: '',
     isGenerating: false,
+    __generationToken: 0,
+    __abortController: null,
+    __renderStream: null,
+    __activeRequestId: null,
+    __activeRunId: null,
     // Swipe state
     swipeStartX: 0,
     swipeStartTime: 0,
@@ -141,11 +148,78 @@ document.addEventListener('DOMContentLoaded', function () {
     const closeResultBtn = $('see-it-now-close-result');
 
     const errorMessage = $('see-it-now-error-message');
+    let errorMeta = $('see-it-now-error-meta');
     const errorRetryBtn = $('see-it-now-error-retry');
     const errorCloseBtn = $('see-it-now-error-close');
     const closeErrorBtn = $('see-it-now-close-error');
 
     const globalError = $('see-it-now-global-error');
+    let a11yStatus = $('see-it-now-a11y-status');
+    let thinkingProgress = $('see-it-now-thinking-progress');
+    let resultStatus = $('see-it-now-result-status');
+
+    function ensureA11yElements() {
+      // Modal semantics (Liquid may not include these)
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      if (!modal.getAttribute('aria-label')) modal.setAttribute('aria-label', 'See It Now');
+      if (!modal.getAttribute('tabindex')) modal.setAttribute('tabindex', '-1');
+      if (!modal.getAttribute('aria-hidden')) modal.setAttribute('aria-hidden', modal.classList.contains('hidden') ? 'true' : 'false');
+
+      const modalContent = modal.querySelector('.see-it-now-modal-content');
+
+      // Live status region for screen readers
+      if (!a11yStatus && modalContent) {
+        a11yStatus = document.createElement('div');
+        a11yStatus.id = 'see-it-now-a11y-status';
+        a11yStatus.className = 'see-it-now-sr-only';
+        a11yStatus.setAttribute('aria-live', 'polite');
+        a11yStatus.setAttribute('aria-atomic', 'true');
+
+        const anchor = globalError && globalError.parentElement === modalContent ? globalError.nextSibling : modalContent.firstChild;
+        modalContent.insertBefore(a11yStatus, anchor);
+      }
+
+      // Thinking progress text (N of 8 ready)
+      if (!thinkingProgress && screenThinking) {
+        const thinkingContent = screenThinking.querySelector('.see-it-now-thinking-content');
+        const spinner = thinkingContent && thinkingContent.querySelector('.see-it-now-thinking-spinner');
+        if (thinkingContent) {
+          thinkingProgress = document.createElement('p');
+          thinkingProgress.id = 'see-it-now-thinking-progress';
+          thinkingProgress.className = 'see-it-now-thinking-subtitle';
+          thinkingProgress.textContent = `0 of ${TOTAL_VARIANTS} ready`;
+          if (spinner && spinner.nextSibling) thinkingContent.insertBefore(thinkingProgress, spinner.nextSibling);
+          else thinkingContent.appendChild(thinkingProgress);
+        }
+      }
+
+      // Result header status (shows N of 8 ready, non-verbose for SR since we already have aria-live)
+      if (!resultStatus && screenResult) {
+        const header = screenResult.querySelector('.see-it-now-header');
+        if (header) {
+          resultStatus = document.createElement('div');
+          resultStatus.id = 'see-it-now-result-status';
+          resultStatus.className = 'see-it-now-header-status';
+          resultStatus.setAttribute('aria-hidden', 'true');
+
+          if (closeResultBtn && closeResultBtn.parentElement === header) {
+            header.insertBefore(resultStatus, closeResultBtn);
+          } else {
+            header.appendChild(resultStatus);
+          }
+        }
+      }
+
+      // Error meta (requestId/runId for support)
+      if (!errorMeta && errorMessage && errorMessage.parentElement) {
+        errorMeta = document.createElement('p');
+        errorMeta.id = 'see-it-now-error-meta';
+        errorMeta.className = 'see-it-now-error-meta';
+        errorMeta.textContent = '';
+        errorMessage.parentElement.insertBefore(errorMeta, errorMessage.nextSibling);
+      }
+    }
 
     // ============================================================================
     // PLATFORM DETECTION
@@ -155,6 +229,9 @@ document.addEventListener('DOMContentLoaded', function () {
       return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
         (navigator.maxTouchPoints > 0 && window.innerWidth < 768);
     }
+
+    // Ensure dynamic a11y/UX nodes exist even if Liquid omits them.
+    ensureA11yElements();
 
     function updateButtonIcon() {
       // Cube icon is always visible, no need to toggle based on device
@@ -201,10 +278,37 @@ document.addEventListener('DOMContentLoaded', function () {
       modal.style.zIndex = '999999';
     }
 
+    let lastFocusedElement = null;
+
+    function cancelActiveRun() {
+      state.__generationToken += 1; // invalidate any in-flight async work
+      if (state.__abortController) {
+        try { state.__abortController.abort(); } catch (e) { }
+      }
+      state.__abortController = null;
+      if (state.__renderStream) {
+        try { state.__renderStream.close(); } catch (e) { }
+        state.__renderStream = null;
+      }
+      state.isGenerating = false;
+      state.__activeRequestId = null;
+      state.__activeRunId = null;
+      setStatus('');
+    }
+
     function openModal() {
       ensureModalPortaled();
+      lastFocusedElement = document.activeElement;
       lockScroll();
       modal.classList.remove('hidden');
+      modal.setAttribute('aria-hidden', 'false');
+
+      // Move focus into the dialog for keyboard users
+      setTimeout(() => {
+        if (modal.classList.contains('hidden')) return;
+        const first = modal.querySelector('button:not([disabled])');
+        try { (first || modal).focus(); } catch (e) { }
+      }, 0);
     }
 
     function closeModal() {
@@ -217,19 +321,36 @@ document.addEventListener('DOMContentLoaded', function () {
         });
       }
 
+      cancelActiveRun();
       modal.classList.add('hidden');
+      modal.setAttribute('aria-hidden', 'true');
       unlockScroll();
       stopTipRotation();
       resetState();
+
+      // Re-enable the PDP trigger (spam prevention)
+      if (activeTrigger) {
+        activeTrigger.disabled = false;
+        activeTrigger.removeAttribute('aria-disabled');
+      }
+
+      // Restore focus to the element that opened the modal
+      const el = lastFocusedElement || activeTrigger;
+      if (el && typeof el.focus === 'function') {
+        try { el.focus(); } catch (e) { }
+      }
     }
 
     function resetState() {
       state.sessionId = null;
       state.roomSessionId = null;
+      state.variants = [];
       state.images = [];
       state.currentIndex = 0;
       state.isGenerating = false;
       state.swiping = false;
+      setErrorMeta(null);
+      setStatus('');
       if (swipeTrack) swipeTrack.innerHTML = '';
       if (dotsContainer) dotsContainer.innerHTML = '';
     }
@@ -268,11 +389,41 @@ document.addEventListener('DOMContentLoaded', function () {
     // ERROR HANDLING
     // ============================================================================
 
-    function showError(msg) {
-      console.error('[See It Now] ERROR:', msg);
+    function setStatus(text) {
+      const t = text || '';
+      if (thinkingProgress) thinkingProgress.textContent = t;
+      if (resultStatus) resultStatus.textContent = t;
+      if (a11yStatus) a11yStatus.textContent = t;
+    }
+
+    function setErrorMeta(meta) {
+      if (!errorMeta) return;
+      const requestId = meta?.requestId || '';
+      const runId = meta?.runId || '';
+      if (!requestId && !runId) {
+        errorMeta.textContent = '';
+        return;
+      }
+      const parts = [];
+      if (requestId) parts.push(`requestId: ${requestId}`);
+      if (runId) parts.push(`runId: ${runId}`);
+      errorMeta.textContent = parts.join(' · ');
+    }
+
+    function extractMetaFromPayload(payload) {
+      if (!payload || typeof payload !== 'object') return null;
+      const requestId = payload.requestId || payload.request_id || null;
+      const runId = payload.runId || payload.run_id || null;
+      if (!requestId && !runId) return null;
+      return { requestId, runId };
+    }
+
+    function showError(msg, meta) {
+      console.error('[See It Now] ERROR:', msg, meta || {});
       if (errorMessage) {
         errorMessage.textContent = msg || 'We couldn\'t create your visualization';
       }
+      setErrorMeta(meta);
       showScreen('error');
     }
 
@@ -637,7 +788,44 @@ document.addEventListener('DOMContentLoaded', function () {
     if (navRight) navRight.addEventListener('click', () => navigateBy(1));
 
     document.addEventListener('keydown', (e) => {
-      if (!modal.classList.contains('hidden') && screenResult.classList.contains('active')) {
+      if (modal.classList.contains('hidden')) return;
+
+      // ESC closes modal
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeModal();
+        return;
+      }
+
+      // Basic focus trap (Tab cycles within modal)
+      if (e.key === 'Tab') {
+        const focusables = Array.from(
+          modal.querySelectorAll(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter((el) => el && el.getClientRects && el.getClientRects().length > 0);
+
+        if (focusables.length > 0) {
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          const active = document.activeElement;
+
+          if (e.shiftKey) {
+            if (active === first || !modal.contains(active)) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (active === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+      }
+
+      // Arrow navigation (result screen only)
+      if (screenResult.classList.contains('active')) {
         if (e.key === 'ArrowLeft') navigateBy(-1);
         if (e.key === 'ArrowRight') navigateBy(1);
       }
@@ -775,21 +963,36 @@ document.addEventListener('DOMContentLoaded', function () {
       console.log('[See It Now] File selected:', file.name, file.size);
 
       showScreen('thinking');
+      cancelActiveRun();
       state.isGenerating = true;
+      setErrorMeta(null);
+      setStatus(`0 of ${TOTAL_VARIANTS} ready`);
+      state.__abortController = new AbortController();
+      const runToken = state.__generationToken;
+      const signal = state.__abortController.signal;
+
+      const assertActive = () => {
+        if (runToken !== state.__generationToken) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+      };
 
       try {
         // Normalize image
         const normalized = await normalizeRoomImage(file);
+        assertActive();
         const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
 
         // Start session (handle both camelCase and snake_case responses)
-        const session = await startSession(normalizedFile.type);
+        const session = await startSession(normalizedFile.type, signal);
+        assertActive();
         state.roomSessionId = session.sessionId || session.room_session_id;
         const uploadUrl = session.uploadUrl || session.upload_url;
         console.log('[See It Now] Session:', state.roomSessionId);
 
         // Upload
-        await uploadImage(normalizedFile, uploadUrl);
+        await uploadImage(normalizedFile, uploadUrl, signal);
+        assertActive();
         console.log('[See It Now] Uploaded');
 
         // Track room upload
@@ -801,43 +1004,109 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         // Confirm
-        await confirmRoom(state.roomSessionId);
+        await confirmRoom(state.roomSessionId, signal);
+        assertActive();
         console.log('[See It Now] Confirmed');
 
-        // Generate (API returns whatever number of variants it produces)
-        const result = await generateImages(state.roomSessionId, state.productId);
-        state.sessionId = result.session_id;
+        // Generate (prefer streaming so we can show images as they complete)
+        let streamHandle = null;
+        const streamedVariantIds = [];
+        let firstImageAnnounced = false;
 
-        // Extract image URLs from variants
-        state.variants = Array.isArray(result.variants) ? result.variants : [];
-        const imageUrls = state.variants.map(v => v.image_url);
-        const variantIds = state.variants.map(v => v.id);
-        console.log('[See It Now] Got', imageUrls.length, 'images');
+        try {
+          streamHandle = startRenderStream(state.roomSessionId, state.productId, runToken, {
+            onRunStarted: (data) => {
+              state.__activeRunId = data.run_id || null;
+            },
+            onProgress: (data) => {
+              const succeeded = typeof data?.succeeded === 'number' ? data.succeeded : 0;
+              const n = Math.max(0, Math.min(TOTAL_VARIANTS, succeeded));
+              setStatus(`${n} of ${TOTAL_VARIANTS} ready`);
+            },
+            onFirstImage: () => {
+              if (firstImageAnnounced) return;
+              firstImageAnnounced = true;
+              if (a11yStatus) a11yStatus.textContent = 'First image ready';
+            },
+            onVariant: (data) => {
+              if (!data || data.status !== 'success' || !data.image_url) return;
+              streamedVariantIds.push(data.id);
+              state.variants.push({ id: data.id, image_url: data.image_url });
+              appendCarouselImage(data.image_url);
 
-        if (imageUrls.length === 0) {
-          throw new Error('No images generated');
-        }
-
-        // Track variants generated (client-side timing)
-        if (window.SeeItNowAnalytics) {
-          window.SeeItNowAnalytics.trackEvent('variants_generated', {
-            sessionId: state.sessionId,
-            roomSessionId: state.roomSessionId,
-            variantCount: imageUrls.length,
-            variantIds,
-            durationMs: result.duration_ms,
+              if (state.images.length === 1) {
+                showScreen('result');
+              }
+              setStatus(`${state.images.length} of ${TOTAL_VARIANTS} ready`);
+            },
           });
-        }
 
-        // Populate carousel
-        populateCarousel(imageUrls);
+          state.__renderStream = streamHandle.es;
+          const complete = await streamHandle.done; // { run_id, status, duration_ms, success_variant_ids }
+          assertActive();
+
+          if (!state.images || state.images.length === 0) {
+            throw new Error('No images generated');
+          }
+
+          if (window.SeeItNowAnalytics) {
+            window.SeeItNowAnalytics.trackEvent('variants_generated', {
+              sessionId: complete.run_id || state.__activeRunId,
+              roomSessionId: state.roomSessionId,
+              variantCount: state.images.length,
+              variantIds: (complete.success_variant_ids || streamedVariantIds || []),
+              durationMs: complete.duration_ms,
+              transport: 'sse',
+            });
+          }
+        } catch (streamErr) {
+          // If server emitted a structured error, show it and stop (no POST retry).
+          if (streamErr && streamErr.name === 'SeeItNowStreamError') {
+            const meta = extractMetaFromPayload(streamErr.payload);
+            showError(streamErr.message || 'Something went wrong', meta);
+            state.isGenerating = false;
+            return;
+          }
+
+          console.warn('[See It Now] Stream failed, falling back to POST render:', streamErr);
+          try { streamHandle?.es?.close(); } catch (e) { }
+          state.__renderStream = null;
+
+          const result = await generateImages(state.roomSessionId, state.productId, signal);
+          assertActive();
+          state.__activeRunId = result.run_id || result.runId || null;
+
+          state.variants = Array.isArray(result.variants) ? result.variants : [];
+          const imageUrls = state.variants.map(v => v.image_url);
+          const variantIds = state.variants.map(v => v.id);
+
+          if (imageUrls.length === 0) {
+            throw new Error('No images generated');
+          }
+
+          if (window.SeeItNowAnalytics) {
+            window.SeeItNowAnalytics.trackEvent('variants_generated', {
+              sessionId: state.__activeRunId,
+              roomSessionId: state.roomSessionId,
+              variantCount: imageUrls.length,
+              variantIds,
+              durationMs: result.duration_ms,
+              transport: 'post',
+            });
+          }
+
+          populateCarousel(imageUrls);
+          showScreen('result');
+          setStatus(`${imageUrls.length} of ${TOTAL_VARIANTS} ready`);
+        }
 
         state.isGenerating = false;
-        showScreen('result');
 
       } catch (err) {
+        if (err && err.name === 'AbortError') return;
         console.error('[See It Now] Error:', err);
         state.isGenerating = false;
+        const meta = extractMetaFromPayload(err?.payload);
 
         // Track error
         if (window.SeeItNowAnalytics) {
@@ -848,7 +1117,7 @@ document.addEventListener('DOMContentLoaded', function () {
           );
         }
 
-        showError(err.message || 'Something went wrong');
+        showError(err.message || 'Something went wrong', meta);
       }
     }
 
@@ -890,6 +1159,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // ============================================================================
 
     function handleTryAgain() {
+      cancelActiveRun();
       resetState();
       if (isMobile()) {
         showScreen('entry');

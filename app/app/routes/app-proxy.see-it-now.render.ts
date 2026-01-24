@@ -254,7 +254,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { ...logContext, stage: "auth" },
       `[See It Now] App proxy auth failed: no session`
     );
-    return json({ error: "forbidden" }, { status: 403, headers: corsHeaders });
+    return errorJson("forbidden", "Forbidden", requestId, corsHeaders, 403, null);
   }
 
   // ============================================================================
@@ -265,12 +265,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { ...logContext, stage: "allowlist", shop: session.shop },
       `[See It Now] Shop not in allowlist`
     );
-    return json(
-      {
-        error: "see_it_now_not_enabled",
-        message: "See It Now features are not enabled for this shop",
-      },
-      { status: 403, headers: corsHeaders }
+    return errorJson(
+      "see_it_now_not_enabled",
+      "See It Now features are not enabled for this shop",
+      requestId,
+      corsHeaders,
+      403,
+      null
     );
   }
 
@@ -280,9 +281,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     body = await request.json();
   } catch {
-    return json(
-      { error: "invalid_json", message: "Request body must be valid JSON" },
-      { status: 400, headers: corsHeaders }
+    return errorJson(
+      "invalid_json",
+      "Request body must be valid JSON",
+      requestId,
+      corsHeaders,
+      400,
+      null
     );
   }
 
@@ -290,27 +295,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Validate required fields
   if (!room_session_id) {
-    return json(
-      { error: "missing_room_session", message: "room_session_id is required" },
-      { status: 400, headers: corsHeaders }
+    return errorJson(
+      "missing_room_session",
+      "room_session_id is required",
+      requestId,
+      corsHeaders,
+      400,
+      null
     );
   }
 
   if (!product_id) {
-    return json(
-      { error: "missing_product_id", message: "product_id is required" },
-      { status: 400, headers: corsHeaders }
+    return errorJson(
+      "missing_product_id",
+      "product_id is required",
+      requestId,
+      corsHeaders,
+      400,
+      null
     );
   }
 
   // Rate limiting
   if (!checkRateLimit(room_session_id)) {
-    return json(
-      {
-        error: "rate_limit_exceeded",
-        message: "Too many requests. Please wait a moment.",
-      },
-      { status: 429, headers: corsHeaders }
+    return errorJson(
+      "rate_limit_exceeded",
+      "Too many requests. Please wait a moment.",
+      requestId,
+      corsHeaders,
+      429,
+      null
     );
   }
 
@@ -324,9 +338,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       { ...logContext, stage: "shop-lookup" },
       `[See It Now] Shop not found: ${session.shop}`
     );
-    return json(
-      { error: "shop_not_found" },
-      { status: 404, headers: corsHeaders }
+    return errorJson(
+      "shop_not_found",
+      "Shop not found",
+      requestId,
+      corsHeaders,
+      404,
+      null
     );
   }
 
@@ -365,9 +383,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   });
 
   if (!roomSession) {
-    return json(
-      { error: "room_not_found", message: "Room session not found" },
-      { status: 404, headers: corsHeaders }
+    return errorJson(
+      "room_not_found",
+      "Room session not found",
+      requestId,
+      corsHeaders,
+      404,
+      null
     );
   }
 
@@ -577,9 +599,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl!;
     roomImageSource = "url";
   } else {
-    return json(
-      { error: "no_room_image", message: "No room image available" },
-      { status: 400, headers: corsHeaders }
+    return errorJson(
+      "no_room_image",
+      "No room image available",
+      requestId,
+      corsHeaders,
+      400,
+      null
     );
   }
 
@@ -601,9 +627,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (!productImageUrl) {
-    return json(
-      { error: "no_product_image", message: "No product image available" },
-      { status: 400, headers: corsHeaders }
+    return errorJson(
+      "no_product_image",
+      "No product image available",
+      requestId,
+      corsHeaders,
+      400,
+      null
     );
   }
 
@@ -739,15 +769,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
 
     if (responseVariants.length === 0) {
-      return json(
-        {
-          success: false,
-          error: "all_variants_failed",
-          message: "Failed to generate any variants",
-          request_id: requestId,
-          version: "see-it-now-v2",
-        },
-        { status: 422, headers: corsHeaders }
+      return errorJson(
+        "all_variants_failed",
+        "Failed to generate any variants",
+        requestId,
+        corsHeaders,
+        422,
+        result.runId
       );
     }
 
@@ -780,15 +808,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       error
     );
 
-    return json(
-      {
-        success: false,
-        error: "generation_failed",
-        message: errorMessage,
-        request_id: requestId,
-        version: "see-it-now-v2",
-      },
-      { status: 422, headers: corsHeaders }
+    return errorJson(
+      "generation_failed",
+      errorMessage,
+      requestId,
+      corsHeaders,
+      422,
+      null
     );
   }
 };
