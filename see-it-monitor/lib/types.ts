@@ -70,6 +70,76 @@ export interface RunDetail {
   variants: VariantResult[];
   resolvedFactsJson?: Record<string, unknown>;
   promptPackJson?: Record<string, unknown>;
+  // Prompt Control Plane fields
+  resolvedConfigSnapshot?: ResolvedConfigSnapshot | null;
+  waterfallMs?: WaterfallMs | null;
+  runTotals?: RunTotals | null;
+}
+
+// =============================================================================
+// Prompt Control Plane Types (for Run Detail)
+// =============================================================================
+
+export interface ResolvedConfigSnapshot {
+  resolvedAt: string;
+  runtime: RuntimeConfigSnapshot;
+  prompts: Record<string, ResolvedPromptSnapshot>;
+  blockedPrompts: Record<string, string>; // promptName -> reason
+}
+
+export interface RuntimeConfigSnapshot {
+  maxConcurrency: number;
+  forceFallbackModel: string | null;
+  modelAllowList: string[];
+  caps: {
+    maxTokensOutput: number;
+    maxImageBytes: number;
+  };
+  dailyCostCap: number;
+  disabledPrompts: string[];
+}
+
+export interface ResolvedPromptSnapshot {
+  promptDefinitionId: string;
+  promptVersionId: string | null;
+  version: number | null;
+  templateHash: string;
+  model: string;
+  params: Record<string, unknown>;
+  messages: PromptMessage[];
+  templates: {
+    system: string | null;
+    developer: string | null;
+    user: string | null;
+  };
+  resolutionHash: string;
+  source: "active" | "system-fallback" | "override";
+  overridesApplied: string[];
+}
+
+export interface PromptMessage {
+  role: "system" | "developer" | "user";
+  content: string;
+}
+
+export interface WaterfallMs {
+  download_ms: number;
+  prompt_build_ms: number;
+  inference_ms: number;
+  inference_p50_ms?: number;
+  inference_p95_ms?: number;
+  upload_ms: number;
+  total_ms: number;
+}
+
+export interface RunTotals {
+  tokens_in: number;
+  tokens_out: number;
+  cost_estimate: number;
+  calls_total: number;
+  calls_succeeded: number;
+  calls_failed: number;
+  calls_timeout: number;
 }
 
 export interface VariantResult {
@@ -182,6 +252,52 @@ export interface ShopsParams {
   limit?: number;
   cursor?: string;
   windowDays?: number;
+}
+
+// =============================================================================
+// LLM Calls - for /api/runs/:id/llm-calls endpoint
+// =============================================================================
+
+export type LLMCallStatus = "STARTED" | "SUCCEEDED" | "FAILED" | "TIMEOUT";
+
+export interface LLMCall {
+  id: string;
+  promptName: string;
+  promptVersionId: string | null;
+  model: string;
+  status: LLMCallStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  latencyMs: number | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  costEstimate: number | null;
+  errorType: string | null;
+  errorMessage: string | null;
+  retryCount: number;
+  providerRequestId: string | null;
+  providerModel: string | null;
+  resolutionHash: string;
+  requestHash: string;
+  inputRef: LLMCallInputRef | null;
+  outputRef: LLMCallOutputRef | null;
+}
+
+export interface LLMCallInputRef {
+  messageCount?: number;
+  imageCount?: number;
+  preview?: string;
+  resolutionHash?: string;
+}
+
+export interface LLMCallOutputRef {
+  preview?: string;
+  length?: number;
+}
+
+export interface LLMCallsResponse {
+  llmCalls: LLMCall[];
+  count: number;
 }
 
 // =============================================================================

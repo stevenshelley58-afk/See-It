@@ -11,6 +11,33 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// =============================================================================
+// Prompt Control Plane Enums
+// =============================================================================
+
+enum PromptStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum CallStatus {
+  STARTED
+  SUCCEEDED
+  FAILED
+  TIMEOUT
+}
+
+enum AuditAction {
+  PROMPT_CREATE
+  PROMPT_UPDATE_DRAFT
+  PROMPT_ACTIVATE
+  PROMPT_ARCHIVE
+  PROMPT_ROLLBACK
+  RUNTIME_UPDATE
+  TEST_RUN
+}
+
 model Session {
   id            String    @id
   shop          String
@@ -53,27 +80,36 @@ model Shop {
   monitorEvents    MonitorEvent[]
   monitorArtifacts MonitorArtifact[]
 
+  // Prompt Control Plane relations
+  promptDefinitions PromptDefinition[]
+  runtimeConfig     ShopRuntimeConfig?
+  llmCalls          LLMCall[]
+  promptTestRuns    PromptTestRun[]
+  promptAuditLog    PromptAuditLog[]
+
   @@map("shops")
 }
 
 model ProductAsset {
-  id               String  @id @default(uuid())
-  shopId           String  @map("shop_id")
-  productId        String  @map("product_id")
-  productTitle     String? @map("product_title")
-  productType      String? @map("product_type") // Shopify Product Type for grouping similar items
-  variantId        String? @map("variant_id")
-  sourceImageId    String  @map("source_image_id")
-  sourceImageUrl   String  @map("source_image_url")
-  preparedImageUrl String? @map("prepared_image_url") // Cached signed URL (expires in 1hr) - legacy/fallback only. Prefer preparedImageKey for fresh URLs.
-  preparedImageKey String? @map("prepared_image_key") // Source of truth: Permanent GCS path (e.g., "shops/.../prepared-123.png"). Use this to generate fresh signed URLs on-demand via StorageService.getSignedReadUrl()
-  status           String // "unprepared" | "preparing" | "ready" | "live" | "failed"
-  enabled          Boolean @default(false) @map("enabled")
-  prepStrategy     String  @map("prep_strategy") // "batch" | "fallback" | "manual"
-  promptVersion    Int     @map("prompt_version")
-  errorMessage     String? @map("error_message")
-  retryCount       Int     @default(0) @map("retry_count") // Track retry attempts
-  isDefault        Boolean @default(false) @map("is_default") // Only one default per shop+product
+  id                            String    @id @default(uuid())
+  shopId                        String    @map("shop_id")
+  productId                     String    @map("product_id")
+  productTitle                  String?   @map("product_title")
+  productType                   String?   @map("product_type") // Shopify Product Type for grouping similar items
+  variantId                     String?   @map("variant_id")
+  sourceImageId                 String    @map("source_image_id")
+  sourceImageUrl                String    @map("source_image_url")
+  preparedImageUrl              String?   @map("prepared_image_url") // Cached signed URL (expires in 1hr) - legacy/fallback only. Prefer preparedImageKey for fresh URLs.
+  preparedImageKey              String?   @map("prepared_image_key") // Source of truth: Permanent GCS path (e.g., "shops/.../prepared-123.png"). Use this to generate fresh signed URLs on-demand via StorageService.getSignedReadUrl()
+  preparedProductImageVersion   Int       @default(0) @map("prepared_product_image_version")
+  preparedProductImageUpdatedAt DateTime? @map("prepared_product_image_updated_at")
+  status                        String // "unprepared" | "preparing" | "ready" | "live" | "failed"
+  enabled                       Boolean   @default(false) @map("enabled")
+  prepStrategy                  String    @map("prep_strategy") // "batch" | "fallback" | "manual"
+  promptVersion                 Int       @map("prompt_version")
+  errorMessage                  String?   @map("error_message")
+  retryCount                    Int       @default(0) @map("retry_count") // Track retry attempts
+  isDefault                     Boolean   @default(false) @map("is_default") // Only one default per shop+product
 
   // Gemini file pre-upload
   geminiFileUri       String?   @map("gemini_file_uri") // Pre-uploaded Gemini Files API URI
@@ -264,10 +300,10 @@ model PrepEvent {
 }
 
 // =============================================================================
-// NEW: PromptVersion - Track prompt config history
+// LEGACY: PromptConfigVersion - Track prompt config history (renamed from PromptVersion)
 // =============================================================================
 
-model PromptVersion {
+model PromptConfigVersion {
   id                    String   @id @default(uuid())
   version               Int      @unique
   extractorPromptHash   String   @map("extractor_prompt_hash")
@@ -322,10 +358,30 @@ model RenderRun {
   timeoutCount     Int       @default(0) @map("timeout_count")
   telemetryDropped Boolean   @default(false) @map("telemetry_dropped")
 
-  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  productAsset   ProductAsset    @relation(fields: [productAssetId], references: [id], onDelete: Cascade)
-  promptVersion  PromptVersion   @relation(fields: [promptPackVersion], references: [version])
-  variantResults VariantResult[]
+  // ==========================================================================
+  // Prompt Control Plane fields
+  // ==========================================================================
+  // Per-run overrides (optional)
+  // Shape: { [promptName]: PromptOverride }
+  promptOverrides Json? @map("prompt_overrides")
+
+  // Complete resolved config snapshot (for audit/replay)
+  // Shape: ResolvedConfigSnapshot
+  resolvedConfigSnapshot Json? @map("resolved_config_snapshot")
+
+  // Waterfall timing
+  // Shape: { download_ms, prompt_build_ms, inference_ms, upload_ms, total_ms }
+  waterfallMs Json? @map("waterfall_ms")
+
+  // Aggregated totals
+  // Shape: { tokens_in, tokens_out, cost_estimate, calls_total, calls_failed }
+  runTotals Json? @map("run_totals")
+
+  shop                Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productAsset        ProductAsset        @relation(fields: [productAssetId], references: [id], onDelete: Cascade)
+  promptConfigVersion PromptConfigVersion @relation(fields: [promptPackVersion], references: [version])
+  variantResults      VariantResult[]
+  llmCalls            LLMCall[]
 
   @@index([shopId, createdAt])
   @@index([productAssetId])
@@ -428,4 +484,241 @@ model MonitorArtifact {
   @@index([runId])
   @@index([type])
   @@map("monitor_artifacts")
+}
+
+// =============================================================================
+// Prompt Control Plane: PromptDefinition
+// The prompt "type" - one per prompt name per shop
+// =============================================================================
+
+model PromptDefinition {
+  id          String  @id @default(cuid())
+  shopId      String  @map("shop_id")
+  name        String // e.g., "extractor", "prompt_builder", "global_render"
+  description String?
+
+  // Defaults (fallback if version doesn't specify)
+  defaultModel  String @default("gemini-2.5-flash") @map("default_model")
+  defaultParams Json?  @map("default_params")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop     Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  versions PromptVersion[]
+
+  @@unique([shopId, name])
+  @@index([shopId])
+  @@map("prompt_definitions")
+}
+
+// =============================================================================
+// Prompt Control Plane: PromptVersion
+// The actual prompt content with versioning
+// =============================================================================
+
+model PromptVersion {
+  id                 String       @id @default(cuid())
+  promptDefinitionId String       @map("prompt_definition_id")
+  version            Int // Auto-incremented per definition (in transaction)
+  status             PromptStatus @default(DRAFT)
+
+  // Message templates (at least one required, validated in code)
+  systemTemplate    String? @map("system_template") @db.Text
+  developerTemplate String? @map("developer_template") @db.Text
+  userTemplate      String? @map("user_template") @db.Text
+
+  // Model config (overrides definition defaults)
+  model  String?
+  params Json?
+
+  // Identity hash: SHA256 of templates + model + params
+  // STORED ON CREATE, NOT RECOMPUTED
+  templateHash String @map("template_hash")
+
+  // Metadata
+  changeNotes String? @map("change_notes")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdBy   String    @map("created_by")
+  activatedAt DateTime? @map("activated_at")
+  activatedBy String?   @map("activated_by")
+
+  promptDefinition PromptDefinition @relation(fields: [promptDefinitionId], references: [id], onDelete: Cascade)
+  llmCalls         LLMCall[]
+
+  @@unique([promptDefinitionId, version])
+  @@index([promptDefinitionId, status])
+  @@map("prompt_control_versions")
+}
+
+// =============================================================================
+// Prompt Control Plane: ShopRuntimeConfig
+// Per-tenant runtime configuration
+// =============================================================================
+
+model ShopRuntimeConfig {
+  id     String @id @default(cuid())
+  shopId String @unique @map("shop_id")
+
+  // Concurrency
+  maxConcurrency Int @default(5) @map("max_concurrency")
+
+  // Model controls
+  forceFallbackModel String?  @map("force_fallback_model")
+  modelAllowList     String[] @default([]) @map("model_allow_list")
+
+  // Caps
+  maxTokensOutputCap Int @default(8192) @map("max_tokens_output_cap")
+  maxImageBytesCap   Int @default(20000000) @map("max_image_bytes_cap")
+
+  // Budget (daily)
+  dailyCostCap Decimal @default(50.00) @map("daily_cost_cap") @db.Decimal(10, 2)
+
+  // Disabled prompts (by name)
+  disabledPromptNames String[] @default([]) @map("disabled_prompt_names")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String   @map("updated_by")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("shop_runtime_configs")
+}
+
+// =============================================================================
+// Prompt Control Plane: LLMCall
+// One row per model call - the core instrumentation table
+// =============================================================================
+
+model LLMCall {
+  id String @id @default(cuid())
+
+  // Tenant context
+  shopId String @map("shop_id")
+
+  // Run context (nullable for test calls)
+  renderRunId     String? @map("render_run_id")
+  variantResultId String? @map("variant_result_id")
+  testRunId       String? @map("test_run_id")
+
+  // Prompt info
+  promptName      String  @map("prompt_name")
+  promptVersionId String? @map("prompt_version_id") // Always stored, even if overridden
+
+  // Model info
+  model String
+
+  // Hashes for identity and deduplication
+  resolutionHash String @map("resolution_hash") // Hash of rendered call
+  requestHash    String @map("request_hash") // Hash for deduplication (sorted imageRefs)
+
+  // Timing
+  status     CallStatus
+  startedAt  DateTime   @map("started_at")
+  finishedAt DateTime?  @map("finished_at")
+  latencyMs  Int?       @map("latency_ms")
+
+  // Token usage
+  tokensIn     Int?     @map("tokens_in")
+  tokensOut    Int?     @map("tokens_out")
+  costEstimate Decimal? @map("cost_estimate") @db.Decimal(10, 6)
+
+  // Error tracking
+  errorType    String? @map("error_type")
+  errorMessage String? @map("error_message")
+  retryCount   Int     @default(0) @map("retry_count")
+
+  // Provider metadata
+  providerRequestId String? @map("provider_request_id")
+  providerModel     String? @map("provider_model")
+
+  // References (truncated for storage)
+  inputRef  Json? @map("input_ref") // { messageCount, imageCount, preview, resolutionHash }
+  outputRef Json? @map("output_ref") // { preview, length }
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  shop          Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  promptVersion PromptVersion? @relation(fields: [promptVersionId], references: [id])
+  renderRun     RenderRun?     @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
+  testRun       PromptTestRun? @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+  @@index([renderRunId])
+  @@index([testRunId])
+  @@index([promptName, createdAt])
+  @@index([status, createdAt])
+  @@map("llm_calls")
+}
+
+// =============================================================================
+// Prompt Control Plane: PromptTestRun
+// For test panel calls (separate from production runs)
+// =============================================================================
+
+model PromptTestRun {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  promptName      String  @map("prompt_name")
+  promptVersionId String? @map("prompt_version_id")
+
+  // Test inputs
+  variables Json?
+  imageRefs String[] @default([]) @map("image_refs")
+
+  // Overrides (full shape)
+  overrides Json? // { systemTemplate?, developerTemplate?, userTemplate?, model?, params? }
+
+  // Results
+  status String // "running" | "succeeded" | "failed"
+  output Json?
+
+  // Metrics
+  latencyMs    Int?     @map("latency_ms")
+  tokensIn     Int?     @map("tokens_in")
+  tokensOut    Int?     @map("tokens_out")
+  costEstimate Decimal? @map("cost_estimate") @db.Decimal(10, 6)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  createdBy String   @map("created_by")
+
+  shop     Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  llmCalls LLMCall[]
+
+  @@index([shopId, promptName, createdAt])
+  @@map("prompt_test_runs")
+}
+
+// =============================================================================
+// Prompt Control Plane: PromptAuditLog
+// Per-tenant audit trail for all changes
+// =============================================================================
+
+model PromptAuditLog {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  actor      String // User email or "system"
+  action     AuditAction
+  targetType String      @map("target_type")
+  targetId   String      @map("target_id")
+  targetName String?     @map("target_name")
+
+  before Json? // State before change
+  after  Json? // State after change
+
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+  @@index([shopId, targetType, targetId])
+  @@index([shopId, action])
+  @@map("prompt_audit_log")
 }

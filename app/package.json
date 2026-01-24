@@ -26,7 +26,8 @@
     "set-unlimited": "node scripts/set-unlimited-credits.js",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
-    "monitor:prune": "curl -X GET http://localhost:3000/cron/monitor-prune -H 'Authorization: Bearer ${CRON_SECRET}'"
+    "monitor:prune": "curl -X GET http://localhost:3000/cron/monitor-prune -H 'Authorization: Bearer ${CRON_SECRET}'",
+    "seed:prompts": "npx tsx prisma/seed-prompts.ts"
   },
   "type": "module",
   "engines": {
@@ -36,7 +37,6 @@
     "@google-cloud/storage": "^7.0.0",
     "@google/genai": "^1.34.0",
     "@grpc/grpc-js": "^1.9.0",
-    "@imgly/background-removal-node": "^1.4.5",
     "@opentelemetry/api": "^1.7.0",
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.48.0",
     "@opentelemetry/resources": "^1.22.0",
@@ -81,6 +81,7 @@
     "eslint-config-prettier": "^10.0.1",
     "pg": "^8.16.3",
     "prettier": "^3.2.4",
+    "tsx": "^4.7.0",
     "typescript": "^5.2.2",
     "vite": "^6.2.2",
     "vitest": "^2.1.0"
