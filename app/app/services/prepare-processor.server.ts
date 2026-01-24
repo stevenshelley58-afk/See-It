@@ -24,6 +24,11 @@ let isProcessing = false;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 5000; // 5 seconds base delay
 
+// Legacy placement config generation is opt-in (default OFF).
+// This path uses ad-hoc prompt+parsing and should not run in production unless explicitly enabled.
+const ENABLE_LEGACY_PLACEMENT_CONFIG =
+    process.env.SEE_IT_ENABLE_LEGACY_PLACEMENT_CONFIG === "true";
+
 /**
  * Calculate exponential backoff delay
  * Delay = baseDelay * 2^retryCount (5s, 10s, 20s for retries 0, 1, 2)
@@ -621,46 +626,55 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
 
                     // NEW: Auto-generate placement config using image analysis if not already set
                     if (!renderInstructions && !isMerchantOwned('renderInstructions')) {
-                        try {
-                            const placementConfig = await generatePlacementConfig(
-                                asset.sourceImageUrl,
-                                asset.productTitle || '',
-                                {
-                                    description: combinedDescription || undefined,
-                                    productType: shopifyProduct?.productType || asset.productType || undefined,
-                                    vendor: shopifyProduct?.vendor || undefined,
-                                    tags: (shopifyProduct?.tags || []) as any,
-                                },
-                                itemRequestId
-                            );
-
-                            if (placementConfig) {
-                                renderInstructions = placementConfig.renderInstructions;
-                                sceneRole = placementConfig.sceneRole || sceneRole;
-                                replacementRule = placementConfig.replacementRule || replacementRule;
-                                allowSpaceCreation = placementConfig.allowSpaceCreation ?? allowSpaceCreation;
-
-                                // Emit event for monitor
-                                await emitPrepEvent({
+                        if (!ENABLE_LEGACY_PLACEMENT_CONFIG) {
+                            logger.info(
+                                createLogContext("prepare", itemRequestId, "placement-config-disabled", {
                                     assetId: asset.id,
-                                    productId: asset.productId,
-                                    shopId: asset.shopId,
-                                    eventType: "placement_config_generated",
-                                    actorType: "system",
-                                    payload: {
-                                        sceneRole: sceneRole,
-                                        replacementRule: replacementRule,
-                                        hasInstructions: !!renderInstructions,
-                                    }
-                                }, null, itemRequestId).catch(() => { });
-                            }
-                        } catch (promptError) {
-                            logger.warn(
-                                createLogContext("prepare", itemRequestId, "placement-config", {
-                                    error: promptError instanceof Error ? promptError.message : String(promptError)
                                 }),
-                                "Placement config generation failed, continuing without"
+                                "Legacy placement config generation disabled (set SEE_IT_ENABLE_LEGACY_PLACEMENT_CONFIG=true to enable)"
                             );
+                        } else {
+                            try {
+                                const placementConfig = await generatePlacementConfig(
+                                    asset.sourceImageUrl,
+                                    asset.productTitle || '',
+                                    {
+                                        description: combinedDescription || undefined,
+                                        productType: shopifyProduct?.productType || asset.productType || undefined,
+                                        vendor: shopifyProduct?.vendor || undefined,
+                                        tags: (shopifyProduct?.tags || []) as any,
+                                    },
+                                    itemRequestId
+                                );
+
+                                if (placementConfig) {
+                                    renderInstructions = placementConfig.renderInstructions;
+                                    sceneRole = placementConfig.sceneRole || sceneRole;
+                                    replacementRule = placementConfig.replacementRule || replacementRule;
+                                    allowSpaceCreation = placementConfig.allowSpaceCreation ?? allowSpaceCreation;
+
+                                    // Emit event for monitor
+                                    await emitPrepEvent({
+                                        assetId: asset.id,
+                                        productId: asset.productId,
+                                        shopId: asset.shopId,
+                                        eventType: "placement_config_generated",
+                                        actorType: "system",
+                                        payload: {
+                                            sceneRole: sceneRole,
+                                            replacementRule: replacementRule,
+                                            hasInstructions: !!renderInstructions,
+                                        }
+                                    }, null, itemRequestId).catch(() => { });
+                                }
+                            } catch (promptError) {
+                                logger.warn(
+                                    createLogContext("prepare", itemRequestId, "placement-config", {
+                                        error: promptError instanceof Error ? promptError.message : String(promptError)
+                                    }),
+                                    "Placement config generation failed, continuing without"
+                                );
+                            }
                         }
                     }
 
