@@ -1,12 +1,12 @@
 // Gemini AI service - runs directly in Railway, no separate Cloud Run service
 import { GoogleGenAI, createPartFromUri } from "@google/genai";
-import { removeBackground } from "@imgly/background-removal-node";
 import crypto from "crypto";
 import sharp from "sharp";
 import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { uploadToGeminiFiles, isGeminiFileValid, type GeminiFileInfo } from "./gemini-files.server";
+import { photoroomRemoveBackground } from "./photoroom.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -538,7 +538,7 @@ export async function prepareProduct(
             throw error;
         }
 
-        // Extra visibility: log decoded metadata of the PNG we will send to @imgly
+        // Extra visibility: log decoded metadata of the PNG we will send to background removal
         try {
             const signature = pngBuffer.slice(0, 8).toString('hex');
             const meta = await sharp(pngBuffer).metadata();
@@ -557,11 +557,11 @@ export async function prepareProduct(
         let lastError: unknown = null;
         let usedMethod: string = "none";
 
-        // Background removal: @imgly/background-removal-node
+        // Background removal: PhotoRoom
         if (!outputBuffer) {
             logger.info(
                 { ...logContext, stage: "bg-remove" },
-                "Removing background with ML model (@imgly)"
+                "Removing background with PhotoRoom"
             );
 
             // Hard limit: MAX 2 attempts (PNG, then JPEG fallback)
@@ -619,19 +619,13 @@ export async function prepareProduct(
                         `Attempting background removal with ${attempt.label}, mimeType: ${attempt.mimeType}`
                     );
 
-                    const resultBlob = await removeBackground(attemptBuffer, {
-                        output: {
-                            format: 'image/png',
-                            quality: 1.0
-                        }
+                    outputBuffer = await photoroomRemoveBackground({
+                        buffer: attemptBuffer,
+                        contentType: attempt.mimeType,
+                        requestId,
+                        mode: "standard",
                     });
-
-                    // Clean up attempt buffer immediately after background removal
-                    attemptBuffer = null;
-
-                    const arrayBuffer = await resultBlob.arrayBuffer();
-                    outputBuffer = Buffer.from(arrayBuffer);
-                    usedMethod = "imgly";
+                    usedMethod = "photoroom";
 
                     logger.info(
                         { ...logContext, stage: "bg-remove" },
@@ -649,7 +643,7 @@ export async function prepareProduct(
                     );
                 }
             }
-        } // End of @imgly fallback block
+        } // End of PhotoRoom block
 
         // Clean up input buffers after background removal - no longer needed
         imageBuffer = null;

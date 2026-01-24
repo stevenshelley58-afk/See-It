@@ -214,42 +214,42 @@ export const action = async ({ request }) => {
                 .toBuffer();
             finalAlpha = smoothedMask;
         } else if (isBackgroundRemoverAvailable()) {
-            // Full path: editing original image - use Prodia for clean edges
-            logger.info({ ...logContext, stage: "prodia" }, "Running Prodia AI for clean edges...");
+            // Full path: editing original image - use PhotoRoom for clean edges
+            logger.info({ ...logContext, stage: "photoroom" }, "Running PhotoRoom background removal for clean edges...");
 
             try {
-                // Run Prodia to get clean AI-detected edges
-                const prodiaResult = await removeBackgroundFast(sourceImageUrl, requestId);
+                // Run PhotoRoom to get a clean cutout (alpha)
+                const photoroomResult = await removeBackgroundFast(sourceImageUrl, requestId);
 
-                // Extract alpha channel from Prodia result
-                const prodiaRgba = await sharp(prodiaResult.imageBuffer)
+                // Extract alpha channel from PhotoRoom result
+                const photoroomRgba = await sharp(photoroomResult.imageBuffer)
                     .ensureAlpha()
                     .resize({ width, height, fit: 'fill' })
                     .raw()
                     .toBuffer();
 
-                // Extract Prodia's alpha channel
-                const prodiaAlpha = Buffer.alloc(width * height);
+                // Extract alpha channel
+                const photoroomAlpha = Buffer.alloc(width * height);
                 for (let i = 0; i < width * height; i++) {
-                    prodiaAlpha[i] = prodiaRgba[i * 4 + 3];  // Alpha is 4th channel
+                    photoroomAlpha[i] = photoroomRgba[i * 4 + 3];  // Alpha is 4th channel
                 }
 
-                // INTERSECT: final = Prodia's clean edges AND user's expanded region
-                // This keeps Prodia's precise edges but only in the area user highlighted
+                // INTERSECT: final = PhotoRoom's clean edges AND user's expanded region
+                // This keeps PhotoRoom's precise edges but only in the area user highlighted
                 logger.info({ ...logContext, stage: "intersecting" }, "Combining AI edges with user selection...");
                 finalAlpha = Buffer.alloc(width * height);
                 for (let i = 0; i < width * height; i++) {
-                    // Keep pixel only if BOTH Prodia thinks it's foreground AND user selected this region
-                    finalAlpha[i] = Math.min(prodiaAlpha[i], expandedMask[i]);
+                    // Keep pixel only if BOTH PhotoRoom thinks it's foreground AND user selected this region
+                    finalAlpha[i] = Math.min(photoroomAlpha[i], expandedMask[i]);
                 }
 
-                logger.info({ ...logContext, stage: "prodia-success" }, "Smart edge detection complete");
+                logger.info({ ...logContext, stage: "photoroom-success" }, "Smart edge detection complete");
 
-            } catch (prodiaError) {
-                // Prodia failed - fall back to user's mask directly with some smoothing
+            } catch (photoroomError) {
+                // PhotoRoom failed - fall back to user's mask directly with some smoothing
                 logger.warn(
-                    { ...logContext, stage: "prodia-fallback" },
-                    `Prodia failed, using direct mask: ${prodiaError.message}`
+                    { ...logContext, stage: "photoroom-fallback" },
+                    `PhotoRoom failed, using direct mask: ${photoroomError.message}`
                 );
 
                 // Apply slight blur to user's mask for softer edges

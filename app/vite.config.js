@@ -69,7 +69,6 @@ export default defineConfig({
     rollupOptions: {
       external: [
         // Node.js-only image processing libraries
-        "@imgly/background-removal-node",
         "sharp",
         // Google Cloud services (server-only)
         "@google-cloud/storage",

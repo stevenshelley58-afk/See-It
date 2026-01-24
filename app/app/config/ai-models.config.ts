@@ -81,9 +81,9 @@ export const IMAGEN_MODEL_FAST = "imagen-4.0-fast-generate-001" as const;
 
 /**
  * Default model for product preparation (background removal).
- * Uses @imgly/background-removal-node, NOT Gemini (Gemini doesn't support transparency)
+ * Uses PhotoRoom background removal, NOT Gemini (Gemini doesn't support transparency)
  */
-export const MODEL_FOR_PRODUCT_PREP = "imgly-background-removal" as const;
+export const MODEL_FOR_PRODUCT_PREP = "photoroom-background-removal" as const;
 
 /**
  * Default model for scene compositing.

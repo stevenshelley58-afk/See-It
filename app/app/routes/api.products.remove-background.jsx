@@ -30,10 +30,7 @@ function extractImageId(url) {
 /**
  * POST /api/products/remove-background
  *
- * One-click background removal using Prodia API
- * - 190ms latency
- * - $0.0025/image
- * - BiRefNet 2 model
+ * One-click background removal using PhotoRoom
  *
  * Body:
  * - productId: Shopify product ID
@@ -143,8 +140,8 @@ export const action = async ({ request }) => {
             });
         }
 
-        // Remove background with Prodia - fast!
-        logger.info({ ...logContext, stage: "processing" }, `Removing background with Prodia...`);
+        // Remove background with PhotoRoom
+        logger.info({ ...logContext, stage: "processing" }, `Removing background with PhotoRoom...`);
 
         const result = await removeBackgroundFast(sourceImageUrl, requestId);
 
