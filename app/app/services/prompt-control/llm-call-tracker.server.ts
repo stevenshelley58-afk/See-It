@@ -388,14 +388,27 @@ export async function recordCacheHit(input: {
 export async function updateLLMCallWithOutput(
   callId: string,
   outputImageKey: string,
-  variantResultId?: string
+  variantResultId?: string,
+  extraOutputRef?: Record<string, unknown>
 ): Promise<void> {
+  // Merge into existing outputRef so we don't erase preview/metadata
+  const existing = await prisma.lLMCall.findUnique({
+    where: { id: callId },
+    select: { outputRef: true },
+  });
+
+  const mergedOutputRef = {
+    ...(typeof existing?.outputRef === "object" && existing.outputRef ? (existing.outputRef as Record<string, unknown>) : {}),
+    ...(extraOutputRef ?? {}),
+    outputImageKey, // Store directly for easy cache retrieval
+  };
+
   await prisma.lLMCall.update({
     where: { id: callId },
     data: {
       variantResultId: variantResultId ?? undefined,
       outputRef: {
-        outputImageKey, // Store directly for easy cache retrieval
+        ...mergedOutputRef,
       },
     },
   });
