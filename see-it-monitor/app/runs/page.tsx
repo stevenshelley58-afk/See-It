@@ -199,10 +199,12 @@ function RunsPageContent() {
   const window = searchParams.get("window") || "24h";
   const shopIdParam = searchParams.get("shopId") || "";
   const ppvParam = searchParams.get("ppv") || "";
+  const searchQuery = searchParams.get("q") || "";
 
   // Local state for inputs (before debouncing)
   const [shopIdInput, setShopIdInput] = useState(shopIdParam);
   const [ppvInput, setPpvInput] = useState(ppvParam);
+  const [searchInput, setSearchInput] = useState(searchQuery);
 
   // Sync local state when URL changes externally
   useEffect(() => {
@@ -213,8 +215,13 @@ function RunsPageContent() {
     setPpvInput(ppvParam);
   }, [ppvParam]);
 
+  useEffect(() => {
+    setSearchInput(searchQuery);
+  }, [searchQuery]);
+
   // Debounced values
   const debouncedShopId = useDebounce(shopIdInput, 300);
+  const debouncedSearch = useDebounce(searchInput, 300);
 
   // Update URL helper
   const updateUrl = (key: string, value: string) => {
@@ -234,6 +241,14 @@ function RunsPageContent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedShopId]);
+
+  // Sync debounced search to URL
+  useEffect(() => {
+    if (debouncedSearch !== searchQuery) {
+      updateUrl("q", debouncedSearch);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
 
   // Build API params (only API-supported filters)
   const apiParams: RunsParams = useMemo(() => {
@@ -272,12 +287,13 @@ function RunsPageContent() {
     return Array.from(runMap.values());
   }, [data?.pages]);
 
-  // Client-side filtering (time window and PPV)
+  // Client-side filtering (time window, PPV, and search)
   const filteredRuns = useMemo(() => {
     const windowConfig = TIME_WINDOWS.find((w) => w.value === window);
     const windowMs = windowConfig?.ms ?? TIME_WINDOWS[2].ms; // Default 24h
     const now = Date.now();
     const ppvNumber = ppvParam ? parseInt(ppvParam, 10) : null;
+    const searchLower = debouncedSearch.toLowerCase().trim();
 
     return allRuns.filter((run) => {
       // Time window filter
@@ -289,17 +305,26 @@ function RunsPageContent() {
         if (run.promptPackVersion !== ppvNumber) return false;
       }
 
+      // Search filter (matches shop domain, product title, or run ID)
+      if (searchLower) {
+        const shopMatch = run.shopDomain.toLowerCase().includes(searchLower);
+        const productMatch = run.productTitle?.toLowerCase().includes(searchLower);
+        const idMatch = run.id.toLowerCase().includes(searchLower);
+        if (!shopMatch && !productMatch && !idMatch) return false;
+      }
+
       return true;
     });
-  }, [allRuns, window, ppvParam]);
+  }, [allRuns, window, ppvParam, debouncedSearch]);
 
   // Check if any filters are active
-  const hasFilters = !!(status || shopIdParam || ppvParam || window !== "24h");
+  const hasFilters = !!(status || shopIdParam || ppvParam || searchQuery || window !== "24h");
 
   // Clear all filters
   const clearFilters = () => {
     setShopIdInput("");
     setPpvInput("");
+    setSearchInput("");
     router.replace("/runs", { scroll: false });
   };
 
@@ -318,6 +343,15 @@ function RunsPageContent() {
 
       {/* Filter Bar */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
+        {/* Search Input */}
+        <input
+          type="text"
+          placeholder="Search shop, product, ID..."
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-52"
+        />
+
         {/* Time Window Buttons */}
         <div className="inline-flex rounded-md shadow-sm">
           {TIME_WINDOWS.map((tw) => (
