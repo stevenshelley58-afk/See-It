@@ -12,9 +12,9 @@ declare global {
 }
 
 function getDatabaseUrl(): string {
-  const baseUrl = process.env.DATABASE_URL;
+  const baseUrl = process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL;
   if (!baseUrl) {
-    throw new Error("DATABASE_URL environment variable is not set");
+    throw new Error("DATABASE_URL or DATABASE_PUBLIC_URL environment variable is not set");
   }
 
   // Check if URL already has pool settings
