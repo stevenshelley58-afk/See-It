@@ -501,10 +501,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         );
       }
     } catch (error) {
+      const isExtractorInvalid =
+        error instanceof Error && error.name === "ExtractorOutputError";
+
+      if (isExtractorInvalid) {
+        // Best-effort: persist a failure marker without changing schema.
+        await prisma.productAsset
+          .update({
+            where: { id: productAsset.id },
+            data: {
+              errorMessage: `[See It Now] extraction_failed (requestId=${requestId}): ${error.message}`,
+            },
+          })
+          .catch(() => {});
+      }
+
       logger.warn(
         { ...shopLogContext, stage: "pipeline-backfill-error" },
         `[See It Now] Pipeline backfill failed for product ${product_id}: ${error instanceof Error ? error.message : String(error)}`
       );
+
+      // Fail closed for malformed/invalid extractor output (do not silently degrade).
+      if (isExtractorInvalid) {
+        return json(
+          {
+            success: false,
+            error: "pipeline_not_ready",
+            message: "Product prompt extraction failed. Please try again later.",
+            pipelineStatus: "extraction_failed",
+            requestId,
+          },
+          { status: 422, headers: corsHeaders }
+        );
+      }
     }
   }
 
@@ -515,6 +544,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         error: "pipeline_not_ready",
         message:
           "Product prompt data is not ready. Please wait for processing to complete.",
+        requestId,
       },
       { status: 422, headers: corsHeaders }
     );
