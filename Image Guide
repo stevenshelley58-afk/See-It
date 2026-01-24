@@ -1,0 +1,304 @@
+Ultimate Gemini guide for See It Now photoreal product in room renders (Jan 2026)
+1) Pick the right model for the job
+Gemini’s native image generation series is “Nano Banana” and it currently maps to two models in the Gemini API: 
+
+
+gemini-2.5-flash-image: tuned for speed and high-volume, low-latency use. 
+
+
+gemini-3-pro-image-preview (Nano Banana Pro): tuned for higher-fidelity “professional asset production” and better instruction following via “Thinking”. 
+
+
+Practical implication for See It Now:
+
+
+Default to 2.5 Flash Image for interactive UX and 8-variant throughput.
+
+
+Keep 3 Pro Image as a fallback path for “premium” rerenders where realism or instruction-following is failing (and for any cases requiring higher fidelity text rendering, even if you rarely use text). 
+
+
+All generated images include an invisible SynthID watermark. 
+
+2) Input methods (this is now a big lever for speed + simplicity)
+The Gemini API now gives you four practical ways to feed images, with updated size limits and new “fetch it yourself” options: 
+Input method comparison (what matters for See It Now): 
+
+
+Inline data: up to 100 MB per request/payload (50 MB for PDFs). Best for quick tests and realtime.
+
+
+Files API upload: 2 GB per file, up to 20 GB per project, stored 48 hours. Best when reusing the same image repeatedly over short windows. 
+
+
+Files API GCS URI registration: register once, Gemini fetches per request; “one time registration can give access for up to 30 days”. Best when your assets already live in GCS and are reused frequently. 
+
+
+External URLs (public or signed URLs): up to 100 MB per request/payload. Best when you want Gemini to fetch directly without you base64 uploading. 
+
+
+Recommended mapping to your pipeline
+
+
+prepared_product_image (reused across many customers and runs): prefer GCS URI registration (30-day access) if you are willing to run OAuth + IAM; otherwise use signed URLs. 
+
+
+customer_room_image (reused across the 8 variants for one run): use Files API upload once per run (48h is fine), or signed URL. 
+
+
+Files API constraints to design around:
+
+
+Storage up to 20 GB per project, per-file up to 2 GB, stored 48 hours, metadata retrievable but files not downloadable back. 
+
+
+
+3) Supported image formats (what you can safely send)
+Gemini supports these image MIME types: PNG, JPEG, WEBP, HEIC, HEIF. 
+Hard requirement for See It Now:
+
+
+If your prepared product needs transparency, PNG is the straightforward choice because it supports alpha and is explicitly supported by Gemini. 
+
+
+Also: always set the MIME type correctly for the bytes you are sending (inlineData/fileData). The docs repeatedly show passing mimeType alongside the bytes. 
+
+4) Output control knobs you should actually use
+4.1 Response modalities
+To force image output (and avoid unexpected text-only responses), set responseModalities to include Image (or TEXT + IMAGE if you want both). 
+4.2 Aspect ratio and size control (this one bites product-in-room)
+Native image generation docs:
+
+
+If you provide an input image, the model defaults to matching output size to the input image. If there is no input image, it defaults to 1:1. 
+
+
+You can explicitly set image_config.aspect_ratio (example shows 16:9). 
+
+
+Prompting guidance (behavioral):
+
+
+In editing flows, Gemini generally preserves the input aspect ratio.
+
+
+If multiple input images have different aspect ratios, Gemini may adopt the aspect ratio of the last image provided.
+
+
+If prompting does not produce the ratio you need, provide a reference image with the correct dimensions. 
+
+
+See It Now implication
+
+
+If your room photo defines the canvas, ensure customer_room_image is last or explicitly set image_config.aspect_ratio to match the room. 
+
+
+4.3 Media resolution (controls how well the model “sees” your inputs)
+media_resolution controls how many tokens are allocated to media inputs, trading off detail vs latency/cost. 
+For Gemini 2.5 models, token behavior is different than Gemini 3:
+
+
+UNSPECIFIED and HIGH are “256 + pan & scan” (the docs describe pan & scan and mention ~2048 in the unspecified row).
+
+
+LOW is 64 tokens for images. 
+
+
+See It Now implication
+
+
+If fine product edges, texture, or small alignment cues matter, do not run LOW by default. Start at default (UNSPECIFIED) and only drop to LOW if you are intentionally trading quality for speed. 
+
+
+
+5) The core prompting rules that consistently improve photoreal “product in room”
+These are straight from Google’s own guidance for Gemini 2.5 Flash Image prompting: 
+5.1 Describe the scene, do not keyword spam
+Use a narrative, descriptive paragraph. It’s explicitly called out as the foundational principle. 
+5.2 “Think like a photographer” to get realism
+Call camera choices, lens language, angle, lighting, mood. This is specifically recommended for photorealistic scenes. 
+5.3 Use semantic negative prompts (avoid long “no X” lists)
+Instead of “no cars”, describe the scene that implies no cars. Google explicitly recommends this. 
+5.4 For edits: constrain what must remain unchanged
+For “change only X” style edits, the guide explicitly uses language like “keep everything else exactly the same” patterns in its templates and examples. 
+
+6) Multi-image composition: the exact pattern you want for See It Now
+Google’s native image generation docs include an “Advanced composition: Combining multiple images” section explicitly framed as ideal for product mockups and commercial composites. 
+The official template pattern is:
+
+
+“Take [element from image 1] and place it with/on [element from image 2]”
+
+
+“Adjust lighting and shadows to match the environment” (shown in the example prompt) 
+
+
+Translate this directly into your See It Now contract
+
+
+Image roles (in text): refer to them as prepared_product_image and customer_room_image (your app convention).
+
+
+Composition directive: “Take the exact product from prepared_product_image and place it into customer_room_image.”
+
+
+Physical realism directive: “Match camera perspective, scale, contact points, lighting direction, and shadow softness to the room.”
+
+
+Preservation directive: “Do not redesign the product. Preserve its geometry, materials, texture, and proportions.”
+
+
+That last part is not guaranteed by the model, but it is the right constraint language to reduce “creative reinterpretation” given how the official composition prompt is written (it anchors to a specific element from a specific image). 
+
+7) Aspect ratio pitfalls specific to product-in-room
+This is the most common failure mode in two-image pipelines:
+Failure pattern
+
+
+Product cutout is square (or close).
+
+
+Room is wide (or tall).
+
+
+Output becomes square or adopts the wrong canvas.
+
+
+Controls that are explicitly supported
+
+
+Ensure the last image provided has the aspect ratio you want. 
+
+
+Or set image_config.aspect_ratio explicitly. 
+
+
+Or provide a reference image with the correct dimensions if prompting fails. 
+
+
+
+8) Caching: reduce cost and sometimes latency in repeated prompt prefixes
+Gemini API has both implicit and explicit caching. 
+
+
+Implicit caching is on by default for most Gemini models, and the docs give two tactics to increase cache hits: put large common content at the beginning and send similar-prefix requests close together. 
+
+
+Explicit caching lets you cache a prefix and refer to it by ID with a TTL (defaults to 1 hour). 
+
+
+See It Now implication
+
+
+Put your global render rules (the shared prefix across your 8 variants) at the top of every variant prompt so implicit caching can hit. 
+
+
+If you have a very large shared prefix, explicit caching can make sense, but it is extra orchestration. 
+
+
+
+9) Safety settings: what you can and cannot control
+Safety filters cover four adjustable categories (harassment, hate speech, sexually explicit, dangerous). 
+Key operational details:
+
+
+For Gemini 2.5 and 3 models, the default safety threshold is “Off” unless set. 
+
+
+Built-in protections for “core harms” (example given: content that endangers child safety) are always blocked and cannot be adjusted. 
+
+
+If content is blocked, you get finishReason=SAFETY and can inspect safetyRatings. 
+
+
+For See It Now product-in-room, the main point is observability: log finishReason and safety ratings so you can distinguish “bad prompt” from “blocked output”. 
+
+10) Cost facts that matter for product renders
+Gemini’s pricing page states:
+
+
+For gemini-2.5-flash-image, image output is priced at $30 per 1,000,000 tokens and a 1024x1024 output image consumes 1290 tokens (about $0.039 per image). 
+
+
+This is relevant because your “8 variants” is effectively “8 images per render run”, so you can compute direct cost per run off that token mapping. 
+
+11) Community notes (reddit, forums, blogs): useful signals, not ground truth
+Use these to generate hypotheses and test quickly, not as guarantees.
+Prompt galleries and idea banks
+
+
+A curated “awesome-nano-banana” GitHub repo collects prompts and examples. Useful for inspiration and patterns. 
+
+
+Community prompt threads exist specifically for Nano Banana usage. 
+
+
+Third-party prompt guides (example: Leonardo.ai) summarize workflows and prompt styles; treat as non-authoritative. 
+
+
+Known rough edges reported by developers
+
+
+Some developers report quality or aspect-ratio inconsistencies between the Gemini app and API outputs in forum threads; treat that as a reason to build a regression harness, not as a stable “rule”. 
+
+
+There are reports that imageSize for gemini-3-pro-image-preview can be ignored in some image-to-image workflows; again, treat as test-driven. 
+
+
+
+See It Now implementation checklist (minimum you should lock down)
+A) Inputs
+
+
+prepared_product_image format is supported and uses correct MIME type. 
+
+
+customer_room_image format is supported and uses correct MIME type. 
+
+
+Input method chosen per asset type:
+
+
+product: GCS registration (30 days) or signed URL. 
+
+
+room: Files API once per run or signed URL. 
+
+
+
+
+B) Request config
+
+
+responseModalities: ["Image"] (or include TEXT if you need it). 
+
+
+image_config.aspect_ratio explicitly set OR ensure the last image provided has the room’s aspect ratio. 
+
+
+media_resolution not set to LOW by default for 2.5 unless you accept the detail tradeoff. 
+
+
+C) Prompt skeleton (aligned to Google guidance)
+
+
+Narrative scene description, not keywords. 
+
+
+Photographic control terms (lens, angle, lighting). 
+
+
+Semantic negatives, minimal “no X” lists. 
+
+
+Composition directive matches the official multi-image composition pattern (take element from image 1, place into image 2, match lighting). 
+
+
+D) Observability you need to debug fast
+
+
+Log: model id, image_config, media_resolution, input method (inline vs file vs URL), image ordering, finishReason, safetyRatings (if any), and the exact prompt string used. 
+
+
+If you want, paste one of your current variant prompts (one of the 8) and I’ll rewrite it into a single “gold” base prompt plus 8 tightly-scoped variant deltas that respect the official composition template and the aspect ratio rules above.
