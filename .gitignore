@@ -35,6 +35,15 @@ NUL
 *.swo
 *~
 
+# Cursor / local tooling (don’t commit)
+.cursor/
+.playwright-mcp/
+.taskmaster/
+.claude-skills/
+.claude/skills/
+.claude/settings.local.json
+audit-results.md
+
 # Prisma (dev databases only - migrations should be committed!)
 prisma/dev.sqlite
 prisma/dev.sqlite-journal
