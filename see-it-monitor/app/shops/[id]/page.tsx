@@ -429,11 +429,11 @@ function RuntimeConfigPanel({ shopId }: RuntimeConfigPanelProps) {
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase">Max Output Tokens</p>
-            <p className="text-lg font-medium">{config.caps.maxTokensOutput.toLocaleString()}</p>
+            <p className="text-lg font-medium">{config.maxTokensOutputCap.toLocaleString()}</p>
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase">Max Image Bytes</p>
-            <p className="text-lg font-medium">{(config.caps.maxImageBytes / 1024 / 1024).toFixed(1)} MB</p>
+            <p className="text-lg font-medium">{(config.maxImageBytesCap / 1024 / 1024).toFixed(1)} MB</p>
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase">Model Allow List</p>
@@ -443,11 +443,11 @@ function RuntimeConfigPanel({ shopId }: RuntimeConfigPanelProps) {
           </div>
         </div>
 
-        {config.disabledPrompts.length > 0 && (
+        {config.disabledPromptNames.length > 0 && (
           <div className="mt-6 pt-6 border-t border-gray-100">
             <p className="text-xs text-gray-500 uppercase mb-2">Disabled Prompts</p>
             <div className="flex flex-wrap gap-2">
-              {config.disabledPrompts.map((name) => (
+              {config.disabledPromptNames.map((name) => (
                 <Badge key={name} variant="warning">{name}</Badge>
               ))}
             </div>
