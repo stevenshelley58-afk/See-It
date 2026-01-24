@@ -357,7 +357,7 @@ export async function createVersion(
           developerTemplate: developerTemplate ?? null,
           userTemplate: userTemplate ?? null,
           model: model ?? null,
-          params: params ?? Prisma.DbNull,
+          params: params ? (params as Prisma.InputJsonValue) : Prisma.DbNull,
           templateHash,
           changeNotes: changeNotes ?? null,
           createdBy,
