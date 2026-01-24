@@ -1,6 +1,7 @@
 // Gemini AI service - runs directly in Railway, no separate Cloud Run service
 import { GoogleGenAI, createPartFromUri } from "@google/genai";
 import { removeBackground } from "@imgly/background-removal-node";
+import crypto from "crypto";
 import sharp from "sharp";
 import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 import { logger, createLogContext } from "../utils/logger.server";
@@ -117,6 +118,51 @@ export class GeminiTimeoutError extends Error {
         super(`Gemini API call timed out after ${timeoutMs}ms`);
         this.name = 'GeminiTimeoutError';
     }
+}
+
+export class GeminiServiceError extends Error {
+    public readonly code: string;
+    public readonly retryable: boolean;
+    public readonly causeId: string;
+
+    constructor(args: { code: string; message: string; retryable: boolean; causeId: string }) {
+        super(args.message);
+        this.name = "GeminiServiceError";
+        this.code = args.code;
+        this.retryable = args.retryable;
+        this.causeId = args.causeId;
+    }
+}
+
+function createCauseId(): string {
+    return crypto.randomUUID().slice(0, 8);
+}
+
+function redactSecrets(text: string): string {
+    // Never allow accidental header/key leakage into logs
+    return text
+        .replace(/(Bearer\s+)[A-Za-z0-9\-._~+/]+=*/gi, "$1[REDACTED]")
+        .replace(/(authorization[:=]\s*)([^\s]+)/gi, "$1[REDACTED]")
+        .replace(/(x-goog-api-key[:=]\s*)([^\s]+)/gi, "$1[REDACTED]");
+}
+
+function toSafeErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return redactSecrets(error.message || error.name || "Gemini request failed");
+    }
+    return "Gemini request failed";
+}
+
+function isRetryableGeminiError(error: unknown): boolean {
+    if (error instanceof GeminiTimeoutError) return true;
+    const msg = error instanceof Error ? error.message.toLowerCase() : "";
+    return (
+        msg.includes("429") ||
+        msg.includes("rate") ||
+        msg.includes("quota") ||
+        msg.includes("503") ||
+        msg.includes("timeout")
+    );
 }
 
 /**
@@ -410,16 +456,21 @@ async function callGemini(
         throw new Error("No image in response - Gemini may have returned text only or blocked the request");
     } catch (error: any) {
         const duration = Date.now() - startTime;
+        const causeId = createCauseId();
+        const safeMessage = toSafeErrorMessage(error);
+        const retryable = isRetryableGeminiError(error);
 
         // Log timeout errors with extra context
         if (error instanceof GeminiTimeoutError) {
             logger.error(
-                { ...context, stage: "timeout" },
-                `Gemini API call timed out after ${duration}ms (limit: ${timeoutMs}ms)`,
-                error
+                { ...context, stage: "timeout", causeId, model, durationMs: duration, timeoutMs },
+                `Gemini API call timed out after ${duration}ms (limit: ${timeoutMs}ms): ${safeMessage}`
             );
         } else {
-            logger.error(context, `Gemini error with ${model} after ${duration}ms`, error);
+            logger.error(
+                { ...context, stage: "gemini-error", causeId, model, durationMs: duration },
+                `Gemini error with ${model} after ${duration}ms: ${safeMessage}`
+            );
         }
 
         // Fallback to fast model if pro fails (except for timeouts - let them propagate)
@@ -427,7 +478,12 @@ async function callGemini(
             logger.info(context, "Falling back to fast model");
             return callGemini(prompt, images, { ...options, model: IMAGE_MODEL_FAST });
         }
-        throw error;
+        throw new GeminiServiceError({
+            code: error instanceof GeminiTimeoutError ? "TIMEOUT" : "GEMINI_ERROR",
+            message: "Gemini request failed. Please try again.",
+            retryable,
+            causeId,
+        });
     }
 }
 

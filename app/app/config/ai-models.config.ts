@@ -88,7 +88,7 @@ export const MODEL_FOR_PRODUCT_PREP = "imgly-background-removal" as const;
 /**
  * Default model for scene compositing.
  */
-export const MODEL_FOR_COMPOSITING = GEMINI_IMAGE_MODEL_PRO;
+export const MODEL_FOR_COMPOSITING = GEMINI_IMAGE_MODEL_FAST;
 
 // =============================================================================
 // INVALID MODEL NAMES - DO NOT USE THESE
