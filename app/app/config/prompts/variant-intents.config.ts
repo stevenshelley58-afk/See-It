@@ -72,7 +72,8 @@ export const VARIANT_INTENTS: VariantIntent[] = [
     scaleStrategy: "context-heavy",
     scaleNote:
       "Place near multiple visible scale references to maximize scale accuracy. Do not change viewpoint.",
-    anchorRule: null, // Special: uses multiple anchors
+    anchorRule:
+      "Use multiple in-frame anchors (at least two: e.g., sofa + doorway, chair + table, bed + nightstand). State the product's size relative to each anchor per scale_guardrails.",
   },
   {
     id: "V08",
