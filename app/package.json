@@ -12,7 +12,7 @@
     "config:use": "shopify app config use",
     "env": "shopify app env",
     "start": "remix-serve ./build/server/index.js",
-    "docker-start": "npm run migrate && npm run generate && npm run start",
+    "docker-start": "node scripts/railway-migrate.mjs && npm run generate && npm run start",
     "generate": "prisma generate",
     "migrate": "prisma migrate deploy",
     "migrate:dev": "prisma migrate dev",
