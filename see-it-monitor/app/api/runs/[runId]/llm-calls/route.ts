@@ -87,7 +87,7 @@ export async function GET(
         callIdentityHash: true,
         dedupeHash: true,
         callSummary: true,
-        debugPayload: reveal, // sensitive; only return when explicitly revealed
+        debugPayload: true, // always include for variant modal payload display
         outputSummary: true,
         variantId: true,
       },
