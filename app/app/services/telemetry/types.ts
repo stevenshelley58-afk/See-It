@@ -73,53 +73,44 @@ export interface ArtifactInput {
 export interface StartRunInput {
   runId: string;
   shopId: string;
-  requestId: string;
   productAssetId: string;
   roomSessionId: string | null;
-  promptPackVersion: number;
-  model: string;
-  traceId?: string;
+  traceId: string;
 
-  // Image info
-  productImageHash: string;
-  productImageMeta: ImageMeta;
-  roomImageHash: string;
-  roomImageMeta: ImageMeta;
+  // Image references
+  preparedProductImageRef: string;
+  preparedProductImageHash?: string;
+  roomImageRef: string;
+  roomImageHash?: string;
 
-  // Snapshots
-  resolvedFactsHash: string;
-  resolvedFactsJson: Record<string, unknown>;
-  promptPackHash: string;
-  promptPackJson: Record<string, unknown>;
+  // Snapshots (canonical schema)
+  resolvedFactsSnapshot: Record<string, unknown>;
+  placementSetSnapshot: Record<string, unknown>;
+  pipelineConfigSnapshot: Record<string, unknown>;
+  pipelineConfigHash: string;
 }
 
 export interface RecordVariantStartInput {
   runId: string;
   variantId: string;
-  requestId: string;
   shopId: string;
+  traceId: string;
 }
 
 export interface RecordVariantResultInput {
-  renderRunId: string;
+  runId: string;
   variantId: string;
-  finalPromptHash: string;
-  requestId: string;
   shopId: string;
+  traceId: string;
 
-  status: "success" | "failed" | "timeout";
+  status: "SUCCESS" | "FAILED" | "TIMEOUT";
 
   // Timing
-  startedAt?: Date;
-  completedAt?: Date;
   latencyMs?: number;
-  providerMs?: number;
-  uploadMs?: number;
 
   // Output
-  outputImageKey?: string;
-  outputImageHash?: string;
-  outputArtifactId?: string;
+  imageRef?: string;
+  imageHash?: string;
 
   // Error
   errorCode?: string;
@@ -128,9 +119,9 @@ export interface RecordVariantResultInput {
 
 export interface CompleteRunInput {
   runId: string;
-  requestId: string;
   shopId: string;
-  status: "complete" | "partial" | "failed";
+  traceId: string;
+  status: "COMPLETE" | "PARTIAL" | "FAILED";
   totalDurationMs: number;
   successCount: number;
   failCount: number;
@@ -140,13 +131,6 @@ export interface CompleteRunInput {
 // =============================================================================
 // Supporting Types
 // =============================================================================
-
-export interface ImageMeta {
-  width: number;
-  height: number;
-  bytes: number;
-  format: string;
-}
 
 export interface TraceContext {
   traceId: string;
