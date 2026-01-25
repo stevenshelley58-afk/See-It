@@ -250,17 +250,17 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
 
                 {/* Save feedback */}
                 {(saveError || saveInfo) && (
-                    <div className={`mb-4 -mt-2 px-4 py-3 rounded-lg border ${
+                    <div className={`mb-4 -mt-2 px-4 py-3 rounded-xl border ${
                         saveError
                             ? 'bg-red-50 border-red-200 text-red-800'
                             : (isSaving
-                                ? 'bg-neutral-50 border-neutral-200 text-neutral-800'
+                                ? 'bg-[#FAFAFA] border-[#E5E5E5] text-[#1A1A1A]'
                                 : 'bg-emerald-50 border-emerald-200 text-emerald-800')
                     }`}>
                         <div className="text-sm font-semibold">
                             {saveError ? 'Save failed' : (isSaving ? 'Saving…' : 'Saved')}
                         </div>
-                        <div className="text-xs mt-1">
+                        <div className="text-xs mt-1 text-[#737373]">
                             {saveError || saveInfo}
                         </div>
                     </div>

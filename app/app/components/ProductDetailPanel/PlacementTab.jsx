@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useFetcher } from '@remix-run/react';
-import { Button } from '../ui';
+import { Button, Card } from '../ui';
 import { buildPlacementTabMetadata } from './placementTabMetadata';
 
 
@@ -663,13 +663,13 @@ export function PlacementTab({ product, asset, onChange }) {
     ];
 
     return (
-        <div className="space-y-8 fade-in">
+        <div className="space-y-6 fade-in">
 
             {/* SECTION 1: Structured Fields */}
-            <div className="space-y-6">
+            <Card className="space-y-6">
                 <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-neutral-900">Product Properties</h3>
-                    <span className="text-xs text-neutral-500 bg-neutral-100 px-2 py-1 rounded-full">
+                    <h3 className="text-lg font-semibold text-[#1A1A1A]">Product Properties</h3>
+                    <span className="text-xs text-[#737373] bg-[#F0F0F0] px-2 py-1 rounded-full">
                         Auto-detected • Review & adjust
                     </span>
                 </div>
@@ -677,18 +677,18 @@ export function PlacementTab({ product, asset, onChange }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Surface */}
                     <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-neutral-700">
+                        <label className="block text-sm font-semibold text-[#1A1A1A]">
                             Typical Placement
                         </label>
-                        <p className="text-xs text-neutral-500">Where does this product usually go?</p>
+                        <p className="text-xs text-[#737373]">Where does this product usually go?</p>
                         <div className="flex flex-wrap gap-2 mt-2">
                             {surfaces.map(s => (
                                 <button
                                     key={s}
                                     onClick={() => updateField('surface', s)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.surface === s
-                                        ? 'bg-neutral-900 text-white'
-                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${fields.surface === s
+                                        ? 'bg-[#171717] text-white shadow-sm'
+                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
                                         }`}
                                 >
                                     {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -699,18 +699,18 @@ export function PlacementTab({ product, asset, onChange }) {
 
                     {/* Material */}
                     <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-neutral-700">
+                        <label className="block text-sm font-semibold text-[#1A1A1A]">
                             Primary Material
                         </label>
-                        <p className="text-xs text-neutral-500">Main material for lighting/reflections</p>
+                        <p className="text-xs text-[#737373]">Main material for lighting/reflections</p>
                         <div className="flex flex-wrap gap-2 mt-2">
                             {materials.map(m => (
                                 <button
                                     key={m}
                                     onClick={() => updateField('material', m)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.material === m
-                                        ? 'bg-neutral-900 text-white'
-                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${fields.material === m
+                                        ? 'bg-[#171717] text-white shadow-sm'
+                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
                                         }`}
                                 >
                                     {m.charAt(0).toUpperCase() + m.slice(1)}
@@ -721,18 +721,18 @@ export function PlacementTab({ product, asset, onChange }) {
 
                     {/* Orientation */}
                     <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-neutral-700">
+                        <label className="block text-sm font-semibold text-[#1A1A1A]">
                             Typical Orientation
                         </label>
-                        <p className="text-xs text-neutral-500">How is it usually positioned?</p>
+                        <p className="text-xs text-[#737373]">How is it usually positioned?</p>
                         <div className="flex flex-wrap gap-2 mt-2">
                             {orientations.map(o => (
                                 <button
                                     key={o}
                                     onClick={() => updateField('orientation', o)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.orientation === o
-                                        ? 'bg-neutral-900 text-white'
-                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${fields.orientation === o
+                                        ? 'bg-[#171717] text-white shadow-sm'
+                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
                                         }`}
                                 >
                                     {o.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
@@ -743,18 +743,18 @@ export function PlacementTab({ product, asset, onChange }) {
 
                     {/* Shadow */}
                     <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-neutral-700">
+                        <label className="block text-sm font-semibold text-[#1A1A1A]">
                             Shadow Type
                         </label>
-                        <p className="text-xs text-neutral-500">How should shadows render?</p>
+                        <p className="text-xs text-[#737373]">How should shadows render?</p>
                         <div className="flex flex-wrap gap-2 mt-2">
                             {shadows.map(s => (
                                 <button
                                     key={s}
                                     onClick={() => updateField('shadow', s)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${fields.shadow === s
-                                        ? 'bg-neutral-900 text-white'
-                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${fields.shadow === s
+                                        ? 'bg-[#171717] text-white shadow-sm'
+                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
                                         }`}
                                 >
                                     {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -766,10 +766,10 @@ export function PlacementTab({ product, asset, onChange }) {
 
                 {/* Dimensions */}
                 <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-neutral-700">
-                        Product dimensions (cm) <span className="font-normal text-neutral-400">(optional)</span>
+                    <label className="block text-sm font-semibold text-[#1A1A1A]">
+                        Product dimensions (cm) <span className="font-normal text-[#A3A3A3]">(optional)</span>
                     </label>
-                    <p className="text-xs text-neutral-500">
+                    <p className="text-xs text-[#737373]">
                         Used to help the AI keep proportions consistent. This is for merchant setup only (not shown to customers).
                     </p>
                     <div className="grid grid-cols-2 gap-4 max-w-xs">
@@ -780,9 +780,9 @@ export function PlacementTab({ product, asset, onChange }) {
                                 placeholder="Height"
                                 value={fields.dimensions?.height || ''}
                                 onChange={(e) => updateField('dimensions.height', e.target.value ? parseFloat(e.target.value) : null)}
-                                className="w-full pl-3 pr-10 py-2 bg-white border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                                className="w-full pl-3 pr-10 py-2 bg-white border border-[#E5E5E5] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#171717]/10 focus:border-[#171717]"
                             />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-400">cm</span>
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#A3A3A3]">cm</span>
                         </div>
                         <div className="relative">
                             <input
@@ -791,37 +791,34 @@ export function PlacementTab({ product, asset, onChange }) {
                                 placeholder="Width"
                                 value={fields.dimensions?.width || ''}
                                 onChange={(e) => updateField('dimensions.width', e.target.value ? parseFloat(e.target.value) : null)}
-                                className="w-full pl-3 pr-10 py-2 bg-white border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                                className="w-full pl-3 pr-10 py-2 bg-white border border-[#E5E5E5] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#171717]/10 focus:border-[#171717]"
                             />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-400">cm</span>
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#A3A3A3]">cm</span>
                         </div>
                     </div>
                 </div>
 
                 {/* Additional Notes */}
                 <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-neutral-700">
-                        Special Notes <span className="font-normal text-neutral-400">(anything the AI should know)</span>
+                    <label className="block text-sm font-semibold text-[#1A1A1A]">
+                        Special Notes <span className="font-normal text-[#A3A3A3]">(anything the AI should know)</span>
                     </label>
                     <textarea
                         placeholder="e.g., 'Brass frame has aged patina', 'Glass shelves are transparent', 'Fabric has subtle sheen'"
                         value={fields.additionalNotes || ''}
                         onChange={(e) => updateField('additionalNotes', e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-lg text-sm min-h-[80px] resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                        className="w-full px-3 py-2 bg-white border border-[#E5E5E5] rounded-xl text-sm min-h-[80px] resize-none focus:outline-none focus:ring-2 focus:ring-[#171717]/10 focus:border-[#171717]"
                         maxLength={200}
                     />
-                    <p className="text-xs text-neutral-400 text-right">{(fields.additionalNotes || '').length}/200</p>
+                    <p className="text-xs text-[#A3A3A3] text-right">{(fields.additionalNotes || '').length}/200</p>
                 </div>
-            </div>
-
-            {/* Divider */}
-            <div className="border-t border-neutral-200"></div>
+            </Card>
 
             {/* SECTION: Placement Rules */}
-            <div className="space-y-6">
+            <Card className="space-y-6">
                 <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-neutral-900">Placement Rules</h3>
-                    <span className="text-xs text-neutral-500 bg-neutral-100 px-2 py-1 rounded-full">
+                    <h3 className="text-lg font-semibold text-[#1A1A1A]">Placement Rules</h3>
+                    <span className="text-xs text-[#737373] bg-[#F0F0F0] px-2 py-1 rounded-full">
                         Auto-detected • Review & adjust
                     </span>
                 </div>
@@ -829,18 +826,18 @@ export function PlacementTab({ product, asset, onChange }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Scene Role */}
                     <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-neutral-700">
+                        <label className="block text-sm font-semibold text-[#1A1A1A]">
                             Scene Role
                         </label>
-                        <p className="text-xs text-neutral-500">How does this product fit in the room?</p>
+                        <p className="text-xs text-[#737373]">How does this product fit in the room?</p>
                         <div className="flex flex-wrap gap-2 mt-2">
                             {sceneRoles.map(role => (
                                 <button
                                     key={role}
                                     onClick={() => setPlacementRulesFields(prev => ({ ...prev, sceneRole: role }))}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${placementRulesFields.sceneRole === role
-                                        ? 'bg-neutral-900 text-white'
-                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${placementRulesFields.sceneRole === role
+                                        ? 'bg-[#171717] text-white shadow-sm'
+                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
                                         }`}
                                 >
                                     {role}
@@ -851,18 +848,18 @@ export function PlacementTab({ product, asset, onChange }) {
 
                     {/* Replacement Rule */}
                     <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-neutral-700">
+                        <label className="block text-sm font-semibold text-[#1A1A1A]">
                             Replacement Rule
                         </label>
-                        <p className="text-xs text-neutral-500">What can be replaced when placing this product?</p>
+                        <p className="text-xs text-[#737373]">What can be replaced when placing this product?</p>
                         <div className="flex flex-col gap-2 mt-2">
                             {replacementRules.map(rule => (
                                 <button
                                     key={rule}
                                     onClick={() => setPlacementRulesFields(prev => ({ ...prev, replacementRule: rule }))}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all text-left ${placementRulesFields.replacementRule === rule
-                                        ? 'bg-neutral-900 text-white'
-                                        : 'bg-white border border-neutral-200 text-neutral-600 hover:border-neutral-400'
+                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all text-left ${placementRulesFields.replacementRule === rule
+                                        ? 'bg-[#171717] text-white shadow-sm'
+                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
                                         }`}
                                 >
                                     {rule}
@@ -879,42 +876,39 @@ export function PlacementTab({ product, asset, onChange }) {
                             type="checkbox"
                             checked={placementRulesFields.allowSpaceCreation === true}
                             onChange={(e) => setPlacementRulesFields(prev => ({ ...prev, allowSpaceCreation: e.target.checked }))}
-                            className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                            className="w-4 h-4 text-[#171717] border-[#E5E5E5] rounded focus:ring-[#171717]/10"
                         />
                         <div>
-                            <span className="block text-sm font-semibold text-neutral-700">Allow Space Creation</span>
-                            <span className="block text-xs text-neutral-500">Allow minimal space creation if product doesn't fit</span>
+                            <span className="block text-sm font-semibold text-[#1A1A1A]">Allow Space Creation</span>
+                            <span className="block text-xs text-[#737373]">Allow minimal space creation if product doesn't fit</span>
                         </div>
                     </label>
                 </div>
-            </div>
-
-            {/* Divider */}
-            <div className="border-t border-neutral-200"></div>
+            </Card>
 
             {/* SECTION: See It Now Facts / Overrides */}
-            <div className="space-y-4">
+            <Card className="space-y-4">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h3 className="text-lg font-bold text-neutral-900">See It Now Facts / Overrides</h3>
-                        <p className="text-sm text-neutral-500 mt-1">
+                        <h3 className="text-lg font-semibold text-[#1A1A1A]">See It Now Facts / Overrides</h3>
+                        <p className="text-sm text-[#737373] mt-1">
                             Optional merchant overrides for the v2 pipeline. These regenerate and save a new prompt pack when you click Save.
                         </p>
                     </div>
-                    <span className="text-xs text-neutral-500 bg-neutral-100 px-2 py-1 rounded-full">
+                    <span className="text-xs text-[#737373] bg-[#F0F0F0] px-2 py-1 rounded-full">
                         {extractedFacts ? 'Facts extracted' : 'Facts not extracted yet'}
                     </span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {/* Material primary */}
-                    <div className="border border-neutral-200 rounded-xl p-4 bg-white">
+                    <div className="border border-[#E5E5E5] rounded-xl p-4 bg-white">
                         <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                                <div className="text-sm font-semibold text-neutral-800">Primary material</div>
-                                <div className="text-xs text-neutral-500 mt-0.5">Affects reflections and material rules</div>
+                                <div className="text-sm font-semibold text-[#1A1A1A]">Primary material</div>
+                                <div className="text-xs text-[#737373] mt-0.5">Affects reflections and material rules</div>
                             </div>
-                            <label className="flex items-center gap-2 text-xs text-neutral-600 select-none">
+                            <label className="flex items-center gap-2 text-xs text-[#737373] select-none">
                                 <input
                                     type="checkbox"
                                     checked={materialPrimaryIsOverridden}
@@ -926,7 +920,7 @@ export function PlacementTab({ product, asset, onChange }) {
                                             return setPath(base, ["material_profile", "primary"], materialPrimaryValue || "unknown");
                                         });
                                     }}
-                                    className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                                    className="w-4 h-4 text-[#171717] border-[#E5E5E5] rounded focus:ring-[#171717]/10"
                                 />
                                 Override
                             </label>
@@ -938,9 +932,9 @@ export function PlacementTab({ product, asset, onChange }) {
                                 setMerchantOverrides((prev) => setPath(prev || {}, ["material_profile", "primary"], v));
                             }}
                             disabled={!materialPrimaryIsOverridden}
-                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${materialPrimaryIsOverridden
-                                ? 'border-neutral-300 bg-white text-neutral-900'
-                                : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                            className={`mt-3 w-full text-sm border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#171717]/10 ${materialPrimaryIsOverridden
+                                ? 'border-[#E5E5E5] bg-white text-[#1A1A1A]'
+                                : 'border-[#F0F0F0] bg-[#FAFAFA] text-[#737373]'
                                 }`}
                         >
                             {materialPrimaryOptions.map((opt) => (
@@ -950,20 +944,20 @@ export function PlacementTab({ product, asset, onChange }) {
                             ))}
                         </select>
                         {!materialPrimaryIsOverridden && (
-                            <div className="mt-2 text-xs text-neutral-400">
+                            <div className="mt-2 text-xs text-[#A3A3A3]">
                                 Using extracted/resolved value: <span className="font-mono">{materialPrimaryValue}</span>
                             </div>
                         )}
                     </div>
 
                     {/* Relative scale class */}
-                    <div className="border border-neutral-200 rounded-xl p-4 bg-white">
+                    <div className="border border-[#E5E5E5] rounded-xl p-4 bg-white">
                         <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                                <div className="text-sm font-semibold text-neutral-800">Relative scale</div>
-                                <div className="text-xs text-neutral-500 mt-0.5">Helps size the product in room context</div>
+                                <div className="text-sm font-semibold text-[#1A1A1A]">Relative scale</div>
+                                <div className="text-xs text-[#737373] mt-0.5">Helps size the product in room context</div>
                             </div>
-                            <label className="flex items-center gap-2 text-xs text-neutral-600 select-none">
+                            <label className="flex items-center gap-2 text-xs text-[#737373] select-none">
                                 <input
                                     type="checkbox"
                                     checked={relativeScaleClassIsOverridden}
@@ -975,7 +969,7 @@ export function PlacementTab({ product, asset, onChange }) {
                                             return setPath(base, ["relative_scale", "class"], relativeScaleClassValue || "unknown");
                                         });
                                     }}
-                                    className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                                    className="w-4 h-4 text-[#171717] border-[#E5E5E5] rounded focus:ring-[#171717]/10"
                                 />
                                 Override
                             </label>
@@ -987,9 +981,9 @@ export function PlacementTab({ product, asset, onChange }) {
                                 setMerchantOverrides((prev) => setPath(prev || {}, ["relative_scale", "class"], v));
                             }}
                             disabled={!relativeScaleClassIsOverridden}
-                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${relativeScaleClassIsOverridden
-                                ? 'border-neutral-300 bg-white text-neutral-900'
-                                : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                            className={`mt-3 w-full text-sm border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#171717]/10 ${relativeScaleClassIsOverridden
+                                ? 'border-[#E5E5E5] bg-white text-[#1A1A1A]'
+                                : 'border-[#F0F0F0] bg-[#FAFAFA] text-[#737373]'
                                 }`}
                         >
                             {relativeScaleClassOptions.map((opt) => (
@@ -999,20 +993,20 @@ export function PlacementTab({ product, asset, onChange }) {
                             ))}
                         </select>
                         {!relativeScaleClassIsOverridden && (
-                            <div className="mt-2 text-xs text-neutral-400">
+                            <div className="mt-2 text-xs text-[#A3A3A3]">
                                 Using extracted/resolved value: <span className="font-mono">{relativeScaleClassValue}</span>
                             </div>
                         )}
                     </div>
 
                     {/* Cropping policy */}
-                    <div className="border border-neutral-200 rounded-xl p-4 bg-white">
+                    <div className="border border-[#E5E5E5] rounded-xl p-4 bg-white">
                         <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                                <div className="text-sm font-semibold text-neutral-800">Cropping policy</div>
-                                <div className="text-xs text-neutral-500 mt-0.5">Controls whether the product may be cropped</div>
+                                <div className="text-sm font-semibold text-[#1A1A1A]">Cropping policy</div>
+                                <div className="text-xs text-[#737373] mt-0.5">Controls whether the product may be cropped</div>
                             </div>
-                            <label className="flex items-center gap-2 text-xs text-neutral-600 select-none">
+                            <label className="flex items-center gap-2 text-xs text-[#737373] select-none">
                                 <input
                                     type="checkbox"
                                     checked={croppingPolicyIsOverridden}
@@ -1024,7 +1018,7 @@ export function PlacementTab({ product, asset, onChange }) {
                                             return setPath(base, ["render_behavior", "cropping_policy"], croppingPolicyValue || "allow_small_crop");
                                         });
                                     }}
-                                    className="w-4 h-4 text-neutral-900 border-neutral-300 rounded focus:ring-neutral-900/10"
+                                    className="w-4 h-4 text-[#171717] border-[#E5E5E5] rounded focus:ring-[#171717]/10"
                                 />
                                 Override
                             </label>
@@ -1036,9 +1030,9 @@ export function PlacementTab({ product, asset, onChange }) {
                                 setMerchantOverrides((prev) => setPath(prev || {}, ["render_behavior", "cropping_policy"], v));
                             }}
                             disabled={!croppingPolicyIsOverridden}
-                            className={`mt-3 w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 ${croppingPolicyIsOverridden
-                                ? 'border-neutral-300 bg-white text-neutral-900'
-                                : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                            className={`mt-3 w-full text-sm border rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#171717]/10 ${croppingPolicyIsOverridden
+                                ? 'border-[#E5E5E5] bg-white text-[#1A1A1A]'
+                                : 'border-[#F0F0F0] bg-[#FAFAFA] text-[#737373]'
                                 }`}
                         >
                             {croppingPolicyOptions.map((opt) => (
@@ -1048,7 +1042,7 @@ export function PlacementTab({ product, asset, onChange }) {
                             ))}
                         </select>
                         {!croppingPolicyIsOverridden && (
-                            <div className="mt-2 text-xs text-neutral-400">
+                            <div className="mt-2 text-xs text-[#A3A3A3]">
                                 Using extracted/resolved value: <span className="font-mono">{croppingPolicyValue}</span>
                             </div>
                         )}
@@ -1060,17 +1054,14 @@ export function PlacementTab({ product, asset, onChange }) {
                         You have unsaved See It Now overrides. Click <strong>Save</strong> to regenerate and persist the v2 prompt pack.
                     </div>
                 )}
-            </div>
-
-            {/* Divider */}
-            <div className="border-t border-neutral-200"></div>
+            </Card>
 
             {/* SECTION 2: Placement Prompts (See It and See It Now) */}
-            <div className="space-y-4">
+            <Card className="space-y-4">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h3 className="text-lg font-bold text-neutral-900">Placement Prompts</h3>
-                        <p className="text-sm text-neutral-500 mt-1">
+                        <h3 className="text-lg font-semibold text-[#1A1A1A]">Placement Prompts</h3>
+                        <p className="text-sm text-[#737373] mt-1">
                             Natural language prompts that help the AI place your product realistically in room photos.
                         </p>
                     </div>
@@ -1089,16 +1080,16 @@ export function PlacementTab({ product, asset, onChange }) {
                     {/* Left: See It Prompt */}
                     <div className="space-y-2">
                         <div>
-                            <label className="block text-sm font-semibold text-neutral-700">
+                            <label className="block text-sm font-semibold text-[#1A1A1A]">
                                 See It prompt
                             </label>
-                            <p className="text-xs text-neutral-500 mt-0.5">
+                            <p className="text-xs text-[#737373] mt-0.5">
                                 Used for full See It flow
                             </p>
                         </div>
                         <div className="relative">
                             {showEditWarning && (
-                                <div className="absolute -top-2 left-0 right-0 bg-amber-50 border border-amber-200 rounded-lg p-3 z-10 shadow-lg">
+                                <div className="absolute -top-2 left-0 right-0 bg-amber-50 border border-amber-200 rounded-xl p-3 z-10 shadow-lg">
                                     <div className="flex items-start gap-2">
                                         <svg className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
@@ -1121,16 +1112,16 @@ export function PlacementTab({ product, asset, onChange }) {
                                 </div>
                             )}
 
-                            <div className={`bg-neutral-900 rounded-xl p-4 ${showEditWarning ? 'mt-16' : ''}`}>
+                            <div className={`bg-[#171717] rounded-xl p-4 ${showEditWarning ? 'mt-16' : ''}`}>
                                 {description ? (
                                     <textarea
                                         value={description}
                                         onChange={(e) => handleDescriptionEdit(e.target.value)}
-                                        className="w-full bg-transparent text-neutral-100 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]"
+                                        className="w-full bg-transparent text-white text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]"
                                         placeholder="Click 'Generate Prompt' to create a placement prompt..."
                                     />
                                 ) : (
-                                    <div className="text-neutral-400 text-sm py-8 text-center">
+                                    <div className="text-[#A3A3A3] text-sm py-8 text-center">
                                         <p>No placement prompt yet.</p>
                                         <p className="mt-1">Review the fields above, then click <strong>Generate Prompt</strong>.</p>
                                     </div>
@@ -1139,7 +1130,7 @@ export function PlacementTab({ product, asset, onChange }) {
 
                             {description && (
                                 <div className="flex items-center justify-between mt-2 px-1">
-                                    <span className="text-xs text-neutral-400">
+                                    <span className="text-xs text-[#A3A3A3]">
                                         {description.length} characters
                                     </span>
                                     {hasEdited && (
@@ -1158,26 +1149,26 @@ export function PlacementTab({ product, asset, onChange }) {
                     {/* Right: See It Now Prompt */}
                     <div className="space-y-2">
                         <div>
-                            <label className="block text-sm font-semibold text-neutral-700">
+                            <label className="block text-sm font-semibold text-[#1A1A1A]">
                                 See It Now prompt
                             </label>
-                            <p className="text-xs text-neutral-500 mt-0.5">
+                            <p className="text-xs text-[#737373] mt-0.5">
                                 Used for instant See It Now flow. Leave blank to use the See It prompt.
                             </p>
                         </div>
-                        <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
+                        <div className="bg-[#FAFAFA] border border-[#E5E5E5] rounded-xl p-4">
                             <textarea
                                 value={seeItNowPrompt}
                                 onChange={(e) => {
                                     setSeeItNowPrompt(e.target.value);
                                     setSeeItNowDirty(true);
                                 }}
-                                className="w-full bg-transparent text-neutral-900 text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]"
+                                className="w-full bg-transparent text-[#1A1A1A] text-sm leading-relaxed resize-none focus:outline-none min-h-[120px]"
                                 placeholder="Leave blank to use the See It prompt..."
                             />
                             {seeItNowPrompt && (
                                 <div className="flex items-center justify-between mt-2 px-1">
-                                    <span className="text-xs text-neutral-400">
+                                    <span className="text-xs text-[#A3A3A3]">
                                         {seeItNowPrompt.length} characters
                                     </span>
                                 </div>
@@ -1185,10 +1176,7 @@ export function PlacementTab({ product, asset, onChange }) {
                         </div>
                     </div>
                 </div>
-            </div>
-
-            {/* Divider */}
-            <div className="border-t border-neutral-200"></div>
+            </Card>
 
 
 
@@ -1208,13 +1196,13 @@ export function PlacementTab({ product, asset, onChange }) {
             )}
 
             {/* Enable Toggle Section */}
-            <div className="mt-8 pt-6 border-t border-neutral-200">
+            <Card className="pt-6">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h3 className="text-sm font-semibold text-neutral-900">
+                        <h3 className="text-sm font-semibold text-[#1A1A1A]">
                             Enable for customers
                         </h3>
-                        <p className="text-xs text-neutral-500 mt-0.5">
+                        <p className="text-xs text-[#737373] mt-0.5">
                             Show "See It In Your Space" button on your store
                         </p>
                     </div>
@@ -1258,8 +1246,8 @@ export function PlacementTab({ product, asset, onChange }) {
                             Preparation failed. Please retry.
                         </div>
                     ) : !asset || asset?.status === 'unprepared' ? (
-                        <div className="flex items-center gap-2 text-sm text-neutral-500">
-                            <span className="w-2 h-2 rounded-full bg-neutral-300"></span>
+                        <div className="flex items-center gap-2 text-sm text-[#737373]">
+                            <span className="w-2 h-2 rounded-full bg-[#A3A3A3]"></span>
                             Prepare the product first to enable
                         </div>
                     ) : enabled ? (
@@ -1268,13 +1256,13 @@ export function PlacementTab({ product, asset, onChange }) {
                             Customers can see this product in their space
                         </div>
                     ) : (
-                        <div className="flex items-center gap-2 text-sm text-neutral-500">
-                            <span className="w-2 h-2 rounded-full bg-neutral-300"></span>
+                        <div className="flex items-center gap-2 text-sm text-[#737373]">
+                            <span className="w-2 h-2 rounded-full bg-[#A3A3A3]"></span>
                             Enable to show on your store
                         </div>
                     )}
                 </div>
-            </div>
+            </Card>
         </div>
     );
 }
