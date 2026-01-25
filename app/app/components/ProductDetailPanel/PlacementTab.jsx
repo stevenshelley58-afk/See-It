@@ -664,7 +664,11 @@ export function PlacementTab({ product, asset, onChange }) {
 
     return (
         // Give the Placement tab a subtle surface so Cards visually stand out inside the Polaris modal.
-        <div className="space-y-6 fade-in -mx-6 px-6 py-6 bg-[#FAFAFA]">
+        <div className="space-y-6 fade-in -mx-6 px-6 py-6 bg-[#FAFAFA]" data-ui-rev="placement-2026-01-25-616a921">
+            {/* Debug marker: proves the iframe is loading the latest bundle. Remove after verification. */}
+            <div className="text-[11px] text-[#737373]">
+                Placement UI rev: <span className="font-mono">placement-2026-01-25-616a921</span>
+            </div>
 
             {/* SECTION 1: Structured Fields */}
             <Card className="space-y-6">
