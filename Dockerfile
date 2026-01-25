@@ -31,6 +31,11 @@ RUN if [ -f package-lock.json ]; then \
 # Copy the remainder of the application source
 COPY app/ .
 
+# Needed for `npm run check:consistency` during build:
+# `app/scripts/check-schema-sync.ts` expects the monitor schema at
+# `/usr/src/app/see-it-monitor/prisma/schema.prisma`.
+COPY see-it-monitor/prisma/schema.prisma /usr/src/app/see-it-monitor/prisma/schema.prisma
+
 # Build Remix bundle and generate Prisma client, then drop devDependencies
 RUN npx prisma generate \
     && npm run build \
