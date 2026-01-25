@@ -1,5 +1,5 @@
 // See It Now - Hero Shot Generation Endpoint
-// Uses 2-LLM pipeline: extractedFacts → resolvedFacts → promptPack → renderAllVariants
+// Uses 2-LLM pipeline: extractedFacts → resolvedFacts → placementSet → renderAllVariants
 //
 // Access: Only shops in SEE_IT_NOW_ALLOWED_SHOPS can use this feature
 
@@ -21,18 +21,17 @@ import {
   validateMagicBytes,
 } from "../services/gemini-files.server";
 
-// NEW: Import from 2-LLM pipeline
+// Import from 2-LLM pipeline
 import {
   renderAllVariants,
   type RenderInput,
   type ProductPlacementFacts,
-  type PromptPack,
+  type PlacementSet,
   type ImageMeta,
   type ExtractionInput,
   extractProductFacts,
   resolveProductFacts,
-  buildPromptPack,
-  ensurePromptVersion,
+  buildPlacementSet,
 } from "../services/see-it-now/index";
 
 // ============================================================================
@@ -430,10 +429,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       geminiFileExpiresAt: true,
       extractedFacts: true,
       merchantOverrides: true,
-      // NEW: 2-LLM pipeline fields
+      // 2-LLM pipeline fields (canonical)
       resolvedFacts: true,
-      promptPack: true,
-      promptPackVersion: true,
+      placementSet: true,
     },
   });
 
@@ -455,14 +453,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   let resolvedFacts = productAsset.resolvedFacts as ProductPlacementFacts | null;
-  let promptPack = productAsset.promptPack as PromptPack | null;
-  let promptPackVersion = productAsset.promptPackVersion;
+  let placementSet = productAsset.placementSet as PlacementSet | null;
 
   // Validate pipeline data exists (attempt backfill for legacy assets)
-  if (!resolvedFacts || !promptPack) {
+  if (!resolvedFacts || !placementSet) {
     logger.warn(
       { ...shopLogContext, stage: "pipeline-check" },
-      `[See It Now] Product ${product_id} missing pipeline data (resolvedFacts: ${!!resolvedFacts}, promptPack: ${!!promptPack})`
+      `[See It Now] Product ${product_id} missing pipeline data (resolvedFacts: ${!!resolvedFacts}, placementSet: ${!!placementSet})`
     );
 
     try {
@@ -523,16 +520,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const extractedFacts = await extractProductFacts(extractionInput, requestId);
         const merchantOverrides = (productAsset.merchantOverrides as Record<string, unknown> | null) || null;
         resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
-        promptPackVersion = await ensurePromptVersion();
-        promptPack = await buildPromptPack(resolvedFacts, requestId);
+        placementSet = await buildPlacementSet({
+          resolvedFacts,
+          productAssetId: productAsset.id,
+          shopId: shop.id,
+          traceId: requestId,
+        });
 
         await prisma.productAsset.update({
           where: { id: productAsset.id },
           data: {
             extractedFacts,
             resolvedFacts,
-            promptPack,
-            promptPackVersion,
+            placementSet,
             extractedAt: new Date(),
             productTitle: shopifyProduct?.title || productAsset.productTitle || undefined,
             productType: shopifyProduct?.productType || productAsset.productType || undefined,
@@ -581,7 +581,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  if (!resolvedFacts || !promptPack) {
+  if (!resolvedFacts || !placementSet) {
     return json(
       {
         success: false,
@@ -750,22 +750,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shopId: shop.id,
       productAssetId: productAsset.id,
       roomSessionId: room_session_id,
-      requestId,
+      traceId: requestId,
       productImage: {
         buffer: productImageData.buffer,
         hash: hashBuffer(productImageData.buffer),
         meta: productImageData.meta,
-        geminiUri: productGeminiFile.uri,
+        ref: productGeminiFile.uri,
       },
       roomImage: {
         buffer: roomImageData.buffer,
         hash: hashBuffer(roomImageData.buffer),
         meta: roomImageData.meta,
-        geminiUri: roomGeminiFile.uri,
+        ref: roomGeminiFile.uri,
       },
       resolvedFacts,
-      promptPack,
-      promptPackVersion,
+      placementSet,
     };
 
     // Call the new renderer

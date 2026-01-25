@@ -64,22 +64,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const result = await getRuns(shop.id, filters, { page, limit: 20 });
 
-  // Get distinct prompt versions for filter
-  const versions = await prisma.renderRun.findMany({
+  // Get distinct pipeline config hashes for filter
+  const configHashes = await prisma.renderRun.findMany({
     where: { shopId: shop.id },
-    select: { promptPackVersion: true },
-    distinct: ["promptPackVersion"],
-    orderBy: { promptPackVersion: "desc" },
+    select: { pipelineConfigHash: true },
+    distinct: ["pipelineConfigHash"],
+    orderBy: { createdAt: "desc" },
   });
 
   return json({
     ...result,
-    versions: versions.map((v: { promptPackVersion: number }) => v.promptPackVersion),
+    configHashes: configHashes.map((v: { pipelineConfigHash: string }) => v.pipelineConfigHash),
   });
 };
 
 export default function MonitorRunsPage() {
-  const { runs, total, page, pages, versions } =
+  const { runs, total, page, pages, configHashes } =
     useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -100,9 +100,9 @@ export default function MonitorRunsPage() {
   const [statusFilter, setStatusFilter] = useState<string[]>(
     searchParams.get("status") ? [searchParams.get("status")!] : []
   );
-  const [versionFilter, setVersionFilter] = useState<string[]>(
-    searchParams.get("promptVersion")
-      ? [searchParams.get("promptVersion")!]
+  const [configHashFilter, setConfigHashFilter] = useState<string[]>(
+    searchParams.get("configHash")
+      ? [searchParams.get("configHash")!]
       : []
   );
   const [requestIdFilter, setRequestIdFilter] = useState(
@@ -124,14 +124,14 @@ export default function MonitorRunsPage() {
     [searchParams, setSearchParams]
   );
 
-  const handleVersionChange = useCallback(
+  const handleConfigHashChange = useCallback(
     (value: string[]) => {
-      setVersionFilter(value);
+      setConfigHashFilter(value);
       const params = new URLSearchParams(searchParams);
       if (value.length > 0) {
-        params.set("promptVersion", value[0]);
+        params.set("configHash", value[0]);
       } else {
-        params.delete("promptVersion");
+        params.delete("configHash");
       }
       params.set("page", "1");
       setSearchParams(params);
@@ -156,7 +156,7 @@ export default function MonitorRunsPage() {
 
   const handleClearAll = useCallback(() => {
     setStatusFilter([]);
-    setVersionFilter([]);
+    setConfigHashFilter([]);
     setRequestIdFilter("");
     setSearchParams({ page: "1" });
   }, [setSearchParams]);
@@ -191,18 +191,18 @@ export default function MonitorRunsPage() {
       shortcut: true,
     },
     {
-      key: "version",
-      label: "Prompt Version",
+      key: "configHash",
+      label: "Pipeline Config",
       filter: (
         <ChoiceList
-          title="Version"
+          title="Config"
           titleHidden
-          choices={versions.map((v: number) => ({
-            label: `v${v}`,
-            value: v.toString(),
+          choices={configHashes.map((hash: string) => ({
+            label: hash.slice(0, 8),
+            value: hash,
           }))}
-          selected={versionFilter}
-          onChange={handleVersionChange}
+          selected={configHashFilter}
+          onChange={handleConfigHashChange}
         />
       ),
       shortcut: true,
@@ -219,12 +219,12 @@ export default function MonitorRunsPage() {
           },
         ]
       : []),
-    ...(versionFilter.length > 0
+    ...(configHashFilter.length > 0
       ? [
           {
-            key: "version",
-            label: `Version: v${versionFilter[0]}`,
-            onRemove: () => handleVersionChange([]),
+            key: "configHash",
+            label: `Config: ${configHashFilter[0].slice(0, 8)}`,
+            onRemove: () => handleConfigHashChange([]),
           },
         ]
       : []),
@@ -260,7 +260,7 @@ export default function MonitorRunsPage() {
     getStatusBadge(run.status),
     `${run.successCount}/${run.variantCount}`,
     run.totalDurationMs ? `${(run.totalDurationMs / 1000).toFixed(1)}s` : "-",
-    `v${run.promptPackVersion}`,
+    run.pipelineConfigHash?.slice(0, 8) || "-",
     <Button
       key={run.id}
       size="slim"
@@ -333,7 +333,7 @@ export default function MonitorRunsPage() {
                 "Status",
                 "Variants",
                 "Duration",
-                "Version",
+                "Config",
                 "",
               ]}
               rows={rows}

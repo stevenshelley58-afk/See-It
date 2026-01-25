@@ -5,8 +5,7 @@ import { logger, createLogContext } from "../utils/logger.server";
 import { emitPrepEvent } from "../services/prep-events.server";
 import { setSeeItLiveTag } from "../utils/shopify-tags.server";
 import {
-    buildPromptPack,
-    ensurePromptVersion,
+    buildPlacementSet,
     resolveProductFacts,
 } from "../services/see-it-now/index";
 
@@ -334,28 +333,31 @@ export const action = async ({ request }) => {
                             pipelineStatus: "missing_extracted_facts",
                         });
                     }
-                    const promptPackVersion = await ensurePromptVersion();
                     const resolvedFacts = resolveProductFacts(
                         asset.extractedFacts,
                         asset.merchantOverrides || null
                     );
-                    const promptPack = await buildPromptPack(resolvedFacts, requestId);
+                    const placementSet = await buildPlacementSet({
+                        resolvedFacts,
+                        productAssetId: asset.id,
+                        shopId: asset.shopId,
+                        traceId: requestId,
+                    });
                     await prisma.productAsset.update({
                         where: { id: asset.id },
                         data: {
                             resolvedFacts,
-                            promptPack,
-                            promptPackVersion,
+                            placementSet,
                         },
                     });
                     return json({
                         success: true,
-                        message: "Saved and regenerated See It Now prompt pack",
+                        message: "Saved and regenerated See It Now placement set",
                         assetId: asset.id,
                         status: asset.status,
                         enabled: asset.enabled || false,
                         pipelineUpdated: true,
-                        promptPackVersion,
+                        variantCount: placementSet.variants.length,
                     });
                 } catch (e) {
                     const msg = e instanceof Error ? e.message : "Unknown error";
@@ -448,30 +450,33 @@ export const action = async ({ request }) => {
                     });
                 }
 
-                const promptPackVersion = await ensurePromptVersion();
                 const resolvedFacts = resolveProductFacts(
                     updatedAsset.extractedFacts,
                     updatedAsset.merchantOverrides || null
                 );
-                const promptPack = await buildPromptPack(resolvedFacts, requestId);
+                const placementSet = await buildPlacementSet({
+                    resolvedFacts,
+                    productAssetId: asset.id,
+                    shopId: asset.shopId,
+                    traceId: requestId,
+                });
 
                 await prisma.productAsset.update({
                     where: { id: asset.id },
                     data: {
                         resolvedFacts,
-                        promptPack,
-                        promptPackVersion,
+                        placementSet,
                     },
                 });
 
                 return json({
                     success: true,
-                    message: "Saved and regenerated See It Now prompt pack",
+                    message: "Saved and regenerated See It Now placement set",
                     assetId: asset.id,
                     status: updatedAsset.status,
                     enabled: updatedAsset.enabled,
                     pipelineUpdated: true,
-                    promptPackVersion,
+                    variantCount: placementSet.variants.length,
                 });
             } catch (e) {
                 const msg = e instanceof Error ? e.message : "Unknown error";

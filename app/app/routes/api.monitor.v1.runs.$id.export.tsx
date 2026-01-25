@@ -56,11 +56,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   archive.append(JSON.stringify(events.events, null, 2), {
     name: "events.json",
   });
-  archive.append(JSON.stringify(run.resolvedFactsJson, null, 2), {
+  archive.append(JSON.stringify(run.resolvedFactsSnapshot, null, 2), {
     name: "resolved_facts.json",
   });
-  archive.append(JSON.stringify(run.promptPackJson, null, 2), {
-    name: "prompt_pack.json",
+  archive.append(JSON.stringify(run.placementSetSnapshot, null, 2), {
+    name: "placement_set.json",
   });
   archive.append(JSON.stringify(artifacts.artifacts, null, 2), {
     name: "artifacts.json",
@@ -69,14 +69,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Add manifest
   const manifest = {
     runId: run.id,
-    requestId: run.requestId,
+    traceId: run.traceId,
     exportedAt: new Date().toISOString(),
     files: [
       "run.json",
       "variants.json",
       "events.json",
       "resolved_facts.json",
-      "prompt_pack.json",
+      "placement_set.json",
       "artifacts.json",
     ],
   };

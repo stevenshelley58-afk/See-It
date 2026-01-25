@@ -24,13 +24,12 @@ import {
   renderAllVariants,
   type RenderInput,
   type ProductPlacementFacts,
-  type PromptPack,
+  type PlacementSet,
   type ImageMeta,
   type ExtractionInput,
   extractProductFacts,
   resolveProductFacts,
-  buildPromptPack,
-  ensurePromptVersion,
+  buildPlacementSet,
 } from "../services/see-it-now/index";
 
 // ============================================================================
@@ -442,8 +441,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               extractedFacts: true,
               merchantOverrides: true,
               resolvedFacts: true,
-              promptPack: true,
-              promptPackVersion: true,
+              placementSet: true,
             },
           });
 
@@ -462,11 +460,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
 
           let resolvedFacts = productAsset.resolvedFacts as ProductPlacementFacts | null;
-          let promptPack = productAsset.promptPack as PromptPack | null;
-          let promptPackVersion = productAsset.promptPackVersion;
+          let placementSet = productAsset.placementSet as PlacementSet | null;
 
           // Validate pipeline data exists (attempt backfill for legacy assets)
-          if (!resolvedFacts || !promptPack) {
+          if (!resolvedFacts || !placementSet) {
             try {
               const shopifyProduct = shop.accessToken
                 ? await fetchShopifyProductForPrompt(
@@ -527,16 +524,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                   (productAsset.merchantOverrides as Record<string, unknown> | null) ||
                   null;
                 resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
-                promptPackVersion = await ensurePromptVersion();
-                promptPack = await buildPromptPack(resolvedFacts, requestId);
+                placementSet = await buildPlacementSet({
+                  resolvedFacts,
+                  productAssetId: productAsset.id,
+                  shopId: shop.id,
+                  traceId: requestId,
+                });
 
                 await prisma.productAsset.update({
                   where: { id: productAsset.id },
                   data: {
                     extractedFacts,
                     resolvedFacts,
-                    promptPack,
-                    promptPackVersion,
+                    placementSet,
                     extractedAt: new Date(),
                     productTitle: shopifyProduct?.title || productAsset.productTitle || undefined,
                     productType: shopifyProduct?.productType || productAsset.productType || undefined,
@@ -583,7 +583,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             }
           }
 
-          if (!resolvedFacts || !promptPack) {
+          if (!resolvedFacts || !placementSet) {
             send(
               "error",
               toStandardErrorPayload(
@@ -752,22 +752,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             shopId: shop.id,
             productAssetId: productAsset.id,
             roomSessionId: room_session_id,
-            requestId,
+            traceId: requestId,
             productImage: {
               buffer: productImageData.buffer,
               hash: hashBuffer(productImageData.buffer),
               meta: productImageData.meta,
-              geminiUri: productGeminiFile.uri,
+              ref: productGeminiFile.uri,
             },
             roomImage: {
               buffer: roomImageData.buffer,
               hash: hashBuffer(roomImageData.buffer),
               meta: roomImageData.meta,
-              geminiUri: roomGeminiFile.uri,
+              ref: roomGeminiFile.uri,
             },
             resolvedFacts,
-            promptPack,
-            promptPackVersion,
+            placementSet,
           };
 
           let firstImageSent = false;

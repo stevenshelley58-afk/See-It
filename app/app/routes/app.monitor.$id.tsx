@@ -86,7 +86,7 @@ export default function MonitorRunDetailPage() {
   // Collapsible state
   const [eventsOpen, setEventsOpen] = useState(false);
   const [factsOpen, setFactsOpen] = useState(false);
-  const [promptPackOpen, setPromptPackOpen] = useState(false);
+  const [placementSetOpen, setPlacementSetOpen] = useState(false);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
 
   // Variant modal state
@@ -157,13 +157,8 @@ export default function MonitorRunDetailPage() {
                 </BlockStack>
 
                 <BlockStack gap="100">
-                  <Text as="span" tone="subdued" variant="bodySm">Version</Text>
-                  <Text as="span" variant="bodyMd">v{run.promptPackVersion}</Text>
-                </BlockStack>
-
-                <BlockStack gap="100">
-                  <Text as="span" tone="subdued" variant="bodySm">Model</Text>
-                  <Text as="span" variant="bodyMd">{run.model}</Text>
+                  <Text as="span" tone="subdued" variant="bodySm">Config</Text>
+                  <Text as="span" variant="bodyMd">{run.pipelineConfigHash?.slice(0, 8) || "-"}</Text>
                 </BlockStack>
               </InlineStack>
 
@@ -171,37 +166,17 @@ export default function MonitorRunDetailPage() {
 
               <InlineStack gap="400" wrap>
                 <InlineStack gap="200" align="center">
-                  <Text as="span" tone="subdued" variant="bodySm">Request ID:</Text>
-                  <Text as="span" variant="bodyMd">{run.requestId.slice(0, 12)}...</Text>
+                  <Text as="span" tone="subdued" variant="bodySm">Trace ID:</Text>
+                  <Text as="span" variant="bodyMd">{run.traceId.slice(0, 12)}...</Text>
                   <Button
                     icon={ClipboardIcon}
                     size="slim"
                     variant="plain"
-                    onClick={() => copyToClipboard(run.requestId)}
-                    accessibilityLabel="Copy request ID"
+                    onClick={() => copyToClipboard(run.traceId)}
+                    accessibilityLabel="Copy trace ID"
                   />
                 </InlineStack>
-
-                {run.traceId && (
-                  <InlineStack gap="200" align="center">
-                    <Text as="span" tone="subdued" variant="bodySm">Trace ID:</Text>
-                    <Text as="span" variant="bodyMd">{run.traceId.slice(0, 12)}...</Text>
-                    <Button
-                      icon={ClipboardIcon}
-                      size="slim"
-                      variant="plain"
-                      onClick={() => copyToClipboard(run.traceId!)}
-                      accessibilityLabel="Copy trace ID"
-                    />
-                  </InlineStack>
-                )}
               </InlineStack>
-
-              {run.telemetryDropped && (
-                <Banner tone="warning">
-                  Some telemetry was dropped for this run due to write failures.
-                </Banner>
-              )}
             </BlockStack>
           </Card>
         </Layout.Section>
@@ -354,13 +329,13 @@ export default function MonitorRunDetailPage() {
                       icon={ClipboardIcon}
                       size="slim"
                       variant="plain"
-                      onClick={() => copyToClipboard(JSON.stringify(run.resolvedFactsJson, null, 2))}
+                      onClick={() => copyToClipboard(JSON.stringify(run.resolvedFactsSnapshot, null, 2))}
                     >
                       Copy
                     </Button>
                   </InlineStack>
                   <pre style={{ overflow: "auto", maxHeight: "300px", fontSize: "12px" }}>
-                    {JSON.stringify(run.resolvedFactsJson, null, 2)}
+                    {JSON.stringify(run.resolvedFactsSnapshot, null, 2)}
                   </pre>
                 </Box>
               </Collapsible>
@@ -372,29 +347,29 @@ export default function MonitorRunDetailPage() {
           <Card>
             <BlockStack gap="300">
               <Button
-                onClick={() => setPromptPackOpen(!promptPackOpen)}
+                onClick={() => setPlacementSetOpen(!placementSetOpen)}
                 variant="plain"
                 fullWidth
                 textAlign="left"
-                icon={promptPackOpen ? ChevronUpIcon : ChevronDownIcon}
+                icon={placementSetOpen ? ChevronUpIcon : ChevronDownIcon}
               >
-                Prompt Pack
+                Placement Set
               </Button>
 
-              <Collapsible open={promptPackOpen} id="prompt-pack-collapsible">
+              <Collapsible open={placementSetOpen} id="placement-set-collapsible">
                 <Box padding="300" background="bg-surface-secondary" borderRadius="200">
                   <InlineStack align="end">
                     <Button
                       icon={ClipboardIcon}
                       size="slim"
                       variant="plain"
-                      onClick={() => copyToClipboard(JSON.stringify(run.promptPackJson, null, 2))}
+                      onClick={() => copyToClipboard(JSON.stringify(run.placementSetSnapshot, null, 2))}
                     >
                       Copy
                     </Button>
                   </InlineStack>
                   <pre style={{ overflow: "auto", maxHeight: "300px", fontSize: "12px" }}>
-                    {JSON.stringify(run.promptPackJson, null, 2)}
+                    {JSON.stringify(run.placementSetSnapshot, null, 2)}
                   </pre>
                 </Box>
               </Collapsible>

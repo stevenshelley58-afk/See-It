@@ -13,8 +13,7 @@ import { getSeeItNowAllowedShops, isSeeItNowAllowedShop } from "~/utils/see-it-n
 import {
     extractProductFacts,
     resolveProductFacts,
-    buildPromptPack,
-    ensurePromptVersion,
+    buildPlacementSet,
 } from "./see-it-now/index";
 
 let processorInterval: NodeJS.Timeout | null = null;
@@ -487,19 +486,8 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
 
                 if (success && prepareResult) {
                     // ========================================================================
-                    // NEW: See It Now 2-LLM Pipeline
+                    // See It Now 2-LLM Pipeline
                     // ========================================================================
-
-                    // Get current prompt version
-                    let promptPackVersion = 0;
-                    try {
-                        promptPackVersion = await ensurePromptVersion();
-                    } catch (versionError) {
-                        logger.warn(
-                            createLogContext("prepare", itemRequestId, "prompt-version-failed", {}),
-                            `Failed to ensure prompt version: ${versionError instanceof Error ? versionError.message : String(versionError)}`
-                        );
-                    }
 
                     // Fetch shop + product context for extraction
                     const shopRecord = await prisma.shop.findUnique({
@@ -583,258 +571,27 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
                         resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
                     }
 
-                    // Step 3: Build prompt pack (LLM #2)
-                    let promptPack = null;
+                    // Step 3: Build placement set (LLM #2)
+                    let placementSet = null;
                     if (resolvedFacts) {
                         try {
-                            promptPack = await buildPromptPack(resolvedFacts, itemRequestId);
+                            placementSet = await buildPlacementSet({
+                                resolvedFacts,
+                                productAssetId: asset.id,
+                                shopId: asset.shopId,
+                                traceId: itemRequestId,
+                            });
 
                             logger.info(
-                                createLogContext("prepare", itemRequestId, "prompt-pack-complete", {
-                                    variantCount: promptPack.variants.length,
+                                createLogContext("prepare", itemRequestId, "placement-set-complete", {
+                                    variantCount: placementSet.variants.length,
                                 }),
-                                `Prompt pack built for ${asset.productId}`
+                                `Placement set built for ${asset.productId}`
                             );
                         } catch (buildError) {
                             logger.warn(
-                                createLogContext("prepare", itemRequestId, "prompt-pack-failed", {}),
-                                `Prompt pack build failed for ${asset.productId}: ${buildError instanceof Error ? buildError.message : String(buildError)}`
-                            );
-                        }
-                    }
-
-                    // ========================================================================
-                    // LEGACY: Generate placement fields and prose prompt (only if not merchant-owned)
-                    // Check fieldSource to avoid overwriting merchant edits
-                    const existingFieldSource = asset.fieldSource && typeof asset.fieldSource === 'object'
-                        ? asset.fieldSource as Record<string, string>
-                        : {};
-
-                    const isMerchantOwned = (field: string) => existingFieldSource[field] === 'merchant';
-
-                    // Only generate if renderInstructions is missing or if it's not merchant-owned
-                    let renderInstructions = asset.renderInstructions;
-                    let placementFields = asset.placementFields && typeof asset.placementFields === 'object'
-                        ? asset.placementFields as Record<string, any>
-                        : null;
-                    let sceneRole = asset.sceneRole;
-                    let replacementRule = asset.replacementRule;
-                    let allowSpaceCreation = asset.allowSpaceCreation;
-
-                    // Note: shopRecord, shopifyProduct, metafieldText, combinedDescription
-                    // are already fetched above in the new 2-LLM pipeline section
-
-                    // NEW: Auto-generate placement config using image analysis if not already set
-                    if (!renderInstructions && !isMerchantOwned('renderInstructions')) {
-                        if (!ENABLE_LEGACY_PLACEMENT_CONFIG) {
-                            logger.info(
-                                createLogContext("prepare", itemRequestId, "placement-config-disabled", {
-                                    assetId: asset.id,
-                                }),
-                                "Legacy placement config generation disabled (set SEE_IT_ENABLE_LEGACY_PLACEMENT_CONFIG=true to enable)"
-                            );
-                        } else {
-                            try {
-                                const placementConfig = await generatePlacementConfig(
-                                    asset.sourceImageUrl,
-                                    asset.productTitle || '',
-                                    {
-                                        description: combinedDescription || undefined,
-                                        productType: shopifyProduct?.productType || asset.productType || undefined,
-                                        vendor: shopifyProduct?.vendor || undefined,
-                                        tags: (shopifyProduct?.tags || []) as any,
-                                    },
-                                    itemRequestId
-                                );
-
-                                if (placementConfig) {
-                                    renderInstructions = placementConfig.renderInstructions;
-                                    sceneRole = placementConfig.sceneRole || sceneRole;
-                                    replacementRule = placementConfig.replacementRule || replacementRule;
-                                    allowSpaceCreation = placementConfig.allowSpaceCreation ?? allowSpaceCreation;
-
-                                    // Emit event for monitor
-                                    await emitPrepEvent({
-                                        assetId: asset.id,
-                                        productId: asset.productId,
-                                        shopId: asset.shopId,
-                                        eventType: "placement_config_generated",
-                                        actorType: "system",
-                                        payload: {
-                                            sceneRole: sceneRole,
-                                            replacementRule: replacementRule,
-                                            hasInstructions: !!renderInstructions,
-                                        }
-                                    }, null, itemRequestId).catch(() => { });
-                                }
-                            } catch (promptError) {
-                                logger.warn(
-                                    createLogContext("prepare", itemRequestId, "placement-config", {
-                                        error: promptError instanceof Error ? promptError.message : String(promptError)
-                                    }),
-                                    "Placement config generation failed, continuing without"
-                                );
-                            }
-                        }
-                    }
-
-                    // Generate placement if missing and not merchant-owned
-                    // Check each field individually so we can generate missing parts even if some exist
-                    const shouldGeneratePrompt = !renderInstructions && !isMerchantOwned('renderInstructions');
-
-                    // For placementFields, check if it exists and if any field is merchant-owned
-                    const placementFieldsSource = placementFields?.fieldSource && typeof placementFields.fieldSource === 'object'
-                        ? placementFields.fieldSource as Record<string, string>
-                        : {};
-                    const hasMerchantOwnedPlacementField = Object.values(placementFieldsSource).some(src => src === 'merchant');
-                    const shouldGenerateFields = (!placementFields || Object.keys(placementFields).filter(k => k !== 'fieldSource').length === 0) && !hasMerchantOwnedPlacementField;
-
-                    const shouldGeneratePlacementRules = (!sceneRole || !replacementRule || allowSpaceCreation === null) &&
-                        (!isMerchantOwned('sceneRole') && !isMerchantOwned('replacementRule') && !isMerchantOwned('allowSpaceCreation'));
-
-                    const shouldGeneratePlacement = (shouldGeneratePrompt || shouldGenerateFields || shouldGeneratePlacementRules);
-
-                    if (shouldGeneratePlacement && asset.productTitle) {
-                        try {
-                            // Extract structured fields from product title (best effort without full product data)
-                            // Enhanced: include PDP descriptionHtml + metafields when available.
-                            const productData = {
-                                title: (shopifyProduct?.title || asset.productTitle || '').toString(),
-                                description: combinedDescription || '',
-                                productType: shopifyProduct?.productType || asset.productType || null,
-                                tags: shopifyProduct?.tags || [],
-                            };
-
-                            const extractedFields = extractStructuredFields(productData);
-
-                            // Auto-detect placement rules (same logic as PlacementTab)
-                            const largeItemKeywords = ['sofa', 'couch', 'sectional', 'mirror', 'cabinet', 'dresser', 'bookshelf', 'bed', 'table', 'desk', 'console', 'credenza', 'sideboard'];
-                            const titleLower = (asset.productTitle || '').toLowerCase();
-                            const isLargeItem = largeItemKeywords.some(k => titleLower.includes(k));
-
-                            const autoSceneRole = isLargeItem ? 'Dominant' : 'Integrated';
-                            const autoReplacementRule = isLargeItem ? 'Similar Size or Position' : 'None';
-                            const autoAllowSpaceCreation = isLargeItem;
-
-                            // Generate prose placement prompt (only if missing and not merchant-owned)
-                            if (shouldGeneratePrompt) {
-                                try {
-                                    const promptResult = await generateProductDescription(
-                                        productData,
-                                        extractedFields,
-                                        itemRequestId
-                                    );
-                                    renderInstructions = promptResult.description;
-
-                                    logger.info(
-                                        createLogContext("prepare", itemRequestId, "placement-prompt-generated", {
-                                            assetId: asset.id,
-                                            productId: asset.productId,
-                                            length: renderInstructions.length
-                                        }),
-                                        `Generated placement prompt: ${renderInstructions.substring(0, 100)}...`
-                                    );
-
-                                    // Emit placement_prompt_generated event with raw text-model prompt for lineage
-                                    if (promptResult.rawPrompt) {
-                                        emitPrepEvent(
-                                            {
-                                                assetId: asset.id,
-                                                productId: asset.productId,
-                                                shopId: asset.shopId,
-                                                eventType: "placement_prompt_generated",
-                                                actorType: "system",
-                                                payload: {
-                                                    source: "auto",
-                                                    model: promptResult.model,
-                                                    confidence: promptResult.confidence,
-                                                    description: promptResult.description,
-                                                    rawPrompt: promptResult.rawPrompt, // Full prompt sent to text model
-                                                    descriptionLength: promptResult.description.length,
-                                                },
-                                            },
-                                            null,
-                                            itemRequestId
-                                        ).catch(() => {
-                                            // Non-critical
-                                        });
-                                    }
-                                } catch (promptError) {
-                                    logger.warn(
-                                        createLogContext("prepare", itemRequestId, "placement-prompt-failed", {
-                                            error: promptError instanceof Error ? promptError.message : String(promptError)
-                                        }),
-                                        "Placement prompt generation failed, continuing without",
-                                        promptError
-                                    );
-                                    // Fallback: use a basic description
-                                    const article = /^[aeiou]/i.test(asset.productTitle) ? 'An' : 'A';
-                                    renderInstructions = `${article} ${asset.productTitle.toLowerCase()}, described for realistic interior photography with accurate proportions and natural lighting.`;
-                                }
-                            }
-
-                            // Set placementFields if not already set and not merchant-owned
-                            if (shouldGenerateFields) {
-                                placementFields = {
-                                    surface: extractedFields.surface,
-                                    material: extractedFields.material,
-                                    orientation: extractedFields.orientation,
-                                    shadow: extractedFields.shadow || (extractedFields.surface === 'ceiling' ? 'none' : 'contact'),
-                                    dimensions: extractedFields.dimensions || { height: null, width: null },
-                                    additionalNotes: '',
-                                    fieldSource: {
-                                        surface: 'auto',
-                                        material: 'auto',
-                                        orientation: 'auto',
-                                        shadow: 'auto',
-                                        dimensions: 'auto',
-                                        additionalNotes: 'auto',
-                                    }
-                                };
-                            }
-
-                            // Set placement rules if not already set and not merchant-owned
-                            if (shouldGeneratePlacementRules) {
-                                if (!sceneRole && !isMerchantOwned('sceneRole')) {
-                                    sceneRole = autoSceneRole;
-                                }
-                                if (!replacementRule && !isMerchantOwned('replacementRule')) {
-                                    replacementRule = autoReplacementRule;
-                                }
-                                if (allowSpaceCreation === null && !isMerchantOwned('allowSpaceCreation')) {
-                                    allowSpaceCreation = autoAllowSpaceCreation;
-                                }
-                            }
-
-                            // Emit auto_placement_generated event
-                            await emitPrepEvent(
-                                {
-                                    assetId: asset.id,
-                                    productId: asset.productId,
-                                    shopId: asset.shopId,
-                                    eventType: "auto_placement_generated",
-                                    actorType: "system",
-                                    payload: {
-                                        source: "auto",
-                                        hasPrompt: !!renderInstructions,
-                                        hasPlacementFields: !!placementFields,
-                                        sceneRole: sceneRole,
-                                        replacementRule: replacementRule,
-                                    },
-                                },
-                                null,
-                                itemRequestId
-                            ).catch(() => {
-                                // Non-critical
-                            });
-
-                        } catch (placementError) {
-                            logger.warn(
-                                createLogContext("prepare", itemRequestId, "placement-generation", {
-                                    error: placementError instanceof Error ? placementError.message : String(placementError)
-                                }),
-                                "Placement generation failed, continuing without",
-                                placementError
+                                createLogContext("prepare", itemRequestId, "placement-set-failed", {}),
+                                `Placement set build failed for ${asset.productId}: ${buildError instanceof Error ? buildError.message : String(buildError)}`
                             );
                         }
                     }
@@ -842,7 +599,7 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
                     // Extract GCS key from the signed URL for on-demand URL generation
                     const preparedImageKey = extractGcsKeyFromUrl(prepareResult.url);
 
-                    // Prepare update data (only include fields that changed or are being set)
+                    // Prepare update data with canonical fields only
                     const updateData: any = {
                         status: "ready",
                         enabled: false, // Merchant must enable after reviewing
@@ -854,55 +611,12 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
                         errorMessage: null,
                         updatedAt: new Date(),
 
-                        // NEW: See It Now 2-LLM Pipeline fields
+                        // See It Now 2-LLM Pipeline fields (canonical)
                         ...(extractedFacts && { extractedFacts }),
                         ...(resolvedFacts && { resolvedFacts }),
-                        ...(promptPack && { promptPack }),
-                        ...(promptPackVersion > 0 && { promptPackVersion }),
+                        ...(placementSet && { placementSet }),
                         ...(extractedFacts && { extractedAt: new Date() }),
                     };
-
-                    // Only update renderInstructions if we generated one or if it was already set
-                    if (renderInstructions) {
-                        updateData.renderInstructions = renderInstructions;
-                    }
-
-                    // Only update placementFields if we generated one
-                    if (placementFields) {
-                        updateData.placementFields = placementFields;
-                    }
-
-                    // Only update placement rules if we have values
-                    if (sceneRole) {
-                        updateData.sceneRole = sceneRole;
-                    }
-                    if (replacementRule) {
-                        updateData.replacementRule = replacementRule;
-                    }
-                    if (allowSpaceCreation !== null && allowSpaceCreation !== undefined) {
-                        updateData.allowSpaceCreation = allowSpaceCreation;
-                    }
-
-                    // Update fieldSource to mark auto-generated fields
-                    const updatedFieldSource = { ...existingFieldSource };
-                    if (renderInstructions && !isMerchantOwned('renderInstructions')) {
-                        updatedFieldSource.renderInstructions = 'auto';
-                    }
-                    if (placementFields && !isMerchantOwned('placementFields')) {
-                        updatedFieldSource.placementFields = 'auto';
-                    }
-                    if (sceneRole && !isMerchantOwned('sceneRole')) {
-                        updatedFieldSource.sceneRole = 'auto';
-                    }
-                    if (replacementRule && !isMerchantOwned('replacementRule')) {
-                        updatedFieldSource.replacementRule = 'auto';
-                    }
-                    if (allowSpaceCreation !== null && !isMerchantOwned('allowSpaceCreation')) {
-                        updatedFieldSource.allowSpaceCreation = 'auto';
-                    }
-                    if (Object.keys(updatedFieldSource).length > 0) {
-                        updateData.fieldSource = updatedFieldSource;
-                    }
 
                     await prisma.productAsset.update({
                         where: { id: asset.id },
@@ -1428,12 +1142,12 @@ const SEE_IT_NOW_PIPELINE_BACKFILL_INTERVAL_MS = 20_000;
 let lastSeeItNowPipelineBackfillAt = 0;
 
 /**
- * Best-effort backfill for See It Now v2 pipeline fields on live assets.
+ * Best-effort backfill for See It Now pipeline fields on live assets.
  *
- * Why: older live assets can exist without extractedFacts/resolvedFacts/promptPack
- * (e.g., prepared before v2 shipped). Those assets cause /app-proxy/see-it-now/render
- * to return 422 "pipeline_not_ready". This keeps the storefront working without
- * forcing merchants to re-prepare products.
+ * Why: older live assets can exist without extractedFacts/resolvedFacts/placementSet
+ * (e.g., prepared before canonical pipeline shipped). Those assets cause
+ * /app-proxy/see-it-now/render to return 422 "pipeline_not_ready". This keeps the
+ * storefront working without forcing merchants to re-prepare products.
  */
 async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<boolean> {
     const now = Date.now();
@@ -1464,7 +1178,7 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
                 OR: [
                     { extractedFacts: { equals: Prisma.AnyNull } },
                     { resolvedFacts: { equals: Prisma.AnyNull } },
-                    { promptPack: { equals: Prisma.AnyNull } },
+                    { placementSet: { equals: Prisma.AnyNull } },
                 ],
             },
             orderBy: { updatedAt: "asc" },
@@ -1479,8 +1193,7 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
                 extractedFacts: true,
                 merchantOverrides: true,
                 resolvedFacts: true,
-                promptPack: true,
-                promptPackVersion: true,
+                placementSet: true,
                 shop: {
                     select: {
                         shopDomain: true,
@@ -1570,16 +1283,19 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
         const extractedFacts = (asset.extractedFacts as any) || await extractProductFacts(extractionInput, itemRequestId);
         const merchantOverrides = (asset.merchantOverrides as any) || null;
         const resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
-        const promptPackVersion = await ensurePromptVersion();
-        const promptPack = await buildPromptPack(resolvedFacts, itemRequestId);
+        const placementSet = await buildPlacementSet({
+            resolvedFacts,
+            productAssetId: asset.id,
+            shopId: asset.shopId,
+            traceId: itemRequestId,
+        });
 
         await prisma.productAsset.update({
             where: { id: asset.id },
             data: {
                 extractedFacts,
                 resolvedFacts,
-                promptPack,
-                promptPackVersion,
+                placementSet,
                 ...(needsExtract && { extractedAt: new Date() }),
                 ...(shopifyProduct?.title && { productTitle: shopifyProduct.title }),
                 ...(shopifyProduct?.productType && { productType: shopifyProduct.productType }),
@@ -1591,7 +1307,7 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
                 assetId: asset.id,
                 shopDomain,
                 productId: asset.productId,
-                promptPackVersion,
+                variantCount: placementSet.variants.length,
             }),
             `Backfilled See It Now pipeline for live product ${asset.productId}`
         );
