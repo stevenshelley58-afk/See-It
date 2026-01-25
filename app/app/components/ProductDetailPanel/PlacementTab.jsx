@@ -663,7 +663,8 @@ export function PlacementTab({ product, asset, onChange }) {
     ];
 
     return (
-        <div className="space-y-6 fade-in">
+        // Give the Placement tab a subtle surface so Cards visually stand out inside the Polaris modal.
+        <div className="space-y-6 fade-in -mx-6 px-6 py-6 bg-[#FAFAFA]">
 
             {/* SECTION 1: Structured Fields */}
             <Card className="space-y-6">
