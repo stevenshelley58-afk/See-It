@@ -630,7 +630,7 @@ function VariantModal({ variant, index, onClose, llmCalls, reveal }: VariantModa
         )}
 
         {/* Gemini Request Payload */}
-        {reveal && matchingLLMCall?.inputPayload && (
+        {matchingLLMCall?.inputPayload && (
           <div>
             <button
               onClick={() => setPayloadExpanded(!payloadExpanded)}
