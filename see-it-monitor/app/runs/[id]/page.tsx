@@ -1617,42 +1617,35 @@ export default function RunPlaybackPage() {
                 </span>
                 <CopyButton value={run.id} />
               </div>
-              {run.traceId && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">Trace ID:</span>
-                  <span className="text-xs font-mono text-gray-700">
-                    {truncateId(run.traceId, 12)}
-                  </span>
-                  <CopyButton value={run.traceId} />
-                </div>
-              )}
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500">Request ID:</span>
+                <span className="text-xs text-gray-500">Trace ID:</span>
                 <span className="text-xs font-mono text-gray-700">
-                  {truncateId(run.requestId, 12)}
+                  {truncateId(run.traceId, 12)}
                 </span>
-                <CopyButton value={run.requestId} />
+                <CopyButton value={run.traceId} />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">Pipeline Config:</span>
+                <span className="text-xs font-mono text-gray-700">
+                  {truncateId(run.pipelineConfigHash, 12)}
+                </span>
+                <CopyButton value={run.pipelineConfigHash} />
               </div>
             </div>
 
-            {/* Model/Version Info */}
+            {/* Variant Stats */}
             <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-gray-100">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500">Model:</span>
-                <Badge>{run.model}</Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500">Prompt Pack:</span>
-                <Badge>v{run.promptPackVersion}</Badge>
-              </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500">Variants:</span>
                 <span className="text-sm text-gray-700">
-                  {run.successCount} / {run.variants.length} success
+                  {run.successCount} / {run.variants.length || 8} success
                 </span>
               </div>
-              {run.telemetryDropped && (
-                <Badge variant="warning">Telemetry Dropped</Badge>
+              {run.llmCalls && run.llmCalls.length > 0 && run.llmCalls[0].callSummary?.model && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">Model:</span>
+                  <Badge>{run.llmCalls[0].callSummary.model}</Badge>
+                </div>
               )}
             </div>
           </CardContent>

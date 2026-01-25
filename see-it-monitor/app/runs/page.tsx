@@ -198,22 +198,16 @@ function RunsPageContent() {
   const status = searchParams.get("status") || "";
   const window = searchParams.get("window") || "24h";
   const shopIdParam = searchParams.get("shopId") || "";
-  const ppvParam = searchParams.get("ppv") || "";
   const searchQuery = searchParams.get("q") || "";
 
   // Local state for inputs (before debouncing)
   const [shopIdInput, setShopIdInput] = useState(shopIdParam);
-  const [ppvInput, setPpvInput] = useState(ppvParam);
   const [searchInput, setSearchInput] = useState(searchQuery);
 
   // Sync local state when URL changes externally
   useEffect(() => {
     setShopIdInput(shopIdParam);
   }, [shopIdParam]);
-
-  useEffect(() => {
-    setPpvInput(ppvParam);
-  }, [ppvParam]);
 
   useEffect(() => {
     setSearchInput(searchQuery);
@@ -287,23 +281,17 @@ function RunsPageContent() {
     return Array.from(runMap.values());
   }, [data?.pages]);
 
-  // Client-side filtering (time window, PPV, and search)
+  // Client-side filtering (time window and search)
   const filteredRuns = useMemo(() => {
     const windowConfig = TIME_WINDOWS.find((w) => w.value === window);
     const windowMs = windowConfig?.ms ?? TIME_WINDOWS[2].ms; // Default 24h
     const now = Date.now();
-    const ppvNumber = ppvParam ? parseInt(ppvParam, 10) : null;
     const searchLower = debouncedSearch.toLowerCase().trim();
 
     return allRuns.filter((run) => {
       // Time window filter
       const runTime = new Date(run.createdAt).getTime();
       if (now - runTime > windowMs) return false;
-
-      // PPV filter
-      if (ppvNumber !== null && !isNaN(ppvNumber)) {
-        if (run.promptPackVersion !== ppvNumber) return false;
-      }
 
       // Search filter (matches shop domain, product title, or run ID)
       if (searchLower) {
@@ -315,23 +303,16 @@ function RunsPageContent() {
 
       return true;
     });
-  }, [allRuns, window, ppvParam, debouncedSearch]);
+  }, [allRuns, window, debouncedSearch]);
 
   // Check if any filters are active
-  const hasFilters = !!(status || shopIdParam || ppvParam || searchQuery || window !== "24h");
+  const hasFilters = !!(status || shopIdParam || searchQuery || window !== "24h");
 
   // Clear all filters
   const clearFilters = () => {
     setShopIdInput("");
-    setPpvInput("");
     setSearchInput("");
     router.replace("/runs", { scroll: false });
-  };
-
-  // Handle PPV input change
-  const handlePpvChange = (value: string) => {
-    setPpvInput(value);
-    updateUrl("ppv", value);
   };
 
   return (
@@ -392,15 +373,6 @@ function RunsPageContent() {
           value={shopIdInput}
           onChange={(e) => setShopIdInput(e.target.value)}
           className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-40"
-        />
-
-        {/* PPV Input */}
-        <input
-          type="number"
-          placeholder="PPV..."
-          value={ppvInput}
-          onChange={(e) => handlePpvChange(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-24"
         />
 
         {/* Clear Filters Button */}

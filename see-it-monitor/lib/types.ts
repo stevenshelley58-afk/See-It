@@ -60,15 +60,13 @@ export interface RunListItem {
   productTitle: string | null;
   productId: string | null;
   status: string;
-  promptPackVersion: number;
-  model: string;
+  pipelineConfigHash: string;
   totalDurationMs: number | null;
   variantCount: number;
   successCount: number;
   failCount: number;
   timeoutCount: number;
-  requestId: string;
-  traceId: string | null;
+  traceId: string;
 }
 
 // =============================================================================
@@ -79,8 +77,7 @@ export interface RunDetail {
   id: string;
   createdAt: string;
   completedAt: string | null;
-  requestId: string;
-  traceId: string | null;
+  traceId: string;
   shopId: string;
   shopDomain: string;
   productAssetId: string;
@@ -88,20 +85,41 @@ export interface RunDetail {
   productId: string | null;
   roomSessionId: string | null;
   status: string;
-  promptPackVersion: number;
-  model: string;
+  pipelineConfigHash: string;
   totalDurationMs: number | null;
   successCount: number;
   failCount: number;
   timeoutCount: number;
-  telemetryDropped: boolean;
   variants: CompositeVariant[];
-  resolvedFactsJson?: Record<string, unknown>;
-  promptPackJson?: Record<string, unknown>;
-  // Prompt Control Plane fields
-  resolvedConfigSnapshot?: ResolvedConfigSnapshot | null;
+  // LLM calls (summarized unless revealed)
+  llmCalls?: LLMCallSummary[];
+  // Only included if revealEnabled
+  resolvedFactsSnapshot?: Record<string, unknown>;
+  placementSetSnapshot?: Record<string, unknown>;
+  pipelineConfigSnapshot?: Record<string, unknown>;
+  // Waterfall timing (may be populated after run completes)
   waterfallMs?: WaterfallMs | null;
   runTotals?: RunTotals | null;
+}
+
+// Summary of LLM call from run detail (matches ExternalRunDetail.llmCalls)
+export interface LLMCallSummary {
+  id: string;
+  variantId: string | null;
+  promptKey: string;
+  status: string;
+  latencyMs: number | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+  costEstimate: string | null;
+  callSummary: {
+    model?: string;
+    imageCount?: number;
+    promptName?: string;
+    promptPreview?: string;
+  };
+  debugPayload?: Record<string, unknown>;
+  outputSummary?: Record<string, unknown>;
 }
 
 // =============================================================================
