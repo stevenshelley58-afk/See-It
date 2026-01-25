@@ -11,7 +11,7 @@ export const EventSource = {
   ADMIN_APP: "admin_app",
   PREP: "prep",
   PROMPT_BUILDER: "prompt_builder",
-  RENDERER: "renderer",
+  COMPOSITE_RUNNER: "composite_runner",
   PROVIDER: "provider",
   STORAGE: "storage",
 } as const;
@@ -39,13 +39,13 @@ export const EventType = {
   PROMPT_BUILDER_STARTED: "prompt.builder.started",
   PROMPT_BUILDER_COMPLETED: "prompt.builder.completed",
 
-  // Render
-  RENDER_RUN_CREATED: "render.run.created",
-  RENDER_VARIANT_STARTED: "render.variant.started",
-  RENDER_PROVIDER_REQUESTED: "render.provider.requested",
-  RENDER_PROVIDER_COMPLETED: "render.provider.completed",
-  RENDER_VARIANT_COMPLETED: "render.variant.completed",
-  RENDER_RUN_COMPLETED: "render.run.completed",
+  // Composite
+  COMPOSITE_RUN_CREATED: "composite.run.created",
+  COMPOSITE_VARIANT_STARTED: "composite.variant.started",
+  COMPOSITE_PROVIDER_REQUESTED: "composite.provider.requested",
+  COMPOSITE_PROVIDER_COMPLETED: "composite.provider.completed",
+  COMPOSITE_VARIANT_COMPLETED: "composite.variant.completed",
+  COMPOSITE_RUN_COMPLETED: "composite.run.completed",
 
   // Storage
   STORAGE_UPLOAD_STARTED: "storage.upload.started",

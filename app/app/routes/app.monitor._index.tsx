@@ -1,7 +1,7 @@
 /**
  * Monitor - Runs List Page
  *
- * Shows paginated list of render runs with filters.
+ * Shows paginated list of composite runs with filters.
  * Polls every 2 seconds for updates.
  */
 
@@ -67,7 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const result = await getRuns(shop.id, filters, { page, limit: 20 });
 
   // Get distinct pipeline config hashes for filter
-  const configHashes = await prisma.renderRun.findMany({
+  const configHashes = await prisma.compositeRun.findMany({
     where: { shopId: shop.id },
     select: { pipelineConfigHash: true },
     distinct: ["pipelineConfigHash"],
@@ -277,7 +277,7 @@ export default function MonitorRunsPage() {
   return (
     <Page
       title="See It Now Monitor"
-      subtitle={`${total} render runs`}
+      subtitle={`${total} composite runs`}
       secondaryActions={[
         {
           content: "Health Dashboard",

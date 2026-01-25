@@ -16,7 +16,7 @@
  * - WaterfallMs: Waterfall timing breakdown (download, inference, upload)
  * - RunTotals: Aggregated run metrics (tokens, cost, call counts)
  * - LLMCall: LLM call instrumentation data
- * - VariantResult: Individual variant output details
+ * - CompositeVariant: Individual variant output details
  *
  * Naming conventions:
  * - All API responses use camelCase (not snake_case)
@@ -95,7 +95,7 @@ export interface RunDetail {
   failCount: number;
   timeoutCount: number;
   telemetryDropped: boolean;
-  variants: VariantResult[];
+  variants: CompositeVariant[];
   resolvedFactsJson?: Record<string, unknown>;
   promptPackJson?: Record<string, unknown>;
   // Prompt Control Plane fields
@@ -170,7 +170,7 @@ export interface RunTotals {
   calls_timeout: number;
 }
 
-export interface VariantResult {
+export interface CompositeVariant {
   id: string;
   variantId: string;
   status: string;
@@ -181,6 +181,9 @@ export interface VariantResult {
   errorMessage: string | null;
   imageUrl: string | null;
 }
+
+/** @deprecated Use CompositeVariant instead */
+export type VariantResult = CompositeVariant;
 
 // =============================================================================
 // Run Events - for /runs/:id/events endpoint

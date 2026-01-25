@@ -70,7 +70,7 @@ model Shop {
   savedRooms       SavedRoom[]
   seeItCaptures    SeeItCapture[]
   prepEvents       PrepEvent[]
-  renderRuns       RenderRun[]
+  compositeRuns    CompositeRun[]
   monitorEvents    MonitorEvent[]
   monitorArtifacts MonitorArtifact[]
 
@@ -124,7 +124,7 @@ model ProductAsset {
   shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
   renderJobs RenderJob[]
   prepEvents PrepEvent[]
-  renderRuns RenderRun[]
+  compositeRuns CompositeRun[]
 
   @@index([shopId, productId])
   @@index([shopId, productId, isDefault]) // Index for finding default assets
@@ -154,7 +154,7 @@ model RoomSession {
 
   shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
   renderJobs RenderJob[]
-  renderRuns RenderRun[]
+  compositeRuns CompositeRun[]
 
   @@map("room_sessions")
 }
@@ -274,10 +274,10 @@ model PrepEvent {
 }
 
 // =============================================================================
-// CANONICAL: RenderRun - One per render request
+// CANONICAL: CompositeRun - One per composite request
 // =============================================================================
 
-model RenderRun {
+model CompositeRun {
   id             String  @id @default(uuid())
   shopId         String  @map("shop_id")
   productAssetId String  @map("product_asset_id")
@@ -312,24 +312,24 @@ model RenderRun {
   timeoutCount Int   @default(0) @map("timeout_count")
   runTotals    Json? @map("run_totals")
 
-  shop           Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  productAsset   ProductAsset   @relation(fields: [productAssetId], references: [id], onDelete: Cascade)
-  roomSession    RoomSession?   @relation(fields: [roomSessionId], references: [id], onDelete: SetNull)
-  variantResults VariantResult[]
+  shop              Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productAsset      ProductAsset       @relation(fields: [productAssetId], references: [id], onDelete: Cascade)
+  roomSession       RoomSession?       @relation(fields: [roomSessionId], references: [id], onDelete: SetNull)
+  compositeVariants CompositeVariant[]
 
   @@index([shopId, createdAt])
   @@index([productAssetId])
   @@index([status])
   @@index([traceId])
   @@index([pipelineConfigHash])
-  @@map("render_runs")
+  @@map("composite_runs")
 }
 
 // =============================================================================
-// CANONICAL: VariantResult - One per variant per RenderRun
+// CANONICAL: CompositeVariant - One per variant per CompositeRun
 // =============================================================================
 
-model VariantResult {
+model CompositeVariant {
   id        String @id @default(uuid())
   runId     String @map("run_id")
   variantId String @map("variant_id") // 'V01' .. 'V08'
@@ -343,12 +343,12 @@ model VariantResult {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  renderRun RenderRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  compositeRun CompositeRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@unique([runId, variantId])
   @@index([runId])
   @@index([status])
-  @@map("variant_results")
+  @@map("composite_variants")
 }
 
 // =============================================================================

@@ -176,7 +176,7 @@ export interface ExtractionInput {
 }
 
 // =============================================================================
-// Render Types
+// Composite Types
 // =============================================================================
 
 export interface ImageMeta {
@@ -186,7 +186,7 @@ export interface ImageMeta {
   format: string;
 }
 
-export interface RenderInput {
+export interface CompositeInput {
   shopId: string;
   productAssetId: string;
   roomSessionId: string;
@@ -207,7 +207,10 @@ export interface RenderInput {
   placementSet: PlacementSet;  // Renamed from promptPack
 }
 
-export interface VariantRenderResult {
+/** @deprecated Use CompositeInput instead */
+export type RenderInput = CompositeInput;
+
+export interface CompositeVariantResult {
   variantId: string;
   status: VariantStatus;
   latencyMs: number;
@@ -217,14 +220,20 @@ export interface VariantRenderResult {
   errorMessage?: string;
 }
 
-export interface RenderRunResult {
+/** @deprecated Use CompositeVariantResult instead */
+export type VariantRenderResult = CompositeVariantResult;
+
+export interface CompositeRunResult {
   runId: string;
   status: RunStatus;
   totalDurationMs: number;
-  variants: VariantRenderResult[];
+  variants: CompositeVariantResult[];
   waterfallMs: WaterfallMs;
   runTotals: RunTotals;
 }
+
+/** @deprecated Use CompositeRunResult instead */
+export type RenderRunResult = CompositeRunResult;
 
 // =============================================================================
 // Variant Intent Config

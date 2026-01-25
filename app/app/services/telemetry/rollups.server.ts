@@ -1,7 +1,7 @@
 /**
  * Telemetry Rollups
  *
- * Write to RenderRun and VariantResult tables.
+ * Write to CompositeRun and CompositeVariant tables.
  * These are "fast query" tables for dashboard UI.
  *
  * CRITICAL: Never throw on hot path. Log errors but return false.
@@ -18,12 +18,12 @@ import type {
 } from "./types";
 
 /**
- * Start a new render run. Creates RenderRun with status=RUNNING.
+ * Start a new composite run. Creates CompositeRun with status=RUNNING.
  * Returns true on success, false on failure.
  */
 export async function startRun(input: StartRunInput): Promise<boolean> {
   try {
-    await prisma.renderRun.create({
+    await prisma.compositeRun.create({
       data: {
         id: input.runId,
         shopId: input.shopId,
@@ -51,8 +51,8 @@ export async function startRun(input: StartRunInput): Promise<boolean> {
       requestId: input.traceId, // Use traceId as requestId for events
       runId: input.runId,
       traceId: input.traceId,
-      source: EventSource.RENDERER,
-      type: EventType.RENDER_RUN_CREATED,
+      source: EventSource.COMPOSITE_RUNNER,
+      type: EventType.COMPOSITE_RUN_CREATED,
       payload: {
         pipelineConfigHash: input.pipelineConfigHash,
         productAssetId: input.productAssetId,
@@ -67,7 +67,7 @@ export async function startRun(input: StartRunInput): Promise<boolean> {
         shopId: input.shopId,
         requestId: input.traceId,
         runId: input.runId,
-        source: EventSource.RENDERER,
+        source: EventSource.COMPOSITE_RUNNER,
       },
       error,
       { operation: "startRun" }
@@ -91,8 +91,8 @@ export async function recordVariantStart(
       runId: input.runId,
       variantId: input.variantId,
       traceId: input.traceId,
-      source: EventSource.RENDERER,
-      type: EventType.RENDER_VARIANT_STARTED,
+      source: EventSource.COMPOSITE_RUNNER,
+      type: EventType.COMPOSITE_VARIANT_STARTED,
       payload: { variantId: input.variantId },
     });
 
@@ -104,14 +104,14 @@ export async function recordVariantStart(
 }
 
 /**
- * Record a variant result. Creates VariantResult record.
+ * Record a variant result. Creates CompositeVariant record.
  * Returns true on success, false on failure.
  */
 export async function recordVariantResult(
   input: RecordVariantResultInput
 ): Promise<boolean> {
   try {
-    await prisma.variantResult.create({
+    await prisma.compositeVariant.create({
       data: {
         runId: input.runId,
         variantId: input.variantId,
@@ -131,8 +131,8 @@ export async function recordVariantResult(
       runId: input.runId,
       variantId: input.variantId,
       traceId: input.traceId,
-      source: EventSource.RENDERER,
-      type: EventType.RENDER_VARIANT_COMPLETED,
+      source: EventSource.COMPOSITE_RUNNER,
+      type: EventType.COMPOSITE_VARIANT_COMPLETED,
       payload: {
         status: input.status,
         latencyMs: input.latencyMs,
@@ -148,12 +148,12 @@ export async function recordVariantResult(
 }
 
 /**
- * Complete a render run. Updates status and counts.
+ * Complete a composite run. Updates status and counts.
  * Returns true on success, false on failure.
  */
 export async function completeRun(input: CompleteRunInput): Promise<boolean> {
   try {
-    await prisma.renderRun.update({
+    await prisma.compositeRun.update({
       where: { id: input.runId },
       data: {
         status: input.status,
@@ -171,8 +171,8 @@ export async function completeRun(input: CompleteRunInput): Promise<boolean> {
       requestId: input.traceId,
       runId: input.runId,
       traceId: input.traceId,
-      source: EventSource.RENDERER,
-      type: EventType.RENDER_RUN_COMPLETED,
+      source: EventSource.COMPOSITE_RUNNER,
+      type: EventType.COMPOSITE_RUN_COMPLETED,
       payload: {
         status: input.status,
         totalDurationMs: input.totalDurationMs,

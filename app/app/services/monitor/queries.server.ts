@@ -95,7 +95,7 @@ export async function getRuns(
   }
 
   const [runs, total] = await Promise.all([
-    prisma.renderRun.findMany({
+    prisma.compositeRun.findMany({
       where,
       orderBy: { createdAt: "desc" },
       skip: (pagination.page - 1) * pagination.limit,
@@ -106,7 +106,7 @@ export async function getRuns(
         },
       },
     }),
-    prisma.renderRun.count({ where }),
+    prisma.compositeRun.count({ where }),
   ]);
 
   return {
@@ -138,13 +138,13 @@ export async function getRunDetail(
   shopId: string,
   revealEnabled: boolean = false
 ): Promise<RunDetailV1 | null> {
-  const run = await prisma.renderRun.findFirst({
+  const run = await prisma.compositeRun.findFirst({
     where: { id: runId, shopId },
     include: {
       productAsset: {
         select: { productTitle: true, productId: true },
       },
-      variantResults: {
+      compositeVariants: {
         orderBy: { variantId: "asc" },
       },
     },
@@ -163,7 +163,7 @@ export async function getRunDetail(
 
   // Generate signed URLs for variant images
   const variants = await Promise.all(
-    run.variantResults.map(async (v: typeof run.variantResults[number]) => {
+    run.compositeVariants.map(async (v: typeof run.compositeVariants[number]) => {
       let imageUrl: string | null = null;
       if (v.imageRef) {
         try {
@@ -322,25 +322,25 @@ export async function getHealthStats(shopId: string): Promise<HealthStatsV1> {
     failed7d,
     latencyData,
   ] = await Promise.all([
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { shopId, createdAt: { gte: oneHourAgo } },
     }),
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { shopId, createdAt: { gte: oneHourAgo }, status: "FAILED" },
     }),
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { shopId, createdAt: { gte: oneDayAgo } },
     }),
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { shopId, createdAt: { gte: oneDayAgo }, status: "FAILED" },
     }),
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { shopId, createdAt: { gte: sevenDaysAgo } },
     }),
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { shopId, createdAt: { gte: sevenDaysAgo }, status: "FAILED" },
     }),
-    prisma.renderRun.findMany({
+    prisma.compositeRun.findMany({
       where: {
         shopId,
         createdAt: { gte: oneDayAgo },
@@ -628,7 +628,7 @@ export async function getRunsExternal(
     }
   }
 
-  const runsPromise = prisma.renderRun.findMany({
+  const runsPromise = prisma.compositeRun.findMany({
     where,
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1, // Fetch one extra to detect if there's a next page
@@ -643,7 +643,7 @@ export async function getRunsExternal(
   });
 
   const totalPromise = includeTotal
-    ? prisma.renderRun.count({
+    ? prisma.compositeRun.count({
         where: {
           ...(filters.status ? { status: filters.status } : {}),
           ...(filters.shopId ? { shopId: filters.shopId } : {}),
@@ -737,7 +737,7 @@ export async function getRunDetailExternal(
   runId: string,
   revealEnabled: boolean
 ): Promise<ExternalRunDetail | null> {
-  const run = await prisma.renderRun.findFirst({
+  const run = await prisma.compositeRun.findFirst({
     where: { id: runId },
     include: {
       shop: {
@@ -746,7 +746,7 @@ export async function getRunDetailExternal(
       productAsset: {
         select: { productTitle: true, productId: true },
       },
-      variantResults: {
+      compositeVariants: {
         orderBy: { variantId: "asc" },
       },
     },
@@ -765,7 +765,7 @@ export async function getRunDetailExternal(
 
   // Generate signed URLs for variant images (always included)
   const variants = await Promise.all(
-    run.variantResults.map(async (v: typeof run.variantResults[number]) => {
+    run.compositeVariants.map(async (v: typeof run.compositeVariants[number]) => {
       let imageUrl: string | null = null;
       if (v.imageRef) {
         try {
@@ -1040,7 +1040,7 @@ export async function getShopsExternal(
   const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
   // Single aggregate query for all shops
-  const aggregates = await prisma.renderRun.groupBy({
+  const aggregates = await prisma.compositeRun.groupBy({
     by: ["shopId"],
     where: {
       shopId: { in: shopIds },
@@ -1051,7 +1051,7 @@ export async function getShopsExternal(
   });
 
   // Count successes separately (Prisma groupBy doesn't support conditional counts)
-  const successCounts = await prisma.renderRun.groupBy({
+  const successCounts = await prisma.compositeRun.groupBy({
     by: ["shopId"],
     where: {
       shopId: { in: shopIds },
@@ -1153,7 +1153,7 @@ export async function getShopDetailExternal(
   if (!shop) return null;
 
   // Get recent runs
-  const recentRuns = await prisma.renderRun.findMany({
+  const recentRuns = await prisma.compositeRun.findMany({
     where: { shopId },
     orderBy: { createdAt: "desc" },
     take: recentRunsLimit,
@@ -1169,9 +1169,9 @@ export async function getShopDetailExternal(
 
   // Get top errors from recent failed runs
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const failedVariants = await prisma.variantResult.findMany({
+  const failedVariants = await prisma.compositeVariant.findMany({
     where: {
-      renderRun: { shopId },
+      compositeRun: { shopId },
       status: "FAILED",
       createdAt: { gte: oneDayAgo },
       errorMessage: { not: null },
@@ -1256,19 +1256,19 @@ export async function getHealthStatsExternal(): Promise<ExternalHealthStats> {
     providerErrors,
     storageErrors,
   ] = await Promise.all([
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { createdAt: { gte: oneHourAgo } },
     }),
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { createdAt: { gte: oneHourAgo }, status: "FAILED" },
     }),
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { createdAt: { gte: oneDayAgo } },
     }),
-    prisma.renderRun.count({
+    prisma.compositeRun.count({
       where: { createdAt: { gte: oneDayAgo }, status: "FAILED" },
     }),
-    prisma.renderRun.findMany({
+    prisma.compositeRun.findMany({
       where: {
         createdAt: { gte: oneDayAgo },
         totalDurationMs: { not: null },

@@ -40,7 +40,7 @@ import {
   queryKeys,
 } from "@/lib/api";
 import type {
-  VariantResult,
+  CompositeVariant,
   RunEvent,
   RunArtifact,
   LLMCall,
@@ -444,7 +444,7 @@ function WaterfallPanel({ waterfallMs, runTotals }: WaterfallPanelProps) {
 // =============================================================================
 
 interface VariantCardProps {
-  variant: VariantResult;
+  variant: CompositeVariant;
   index: number;
   onClick: () => void;
 }
@@ -522,7 +522,7 @@ function VariantCard({ variant, index, onClick }: VariantCardProps) {
 // =============================================================================
 
 interface VariantModalProps {
-  variant: VariantResult;
+  variant: CompositeVariant;
   index: number;
   onClose: () => void;
 }
@@ -1428,7 +1428,7 @@ export default function RunPlaybackPage() {
   const [reveal, setReveal] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("variants");
   const [selectedVariant, setSelectedVariant] = useState<{
-    variant: VariantResult;
+    variant: CompositeVariant;
     index: number;
   } | null>(null);
 

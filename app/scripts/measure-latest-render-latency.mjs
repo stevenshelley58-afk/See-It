@@ -1,13 +1,13 @@
 import { Client } from "pg";
 
 /**
- * Prints end-to-end timing deltas for the most recent render run.
+ * Prints end-to-end timing deltas for the most recent composite run.
  *
  * Requires:
- * - DATABASE_URL pointing at the DB containing `render_runs` + `monitor_events`
+ * - DATABASE_URL pointing at the DB containing `composite_runs` + `monitor_events`
  *
  * Notes:
- * - Some "sf.*" events are emitted before `render_runs` exists (no run_id), so we
+ * - Some "sf.*" events are emitted before `composite_runs` exists (no run_id), so we
  *   associate them to the run via `payload.roomSessionId` and choose the latest.
  */
 function iso(v) {
@@ -36,17 +36,17 @@ async function main() {
          id,
          shop_id,
          room_session_id,
-         request_id,
+         trace_id,
          created_at,
          completed_at,
          total_duration_ms
-       from render_runs
+       from composite_runs
        order by created_at desc
        limit 1`
     );
 
     if (runRes.rowCount === 0) {
-      console.log("No render_runs rows found.");
+      console.log("No composite_runs rows found.");
       return;
     }
 
@@ -68,8 +68,8 @@ async function main() {
       return arr.length ? arr[arr.length - 1].ts : null;
     };
 
-    const runCreatedEvt = firstOf("render.run.created");
-    const runCompletedEvt = lastOf("render.run.completed");
+    const runCreatedEvt = firstOf("composite.run.created");
+    const runCompletedEvt = lastOf("composite.run.completed");
     const completedTs = runCompletedEvt || run.completed_at || null;
 
     // These events are emitted before a run exists, so they won't have run_id.
@@ -104,7 +104,7 @@ async function main() {
       runId: run.id,
       shopId: run.shop_id,
       roomSessionId: run.room_session_id,
-      requestId: run.request_id,
+      traceId: run.trace_id,
       totalDurationMs: run.total_duration_ms,
       ts: {
         uploadCompleted: iso(uploadCompleted),
