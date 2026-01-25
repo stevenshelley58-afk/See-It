@@ -1,0 +1,14 @@
+# Nixpacks configuration for Railway
+# Cache bust: 2026-01-25T11:50:00Z
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "openssl"]
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npx prisma generate", "npm run build", "npm prune --omit=dev"]
+
+[start]
+cmd = "npm run docker-start"
