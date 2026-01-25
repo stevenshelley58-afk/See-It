@@ -36,8 +36,12 @@ export const loader = async ({ request, params }) => {
             prep_strategy: a.prepStrategy,
             prompt_version: a.promptVersion,
             error_message: a.errorMessage,
-            render_instructions: a.renderInstructions,
-            render_instructions_see_it_now: a.renderInstructionsSeeItNow,
+            // Canonical pipeline fields
+            extracted_facts: a.extractedFacts,
+            merchant_overrides: a.merchantOverrides,
+            resolved_facts: a.resolvedFacts,
+            placement_set: a.placementSet,
+            extracted_at: a.extractedAt,
             created_at: a.createdAt,
             updated_at: a.updatedAt,
         }))

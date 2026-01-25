@@ -99,45 +99,14 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
         const formData = new FormData();
         formData.append("productId", product.id.split('/').pop());
 
-        if (typeof pendingMetadata === 'string') {
-            formData.append("instructions", pendingMetadata);
-        } else if (pendingMetadata && typeof pendingMetadata === 'object') {
-            formData.append("instructions", pendingMetadata.renderInstructions || '');
-
-            // Add instructionsSeeItNow only if dirty (to prevent accidental erasure)
-            if (pendingMetadata.renderInstructionsSeeItNowDirty === true) {
-                formData.append("instructionsSeeItNow", pendingMetadata.renderInstructionsSeeItNow || '');
-            }
-
-            // Add placementFields if present
-            if (pendingMetadata.placementFields) {
-                formData.append("placementFields", JSON.stringify(pendingMetadata.placementFields));
-            }
-
-            // Add placement rules config
-            const rulesConfig = pendingMetadata.placementRulesConfig;
-            if (rulesConfig) {
-                if (rulesConfig.sceneRole) {
-                    formData.append("sceneRole", rulesConfig.sceneRole);
-                }
-                if (rulesConfig.replacementRule) {
-                    formData.append("replacementRule", rulesConfig.replacementRule);
-                }
-                if (rulesConfig.allowSpaceCreation !== undefined && rulesConfig.allowSpaceCreation !== null) {
-                    formData.append("allowSpaceCreation", rulesConfig.allowSpaceCreation ? 'true' : 'false');
-                }
-            }
-
+        // Only send canonical fields (legacy fields removed from schema)
+        if (pendingMetadata && typeof pendingMetadata === 'object') {
             // Add enabled flag
             if (pendingMetadata.enabled !== undefined) {
                 formData.append("enabled", pendingMetadata.enabled ? 'true' : 'false');
             }
 
-            if (pendingMetadata.seeItNowVariants !== undefined) {
-                formData.append("seeItNowVariants", JSON.stringify(pendingMetadata.seeItNowVariants));
-            }
-
-            // NEW: merchantOverrides (sparse diff) for v2 pipeline - only send if dirty
+            // merchantOverrides (sparse diff) for v2 pipeline - only send if dirty
             if (pendingMetadata.merchantOverridesDirty === true) {
                 const overrides = pendingMetadata.merchantOverrides;
                 const isEmptyObject =
@@ -152,8 +121,6 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                     formData.append("merchantOverrides", JSON.stringify(overrides));
                 }
             }
-        } else {
-            formData.append("instructions", JSON.stringify(pendingMetadata));
         }
 
         setSaveInfo("Saving...");

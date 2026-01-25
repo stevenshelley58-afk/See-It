@@ -5,14 +5,18 @@ import { buildPlacementTabMetadata } from './placementTabMetadata';
 
 
 /**
- * PlacementTab - Product preparation for rendering
- * 
+ * PlacementTab - Product preparation for rendering (Canonical Pipeline)
+ *
+ * Canonical Fields (from ProductAsset):
+ * - extractedFacts: LLM #1 output (read-only)
+ * - merchantOverrides: Merchant edits (sparse diff, editable)
+ * - resolvedFacts: merged(extracted, overrides) (read-only)
+ * - placementSet: LLM #2 output with variants (read-only)
+ *
  * Flow:
- * 1. Auto-extract structured fields from product data
- * 2. Merchant reviews/adjusts fields
- * 3. Click "Generate Description" → AI writes optimized prose
- * 4. Merchant sees description with "edit at own risk" warning
- * 5. Save → prose goes to ProductAsset.renderInstructions
+ * 1. System extracts product facts via LLM
+ * 2. Merchant reviews extracted facts and can override specific fields
+ * 3. Save → merchantOverrides saved, triggers regeneration of resolvedFacts + placementSet
  */
 
 // ============================================================================
@@ -345,29 +349,29 @@ function stableStringify(value) {
 export function PlacementTab({ product, asset, onChange }) {
     const fetcher = useFetcher();
 
-    // Parse existing saved description (if any)
-    const existingDescription = useMemo(() => {
-        if (!asset?.renderInstructions) return null;
-        // If it starts with {, it's old JSON format - ignore it
-        if (asset.renderInstructions.startsWith('{')) return null;
-        return asset.renderInstructions;
-    }, [asset]);
+    // Legacy renderInstructions field has been removed from schema
+    // Descriptions are now generated from placementSet when needed
+    const existingDescription = null;
 
     // Auto-detect initial fields (fallback if no saved data)
     const detectedFields = useMemo(() => autoDetectFields(product), [product]);
 
-    // Load saved placementFields from asset, or use auto-detected defaults
+    // Initialize fields from extractedFacts/resolvedFacts (canonical) or auto-detect
     const initialFields = useMemo(() => {
-        if (asset?.placementFields && typeof asset.placementFields === 'object') {
-            // Use saved placementFields if available
-            const saved = asset.placementFields;
+        // Try to get values from resolvedFacts (canonical pipeline)
+        const resolved = isPlainObject(asset?.resolvedFacts) ? asset.resolvedFacts : null;
+        const extracted = isPlainObject(asset?.extractedFacts) ? asset.extractedFacts : null;
+        const facts = resolved || extracted;
+
+        if (facts) {
+            // Map canonical facts to UI fields where possible
             return {
-                surface: saved.surface || detectedFields.surface,
-                material: saved.material || detectedFields.material,
-                orientation: saved.orientation || detectedFields.orientation,
-                shadow: saved.shadow || (detectedFields.surface === 'ceiling' ? 'none' : 'contact'),
-                dimensions: saved.dimensions || detectedFields.dimensions || { height: null, width: null },
-                additionalNotes: saved.additionalNotes || '',
+                surface: detectedFields.surface, // not in canonical schema, use auto-detect
+                material: facts?.material_profile?.primary || detectedFields.material,
+                orientation: detectedFields.orientation, // not in canonical schema
+                shadow: detectedFields.surface === 'ceiling' ? 'none' : 'contact',
+                dimensions: facts?.typical_dimensions_cm || detectedFields.dimensions || { height: null, width: null },
+                additionalNotes: '',
             };
         }
         // Fallback to auto-detection
@@ -379,51 +383,44 @@ export function PlacementTab({ product, asset, onChange }) {
             dimensions: detectedFields.dimensions || { height: null, width: null },
             additionalNotes: '',
         };
-    }, [asset?.placementFields, detectedFields]);
+    }, [asset?.resolvedFacts, asset?.extractedFacts, detectedFields]);
 
     // State
     const [fields, setFields] = useState(initialFields);
 
-    // Update state when asset.placementFields changes (e.g., asset loads async)
+    // Update state when canonical facts change (e.g., asset loads async)
     useEffect(() => {
-        if (asset?.placementFields && typeof asset.placementFields === 'object') {
-            const saved = asset.placementFields;
+        const resolved = isPlainObject(asset?.resolvedFacts) ? asset.resolvedFacts : null;
+        const extracted = isPlainObject(asset?.extractedFacts) ? asset.extractedFacts : null;
+        const facts = resolved || extracted;
+        if (facts) {
             setFields(prev => ({
-                surface: saved.surface || prev.surface,
-                material: saved.material || prev.material,
-                orientation: saved.orientation || prev.orientation,
-                shadow: saved.shadow || prev.shadow,
-                dimensions: saved.dimensions || prev.dimensions || { height: null, width: null },
-                additionalNotes: saved.additionalNotes !== undefined ? saved.additionalNotes : prev.additionalNotes,
+                surface: prev.surface, // keep user selection
+                material: facts?.material_profile?.primary || prev.material,
+                orientation: prev.orientation,
+                shadow: prev.shadow,
+                dimensions: facts?.typical_dimensions_cm || prev.dimensions || { height: null, width: null },
+                additionalNotes: prev.additionalNotes,
             }));
         }
-    }, [asset?.placementFields]);
+    }, [asset?.resolvedFacts, asset?.extractedFacts]);
 
-    // placement rules state - use existing asset values or auto-detected defaults
+    // placement rules state - use auto-detected defaults (legacy columns removed from schema)
+    // These are now UI-only fields for the Generate Prompt feature
     const [placementRulesFields, setPlacementRulesFields] = useState({
-        sceneRole: asset?.sceneRole || detectedFields.sceneRole || null,
-        replacementRule: asset?.replacementRule || detectedFields.replacementRule || null,
-        allowSpaceCreation: asset?.allowSpaceCreation !== undefined ? asset.allowSpaceCreation : detectedFields.allowSpaceCreation,
+        sceneRole: detectedFields.sceneRole || null,
+        replacementRule: detectedFields.replacementRule || null,
+        allowSpaceCreation: detectedFields.allowSpaceCreation,
     });
-
-    // Update placementRulesFields when asset loads async
-    useEffect(() => {
-        if (asset) {
-            setPlacementRulesFields({
-                sceneRole: asset.sceneRole || detectedFields.sceneRole || null,
-                replacementRule: asset.replacementRule || detectedFields.replacementRule || null,
-                allowSpaceCreation: asset.allowSpaceCreation !== undefined ? asset.allowSpaceCreation : detectedFields.allowSpaceCreation,
-            });
-        }
-    }, [asset?.sceneRole, asset?.replacementRule, asset?.allowSpaceCreation, detectedFields]);
 
     const [description, setDescription] = useState(existingDescription || '');
     const [isGenerating, setIsGenerating] = useState(false);
     const [hasEdited, setHasEdited] = useState(false);
     const [showEditWarning, setShowEditWarning] = useState(false);
 
-    // See It Now prompt state (with dirty tracking)
-    const [seeItNowPrompt, setSeeItNowPrompt] = useState(asset?.renderInstructionsSeeItNow || '');
+    // See It Now prompt state (legacy renderInstructionsSeeItNow removed)
+    // Prompts are now generated from placementSet via the canonical pipeline
+    const [seeItNowPrompt, setSeeItNowPrompt] = useState('');
     const [seeItNowDirty, setSeeItNowDirty] = useState(false);
 
 
@@ -541,17 +538,7 @@ export function PlacementTab({ product, asset, onChange }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [existingDescription]);
 
-    // Hydrate See It Now prompt when asset loads async (only if not dirty)
-    useEffect(() => {
-        if (seeItNowDirty) return;
-        const assetValue = asset?.renderInstructionsSeeItNow || '';
-        setSeeItNowPrompt((prev) => {
-            const prevTrim = (prev || '').toString().trim();
-            if (prevTrim) return prev;
-            return assetValue;
-        });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [asset?.renderInstructionsSeeItNow]);
+    // Legacy renderInstructionsSeeItNow hydration removed - prompts come from placementSet now
 
     // Notify parent when description, placementFields, placement rules, See It Now prompt, or enabled change
     useEffect(() => {

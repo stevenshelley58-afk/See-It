@@ -63,8 +63,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         where: {
             shopId: shop.id,
             productId: productId,
-            status: "live",     // CHANGED: Only return live (enabled) assets
-            enabled: true       // ADDED: Double-check enabled flag
+            status: "live",     // Only return live (enabled) assets
+            enabled: true       // Double-check enabled flag
         },
         select: {
             id: true,
@@ -72,7 +72,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             preparedImageKey: true,
             sourceImageUrl: true,
             status: true,
-            placementFields: true,  // Include dimensions for correct aspect ratio
+            // Canonical pipeline fields for dimensions
+            resolvedFacts: true,
+            extractedFacts: true,
             updatedAt: true,
         },
         orderBy: { updatedAt: 'desc' }  // Get the most recent one
@@ -135,9 +137,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         );
     }
 
-    // Extract dimensions from placementFields if available
-    const placementFields = productAsset.placementFields as { dimensions?: { width?: number; height?: number } } | null;
-    const dimensions = placementFields?.dimensions || null;
+    // Extract dimensions from canonical facts (resolvedFacts preferred, fallback to extractedFacts)
+    type CanonicalFacts = { typical_dimensions_cm?: { width?: number; height?: number } } | null;
+    const resolvedFacts = productAsset.resolvedFacts as CanonicalFacts;
+    const extractedFacts = productAsset.extractedFacts as CanonicalFacts;
+    const dimensions = resolvedFacts?.typical_dimensions_cm || extractedFacts?.typical_dimensions_cm || null;
 
     return json(
         {

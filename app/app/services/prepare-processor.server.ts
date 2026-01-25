@@ -73,12 +73,7 @@ function isRetryableError(error: unknown): boolean {
     return retryablePatterns.some(pattern => message.includes(pattern));
 }
 
-interface PlacementConfig {
-    renderInstructions: string;
-    sceneRole: string | null;
-    replacementRule: string | null;
-    allowSpaceCreation: boolean | null;
-}
+// Legacy PlacementConfig interface removed - renderInstructions, sceneRole, etc. no longer in schema
 
 interface RenderPromptTelemetry {
     prompt: string;
@@ -97,138 +92,8 @@ interface RenderPromptTelemetry {
     productResizedHeight?: number;
 }
 
-/**
- * Auto-generate placement configuration using AI vision
- * Analyzes product image and title to create render instructions
- */
-async function generatePlacementConfig(
-    imageUrl: string,
-    productTitle: string,
-    productContext: { description?: string; productType?: string; vendor?: string; tags?: string[] } | null,
-    requestId: string
-): Promise<PlacementConfig | null> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-        logger.warn(
-            createLogContext("prepare", requestId, "placement-config-skip", {}),
-            "GEMINI_API_KEY not set, skipping placement config generation"
-        );
-        return null;
-    }
-
-    const genAI = new GoogleGenAI({ apiKey });
-
-    try {
-        // Fetch the image
-        const imageResponse = await fetch(imageUrl);
-        if (!imageResponse.ok) {
-            throw new Error(`Failed to fetch image: ${imageResponse.status}`);
-        }
-        const imageBuffer = await imageResponse.arrayBuffer();
-        const base64Image = Buffer.from(imageBuffer).toString('base64');
-        const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
-
-        const descriptionSnippet = (productContext?.description || '').toString().replace(/\s+/g, ' ').trim().slice(0, 1200);
-        const tagsSnippet = Array.isArray(productContext?.tags) ? productContext!.tags.slice(0, 20).join(', ') : '';
-
-        const prompt = `You are analyzing a product image for an AR/visualization app that places furniture and home decor into customer room photos.
-
-Product Title: "${productTitle}"
-Product Type: "${(productContext?.productType || '').toString().trim()}"
-Vendor: "${(productContext?.vendor || '').toString().trim()}"
-Tags: "${tagsSnippet}"
-Product Description (from PDP, may include dimensions/materials): "${descriptionSnippet}"
-
-Analyze this product image and provide:
-
-1. **renderInstructions**: A detailed description for AI image generation. Include:
-   - What the product is (material, style, color)
-   - How it should be placed in a room (on floor, on wall, on table, etc.)
-   - Scale/proportion guidance
-   - Any special placement considerations
-   - Example: "A solid teak wood dining table with natural grain and tapered legs. Place on floor as main furniture piece. Scale to realistic dining table proportions (approximately 72 inches long). Ensure all four legs contact the floor naturally."
-
-2. **sceneRole**: One of:
-   - "floor_furniture" (sofas, tables, chairs, rugs)
-   - "wall_art" (paintings, mirrors, wall decor)
-   - "tabletop" (vases, lamps, small decor)
-   - "lighting" (floor lamps, pendant lights)
-   - "outdoor" (garden furniture, planters)
-
-3. **replacementRule**: One of:
-   - "replace_similar" (replace similar items in the room)
-   - "add_to_scene" (add without replacing anything)
-   - "replace_any" (can replace any blocking object)
-
-4. **allowSpaceCreation**: true if the AI can create minimal space/context around the product, false if it should only place in existing space.
-
-Respond in JSON format only, no markdown:
-{
-    "renderInstructions": "...",
-    "sceneRole": "...",
-    "replacementRule": "...",
-    "allowSpaceCreation": true
-}`;
-
-        const result = await genAI.models.generateContent({
-            model: "gemini-2.0-flash-exp",
-            contents: [
-                {
-                    role: "user",
-                    parts: [
-                        { text: prompt },
-                        {
-                            inlineData: {
-                                mimeType: mimeType,
-                                data: base64Image
-                            }
-                        }
-                    ]
-                }
-            ]
-        });
-
-        const responseText = result.text || '';
-
-        // Extract JSON from response (handle markdown code blocks)
-        let jsonStr = responseText;
-        const jsonMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-        if (jsonMatch) {
-            jsonStr = jsonMatch[1];
-        } else {
-            const rawJsonMatch = responseText.match(/\{[\s\S]*\}/);
-            if (rawJsonMatch) {
-                jsonStr = rawJsonMatch[0];
-            }
-        }
-
-        const config = JSON.parse(jsonStr);
-
-        logger.info(
-            createLogContext("prepare", requestId, "placement-config-generated", {
-                sceneRole: config.sceneRole,
-                hasInstructions: !!config.renderInstructions
-            }),
-            `Auto-generated placement config: sceneRole=${config.sceneRole}`
-        );
-
-        return {
-            renderInstructions: config.renderInstructions || null,
-            sceneRole: config.sceneRole || null,
-            replacementRule: config.replacementRule || null,
-            allowSpaceCreation: config.allowSpaceCreation ?? true
-        };
-    } catch (error) {
-        logger.error(
-            createLogContext("prepare", requestId, "placement-config-error", {
-                error: error instanceof Error ? error.message : String(error)
-            }),
-            "Failed to generate placement config",
-            error
-        );
-        return null;
-    }
-}
+// Legacy generatePlacementConfig function removed - placement prompts now come from
+// canonical pipeline: extractedFacts -> merchantOverrides -> resolvedFacts -> placementSet
 
 type ShopifyProductForPrompt = {
     title?: string | null;
@@ -928,13 +793,15 @@ async function processPendingRenderJobs(batchRequestId: string): Promise<boolean
                             capturedTelemetry = null;
 
                             // compositeScene now returns { imageUrl, imageKey }
+                            // Note: Legacy renderInstructions removed from schema
+                            // Placement prompts now come from placementSet in canonical pipeline
                             compositeResult = await compositeScene(
                                 productImageUrl,
                                 roomImageUrl,
                                 placement,
                                 job.stylePreset ?? "neutral",
                                 itemRequestId,
-                                productAsset?.renderInstructions ?? undefined,
+                                undefined, // was: productAsset?.renderInstructions
                                 {
                                     roomGeminiUri: roomSession.geminiFileUri,
                                     roomGeminiExpiresAt: roomSession.geminiFileExpiresAt,

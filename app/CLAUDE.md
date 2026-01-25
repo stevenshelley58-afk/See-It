@@ -13,40 +13,39 @@ Shopify merchants prepare product images (background removal + placement metadat
 ## Current Task
 Redesigning Products page. See `docs/PRODUCT_PREP_REDESIGN.md` for spec.
 
-## Key Data Flow
+## Key Data Flow (Canonical Pipeline)
 
 ### Prepare Phase (Merchant-time, Background Processing)
 ```
 Shopify Product (title, description, metafields, image)
-  ↓
+  |
 Background Processor (prepare-processor.server.ts)
-  ├─→ Background removal → preparedImageUrl (transparent PNG)
-  ├─→ Extract structured fields (surface, material, orientation, shadow, dimensions)
-  ├─→ Generate prose placement prompt → renderInstructions
-  └─→ Set placement rules (sceneRole, replacementRule, allowSpaceCreation)
-  ↓
+  |-- Background removal -> preparedImageUrl (transparent PNG)
+  |-- LLM #1: Extract product facts -> extractedFacts (JSON)
+  |-- Merge with merchant overrides -> resolvedFacts (JSON)
+  \-- LLM #2: Generate placement set -> placementSet (JSON with variants)
+  |
 ProductAsset saved with:
   - preparedImageUrl / preparedImageKey
-  - placementFields (JSON: structured fields)
-  - renderInstructions (prose: natural-language placement prompt)
-  - sceneRole, replacementRule, allowSpaceCreation (placement rule columns)
-  - fieldSource (JSON: provenance tracking, 'auto' vs 'merchant')
+  - extractedFacts (LLM #1 output: ProductFacts)
+  - merchantOverrides (sparse diff from merchant edits)
+  - resolvedFacts (merged: extracted + overrides)
+  - placementSet (LLM #2 output: { productDescription, variants[] })
+  - extractedAt (timestamp)
 ```
 
 ### Placement Tab (Merchant Review/Confirm)
 ```
 Merchant opens Placement tab
-  ↓
-Loads saved placementFields → Toggles show saved values (or auto-detected if not saved)
-  ↓
-Merchant adjusts toggles → Confirms/corrects extraction
-  ↓
-Merchant clicks "Generate Prompt" → Creates prose from structured fields
-  ↓
-Merchant saves → All fields marked as 'merchant' in fieldSource (never overwritten by bulk prepare)
+  |
+Loads extractedFacts + merchantOverrides -> Shows resolved values
+  |
+Merchant adjusts overrides -> Sparse diff saved to merchantOverrides
+  |
+System regenerates resolvedFacts + placementSet
 ```
 
-### Final Render (Customer-time, V1)
+### Final Render (Customer-time)
 ```
 ProductAsset.preparedImageUrl (transparent PNG)
   +
@@ -54,23 +53,32 @@ Room photo (from RoomSession)
   +
 Customer placement coords + scale
   +
-ProductAsset.renderInstructions (prose placement prompt)
-  ↓
-compositeScene() → Gemini API
-  ↓
+Prompt from placementSet.variants[selected]
+  |
+compositeScene() -> Gemini API
+  |
 Composited room photo with product placed realistically
+```
+
+## Canonical ProductAsset Fields
+```
+extractedFacts    Json?     // LLM #1 output: ProductFacts
+merchantOverrides Json?     // Merchant edits (diff only)
+resolvedFacts     Json?     // merged(extracted, overrides)
+placementSet      Json?     // LLM #2 output: { productDescription, variants[] }
+extractedAt       DateTime?
 ```
 
 ## Critical Files
 | Purpose | File |
 |---------|------|
-| Schema | `prisma/schema.prisma` (ProductAsset has placementFields JSON, renderInstructions prose, placement rule columns) |
+| Schema | `prisma/schema.prisma` (ProductAsset with canonical fields) |
 | Products page | `app/routes/app.products.jsx` |
-| Background processor | `app/services/prepare-processor.server.ts` (generates placement during bulk prepare) |
-| Placement prompt generator | `app/services/description-writer.server.ts` (structured fields → prose) |
-| Placement UI | `app/components/ProductDetailPanel/PlacementTab.jsx` (confirms/corrects extraction) |
-| Save placement API | `app/routes/api.products.update-instructions.jsx` (saves with merchant provenance) |
-| Compositing | `app/services/gemini.server.ts` → `compositeScene()` (uses renderInstructions prose prompt) |
+| Background processor | `app/services/prepare-processor.server.ts` |
+| Canonical pipeline | `app/services/see-it-now/index.ts` (extractProductFacts, buildPlacementSet, resolveProductFacts) |
+| Placement UI | `app/components/ProductDetailPanel/PlacementTab.jsx` |
+| Save placement API | `app/routes/api.products.update-instructions.jsx` |
+| Compositing | `app/services/gemini.server.ts` |
 
 ## Commands
 ```bash

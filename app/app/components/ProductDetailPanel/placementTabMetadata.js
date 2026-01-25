@@ -1,3 +1,12 @@
+/**
+ * Build metadata from PlacementTab for saving.
+ *
+ * Only includes canonical fields that exist in the current schema:
+ * - merchantOverrides (sparse diff for fact overrides)
+ * - enabled (toggle for customer visibility)
+ *
+ * Legacy fields (renderInstructions, placementFields, etc.) have been removed.
+ */
 export function buildPlacementTabMetadata({
     description,
     seeItNowPrompt,
@@ -14,26 +23,18 @@ export function buildPlacementTabMetadata({
     const enabledDirty = enabled !== baselineEnabled;
 
     return {
-        renderInstructions: description || null,
-        renderInstructionsSeeItNow: seeItNowPrompt,
-        renderInstructionsSeeItNowDirty: seeItNowDirty,
-        placementFields: {
-            surface: fields.surface,
-            material: fields.material,
-            orientation: fields.orientation,
-            shadow: fields.shadow,
-            dimensions: fields.dimensions || { height: null, width: null },
-            additionalNotes: fields.additionalNotes || '',
-        },
-        placementRulesConfig: {
-            sceneRole: placementRulesFields.sceneRole || null,
-            replacementRule: placementRulesFields.replacementRule || null,
-            allowSpaceCreation: placementRulesFields.allowSpaceCreation !== undefined ? placementRulesFields.allowSpaceCreation : null,
-        },
+        // Canonical fields only
         merchantOverrides: merchantOverrides,
         merchantOverridesDirty: merchantOverridesDirty,
         enabled: enabledDirty ? enabled : undefined,
-        dirty: !!merchantOverridesDirty || !!seeItNowDirty || !!hasEdited || enabledDirty,
+        dirty: !!merchantOverridesDirty || enabledDirty,
+
+        // UI-only fields for Generate Prompt feature (not saved to DB)
+        _uiFields: {
+            description,
+            seeItNowPrompt,
+            fields,
+            placementRulesFields,
+        },
     };
 }
-

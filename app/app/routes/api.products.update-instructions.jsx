@@ -12,15 +12,18 @@ import {
 /**
  * POST /api/products/update-instructions
  *
- * Update custom render instructions, placement fields, and See It Now placement rules for a product asset
+ * Update merchant overrides and enabled status for a product asset.
+ *
+ * Canonical Pipeline Fields:
+ * - merchantOverrides: JSON object with sparse diff of fact overrides
+ * - enabled: boolean for ready ↔ live status transitions
+ *
+ * Legacy fields (renderInstructions, placementFields, sceneRole, etc.) have been
+ * removed from the schema. This endpoint now only handles canonical fields.
  *
  * Body (FormData):
- * - productId: Shopify product ID (numeric)
- * - instructions: Placement prompt (prose text for AI render, can be empty string to clear)
- * - placementFields: (optional) JSON string with structured fields: { surface, material, orientation, shadow, dimensions: { height, width }, additionalNotes }
- * - sceneRole: (optional) "Dominant" | "Integrated"
- * - replacementRule: (optional) "Same Role Only" | "Similar Size or Position" | "Any Blocking Object" | "None"
- * - allowSpaceCreation: (optional) "true" | "false"
+ * - productId: Shopify product ID (numeric) - required
+ * - merchantOverrides: (optional) JSON string with sparse diff overrides, empty string to clear
  * - enabled: (optional) "true" | "false" - Controls ready ↔ live status transitions
  */
 export const action = async ({ request }) => {
@@ -33,48 +36,12 @@ export const action = async ({ request }) => {
 
         const formData = await request.formData();
         const productId = formData.get("productId")?.toString();
-        const instructions = formData.get("instructions")?.toString() ?? "";
-        
-        // Extract instructionsSeeItNow (3-state: missing = no change, empty = null, value = trimmed text)
-        let instructionsSeeItNow = undefined;
-        if (formData.has("instructionsSeeItNow")) {
-            const raw = formData.get("instructionsSeeItNow")?.toString() ?? "";
-            instructionsSeeItNow = raw.trim() || null;
-        }
-        
-        // Extract placementFields (JSON)
-        let placementFields = null;
-        const placementFieldsRaw = formData.get("placementFields")?.toString();
-        if (placementFieldsRaw) {
-            try {
-                placementFields = JSON.parse(placementFieldsRaw);
-                // Validate structure
-                if (typeof placementFields !== 'object' || placementFields === null) {
-                    return json({ success: false, error: "placementFields must be a valid JSON object" }, { status: 400 });
-                }
-            } catch (e) {
-                return json({ success: false, error: "Invalid placementFields JSON format" }, { status: 400 });
-            }
-        }
-        
-        // Extract placement rules
-        const sceneRole = formData.get("sceneRole")?.toString() || null;
-        const replacementRule = formData.get("replacementRule")?.toString() || null;
-        const allowSpaceCreationRaw = formData.get("allowSpaceCreation")?.toString();
-        const allowSpaceCreation = allowSpaceCreationRaw === 'true' ? true : allowSpaceCreationRaw === 'false' ? false : null;
 
         // Extract enabled field for ready ↔ live transitions
         const enabledRaw = formData.get("enabled")?.toString();
         const enabled = enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : null;
 
-        // Extract See It Now generated prompt fields
-        let generatedSeeItNowPrompt = undefined;
-        if (formData.has("generatedSeeItNowPrompt")) {
-            const raw = formData.get("generatedSeeItNowPrompt")?.toString() ?? "";
-            generatedSeeItNowPrompt = raw.trim() || null;
-        }
-
-        // NEW: Merchant overrides (sparse diff) for See It Now v2 pipeline
+        // Merchant overrides (sparse diff) for canonical pipeline
         // 3-state semantics:
         // - missing field => no change
         // - empty string => null (clear)
@@ -106,43 +73,11 @@ export const action = async ({ request }) => {
             }
         }
 
-        let seeItNowVariants = undefined;
-        if (formData.has("seeItNowVariants")) {
-            const variantsRaw = formData.get("seeItNowVariants")?.toString();
-            if (variantsRaw) {
-                try {
-                    seeItNowVariants = JSON.parse(variantsRaw);
-                    // Validate it's an array
-                    if (!Array.isArray(seeItNowVariants)) {
-                        return json({ success: false, error: "seeItNowVariants must be a valid JSON array" }, { status: 400 });
-                    }
-                } catch (e) {
-                    return json({ success: false, error: "Invalid seeItNowVariants JSON format" }, { status: 400 });
-                }
-            } else {
-                seeItNowVariants = null;
-            }
-        }
-
-        const useGeneratedPromptRaw = formData.get("useGeneratedPrompt")?.toString();
-        const useGeneratedPrompt = useGeneratedPromptRaw === 'true' ? true : useGeneratedPromptRaw === 'false' ? false : undefined;
-
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
         }
-        
-        // Validate placement rules
-        const validSceneRoles = ['Dominant', 'Integrated'];
-        if (sceneRole && !validSceneRoles.includes(sceneRole)) {
-            return json({ success: false, error: `Invalid sceneRole. Must be one of: ${validSceneRoles.join(', ')}` }, { status: 400 });
-        }
-        
-        const validReplacementRules = ['Same Role Only', 'Similar Size or Position', 'Any Blocking Object', 'None'];
-        if (replacementRule && !validReplacementRules.includes(replacementRule)) {
-            return json({ success: false, error: `Invalid replacementRule. Must be one of: ${validReplacementRules.join(', ')}` }, { status: 400 });
-        }
 
-        logger.info(logContext, `Update instructions: productId=${productId}, length=${instructions.length}, hasPlacementFields=${!!placementFields}, sceneRole=${sceneRole}, replacementRule=${replacementRule}, allowSpaceCreation=${allowSpaceCreation}, enabled=${enabled}`);
+        logger.info(logContext, `Update instructions: productId=${productId}, enabled=${enabled}, hasMerchantOverrides=${merchantOverrides !== undefined}`);
 
         // Get shop record
         const shop = await prisma.shop.findUnique({
@@ -153,7 +88,7 @@ export const action = async ({ request }) => {
             return json({ success: false, error: "Shop not found" }, { status: 404 });
         }
 
-        // Get existing asset - or create placeholder if none exists
+        // Get existing asset
         let asset = await prisma.productAsset.findFirst({
             where: {
                 shopId: shop.id,
@@ -161,65 +96,11 @@ export const action = async ({ request }) => {
             },
         });
 
-        // Prepare update data
+        // Prepare update data - only canonical fields
         const updateData = {
-            renderInstructions: instructions.trim() || null,
             updatedAt: new Date(),
         };
-        
-        // Add renderInstructionsSeeItNow if provided (3-state semantics)
-        if (instructionsSeeItNow !== undefined) {
-            updateData.renderInstructionsSeeItNow = instructionsSeeItNow;
-        }
-        
-        // Add placementFields if provided (mark all fields as merchant-owned when saved)
-        if (placementFields !== null) {
-            // Mark all fields in placementFields as merchant-owned
-            const placementFieldsWithSource = {
-                ...placementFields,
-                fieldSource: {}
-            };
-            // Mark each field as merchant-owned
-            const fieldsToMark = ['surface', 'material', 'orientation', 'shadow', 'dimensions', 'additionalNotes'];
-            fieldsToMark.forEach(field => {
-                if (placementFields.hasOwnProperty(field)) {
-                    placementFieldsWithSource.fieldSource[field] = 'merchant';
-                }
-            });
-            updateData.placementFields = placementFieldsWithSource;
-        }
-        
-        // Add placement rules if provided (also mark as merchant-owned when explicitly set)
-        if (sceneRole !== null) {
-            updateData.sceneRole = sceneRole;
-        }
-        if (replacementRule !== null) {
-            updateData.replacementRule = replacementRule;
-        }
-        if (allowSpaceCreation !== null) {
-            updateData.allowSpaceCreation = allowSpaceCreation;
-        }
-        
-        // Mark placement rules as merchant-owned in fieldSource when explicitly set
-        if (sceneRole !== null || replacementRule !== null || allowSpaceCreation !== null) {
-            const existingFieldSource = asset?.fieldSource ? (typeof asset.fieldSource === 'object' ? asset.fieldSource : {}) : {};
-            const updatedFieldSource = { ...existingFieldSource };
-            if (sceneRole !== null) updatedFieldSource.sceneRole = 'merchant';
-            if (replacementRule !== null) updatedFieldSource.replacementRule = 'merchant';
-            if (allowSpaceCreation !== null) updatedFieldSource.allowSpaceCreation = 'merchant';
-            updateData.fieldSource = updatedFieldSource;
-        }
 
-        // Add See It Now generated prompt fields if provided
-        if (generatedSeeItNowPrompt !== undefined) {
-            updateData.generatedSeeItNowPrompt = generatedSeeItNowPrompt;
-        }
-        if (seeItNowVariants !== undefined) {
-            updateData.seeItNowVariants = seeItNowVariants;
-        }
-        if (useGeneratedPrompt !== undefined) {
-            updateData.useGeneratedPrompt = useGeneratedPrompt;
-        }
         if (merchantOverrides !== undefined) {
             updateData.merchantOverrides = merchantOverrides;
         }
@@ -240,7 +121,6 @@ export const action = async ({ request }) => {
             // If status is not ready/live, don't change it (e.g., preparing, failed, pending)
 
             // Sync "see-it-live" tag to Shopify product so storefront can conditionally show button
-            // Only sync if we're actually transitioning to/from live status
             if (updateData.status === "live" || (currentStatus === "live" && !enabled)) {
                 const tagResult = await setSeeItLiveTag(admin, productId, enabled);
                 if (!tagResult.success) {
@@ -273,8 +153,7 @@ export const action = async ({ request }) => {
         }
 
         if (!asset) {
-            // No asset exists yet - create a minimal one to store instructions
-            // This allows setting instructions before background removal
+            // No asset exists yet - create a minimal one
             asset = await prisma.productAsset.create({
                 data: {
                     shopId: shop.id,
@@ -291,32 +170,8 @@ export const action = async ({ request }) => {
 
             logger.info(
                 { ...logContext, stage: "created" },
-                `Created new asset with instructions for product ${productId}`
+                `Created new asset for product ${productId}`
             );
-
-            // Emit merchant_placement_saved event for newly created asset
-            await emitPrepEvent(
-                {
-                    assetId: asset.id,
-                    productId: productId,
-                    shopId: shop.id,
-                    eventType: "merchant_placement_saved",
-                    actorType: "merchant",
-                    payload: {
-                        renderInstructions: instructions.trim() || undefined,
-                        renderInstructionsSeeItNow: instructionsSeeItNow !== undefined ? instructionsSeeItNow || undefined : undefined,
-                        placementFields: placementFields || undefined,
-                        sceneRole: sceneRole || undefined,
-                        replacementRule: replacementRule || undefined,
-                        allowSpaceCreation: allowSpaceCreation !== null ? allowSpaceCreation : undefined,
-                        isNewAsset: true,
-                    },
-                },
-                session,
-                requestId
-            ).catch(() => {
-                // Non-critical
-            });
 
             // If merchantOverrides were provided, attempt to rebuild v2 prompt pack immediately.
             if (merchantOverrides !== undefined) {
@@ -325,7 +180,7 @@ export const action = async ({ request }) => {
                         return json({
                             success: true,
                             message:
-                                "Saved. See It Now facts are not extracted yet; prompt pack will generate after preparation.",
+                                "Saved. Facts are not extracted yet; prompt pack will generate after preparation.",
                             assetId: asset.id,
                             status: asset.status,
                             enabled: asset.enabled || false,
@@ -352,7 +207,7 @@ export const action = async ({ request }) => {
                     });
                     return json({
                         success: true,
-                        message: "Saved and regenerated See It Now placement set",
+                        message: "Saved and regenerated placement set",
                         assetId: asset.id,
                         status: asset.status,
                         enabled: asset.enabled || false,
@@ -364,7 +219,7 @@ export const action = async ({ request }) => {
                     return json(
                         {
                             success: false,
-                            error: `Saved placement fields, but failed to regenerate See It Now prompt pack: ${msg}`,
+                            error: `Saved overrides, but failed to regenerate prompt pack: ${msg}`,
                         },
                         { status: 500 }
                     );
@@ -373,22 +228,12 @@ export const action = async ({ request }) => {
 
             return json({
                 success: true,
-                message: "Instructions saved (new asset created)",
+                message: "Asset created",
                 assetId: asset.id,
                 status: asset.status,
                 enabled: asset.enabled || false,
             });
         }
-
-        // Capture before state for diff (if needed)
-        const beforeState = {
-            renderInstructions: asset.renderInstructions,
-            renderInstructionsSeeItNow: asset.renderInstructionsSeeItNow,
-            placementFields: asset.placementFields,
-            sceneRole: asset.sceneRole,
-            replacementRule: asset.replacementRule,
-            allowSpaceCreation: asset.allowSpaceCreation,
-        };
 
         // Update existing asset
         const updatedAsset = await prisma.productAsset.update({
@@ -398,7 +243,7 @@ export const action = async ({ request }) => {
 
         logger.info(
             { ...logContext, stage: "updated" },
-            `Updated instructions for asset ${asset.id}`
+            `Updated asset ${asset.id}`
         );
 
         // Emit merchant_placement_saved event
@@ -410,22 +255,8 @@ export const action = async ({ request }) => {
                 eventType: "merchant_placement_saved",
                 actorType: "merchant",
                 payload: {
-                    renderInstructions: instructions.trim() || undefined,
-                    renderInstructionsSeeItNow: instructionsSeeItNow !== undefined ? instructionsSeeItNow || undefined : undefined,
-                    placementFields: placementFields || undefined,
-                    sceneRole: sceneRole || undefined,
-                    replacementRule: replacementRule || undefined,
-                    allowSpaceCreation: allowSpaceCreation !== null ? allowSpaceCreation : undefined,
-                    before: beforeState.renderInstructions !== instructions.trim() || instructionsSeeItNow !== undefined || placementFields !== null || sceneRole !== null || replacementRule !== null || allowSpaceCreation !== null
-                        ? {
-                            renderInstructions: beforeState.renderInstructions || undefined,
-                            renderInstructionsSeeItNow: instructionsSeeItNow !== undefined ? (beforeState.renderInstructionsSeeItNow || undefined) : undefined,
-                            placementFields: beforeState.placementFields ? (typeof beforeState.placementFields === 'object' ? beforeState.placementFields : undefined) : undefined,
-                            sceneRole: beforeState.sceneRole || undefined,
-                            replacementRule: beforeState.replacementRule || undefined,
-                            allowSpaceCreation: beforeState.allowSpaceCreation !== null ? beforeState.allowSpaceCreation : undefined,
-                        }
-                        : undefined,
+                    merchantOverrides: merchantOverrides !== undefined ? merchantOverrides : undefined,
+                    enabled: enabled !== null ? enabled : undefined,
                 },
             },
             session,
@@ -434,14 +265,14 @@ export const action = async ({ request }) => {
             // Non-critical
         });
 
-        // If merchantOverrides were provided, regenerate See It Now v2 prompt pack immediately.
+        // If merchantOverrides were provided, regenerate prompt pack immediately.
         if (merchantOverrides !== undefined) {
             try {
                 if (!updatedAsset.extractedFacts) {
                     return json({
                         success: true,
                         message:
-                            "Saved. See It Now facts are not extracted yet; prompt pack will generate after preparation.",
+                            "Saved. Facts are not extracted yet; prompt pack will generate after preparation.",
                         assetId: asset.id,
                         status: updatedAsset.status,
                         enabled: updatedAsset.enabled,
@@ -471,7 +302,7 @@ export const action = async ({ request }) => {
 
                 return json({
                     success: true,
-                    message: "Saved and regenerated See It Now placement set",
+                    message: "Saved and regenerated placement set",
                     assetId: asset.id,
                     status: updatedAsset.status,
                     enabled: updatedAsset.enabled,
@@ -483,7 +314,7 @@ export const action = async ({ request }) => {
                 return json(
                     {
                         success: false,
-                        error: `Saved placement fields, but failed to regenerate See It Now prompt pack: ${msg}`,
+                        error: `Saved overrides, but failed to regenerate prompt pack: ${msg}`,
                     },
                     { status: 500 }
                 );
@@ -492,7 +323,7 @@ export const action = async ({ request }) => {
 
         return json({
             success: true,
-            message: "Instructions saved",
+            message: "Saved",
             assetId: asset.id,
             status: updatedAsset.status,
             enabled: updatedAsset.enabled,
@@ -508,4 +339,3 @@ export const action = async ({ request }) => {
         }, { status: 500 });
     }
 };
-
