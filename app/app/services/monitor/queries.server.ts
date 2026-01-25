@@ -148,7 +148,8 @@ export async function getRunDetail(
   );
 
   // Format LLM calls - only include debugPayload if reveal is enabled
-  const formattedCalls: LLMCallSummaryV1[] = llmCalls.map((call) => {
+  const formattedCalls: LLMCallSummaryV1[] = llmCalls.map(
+    (call: (typeof llmCalls)[number]) => {
     const result: LLMCallSummaryV1 = {
       id: call.id,
       variantId: call.variantId,
@@ -167,7 +168,8 @@ export async function getRunDetail(
     }
 
     return result;
-  });
+    }
+  );
 
   return {
     id: run.id,
@@ -748,7 +750,8 @@ export async function getRunDetailExternal(
   );
 
   // Format LLM calls
-  const formattedCalls: LLMCallSummaryV1[] = llmCalls.map((call) => {
+  const formattedCalls: LLMCallSummaryV1[] = llmCalls.map(
+    (call: (typeof llmCalls)[number]) => {
     const result: LLMCallSummaryV1 = {
       id: call.id,
       variantId: call.variantId,
@@ -767,7 +770,8 @@ export async function getRunDetailExternal(
     }
 
     return result;
-  });
+    }
+  );
 
   const result: ExternalRunDetail = {
     id: run.id,

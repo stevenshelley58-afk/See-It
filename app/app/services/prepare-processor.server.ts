@@ -548,7 +548,12 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
                             imageUrls: Array.from(uniqueImages),
                         };
 
-                        extractedFacts = await extractProductFacts(extractionInput, itemRequestId);
+                        extractedFacts = await extractProductFacts({
+                            input: extractionInput,
+                            productAssetId: asset.id,
+                            shopId: asset.shopId,
+                            traceId: itemRequestId,
+                        });
 
                         logger.info(
                             createLogContext("prepare", itemRequestId, "extraction-complete", {
@@ -1280,7 +1285,12 @@ async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<b
         };
 
         const needsExtract = !asset.extractedFacts;
-        const extractedFacts = (asset.extractedFacts as any) || await extractProductFacts(extractionInput, itemRequestId);
+        const extractedFacts = (asset.extractedFacts as any) || await extractProductFacts({
+            input: extractionInput,
+            productAssetId: asset.id,
+            shopId: asset.shopId,
+            traceId: itemRequestId,
+        });
         const merchantOverrides = (asset.merchantOverrides as any) || null;
         const resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
         const placementSet = await buildPlacementSet({

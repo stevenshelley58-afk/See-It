@@ -519,7 +519,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               };
 
               if (extractionInput.title && extractionInput.imageUrls.length > 0) {
-                const extractedFacts = await extractProductFacts(extractionInput, requestId);
+                const extractedFacts = await extractProductFacts({
+                  input: extractionInput,
+                  productAssetId: productAsset.id,
+                  shopId: shop.id,
+                  traceId: requestId,
+                });
                 const merchantOverrides =
                   (productAsset.merchantOverrides as Record<string, unknown> | null) ||
                   null;
@@ -801,17 +806,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             },
             onVariantCompleted: async (v) => {
               // Maintain progress counts.
-              if (v.status === "success") progress.succeeded += 1;
+              if (v.status === "SUCCESS") progress.succeeded += 1;
               else progress.failed += 1;
               progress.inFlight = Math.max(0, progress.inFlight - 1);
               send("progress", { ...progress });
 
               // Stream only when we have an image URL, otherwise still inform client of failures/timeouts.
-              if (v.status === "success" && v.imageKey) {
+              if (v.status === "SUCCESS" && v.imageRef) {
                 let imageUrl: string | null = null;
                 try {
                   imageUrl = await StorageService.getSignedReadUrl(
-                    v.imageKey,
+                    v.imageRef,
                     60 * 60 * 1000
                   );
                 } catch {
@@ -846,7 +851,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           const durationMs = Date.now() - startTime;
 
           const successVariants = result.variants
-            .filter((v) => v.status === "success" && v.imageKey)
+            .filter((v) => v.status === "SUCCESS" && v.imageRef)
             .map((v) => v.variantId);
 
           send("complete", {

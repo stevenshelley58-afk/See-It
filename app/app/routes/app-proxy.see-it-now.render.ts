@@ -517,7 +517,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       };
 
       if (extractionInput.title && extractionInput.imageUrls.length > 0) {
-        const extractedFacts = await extractProductFacts(extractionInput, requestId);
+        const extractedFacts = await extractProductFacts({
+          input: extractionInput,
+          productAssetId: productAsset.id,
+          shopId: shop.id,
+          traceId: requestId,
+        });
         const merchantOverrides = (productAsset.merchantOverrides as Record<string, unknown> | null) || null;
         resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
         placementSet = await buildPlacementSet({
@@ -778,11 +783,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Build response variants with signed URLs
     const responseVariants = await Promise.all(
       result.variants
-        .filter((v) => v.status === "success" && v.imageKey)
+        .filter((v) => v.status === "SUCCESS" && v.imageRef)
         .map(async (v) => ({
           id: v.variantId,
           image_url: await StorageService.getSignedReadUrl(
-            v.imageKey!,
+            v.imageRef!,
             60 * 60 * 1000
           ),
           latency_ms: v.latencyMs,

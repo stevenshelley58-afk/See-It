@@ -587,10 +587,10 @@ export async function renderAllVariants(
           errorCode: result.errorCode,
           errorMessage: result.errorMessage,
         },
-      }).catch(e => {
+      }).catch((e: unknown) => {
         logger.error(
           { ...logContext, variantId: result.variantId },
-          `Failed to write variant result: ${e}`
+          `Failed to write variant result: ${e instanceof Error ? e.message : String(e)}`
         );
       });
 

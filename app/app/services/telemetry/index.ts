@@ -61,6 +61,5 @@ export type {
   RecordVariantStartInput,
   RecordVariantResultInput,
   CompleteRunInput,
-  ImageMeta,
   TraceContext,
 } from "./types";
