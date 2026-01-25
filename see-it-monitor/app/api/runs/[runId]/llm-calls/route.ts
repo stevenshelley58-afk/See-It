@@ -28,6 +28,7 @@ export async function GET(
   context: RouteContext
 ): Promise<NextResponse> {
   const { runId } = await context.params;
+  const reveal = request.nextUrl.searchParams.get("_reveal") === "true";
 
   if (!runId) {
     return jsonError(400, "bad_request", "Run ID is required");
@@ -87,6 +88,7 @@ export async function GET(
         resolutionHash: true,
         requestHash: true,
         inputRef: true,
+        inputPayload: reveal, // sensitive; only return when explicitly revealed
         outputRef: true,
       },
     });
@@ -97,6 +99,8 @@ export async function GET(
       costEstimate: call.costEstimate ? Number(call.costEstimate) : null,
       startedAt: call.startedAt.toISOString(),
       finishedAt: call.finishedAt ? call.finishedAt.toISOString() : null,
+      // Prisma omits fields not selected; normalize to null for API clients
+      inputPayload: (call as any).inputPayload ?? null,
     }));
 
     return jsonSuccess({

@@ -15,7 +15,7 @@
 // =============================================================================
 
 import { createHash } from "crypto";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 
 // Import prompts from existing config files
 import {
@@ -186,7 +186,7 @@ async function seedSystemPrompts(): Promise<void> {
         name: prompt.name,
         description: prompt.description,
         defaultModel: prompt.defaultModel,
-        defaultParams: prompt.defaultParams,
+        defaultParams: (prompt.defaultParams ?? undefined) as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -209,7 +209,7 @@ async function seedSystemPrompts(): Promise<void> {
         developerTemplate: prompt.developerTemplate,
         userTemplate: prompt.userTemplate,
         model: prompt.defaultModel,
-        params: prompt.defaultParams,
+        params: (prompt.defaultParams ?? undefined) as unknown as Prisma.InputJsonValue,
         templateHash,
         changeNotes: "Initial version migrated from hardcoded prompts",
         createdBy: "system",

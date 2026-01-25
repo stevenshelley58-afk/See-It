@@ -5,6 +5,7 @@ import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { removeBackgroundFast, isBackgroundRemoverAvailable } from "../services/background-remover.server";
 import { emitPrepEvent } from "../services/prep-events.server";
+import { trimTransparentPaddingPng } from "../services/image-prep/trim-alpha.server";
 import sharp from "sharp";
 
 const MAX_EDIT_EDGE_PX = 4096;
@@ -306,10 +307,7 @@ export const action = async ({ request }) => {
         // during placement and in final renders.
         try {
             const beforeMeta = await sharp(resultBuffer).metadata();
-            const trimmed = await sharp(resultBuffer)
-                .trim() // removes fully-transparent edges (top-left is transparent)
-                .png()
-                .toBuffer();
+            const trimmed = await trimTransparentPaddingPng(resultBuffer);
             const afterMeta = await sharp(trimmed).metadata();
 
             if (afterMeta.width && afterMeta.height && beforeMeta.width && beforeMeta.height) {

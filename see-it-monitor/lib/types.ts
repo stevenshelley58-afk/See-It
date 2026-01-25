@@ -280,6 +280,7 @@ export interface LLMCall {
   resolutionHash: string;
   requestHash: string;
   inputRef: LLMCallInputRef | null;
+  inputPayload: Record<string, unknown> | null;
   outputRef: LLMCallOutputRef | null;
 }
 

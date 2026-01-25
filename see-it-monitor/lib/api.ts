@@ -116,8 +116,17 @@ export async function getRunArtifacts(
 /**
  * Get LLM calls for a run by ID (internal API - uses local Prisma)
  */
-export async function getRunLLMCalls(runId: string): Promise<LLMCallsResponse> {
-  const url = new URL(`${INTERNAL_API_BASE}/runs/${runId}/llm-calls`, window.location.origin);
+export async function getRunLLMCalls(
+  runId: string,
+  options?: { reveal?: boolean }
+): Promise<LLMCallsResponse> {
+  const url = new URL(
+    `${INTERNAL_API_BASE}/runs/${runId}/llm-calls`,
+    window.location.origin
+  );
+  if (options?.reveal) {
+    url.searchParams.set("_reveal", "true");
+  }
 
   const response = await fetch(url.toString());
 

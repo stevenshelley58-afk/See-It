@@ -24,6 +24,11 @@ export interface StartLLMCallInput {
   params: Record<string, unknown>;
   imageRefs: string[];
   resolutionHash: string; // From resolver
+  /**
+   * Full request payload for debugging/replay.
+   * IMPORTANT: May contain sensitive content; only expose behind "Reveal".
+   */
+  inputPayload?: Record<string, unknown> | null;
 }
 
 export interface CompleteLLMCallInput {
@@ -128,6 +133,7 @@ export async function startLLMCall(input: StartLLMCallInput): Promise<string> {
       status: "STARTED",
       startedAt: new Date(),
       inputRef,
+      inputPayload: input.inputPayload ?? null,
     },
   });
 
@@ -515,9 +521,9 @@ export async function getPromptCallStats(
   }
 
   // Calculate percentiles from sorted latencies
-  const latencies = latencyResult
-    .map((r) => r.latencyMs)
-    .filter((l): l is number => l !== null);
+  const latencies = (latencyResult as Array<{ latencyMs: number | null }>)
+    .map((r: { latencyMs: number | null }) => r.latencyMs)
+    .filter((l: number | null): l is number => l !== null);
 
   const latencyP50 =
     latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.5)] : null;

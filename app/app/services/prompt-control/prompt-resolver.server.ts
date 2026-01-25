@@ -126,7 +126,7 @@ export function computeRequestHash(
  */
 export function renderTemplate(
   template: string | null,
-  variables: Record<string, string>
+  variables: Record<string, unknown>
 ): string | null {
   if (!template) return null;
 

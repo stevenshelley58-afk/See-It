@@ -5,6 +5,7 @@ import { removeBackgroundFast } from "../services/background-remover.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { emitPrepEvent } from "../services/prep-events.server";
+import { trimTransparentPaddingPng } from "../services/image-prep/trim-alpha.server";
 import sharp from "sharp";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
@@ -151,10 +152,7 @@ export const action = async ({ request }) => {
         let preparedBuffer = result.imageBuffer;
         try {
             const beforeMeta = await sharp(preparedBuffer).metadata();
-            const trimmed = await sharp(preparedBuffer)
-                .trim()
-                .png()
-                .toBuffer();
+            const trimmed = await trimTransparentPaddingPng(preparedBuffer);
             const afterMeta = await sharp(trimmed).metadata();
 
             if (afterMeta.width && afterMeta.height && beforeMeta.width && beforeMeta.height) {

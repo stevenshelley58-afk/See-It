@@ -5,7 +5,7 @@
 
 import { createHash } from "crypto";
 import prisma from "~/db.server";
-import type { PromptStatus, AuditAction } from "@prisma/client";
+import type { Prisma, PromptStatus, AuditAction } from "@prisma/client";
 
 // =============================================================================
 // Types
@@ -129,7 +129,7 @@ export async function createVersion(input: CreateVersionInput) {
   });
 
   // Use a transaction with serializable isolation to prevent race conditions
-  const version = await prisma.$transaction(async (tx) => {
+  const version = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     // 1. Find the prompt definition
     const definition = await tx.promptDefinition.findUnique({
       where: { shopId_name: { shopId, name: promptName } },
@@ -157,7 +157,8 @@ export async function createVersion(input: CreateVersionInput) {
         developerTemplate: developerTemplate ?? null,
         userTemplate: userTemplate ?? null,
         model: model ?? null,
-        params: params ?? null,
+        // Prisma JSON inputs require InputJsonValue (not Record<string, unknown>)
+        params: (params ?? undefined) as unknown as Prisma.InputJsonValue,
         templateHash,
         changeNotes,
         createdBy,
@@ -201,7 +202,7 @@ export async function createVersion(input: CreateVersionInput) {
 export async function activateVersion(input: ActivateVersionInput) {
   const { shopId, promptName, versionId, activatedBy } = input;
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     // 1. Find the prompt definition
     const definition = await tx.promptDefinition.findUnique({
       where: { shopId_name: { shopId, name: promptName } },
@@ -302,7 +303,7 @@ export async function rollbackToPreviousVersion(input: {
 }) {
   const { shopId, promptName, rolledBackBy } = input;
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     // 1. Find the prompt definition
     const definition = await tx.promptDefinition.findUnique({
       where: { shopId_name: { shopId, name: promptName } },
@@ -466,8 +467,8 @@ export async function getPromptWithVersions(shopId: string, promptName: string) 
     return null;
   }
 
-  const activeVersion = definition.versions.find((v) => v.status === "ACTIVE") ?? null;
-  const draftVersion = definition.versions.find((v) => v.status === "DRAFT") ?? null;
+  const activeVersion = definition.versions.find((v: any) => v.status === "ACTIVE") ?? null;
+  const draftVersion = definition.versions.find((v: any) => v.status === "DRAFT") ?? null;
 
   return {
     definition,
@@ -495,9 +496,9 @@ export async function listPromptsForShop(shopId: string) {
     orderBy: { name: "asc" },
   });
 
-  return definitions.map((def) => ({
+  return definitions.map((def: any) => ({
     ...def,
-    activeVersion: def.versions.find((v) => v.status === "ACTIVE") ?? null,
-    draftVersion: def.versions.find((v) => v.status === "DRAFT") ?? null,
+    activeVersion: def.versions.find((v: any) => v.status === "ACTIVE") ?? null,
+    draftVersion: def.versions.find((v: any) => v.status === "DRAFT") ?? null,
   }));
 }

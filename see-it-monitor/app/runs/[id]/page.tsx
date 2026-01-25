@@ -973,6 +973,20 @@ function LLMCallRow({ call, runStartTime }: LLMCallRowProps) {
             </div>
           )}
 
+          {/* Full Input Payload (Reveal-gated) */}
+          <div>
+            <p className="text-xs text-gray-500 uppercase mb-2">Full Input Payload</p>
+            {call.inputPayload ? (
+              <pre className="text-xs bg-gray-50 p-3 rounded-lg overflow-auto max-h-96">
+                {JSON.stringify(call.inputPayload, null, 2)}
+              </pre>
+            ) : (
+              <p className="text-xs text-gray-400">
+                {"Toggle Reveal to view full input payload (or this run predates full payload logging)."}
+              </p>
+            )}
+          </div>
+
           {/* Output Reference */}
           {call.outputRef && (
             <div>
@@ -1440,8 +1454,8 @@ export default function RunPlaybackPage() {
 
   // LLM Calls query (enabled after run loads)
   const llmCallsQuery = useQuery({
-    queryKey: queryKeys.runs.llmCalls(id),
-    queryFn: () => getRunLLMCalls(id),
+    queryKey: [...queryKeys.runs.llmCalls(id), reveal],
+    queryFn: () => getRunLLMCalls(id, { reveal }),
     enabled: runQuery.isSuccess,
   });
 

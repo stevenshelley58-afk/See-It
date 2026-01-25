@@ -753,7 +753,6 @@ describe("Prompt Version Manager", () => {
     it("should not archive an active version directly", async () => {
       const shopId = "shop-1";
       const activeVersion = createMockVersion("def-1", 1, "ACTIVE", "ver-1");
-      activeVersion.promptDefinition = createMockDefinition(shopId, "extractor") as any;
 
       mockPrisma.promptVersion.findUnique.mockResolvedValue({
         ...activeVersion,

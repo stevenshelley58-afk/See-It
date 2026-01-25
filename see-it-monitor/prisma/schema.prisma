@@ -5,6 +5,9 @@
 
 generator client {
   provider = "prisma-client-js"
+  // Windows on ARM (Node arm64) has issues loading the Node-API engine (.dll.node).
+  // Use the binary engine to ensure local dev/build works on win32 arm64.
+  engineType = "binary"
 }
 
 datasource db {
@@ -190,6 +193,7 @@ model LLMCall {
   providerModel     String? @map("provider_model")
 
   inputRef  Json? @map("input_ref")
+  inputPayload Json? @map("input_payload")
   outputRef Json? @map("output_ref")
 
   createdAt DateTime @default(now()) @map("created_at")

@@ -132,6 +132,10 @@ function hashBuffer(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
 }
 
+function stableJsonSha256_16(value: unknown): string {
+  return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
+}
+
 /**
  * Tracking context for prompt control integration
  */
@@ -159,6 +163,10 @@ async function renderSingleVariant(
   const variantLogContext = { ...logContext, variantId };
 
   logger.info(variantLogContext, `Rendering variant ${variantId}`);
+
+  const roomWidth = roomImage.meta?.width;
+  const roomHeight = roomImage.meta?.height;
+  const aspectRatio = findClosestGeminiRatioLabel(roomWidth, roomHeight);
 
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY not set");
@@ -285,10 +293,6 @@ async function renderSingleVariant(
 
   // Define the LLM call executor
   const executeGeminiCall = async () => {
-    const roomWidth = roomImage.meta?.width;
-    const roomHeight = roomImage.meta?.height;
-    const aspectRatio = findClosestGeminiRatioLabel(roomWidth, roomHeight);
-
     logger.info(
       { ...variantLogContext, stage: "aspect-ratio", roomWidth, roomHeight, aspectRatio },
       `Variant ${variantId} aspect ratio resolved: ${aspectRatio ?? "none"}`
@@ -425,6 +429,77 @@ async function renderSingleVariant(
 
     // If we have tracking context, wrap the call with trackedLLMCall
     if (trackingContext) {
+      // Build a provider-style request summary for debugging (no raw base64 stored).
+      const productMime = `image/${productImage.meta.format === "jpeg" ? "jpeg" : productImage.meta.format}`;
+      const roomMime = `image/${roomImage.meta.format === "jpeg" ? "jpeg" : roomImage.meta.format}`;
+      const inputPayload = {
+        kind: "see-it-now.global_render",
+        variantId,
+        promptName: "global_render",
+        // These are what we *intend* to call with (actual used model may be PRO if fallback kicks in)
+        baseModel: BASE_RENDER_MODEL,
+        imageRefs,
+        images: [
+          productImage.geminiUri
+            ? {
+                role: "prepared_product_image",
+                source: "fileData",
+                mimeType: productMime,
+                fileUri: productImage.geminiUri,
+              }
+            : {
+                role: "prepared_product_image",
+                source: "inlineData",
+                mimeType: productMime,
+                byteLength: productImage.buffer.byteLength,
+                sha256_16: hashBuffer(productImage.buffer),
+              },
+          roomImage.geminiUri
+            ? {
+                role: "customer_room_image",
+                source: "fileData",
+                mimeType: roomMime,
+                fileUri: roomImage.geminiUri,
+              }
+            : {
+                role: "customer_room_image",
+                source: "inlineData",
+                mimeType: roomMime,
+                byteLength: roomImage.buffer.byteLength,
+                sha256_16: hashBuffer(roomImage.buffer),
+              },
+        ],
+        roomMeta: roomImage.meta,
+        productMeta: productImage.meta,
+        aspectRatio,
+        // This is the full text prompt we send (this is what you need when renders are bad)
+        finalPrompt,
+        finalPromptLength: finalPrompt.length,
+        finalPromptSha256_16: stableJsonSha256_16(finalPrompt),
+        // What we'll pass to Gemini (minus raw base64)
+        geminiRequest: {
+          model: BASE_RENDER_MODEL,
+          contents: [
+            {
+              role: "user",
+              parts: [
+                productImage.geminiUri
+                  ? { fileData: { mimeType: productMime, fileUri: productImage.geminiUri } }
+                  : { inlineData: { mimeType: productMime, byteLength: productImage.buffer.byteLength, sha256_16: hashBuffer(productImage.buffer) } },
+                roomImage.geminiUri
+                  ? { fileData: { mimeType: roomMime, fileUri: roomImage.geminiUri } }
+                  : { inlineData: { mimeType: roomMime, byteLength: roomImage.buffer.byteLength, sha256_16: hashBuffer(roomImage.buffer) } },
+                { text: finalPrompt },
+              ],
+            },
+          ],
+          config: {
+            responseModalities: ["TEXT", "IMAGE"],
+            ...(aspectRatio ? { imageConfig: { aspectRatio } } : {}),
+          },
+        },
+      };
+
       geminiResult = await trackedLLMCall(
         {
           shopId: trackingContext.shopId,
@@ -434,9 +509,13 @@ async function renderSingleVariant(
           promptVersionId: trackingContext.promptVersionId,
           model: BASE_RENDER_MODEL,
           messages: [{ role: "user", content: finalPrompt }],
-          params: { responseModalities: ["TEXT", "IMAGE"] },
+          params: {
+            responseModalities: ["TEXT", "IMAGE"],
+            ...(aspectRatio ? { imageConfig: { aspectRatio } } : {}),
+          },
           imageRefs,
           resolutionHash: trackingContext.resolutionHash,
+          inputPayload,
         },
         executeGeminiCall
       );
@@ -513,7 +592,7 @@ async function renderSingleVariant(
         blockReason: isBlocked ? error.blockReason ?? null : undefined,
         causeId: isBlocked ? error.causeId : undefined,
       },
-    };
+    } as any;
   }
 }
 

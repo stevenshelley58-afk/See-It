@@ -640,6 +640,9 @@ model LLMCall {
 
   // References (truncated for storage)
   inputRef  Json? @map("input_ref") // { messageCount, imageCount, preview, resolutionHash }
+  // Full request payload (for debugging / replay). May include sensitive content.
+  // Stored as JSONB to allow rich inspection in See It Monitor (gated behind Reveal).
+  inputPayload Json? @map("input_payload")
   outputRef Json? @map("output_ref") // { preview, length }
 
   createdAt DateTime @default(now()) @map("created_at")

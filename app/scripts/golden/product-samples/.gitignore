@@ -1,0 +1,9 @@
+#
+# Keep sample images out of git history.
+# Place local test images here when running golden tests.
+#
+*.png
+*.jpg
+*.jpeg
+*.webp
+
