@@ -82,10 +82,14 @@ extractedAt       DateTime?
 
 ## Commands
 ```bash
-npm run dev          # Local dev
 npm run build        # Build (run before commit)
-npx prisma studio    # View database
+npm run deploy       # Deploy Shopify app config
 ```
+
+## Deployment
+- **App**: Push to GitHub → Railway auto-deploys
+- **Monitor**: Push to GitHub → Vercel auto-deploys
+- **Local dev not supported** - no local database or tunnel
 
 ## Rules
 1. Read the spec before coding: `docs/PRODUCT_PREP_REDESIGN.md`

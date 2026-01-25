@@ -8,7 +8,7 @@
     "check:consistency": "tsx scripts/check-schema-sync.ts && tsx scripts/check-deprecations.ts",
     "prebuild": "npm run check:consistency",
     "build": "remix vite:build",
-    "dev": "shopify app dev",
+    "dev": "echo 'Local dev not supported. Deploy to Railway.' && exit 1",
     "config:link": "shopify app config link",
     "app:generate": "shopify app generate",
     "predeploy": "node scripts/inject-version.js",

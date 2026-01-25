@@ -43,20 +43,11 @@ Set these environment variables in your Vercel project settings:
 
 After setting environment variables, a new deployment is required to pick them up.
 
-### Development
+### Deployment
 
-```bash
-npm run dev
-```
+Push to GitHub → Vercel auto-deploys.
 
-Open [http://localhost:3001](http://localhost:3001) in your browser.
-
-### Production Build
-
-```bash
-npm run build
-npm start
-```
+**Local development is not supported.**
 
 ## Architecture
 

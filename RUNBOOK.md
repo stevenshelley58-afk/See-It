@@ -1,77 +1,78 @@
 # Runbook: See It Shopify App
 
-## 0. Prerequisites
+## Deployment Architecture
 
-Before you start, ensure you have the following:
+- **Main App**: Railway (auto-deploys from GitHub)
+- **Monitor Dashboard**: Vercel (auto-deploys from GitHub)
+- **Database**: PostgreSQL on Railway
+- **Local development is NOT supported**
 
-1.  **Node.js**: Version 18.20+, 20.10+, or 21.0.0+. [Download Node.js](https://nodejs.org/)
-2.  **Shopify Partner Account**: You need an account at [partners.shopify.com](https://partners.shopify.com) to create and manage apps.
-3.  **Git**: [Download Git](https://git-scm.com/downloads)
+## Environment Setup
 
-**Note on Shopify CLI**: You do **not** need to install the Shopify CLI globally. It is included in the project dependencies (`npm install` installs it locally).
+### Railway (Main App)
 
-## 1. Environment Setup
+Set these environment variables in Railway dashboard:
 
-1.  Copy `.env.example` to `.env` in the `c:\See It` directory (or `c:\See It\app` if running from there).
-2.  Fill in the required values:
-    *   `SHOPIFY_API_KEY`: From your Shopify Partner Dashboard.
-    *   `SHOPIFY_API_SECRET`: From your Shopify Partner Dashboard.
-    *   `SCOPES`: `write_products,read_products` (and any others needed).
-    *   `SHOPIFY_APP_URL`: The tunnel URL (e.g., from `npm run dev`) or your production URL.
-    *   `DATABASE_URL`: `file:dev.sqlite` (for local development).
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string (Railway provides this) |
+| `SHOPIFY_API_KEY` | From Shopify Partner Dashboard |
+| `SHOPIFY_API_SECRET` | From Shopify Partner Dashboard |
+| `SHOPIFY_APP_URL` | `https://see-it-production.up.railway.app` |
+| `GEMINI_API_KEY` | For AI compositing |
+| `GOOGLE_CREDENTIALS_JSON` | Base64-encoded GCS service account |
+| `GCS_BUCKET` | `see-it-room` |
+| `IMAGE_SERVICE_BASE_URL` | Cloud Run image service URL |
+| `IMAGE_SERVICE_TOKEN` | Shared secret for image service |
 
-## 2. Installation & Database
+### Vercel (Monitor Dashboard)
 
-Open a terminal in `c:\See It\app`:
+Set these in Vercel project settings:
 
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Same PostgreSQL connection as Railway |
+| `RAILWAY_API_URL` | `https://see-it-production.up.railway.app` |
+| `MONITOR_API_TOKEN` | API token for auth |
+
+## Deploying Changes
+
+### Code Changes
+
+1. Push to `main` branch
+2. Railway and Vercel auto-deploy
+3. Check Railway logs for any migration issues
+
+### Database Migrations
+
+Migrations run automatically on container start via `docker-start` script.
+
+For manual migration:
 ```bash
-# Install dependencies
-npm install
-
-# Generate Prisma Client
-npx prisma generate
-
-# Run Database Migrations
-npx prisma migrate dev --name init
+# From Railway CLI (if installed)
+railway run npx prisma migrate deploy
 ```
 
-## 3. Running Locally
+### Shopify App Config
 
+To update webhooks, scopes, or app settings:
 ```bash
-npm run dev
+cd app
+npm run deploy
 ```
 
-This command will:
-1.  Start the Remix server.
-2.  Start the Shopify CLI (which handles the tunnel).
-3.  Output a URL to install the app.
+## Verification
 
-## 4. Installing on a Dev Store
+1. **Railway Dashboard**: Check deployment logs for errors
+2. **Vercel Dashboard**: Check build logs
+3. **Monitor Dashboard**: Visit https://see-it-monitor.vercel.app to verify health
 
-1.  Look for the URL in the terminal output labeled "Preview your app". It will look like:
-    `https://admin.shopify.com/store/<your-store-name>/apps/<your-app-name>`
-    OR a direct tunnel URL like `https://<random-id>.trycloudflare.com`.
-2.  Click that URL.
-3.  **OAuth Flow**:
-    *   Shopify will ask you to install the app.
-    *   Click "Install app".
-    *   This hits the `/auth` route in `app/shopify.server.js`.
-    *   After approval, Shopify redirects to `/auth/callback`.
-    *   The app validates the session and redirects to `/app` (the Embedded Admin UI).
+## Troubleshooting
 
-## 5. Billing & Quotas
+### Build Fails on Schema Sync
 
-*   **Billing Creation**:
-    *   The app checks for a valid plan in `app/routes/app._index.jsx` (or where the plan selection is).
-    *   To upgrade, the app posts to `/api/billing` with `plan=PRO`.
-    *   This calls `billing.request` in `app/routes/api.billing.jsx`.
-*   **Billing Callback**:
-    *   Shopify redirects to `/api/billing/callback` after payment approval.
-    *   The `loader` in `app/routes/api.billing.callback.jsx` verifies the payment and updates `Shop.plan`, `Shop.dailyQuota`, and `Shop.monthlyQuota` in the database.
+The build runs `check:consistency` which validates that `see-it-monitor/prisma/schema.prisma` is a subset of `app/prisma/schema.prisma`. If they're out of sync, update both schemas.
 
-## 6. Verification
+### Migration Errors
 
-To verify the wiring:
-1.  **Check Logs**: Ensure no errors during `npm run dev`.
-2.  **Check Database**: Open `dev.sqlite` (using a SQLite viewer or `npx prisma studio`) and verify the `Shop` table has an entry for your store.
-3.  **Check Quotas**: Trigger a render (if implemented) and verify `UsageDaily` is updated.
+If migrations fail on deploy, check Railway logs. You may need to manually run migrations or reset the database if there's drift.
