@@ -97,6 +97,8 @@ export interface RunDetail {
   resolvedFactsSnapshot?: Record<string, unknown>;
   placementSetSnapshot?: Record<string, unknown>;
   pipelineConfigSnapshot?: Record<string, unknown>;
+  // Prompt Control Plane fields (legacy - may be deprecated)
+  resolvedConfigSnapshot?: ResolvedConfigSnapshot | null;
   // Waterfall timing (may be populated after run completes)
   waterfallMs?: WaterfallMs | null;
   runTotals?: RunTotals | null;
