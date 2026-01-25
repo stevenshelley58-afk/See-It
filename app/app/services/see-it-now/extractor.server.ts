@@ -273,6 +273,7 @@ export async function extractProductFacts(args: ExtractProductFactsInput): Promi
         contents: [{ role: "user", parts }],
         config: {
           responseMimeType: "application/json",
+          ...(resolvedPrompt.params ?? {}),
         },
       });
 
@@ -310,17 +311,37 @@ export async function extractProductFacts(args: ExtractProductFactsInput): Promi
 
         // Complete LLM call with success
         const latencyMs = Date.now() - startTime;
+        const candidates = (result as any)?.candidates;
+        const finishReason = candidates?.[0]?.finishReason ?? null;
+
+        const providerRequestId =
+          (result as any)?.response?.requestId ??
+          (result as any)?.requestId ??
+          (result as any)?.responseId ??
+          (result as any)?.response?.id ??
+          (result as any)?.id ??
+          undefined;
+
+        const usageMetadata = (result as any)?.usageMetadata;
+        const tokensIn = usageMetadata?.promptTokenCount ?? 0;
+        const tokensOut = usageMetadata?.candidatesTokenCount ?? 0;
+        const inCost = (tokensIn / 1_000_000) * 0.10;
+        const outCost = (tokensOut / 1_000_000) * 0.40;
+        const costEstimate = inCost + outCost;
+
         const outputSummary: OutputSummary = {
-          finishReason: 'STOP',
+          finishReason: String(finishReason ?? "STOP"),
+          providerRequestId,
         };
 
         await completeCallSuccess({
           callId,
-          tokensIn: 0, // TODO: Extract from response
-          tokensOut: 0,
-          costEstimate: 0,
+          tokensIn,
+          tokensOut,
+          costEstimate,
           latencyMs,
           providerModel: resolvedPrompt.model,
+          providerRequestId,
           outputSummary,
         });
 
@@ -383,20 +404,4 @@ export async function extractProductFacts(args: ExtractProductFactsInput): Promi
   }
 }
 
-// =============================================================================
-// Legacy Export for backward compatibility
-// =============================================================================
-
-/** @deprecated Use extractProductFacts with object argument instead */
-export async function extractProductFactsLegacy(
-  input: ExtractionInput,
-  requestId: string,
-  shopId?: string
-): Promise<ProductFacts> {
-  return extractProductFacts({
-    input,
-    productAssetId: 'legacy-' + requestId,
-    shopId: shopId || 'SYSTEM',
-    traceId: requestId,
-  });
-}
+// Fail-hard: no legacy exports.

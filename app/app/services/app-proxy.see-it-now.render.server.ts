@@ -1,16 +1,3 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-
-export const action = async (args: ActionFunctionArgs) => {
-  const mod = await import("~/services/app-proxy.see-it-now.render.server");
-  return mod.action(args);
-};
-
-export const loader = async (args: LoaderFunctionArgs) => {
-  const mod = await import("~/services/app-proxy.see-it-now.render.server");
-  // The implementation types loader as ActionFunctionArgs but only uses request.
-  return mod.loader(args as any);
-};
-
 // See It Now - Hero Shot Generation Endpoint
 // Uses 2-LLM pipeline: extractedFacts → resolvedFacts → placementSet → renderAllVariants
 //
@@ -687,7 +674,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         status: result.status,
         variants: responseVariants,
         duration_ms: duration,
-        version: "see-it-now",
+        version: "see-it-now-v2",
       },
       { headers: corsHeaders }
     );
@@ -718,3 +705,4 @@ export const loader = async ({ request }: ActionFunctionArgs) => {
 
   return new Response(null, { status: 204, headers: corsHeaders });
 };
+

@@ -400,71 +400,60 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
                         }
                     }
 
-                    // Step 1: Extract product facts (LLM #1)
-                    let extractedFacts = null;
-                    try {
-                        const extractionInput = {
-                            title: shopifyProduct?.title || asset.productTitle || `Product ${asset.productId}`,
-                            description: combinedDescription || "",
-                            productType: shopifyProduct?.productType || asset.productType || null,
-                            vendor: shopifyProduct?.vendor || null,
-                            tags: (shopifyProduct?.tags || []) as string[],
-                            metafields: metafieldsRecord,
-                            imageUrls: Array.from(uniqueImages),
-                        };
+                    // Step 1: Extract product facts (LLM #1) - FAIL HARD
+                    const extractionInput = {
+                        title: shopifyProduct?.title || asset.productTitle || `Product ${asset.productId}`,
+                        description: combinedDescription || "",
+                        productType: shopifyProduct?.productType || asset.productType || null,
+                        vendor: shopifyProduct?.vendor || null,
+                        tags: (shopifyProduct?.tags || []) as string[],
+                        metafields: metafieldsRecord,
+                        imageUrls: Array.from(uniqueImages),
+                    };
 
-                        extractedFacts = await extractProductFacts({
-                            input: extractionInput,
-                            productAssetId: asset.id,
-                            shopId: asset.shopId,
-                            traceId: itemRequestId,
-                        });
-
-                        logger.info(
-                            createLogContext("prepare", itemRequestId, "extraction-complete", {
-                                productKind: extractedFacts.identity?.product_kind,
-                                scaleClass: extractedFacts.relative_scale?.class,
-                            }),
-                            `Extraction complete for ${asset.productId}`
-                        );
-                    } catch (extractError) {
-                        logger.warn(
-                            createLogContext("prepare", itemRequestId, "extraction-failed", {}),
-                            `Extraction failed for ${asset.productId}, continuing with legacy flow: ${extractError instanceof Error ? extractError.message : String(extractError)}`
-                        );
+                    if (!extractionInput.title || extractionInput.imageUrls.length === 0) {
+                        throw new Error("Missing product title or images for extraction");
                     }
+
+                    const extractedFacts = await extractProductFacts({
+                        input: extractionInput,
+                        productAssetId: asset.id,
+                        shopId: asset.shopId,
+                        traceId: itemRequestId,
+                    });
+
+                    logger.info(
+                        createLogContext("prepare", itemRequestId, "extraction-complete", {
+                            productKind: extractedFacts.identity?.product_kind,
+                            scaleClass: extractedFacts.relative_scale?.class,
+                        }),
+                        `Extraction complete for ${asset.productId}`
+                    );
 
                     // Step 2: Resolve facts (merge with any existing merchant overrides)
-                    let resolvedFacts = null;
-                    if (extractedFacts) {
-                        const merchantOverrides = asset.merchantOverrides as any || null;
-                        resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
+                    const merchantOverrides = (asset.merchantOverrides as any) || null;
+                    const resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
+
+                    // Step 3: Build placement set (LLM #2) - FAIL HARD
+                    const placementSet = await buildPlacementSet({
+                        resolvedFacts,
+                        productAssetId: asset.id,
+                        shopId: asset.shopId,
+                        traceId: itemRequestId,
+                    });
+
+                    if (!placementSet?.variants || placementSet.variants.length !== 8) {
+                        throw new Error(
+                            `Invalid placement set: expected 8 variants, got ${placementSet?.variants?.length ?? 0}`
+                        );
                     }
 
-                    // Step 3: Build placement set (LLM #2)
-                    let placementSet = null;
-                    if (resolvedFacts) {
-                        try {
-                            placementSet = await buildPlacementSet({
-                                resolvedFacts,
-                                productAssetId: asset.id,
-                                shopId: asset.shopId,
-                                traceId: itemRequestId,
-                            });
-
-                            logger.info(
-                                createLogContext("prepare", itemRequestId, "placement-set-complete", {
-                                    variantCount: placementSet.variants.length,
-                                }),
-                                `Placement set built for ${asset.productId}`
-                            );
-                        } catch (buildError) {
-                            logger.warn(
-                                createLogContext("prepare", itemRequestId, "placement-set-failed", {}),
-                                `Placement set build failed for ${asset.productId}: ${buildError instanceof Error ? buildError.message : String(buildError)}`
-                            );
-                        }
-                    }
+                    logger.info(
+                        createLogContext("prepare", itemRequestId, "placement-set-complete", {
+                            variantCount: placementSet.variants.length,
+                        }),
+                        `Placement set built for ${asset.productId}`
+                    );
 
                     // Extract GCS key from the signed URL for on-demand URL generation
                     const preparedImageKey = extractGcsKeyFromUrl(prepareResult.url);
@@ -481,11 +470,11 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
                         errorMessage: null,
                         updatedAt: new Date(),
 
-                        // See It Now 2-LLM Pipeline fields (canonical)
-                        ...(extractedFacts && { extractedFacts }),
-                        ...(resolvedFacts && { resolvedFacts }),
-                        ...(placementSet && { placementSet }),
-                        ...(extractedFacts && { extractedAt: new Date() }),
+                        // See It Now 2-LLM Pipeline fields (canonical) - REQUIRED
+                        extractedFacts,
+                        resolvedFacts,
+                        placementSet,
+                        extractedAt: new Date(),
                     };
 
                     await prisma.productAsset.update({
@@ -680,7 +669,16 @@ async function processPendingRenderJobs(batchRequestId: string): Promise<boolean
 
                     // 1. Get Product Image URL (generate fresh URL if key is available)
                     const productAsset = await prisma.productAsset.findFirst({
-                        where: { shopId: job.shopId, productId: job.productId }
+                        where: { shopId: job.shopId, productId: job.productId },
+                        select: {
+                            id: true,
+                            preparedImageKey: true,
+                            preparedImageUrl: true,
+                            sourceImageUrl: true,
+                            geminiFileUri: true,
+                            geminiFileExpiresAt: true,
+                            placementSet: true,
+                        }
                     });
 
                     // Emit render_job_started event
@@ -792,16 +790,41 @@ async function processPendingRenderJobs(batchRequestId: string): Promise<boolean
                             // Reset captured telemetry for this attempt
                             capturedTelemetry = null;
 
+                            // Build placement prompt from placementSet if available
+                            let placementPrompt: string | undefined = undefined;
+                            if (productAsset?.placementSet) {
+                                try {
+                                    const placementSet = productAsset.placementSet as any;
+                                    if (placementSet?.productDescription) {
+                                        // Get variant instruction (default to V01 if no variantId in job)
+                                        const variantId = (job as any).variantId || 'V01';
+                                        const variant = placementSet.variants?.find((v: any) => v.id === variantId) || placementSet.variants?.[0];
+                                        
+                                        if (variant?.placementInstruction) {
+                                            // Combine product description with variant-specific instruction
+                                            placementPrompt = `${placementSet.productDescription}\n\n${variant.placementInstruction}`;
+                                        } else {
+                                            // Fallback to just product description
+                                            placementPrompt = placementSet.productDescription;
+                                        }
+                                    }
+                                } catch (e) {
+                                    logger.warn(
+                                        createLogContext("prepare", itemRequestId, "placement-prompt-error", {}),
+                                        `Failed to parse placementSet: ${e instanceof Error ? e.message : 'Unknown error'}`
+                                    );
+                                }
+                            }
+
                             // compositeScene now returns { imageUrl, imageKey }
-                            // Note: Legacy renderInstructions removed from schema
-                            // Placement prompts now come from placementSet in canonical pipeline
+                            // Placement prompts come from placementSet generated during batch prep
                             compositeResult = await compositeScene(
                                 productImageUrl,
                                 roomImageUrl,
                                 placement,
                                 job.stylePreset ?? "neutral",
                                 itemRequestId,
-                                undefined, // was: productAsset?.renderInstructions
+                                placementPrompt,
                                 {
                                     roomGeminiUri: roomSession.geminiFileUri,
                                     roomGeminiExpiresAt: roomSession.geminiFileExpiresAt,
@@ -1010,195 +1033,6 @@ async function processPendingRenderJobs(batchRequestId: string): Promise<boolean
     }
 }
 
-const SEE_IT_NOW_PIPELINE_BACKFILL_INTERVAL_MS = 20_000;
-let lastSeeItNowPipelineBackfillAt = 0;
-
-/**
- * Best-effort backfill for See It Now pipeline fields on live assets.
- *
- * Why: older live assets can exist without extractedFacts/resolvedFacts/placementSet
- * (e.g., prepared before canonical pipeline shipped). Those assets cause
- * /app-proxy/see-it-now/render to return 422 "pipeline_not_ready". This keeps the
- * storefront working without forcing merchants to re-prepare products.
- */
-async function processMissingSeeItNowPipeline(batchRequestId: string): Promise<boolean> {
-    const now = Date.now();
-    if (now - lastSeeItNowPipelineBackfillAt < SEE_IT_NOW_PIPELINE_BACKFILL_INTERVAL_MS) {
-        return false;
-    }
-
-    // Throttle DB polling even when there is nothing to do.
-    lastSeeItNowPipelineBackfillAt = now;
-
-    try {
-        const allowlist = getSeeItNowAllowedShops();
-        const allowedShopIds = allowlist.allowAll
-            ? null
-            : (
-                await prisma.shop.findMany({
-                    where: { shopDomain: { in: allowlist.shops } },
-                    select: { id: true },
-                })
-            ).map((s: any) => s.id);
-
-        if (Array.isArray(allowedShopIds) && allowedShopIds.length === 0) return false;
-
-        const asset = await prisma.productAsset.findFirst({
-            where: {
-                status: "live",
-                ...(Array.isArray(allowedShopIds) ? { shopId: { in: allowedShopIds } } : {}),
-                OR: [
-                    { extractedFacts: { equals: Prisma.AnyNull } },
-                    { resolvedFacts: { equals: Prisma.AnyNull } },
-                    { placementSet: { equals: Prisma.AnyNull } },
-                ],
-            },
-            orderBy: { updatedAt: "asc" },
-            select: {
-                id: true,
-                shopId: true,
-                productId: true,
-                productTitle: true,
-                productType: true,
-                sourceImageUrl: true,
-                preparedImageUrl: true,
-                extractedFacts: true,
-                merchantOverrides: true,
-                resolvedFacts: true,
-                placementSet: true,
-                shop: {
-                    select: {
-                        shopDomain: true,
-                        accessToken: true,
-                    },
-                },
-            },
-        });
-
-        if (!asset) return false;
-        if (asset.shop?.shopDomain && !isSeeItNowAllowedShop(asset.shop.shopDomain)) return false;
-
-        const itemRequestId = generateRequestId();
-        const shopDomain = asset.shop?.shopDomain || "(unknown-shop)";
-        const accessToken = asset.shop?.accessToken || null;
-
-        logger.info(
-            createLogContext("prepare", itemRequestId, "pipeline-backfill-start", {
-                assetId: asset.id,
-                shopId: asset.shopId,
-                productId: asset.productId,
-                shopDomain,
-            }),
-            `Backfilling See It Now pipeline for live product ${asset.productId}`
-        );
-
-        const shopifyProduct = accessToken
-            ? await fetchShopifyProductForPrompt(shopDomain, accessToken, asset.productId, itemRequestId)
-            : null;
-
-        const metafieldText = Array.isArray(shopifyProduct?.metafields?.edges)
-            ? shopifyProduct!.metafields!.edges!
-                .map((e) => e?.node?.value)
-                .filter(Boolean)
-                .join(" ")
-            : "";
-
-        const combinedDescription = `${shopifyProduct?.description || ""}\n${shopifyProduct?.descriptionHtml || ""}\n${metafieldText}`.trim();
-
-        const metafieldsRecord: Record<string, string> = {};
-        if (Array.isArray(shopifyProduct?.metafields?.edges)) {
-            for (const edge of shopifyProduct!.metafields!.edges!) {
-                const node = edge?.node;
-                if (node?.namespace && node?.key && node?.value) {
-                    metafieldsRecord[`${node.namespace}.${node.key}`] = node.value;
-                }
-            }
-        }
-
-        // Collect up to 3 unique images (starting with stored URLs).
-        const uniqueImages = new Set<string>();
-        if (asset.sourceImageUrl && asset.sourceImageUrl !== "pending") uniqueImages.add(asset.sourceImageUrl);
-        if (asset.preparedImageUrl && asset.preparedImageUrl !== "pending") uniqueImages.add(asset.preparedImageUrl);
-
-        if (Array.isArray(shopifyProduct?.images?.edges)) {
-            for (const edge of shopifyProduct!.images!.edges!) {
-                const url = edge?.node?.url;
-                if (url) uniqueImages.add(url);
-                if (uniqueImages.size >= 3) break;
-            }
-        }
-
-        const title = shopifyProduct?.title || asset.productTitle || `Product ${asset.productId}`;
-        if (!title || uniqueImages.size === 0) {
-            logger.warn(
-                createLogContext("prepare", itemRequestId, "pipeline-backfill-skip", {
-                    shopDomain,
-                    hasTitle: !!title,
-                    imageCount: uniqueImages.size,
-                }),
-                "Skipping See It Now pipeline backfill: insufficient product data"
-            );
-            return false;
-        }
-
-        const extractionInput = {
-            title,
-            description: combinedDescription || "",
-            productType: shopifyProduct?.productType || asset.productType || null,
-            vendor: shopifyProduct?.vendor || null,
-            tags: (shopifyProduct?.tags || []) as string[],
-            metafields: metafieldsRecord,
-            imageUrls: Array.from(uniqueImages),
-        };
-
-        const needsExtract = !asset.extractedFacts;
-        const extractedFacts = (asset.extractedFacts as any) || await extractProductFacts({
-            input: extractionInput,
-            productAssetId: asset.id,
-            shopId: asset.shopId,
-            traceId: itemRequestId,
-        });
-        const merchantOverrides = (asset.merchantOverrides as any) || null;
-        const resolvedFacts = resolveProductFacts(extractedFacts, merchantOverrides);
-        const placementSet = await buildPlacementSet({
-            resolvedFacts,
-            productAssetId: asset.id,
-            shopId: asset.shopId,
-            traceId: itemRequestId,
-        });
-
-        await prisma.productAsset.update({
-            where: { id: asset.id },
-            data: {
-                extractedFacts,
-                resolvedFacts,
-                placementSet,
-                ...(needsExtract && { extractedAt: new Date() }),
-                ...(shopifyProduct?.title && { productTitle: shopifyProduct.title }),
-                ...(shopifyProduct?.productType && { productType: shopifyProduct.productType }),
-            },
-        });
-
-        logger.info(
-            createLogContext("prepare", itemRequestId, "pipeline-backfill-complete", {
-                assetId: asset.id,
-                shopDomain,
-                productId: asset.productId,
-                variantCount: placementSet.variants.length,
-            }),
-            `Backfilled See It Now pipeline for live product ${asset.productId}`
-        );
-
-        return true;
-    } catch (error) {
-        logger.warn(
-            createLogContext("prepare", batchRequestId, "pipeline-backfill-error", {}),
-            `See It Now pipeline backfill failed: ${error instanceof Error ? error.message : String(error)}`
-        );
-        return false;
-    }
-}
-
 async function runProcessorCycle() {
     if (isProcessing) return;
     isProcessing = true;
@@ -1278,32 +1112,16 @@ async function runProcessorCycle() {
         );
     }
 
-    const didAssets = await processPendingAssets(batchRequestId);
-    const didJobs = await processPendingRenderJobs(batchRequestId);
-
-    // Only attempt v2 pipeline backfills when the system is otherwise idle.
-    if (!didAssets && !didJobs) {
-        await processMissingSeeItNowPipeline(batchRequestId);
-    }
+    await processPendingAssets(batchRequestId);
+    await processPendingRenderJobs(batchRequestId);
 
     isProcessing = false;
 }
 
-// Flag to track if processor is disabled due to missing configuration
-let processorDisabled = false;
-
 export function startPrepareProcessor() {
     // Validate required environment variables before starting
     if (!process.env.GEMINI_API_KEY) {
-        if (!processorDisabled) {
-            logger.warn(
-                createLogContext("system", "startup", "processor-disabled", {}),
-                "GEMINI_API_KEY not configured. Background processor disabled. " +
-                "Product preparation and render jobs will not be processed until API key is set."
-            );
-            processorDisabled = true;
-        }
-        return; // Gracefully exit without starting processor
+        throw new Error("GEMINI_API_KEY not configured (fail-hard): cannot start background processor");
     }
 
     if (!processorInterval) {
@@ -1311,8 +1129,9 @@ export function startPrepareProcessor() {
             try {
                 await runProcessorCycle();
             } catch (error) {
-                console.error("Critical error in processor wrapper:", error);
-                isProcessing = false;
+                // Fail-hard: crash the process so the platform restarts it.
+                console.error("Critical error in processor wrapper (fail-hard):", error);
+                process.exit(1);
             }
         };
         // Run every 5 seconds
@@ -1323,7 +1142,7 @@ export function startPrepareProcessor() {
 }
 
 export function isProcessorEnabled(): boolean {
-    return !processorDisabled && processorInterval !== null;
+    return processorInterval !== null;
 }
 
 export function stopPrepareProcessor() {

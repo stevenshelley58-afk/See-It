@@ -13,24 +13,9 @@ import { resolvePromptText } from "../prompt-control/prompt-resolver.server";
 import { startCall, completeCallSuccess, completeCallFailure } from "../prompt-control/llm-call-tracker.server";
 import { computeCallIdentityHash } from "./hashing.server";
 
-// Use an env override so we can change models without a redeploy.
-const PROMPT_BUILDER_MODEL = process.env.SEE_IT_NOW_PROMPT_BUILDER_MODEL || "gemini-2.5-flash";
+// Model selection comes from Prompt Control Plane (resolvedPrompt.model).
 
-// Legacy type for backward compatibility
-interface LegacyPromptPack {
-  product_context: string;
-  variants: Array<{ id: string; variation: string }>;
-}
-
-function transformLegacyToCanonical(legacy: LegacyPromptPack): PlacementSet {
-  return {
-    productDescription: legacy.product_context,
-    variants: legacy.variants.map(v => ({
-      id: v.id,
-      placementInstruction: v.variation,
-    })),
-  };
-}
+// Fail-hard: no legacy prompt pack support.
 
 export interface BuildPlacementSetInput {
   resolvedFacts: ProductFacts;
@@ -46,20 +31,6 @@ export async function buildPlacementSet(args: BuildPlacementSetInput): Promise<P
   });
 
   logger.info(logContext, "Building placement set");
-
-  // Emit builder started event
-  emit({
-    shopId,
-    requestId: traceId,
-    source: EventSource.PROMPT_BUILDER,
-    type: EventType.PROMPT_BUILDER_STARTED,
-    severity: Severity.INFO,
-    payload: {
-      productKind: resolvedFacts.identity?.product_kind,
-      materialPrimary: resolvedFacts.material_profile?.primary,
-      model: PROMPT_BUILDER_MODEL,
-    },
-  });
 
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY not set");
@@ -86,13 +57,26 @@ export async function buildPlacementSet(args: BuildPlacementSetInput): Promise<P
     variantIntentsJson,
   });
 
+  // Emit builder started event (fail-hard: report the actual resolved model)
+  emit({
+    shopId,
+    requestId: traceId,
+    source: EventSource.PROMPT_BUILDER,
+    type: EventType.PROMPT_BUILDER_STARTED,
+    severity: Severity.INFO,
+    payload: {
+      productKind: resolvedFacts.identity?.product_kind,
+      materialPrimary: resolvedFacts.material_profile?.primary,
+      model: resolvedPrompt.model,
+    },
+  });
+
   // Build debug payload
   const debugPayload: DebugPayload = {
     promptText: resolvedPrompt.promptText,
     model: resolvedPrompt.model,
     params: {
       responseModalities: ['TEXT'],
-      temperature: 0.2,
       ...resolvedPrompt.params,
     },
     images: [], // No images for placement set generation
@@ -137,8 +121,26 @@ export async function buildPlacementSet(args: BuildPlacementSetInput): Promise<P
           parts: [{ text: resolvedPrompt.promptText }],
         },
       ],
-      config: { responseMimeType: "application/json", temperature: 0.2 },
+      config: { responseMimeType: "application/json", ...(resolvedPrompt.params ?? {}) },
     });
+
+    const candidates = (result as any)?.candidates;
+    const finishReason = candidates?.[0]?.finishReason ?? null;
+
+    const providerRequestId =
+      (result as any)?.response?.requestId ??
+      (result as any)?.requestId ??
+      (result as any)?.responseId ??
+      (result as any)?.response?.id ??
+      (result as any)?.id ??
+      undefined;
+
+    const usageMetadata = (result as any)?.usageMetadata;
+    const tokensIn = usageMetadata?.promptTokenCount ?? 0;
+    const tokensOut = usageMetadata?.candidatesTokenCount ?? 0;
+    const inCost = (tokensIn / 1_000_000) * 0.10;
+    const outCost = (tokensOut / 1_000_000) * 0.40;
+    const costEstimate = inCost + outCost;
 
     const text = (result as { text?: string })?.text || "{}";
     let placementSet: PlacementSet;
@@ -151,16 +153,11 @@ export async function buildPlacementSet(args: BuildPlacementSetInput): Promise<P
       }
       const parsed = JSON.parse(jsonStr);
 
-      // Handle both old (product_context/variation) and new (productDescription/placementInstruction) formats
-      if ('product_context' in parsed) {
-        // Legacy format - transform to canonical
-        placementSet = transformLegacyToCanonical(parsed as LegacyPromptPack);
-      } else if ('productDescription' in parsed) {
-        // New format - use directly
-        placementSet = parsed as PlacementSet;
-      } else {
-        throw new Error("Missing productDescription or product_context in response");
+      // Fail-hard: only canonical format is accepted
+      if (!('productDescription' in parsed)) {
+        throw new Error("Missing productDescription in response");
       }
+      placementSet = parsed as PlacementSet;
     } catch (parseErr) {
       logger.error(
         { ...logContext, stage: "parse" },
@@ -169,41 +166,33 @@ export async function buildPlacementSet(args: BuildPlacementSetInput): Promise<P
       throw new Error("Failed to parse placement set as JSON");
     }
 
-    // Validate we have 8 variants
+    // Validate we have 8 variants (fail-hard)
     if (!placementSet.variants || placementSet.variants.length !== 8) {
-      logger.warn(
-        { ...logContext, stage: "validate" },
-        `Expected 8 variants, got ${placementSet.variants?.length || 0}`
+      throw new Error(
+        `Invalid placement set: expected 8 variants, got ${placementSet.variants?.length || 0}`
       );
-      // Attempt to continue if we have at least some variants
-      if (!placementSet.variants || placementSet.variants.length === 0) {
-        throw new Error("No variants in placement set");
-      }
     }
 
-    // Validate scale_guardrails is in productDescription
+    // Validate scale guardrails line exists (fail-hard)
     if (!placementSet.productDescription.toLowerCase().includes("relative scale")) {
-      logger.warn(
-        { ...logContext, stage: "validate" },
-        "productDescription missing 'Relative scale' line"
-      );
-      // Inject it
-      placementSet.productDescription += `\n\nRelative scale: ${scaleGuardrails}`;
+      throw new Error("productDescription missing required 'Relative scale' line");
     }
 
     // Complete LLM call with success
     const latencyMs = Date.now() - startTime;
     const outputSummary: OutputSummary = {
-      finishReason: 'STOP',
+      finishReason: String(finishReason ?? "STOP"),
+      providerRequestId,
     };
 
     await completeCallSuccess({
       callId,
-      tokensIn: 0, // TODO: Extract from response
-      tokensOut: 0,
-      costEstimate: 0,
+      tokensIn,
+      tokensOut,
+      costEstimate,
       latencyMs,
       providerModel: resolvedPrompt.model,
+      providerRequestId,
       outputSummary,
     });
 
@@ -242,20 +231,4 @@ export async function buildPlacementSet(args: BuildPlacementSetInput): Promise<P
   }
 }
 
-// =============================================================================
-// Legacy Export for backward compatibility
-// =============================================================================
-
-/** @deprecated Use buildPlacementSet instead */
-export async function buildPromptPack(
-  resolvedFacts: ProductFacts,
-  requestId: string,
-  shopId?: string
-): Promise<PlacementSet> {
-  return buildPlacementSet({
-    resolvedFacts,
-    productAssetId: 'legacy-' + requestId,
-    shopId: shopId || 'SYSTEM',
-    traceId: requestId,
-  });
-}
+// Fail-hard: no legacy exports.
