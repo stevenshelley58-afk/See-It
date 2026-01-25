@@ -333,6 +333,7 @@ export interface LLMCall {
   inputRef: LLMCallInputRef | null;
   inputPayload: Record<string, unknown> | null;
   outputRef: LLMCallOutputRef | null;
+  variantId: string | null;
 }
 
 export interface LLMCallInputRef {

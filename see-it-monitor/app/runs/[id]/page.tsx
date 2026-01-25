@@ -525,9 +525,18 @@ interface VariantModalProps {
   variant: CompositeVariant;
   index: number;
   onClose: () => void;
+  llmCalls: LLMCall[];
+  reveal: boolean;
 }
 
-function VariantModal({ variant, index, onClose }: VariantModalProps) {
+function VariantModal({ variant, index, onClose, llmCalls, reveal }: VariantModalProps) {
+  const [payloadExpanded, setPayloadExpanded] = useState(false);
+
+  // Find the LLM call matching this variant
+  const matchingLLMCall = llmCalls.find(
+    (call) => call.variantId === variant.variantId
+  );
+
   return (
     <Modal open={true} onClose={onClose} title={`Variant ${index + 1}`}>
       <div className="space-y-4">
@@ -617,6 +626,28 @@ function VariantModal({ variant, index, onClose }: VariantModalProps) {
               </a>
               <CopyButton value={variant.imageUrl} label="Copy" />
             </div>
+          </div>
+        )}
+
+        {/* Gemini Request Payload */}
+        {reveal && matchingLLMCall?.inputPayload && (
+          <div>
+            <button
+              onClick={() => setPayloadExpanded(!payloadExpanded)}
+              className="flex items-center gap-2 text-xs text-gray-500 uppercase mb-2 hover:text-gray-700"
+            >
+              {payloadExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+              Gemini Request Payload
+            </button>
+            {payloadExpanded && (
+              <pre className="text-xs bg-gray-50 p-3 rounded-lg overflow-auto max-h-96">
+                {JSON.stringify(matchingLLMCall.inputPayload, null, 2)}
+              </pre>
+            )}
           </div>
         )}
       </div>
@@ -1733,6 +1764,8 @@ export default function RunPlaybackPage() {
           variant={selectedVariant.variant}
           index={selectedVariant.index}
           onClose={() => setSelectedVariant(null)}
+          llmCalls={llmCallsQuery.data?.llmCalls || []}
+          reveal={reveal}
         />
       )}
     </Shell>

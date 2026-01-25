@@ -89,6 +89,7 @@ export async function GET(
         callSummary: true,
         debugPayload: reveal, // sensitive; only return when explicitly revealed
         outputSummary: true,
+        variantId: true,
       },
     });
 
@@ -142,6 +143,7 @@ export async function GET(
         },
         inputPayload: (call as any).debugPayload ?? null,
         outputRef: outputPreview ? { preview: outputPreview } : null,
+        variantId: call.variantId ?? null,
       };
     });
 
