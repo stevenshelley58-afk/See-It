@@ -770,7 +770,7 @@ export async function testPrompt(
         model,
         imageCount: options.imageRefs?.length ?? 0,
         promptPreview: messages.map((m) => m.content).join("\n").slice(0, 500),
-      },
+      } as unknown as Prisma.InputJsonValue,
       debugPayload: {
         messages,
         model,
@@ -780,7 +780,7 @@ export async function testPrompt(
         resolutionHash,
         requestHash,
         overrides,
-      },
+      } as unknown as Prisma.InputJsonValue,
     },
   });
 
@@ -811,7 +811,7 @@ export async function testPrompt(
       outputSummary: {
         preview: JSON.stringify(mockOutput).slice(0, 500),
         length: JSON.stringify(mockOutput).length,
-      },
+      } as unknown as Prisma.InputJsonValue,
     },
   });
 
