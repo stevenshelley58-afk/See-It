@@ -53,7 +53,7 @@ const mockTx: MockTransaction = {
   },
 };
 
-const mockPrisma = {
+const mockPrisma = vi.hoisted(() => ({
   promptDefinition: {
     create: vi.fn(),
     findUnique: vi.fn(),
@@ -72,7 +72,7 @@ const mockPrisma = {
     findMany: vi.fn(),
   },
   $transaction: vi.fn(),
-};
+}));
 
 // Mock the db.server module
 vi.mock("~/db.server", () => ({
@@ -151,7 +151,8 @@ function createMockVersion(
 
 describe("Prompt Version Manager", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Reset implementations between tests to avoid cross-test leakage.
+    vi.resetAllMocks();
   });
 
   // ===========================================================================
@@ -317,20 +318,23 @@ describe("Prompt Version Manager", () => {
       const shopId = "shop-1";
       const promptName = "extractor";
       const definition = createMockDefinition(shopId, promptName);
-      const currentActive = createMockVersion(definition.id, 3, "ACTIVE", "ver-3");
       const previousVersion = createMockVersion(definition.id, 2, "ARCHIVED", "ver-2");
+      const currentActive = {
+        ...createMockVersion(definition.id, 3, "ACTIVE", "ver-3"),
+        previousActiveVersionId: previousVersion.id,
+      };
 
       mockPrisma.$transaction.mockImplementation(async (callback) => {
         mockTx.promptDefinition.findUnique.mockResolvedValue(definition);
-        mockTx.promptVersion.findFirst
-          .mockResolvedValueOnce(currentActive) // Find current active
-          .mockResolvedValueOnce(previousVersion); // Find most recent archived
+        mockTx.promptVersion.findFirst.mockResolvedValueOnce(currentActive); // Find current active
+        mockTx.promptVersion.findUnique.mockResolvedValueOnce(previousVersion); // Follow rollback chain
         mockTx.promptVersion.update
           .mockResolvedValueOnce({ ...currentActive, status: "ARCHIVED" }) // Archive current
           .mockResolvedValueOnce({
             ...previousVersion,
             status: "ACTIVE",
             activatedAt: new Date(),
+            previousActiveVersionId: currentActive.id,
           }); // Reactivate previous
         return callback(mockTx);
       });
@@ -370,13 +374,14 @@ describe("Prompt Version Manager", () => {
       const shopId = "shop-1";
       const promptName = "extractor";
       const definition = createMockDefinition(shopId, promptName);
-      const currentActive = createMockVersion(definition.id, 1, "ACTIVE", "ver-1");
+      const currentActive = {
+        ...createMockVersion(definition.id, 1, "ACTIVE", "ver-1"),
+        previousActiveVersionId: null,
+      };
 
       mockPrisma.$transaction.mockImplementation(async (callback) => {
         mockTx.promptDefinition.findUnique.mockResolvedValue(definition);
-        mockTx.promptVersion.findFirst
-          .mockResolvedValueOnce(currentActive) // Find current active
-          .mockResolvedValueOnce(null); // No archived versions
+        mockTx.promptVersion.findFirst.mockResolvedValueOnce(currentActive); // Find current active
         return callback(mockTx);
       });
 
@@ -493,17 +498,23 @@ describe("Prompt Version Manager", () => {
       const shopId = "shop-1";
       const promptName = "extractor";
       const definition = createMockDefinition(shopId, promptName);
-      const currentActive = createMockVersion(definition.id, 2, "ACTIVE", "ver-2");
       const previousVersion = createMockVersion(definition.id, 1, "ARCHIVED", "ver-1");
+      const currentActive = {
+        ...createMockVersion(definition.id, 2, "ACTIVE", "ver-2"),
+        previousActiveVersionId: previousVersion.id,
+      };
 
       mockPrisma.$transaction.mockImplementation(async (callback) => {
         mockTx.promptDefinition.findUnique.mockResolvedValue(definition);
-        mockTx.promptVersion.findFirst
-          .mockResolvedValueOnce(currentActive)
-          .mockResolvedValueOnce(previousVersion);
+        mockTx.promptVersion.findFirst.mockResolvedValueOnce(currentActive);
+        mockTx.promptVersion.findUnique.mockResolvedValueOnce(previousVersion);
         mockTx.promptVersion.update
           .mockResolvedValueOnce({ ...currentActive, status: "ARCHIVED" })
-          .mockResolvedValueOnce({ ...previousVersion, status: "ACTIVE" });
+          .mockResolvedValueOnce({
+            ...previousVersion,
+            status: "ACTIVE",
+            previousActiveVersionId: currentActive.id,
+          });
         return callback(mockTx);
       });
       mockPrisma.promptAuditLog.create.mockResolvedValue({});

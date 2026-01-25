@@ -17,14 +17,15 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // Mock Prisma
 // =============================================================================
 
-const mockPrisma = {
+const mockPrisma = vi.hoisted(() => ({
   promptDefinition: {
     findUnique: vi.fn(),
+    findMany: vi.fn(),
   },
   shopRuntimeConfig: {
     findUnique: vi.fn(),
   },
-};
+}));
 
 vi.mock("~/db.server", () => ({
   default: mockPrisma,
@@ -202,9 +203,10 @@ describe("Prompt Resolver", () => {
       };
 
       mockPrisma.shopRuntimeConfig.findUnique.mockResolvedValue(null);
-      mockPrisma.promptDefinition.findUnique
-        .mockResolvedValueOnce(extractorDef)
-        .mockResolvedValueOnce(builderDef);
+      mockPrisma.promptDefinition.findMany.mockResolvedValueOnce([
+        extractorDef,
+        builderDef,
+      ]);
 
       const snapshot = await buildResolvedConfigSnapshot({
         shopId,
@@ -244,7 +246,7 @@ describe("Prompt Resolver", () => {
         versions: [createMockVersion("def-ext", 1, "ACTIVE")],
       };
 
-      mockPrisma.promptDefinition.findUnique.mockResolvedValueOnce(extractorDef);
+      mockPrisma.promptDefinition.findMany.mockResolvedValueOnce([extractorDef]);
 
       const snapshot = await buildResolvedConfigSnapshot({
         shopId,

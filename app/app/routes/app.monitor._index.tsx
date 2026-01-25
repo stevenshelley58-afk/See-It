@@ -54,11 +54,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const status = url.searchParams.get("status");
   if (status) filters.status = status;
 
-  const requestId = url.searchParams.get("requestId");
-  if (requestId) filters.requestId = requestId;
+  // Prefer traceId (canonical), but accept legacy requestId param for backwards compatibility.
+  const traceId = url.searchParams.get("traceId") || url.searchParams.get("requestId");
+  if (traceId) filters.traceId = traceId;
 
-  const promptVersion = url.searchParams.get("promptVersion");
-  if (promptVersion) filters.promptVersion = parseInt(promptVersion);
+  const configHash =
+    url.searchParams.get("configHash") || url.searchParams.get("pipelineConfigHash");
+  if (configHash) filters.pipelineConfigHash = configHash;
 
   const page = parseInt(url.searchParams.get("page") || "1");
 
@@ -105,8 +107,8 @@ export default function MonitorRunsPage() {
       ? [searchParams.get("configHash")!]
       : []
   );
-  const [requestIdFilter, setRequestIdFilter] = useState(
-    searchParams.get("requestId") || ""
+  const [traceIdFilter, setTraceIdFilter] = useState(
+    searchParams.get("traceId") || searchParams.get("requestId") || ""
   );
 
   const handleStatusChange = useCallback(
@@ -139,25 +141,26 @@ export default function MonitorRunsPage() {
     [searchParams, setSearchParams]
   );
 
-  const handleRequestIdChange = useCallback((value: string) => {
-    setRequestIdFilter(value);
+  const handleTraceIdChange = useCallback((value: string) => {
+    setTraceIdFilter(value);
   }, []);
 
-  const handleRequestIdSubmit = useCallback(() => {
+  const handleTraceIdSubmit = useCallback(() => {
     const params = new URLSearchParams(searchParams);
-    if (requestIdFilter) {
-      params.set("requestId", requestIdFilter);
+    if (traceIdFilter) {
+      params.set("traceId", traceIdFilter);
     } else {
-      params.delete("requestId");
+      params.delete("traceId");
+      params.delete("requestId"); // legacy
     }
     params.set("page", "1");
     setSearchParams(params);
-  }, [requestIdFilter, searchParams, setSearchParams]);
+  }, [traceIdFilter, searchParams, setSearchParams]);
 
   const handleClearAll = useCallback(() => {
     setStatusFilter([]);
     setConfigHashFilter([]);
-    setRequestIdFilter("");
+    setTraceIdFilter("");
     setSearchParams({ page: "1" });
   }, [setSearchParams]);
 
@@ -228,15 +231,16 @@ export default function MonitorRunsPage() {
           },
         ]
       : []),
-    ...(requestIdFilter
+    ...(traceIdFilter
       ? [
           {
-            key: "requestId",
-            label: `Request: ${requestIdFilter.slice(0, 8)}...`,
+            key: "traceId",
+            label: `Trace: ${traceIdFilter.slice(0, 8)}...`,
             onRemove: () => {
-              setRequestIdFilter("");
+              setTraceIdFilter("");
               const params = new URLSearchParams(searchParams);
-              params.delete("requestId");
+              params.delete("traceId");
+              params.delete("requestId"); // legacy
               setSearchParams(params);
             },
           },
@@ -289,17 +293,18 @@ export default function MonitorRunsPage() {
               <InlineStack gap="400" align="start">
                 <div style={{ flex: 1, maxWidth: 300 }}>
                   <TextField
-                    label="Search by Request ID"
-                    value={requestIdFilter}
-                    onChange={handleRequestIdChange}
-                    onBlur={handleRequestIdSubmit}
-                    placeholder="Enter request ID..."
+                    label="Search by Trace ID"
+                    value={traceIdFilter}
+                    onChange={handleTraceIdChange}
+                    onBlur={handleTraceIdSubmit}
+                    placeholder="Enter trace ID..."
                     autoComplete="off"
                     clearButton
                     onClearButtonClick={() => {
-                      setRequestIdFilter("");
+                      setTraceIdFilter("");
                       const params = new URLSearchParams(searchParams);
-                      params.delete("requestId");
+                      params.delete("traceId");
+                      params.delete("requestId"); // legacy
                       setSearchParams(params);
                     }}
                   />

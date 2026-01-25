@@ -21,6 +21,49 @@ import type {
 
 const DEFAULT_PAGE_SIZE = 20;
 
+function toRunStatusV1(status: string): string {
+  switch (status) {
+    case "RUNNING":
+      return "in_flight";
+    case "COMPLETE":
+      return "complete";
+    case "PARTIAL":
+      return "partial";
+    case "FAILED":
+      return "failed";
+    default:
+      return status;
+  }
+}
+
+function toVariantStatusV1(status: string): string {
+  switch (status) {
+    case "SUCCESS":
+      return "success";
+    case "FAILED":
+      return "failed";
+    case "TIMEOUT":
+      return "timeout";
+    default:
+      return status;
+  }
+}
+
+function fromRunStatusFilter(filter: string): string {
+  switch (filter) {
+    case "in_flight":
+      return "RUNNING";
+    case "complete":
+      return "COMPLETE";
+    case "partial":
+      return "PARTIAL";
+    case "failed":
+      return "FAILED";
+    default:
+      return filter;
+  }
+}
+
 /**
  * Get paginated list of runs with filters.
  */
@@ -34,7 +77,7 @@ export async function getRuns(
   const where: any = { shopId };
 
   if (filters.status) {
-    where.status = filters.status;
+    where.status = fromRunStatusFilter(filters.status);
   }
   if (filters.dateFrom || filters.dateTo) {
     where.createdAt = {};
@@ -72,7 +115,7 @@ export async function getRuns(
       createdAt: run.createdAt.toISOString(),
       productTitle: run.productAsset?.productTitle || null,
       productId: run.productAsset?.productId || null,
-      status: run.status,
+      status: toRunStatusV1(run.status),
       pipelineConfigHash: run.pipelineConfigHash,
       totalDurationMs: run.totalDurationMs,
       variantCount: 8, // Always 8 variants
@@ -136,7 +179,7 @@ export async function getRunDetail(
       return {
         id: v.id,
         variantId: v.variantId,
-        status: v.status,
+        status: toVariantStatusV1(v.status),
         latencyMs: v.latencyMs,
         errorCode: v.errorCode,
         errorMessage: v.errorMessage,
@@ -181,7 +224,7 @@ export async function getRunDetail(
     productTitle: run.productAsset?.productTitle || null,
     productId: run.productAsset?.productId || null,
     roomSessionId: run.roomSessionId,
-    status: run.status,
+    status: toRunStatusV1(run.status),
     pipelineConfigHash: run.pipelineConfigHash,
     totalDurationMs: run.totalDurationMs,
     successCount: run.successCount,

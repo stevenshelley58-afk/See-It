@@ -67,6 +67,7 @@ let versions: MockPromptVersion[] = [];
 let auditLogs: MockAuditLog[] = [];
 let runtimeConfigs: Map<string, Record<string, unknown>> = new Map();
 let versionCounter = 0;
+let txnQueue: Promise<unknown> = Promise.resolve();
 
 function resetStores() {
   definitions = [];
@@ -74,6 +75,7 @@ function resetStores() {
   auditLogs = [];
   runtimeConfigs = new Map();
   versionCounter = 0;
+  txnQueue = Promise.resolve();
 }
 
 const mockTx = {
@@ -154,7 +156,7 @@ const mockTx = {
   },
 };
 
-const mockPrisma = {
+const mockPrisma = vi.hoisted(() => ({
   promptDefinition: {
     create: vi.fn(async ({ data }) => mockTx.promptDefinition.create({ data })),
     findUnique: vi.fn(async ({ where, include }) => {
@@ -193,10 +195,14 @@ const mockPrisma = {
       return runtimeConfigs.get(where.shopId) ?? null;
     }),
   },
-  $transaction: vi.fn(async (callback, options) => {
-    return callback(mockTx);
+  // Serialize "transactions" to better simulate Serializable isolation.
+  $transaction: vi.fn((callback, options) => {
+    const run = () => callback(mockTx);
+    const next = txnQueue.then(run, run);
+    txnQueue = next;
+    return next;
   }),
-};
+}));
 
 vi.mock("~/db.server", () => ({
   default: mockPrisma,

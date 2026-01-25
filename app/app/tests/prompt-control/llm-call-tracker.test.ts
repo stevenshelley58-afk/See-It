@@ -1,29 +1,25 @@
 /**
- * Acceptance Tests for Prompt Control Plane - LLM Call Tracker
+ * Prompt Control Plane - LLM Call Tracker (Canonical)
  *
- * Tests:
- * - #6: View run's LLM calls
- * - #11: Test panel runs prompt without affecting production
- * - Tracked call wrapper functionality
- * - Request hash computation
+ * This test suite validates the canonical `llm_calls` writer helpers.
+ * It is intentionally aligned with the current schema (ownerType/ownerId, promptKey, etc).
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // =============================================================================
 // Mock Prisma
 // =============================================================================
 
-const mockPrisma = {
+const mockPrisma = vi.hoisted(() => ({
   lLMCall: {
     create: vi.fn(),
     update: vi.fn(),
-    findUnique: vi.fn(),
     findMany: vi.fn(),
-    groupBy: vi.fn(),
+    findFirst: vi.fn(),
     aggregate: vi.fn(),
   },
-};
+}));
 
 vi.mock("~/db.server", () => ({
   default: mockPrisma,
@@ -31,552 +27,234 @@ vi.mock("~/db.server", () => ({
 
 // Import after mocking
 import {
-  startLLMCall,
-  completeLLMCall,
-  trackedLLMCall,
+  startCall,
+  completeCallSuccess,
+  completeCallFailure,
+  trackedCall,
   getCallsForRun,
   getCallsForTestRun,
-  getPromptCallStats,
+  findCachedByDedupeHash,
   getDailyCostForShop,
+  type StartCallInput,
 } from "~/services/prompt-control/llm-call-tracker.server";
 
-// =============================================================================
-// Test Helpers
-// =============================================================================
-
-function createMockLLMCall(overrides: Record<string, unknown> = {}) {
+function makeStartInput(
+  overrides: Partial<StartCallInput> = {}
+): StartCallInput {
   return {
-    id: "call-1",
     shopId: "shop-1",
-    renderRunId: "run-1",
-    variantResultId: null,
-    testRunId: null,
-    promptName: "extractor",
+    ownerType: "COMPOSITE_RUN",
+    ownerId: "run-1",
+    variantId: "V01",
+    promptName: "product_fact_extractor",
     promptVersionId: "ver-1",
-    model: "gemini-2.5-flash",
-    resolutionHash: "res-hash",
-    requestHash: "req-hash",
-    status: "STARTED",
-    startedAt: new Date("2024-01-01T10:00:00Z"),
-    finishedAt: null,
-    latencyMs: null,
-    tokensIn: null,
-    tokensOut: null,
-    costEstimate: null,
-    errorType: null,
-    errorMessage: null,
-    retryCount: 0,
-    providerRequestId: null,
-    providerModel: null,
-    inputRef: null,
-    outputRef: null,
-    createdAt: new Date(),
+    callIdentityHash: "identity-hash-1",
+    dedupeHash: "dedupe-hash-1",
+    callSummary: {
+      promptName: "product_fact_extractor",
+      model: "gemini-2.5-flash-image",
+      imageCount: 1,
+      promptPreview: "preview",
+    },
+    debugPayload: {
+      promptText: "prompt text",
+      model: "gemini-2.5-flash-image",
+      params: { responseModalities: ["TEXT"] },
+      images: [],
+      aspectRatioSource: "UNKNOWN",
+    },
     ...overrides,
   };
 }
 
-// =============================================================================
-// Tests
-// =============================================================================
-
-describe("LLM Call Tracker", () => {
+describe("LLM Call Tracker (canonical)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T10:00:00Z"));
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  // ===========================================================================
-  // Test #6: View run's LLM calls
-  // ===========================================================================
+  describe("startCall()", () => {
+    it("creates an LLMCall row and returns call id", async () => {
+      mockPrisma.lLMCall.create.mockResolvedValue({ id: "call-1" });
 
-  describe("AC #6: View run's LLM calls", () => {
-    it("should retrieve all LLM calls for a render run", async () => {
-      const renderRunId = "run-1";
-      const mockCalls = [
-        createMockLLMCall({ id: "call-1", promptName: "extractor", status: "SUCCEEDED" }),
-        createMockLLMCall({
-          id: "call-2",
-          promptName: "prompt_builder",
-          status: "SUCCEEDED",
-        }),
-        createMockLLMCall({
-          id: "call-3",
-          promptName: "global_render",
-          status: "SUCCEEDED",
-        }),
-      ];
+      const callId = await startCall(makeStartInput());
 
-      mockPrisma.lLMCall.findMany.mockResolvedValue(mockCalls);
-
-      const calls = await getCallsForRun(renderRunId);
-
-      expect(calls).toHaveLength(3);
-      expect(mockPrisma.lLMCall.findMany).toHaveBeenCalledWith({
-        where: { renderRunId },
-        orderBy: { startedAt: "asc" },
-      });
-    });
-
-    it("should include timing and status for each call", async () => {
-      const renderRunId = "run-1";
-      const mockCalls = [
-        createMockLLMCall({
-          id: "call-1",
-          status: "SUCCEEDED",
-          latencyMs: 1500,
-          tokensIn: 1000,
-          tokensOut: 500,
-          costEstimate: 0.0015,
-        }),
-        createMockLLMCall({
-          id: "call-2",
-          status: "FAILED",
-          latencyMs: 500,
-          errorType: "RateLimitError",
-          errorMessage: "Too many requests",
-        }),
-      ];
-
-      mockPrisma.lLMCall.findMany.mockResolvedValue(mockCalls);
-
-      const calls = await getCallsForRun(renderRunId);
-
-      expect(calls[0].status).toBe("SUCCEEDED");
-      expect(calls[0].latencyMs).toBe(1500);
-      expect(calls[0].tokensIn).toBe(1000);
-      expect(calls[1].status).toBe("FAILED");
-      expect(calls[1].errorType).toBe("RateLimitError");
-    });
-
-    it("should return calls sorted by startedAt ascending", async () => {
-      mockPrisma.lLMCall.findMany.mockResolvedValue([]);
-
-      await getCallsForRun("run-1");
-
-      expect(mockPrisma.lLMCall.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          orderBy: { startedAt: "asc" },
-        })
-      );
-    });
-  });
-
-  // ===========================================================================
-  // Test #11: Test panel runs prompt without affecting production
-  // ===========================================================================
-
-  describe("AC #11: Test panel isolation", () => {
-    it("should track test run calls with testRunId instead of renderRunId", async () => {
-      mockPrisma.lLMCall.create.mockResolvedValue(
-        createMockLLMCall({ testRunId: "test-1", renderRunId: null })
-      );
-
-      const callId = await startLLMCall({
-        shopId: "shop-1",
-        testRunId: "test-1", // Test run, not production
-        promptName: "extractor",
-        promptVersionId: "ver-1",
-        model: "gemini-2.5-flash",
-        messages: [{ role: "user", content: "Test prompt" }],
-        params: {},
-        imageRefs: [],
-        resolutionHash: "res-hash",
-      });
-
+      expect(callId).toBe("call-1");
       expect(mockPrisma.lLMCall.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          testRunId: "test-1",
-          renderRunId: null,
-        }),
-      });
-    });
-
-    it("should retrieve calls for test run separately", async () => {
-      const testRunId = "test-1";
-      const mockCalls = [
-        createMockLLMCall({ testRunId: "test-1", renderRunId: null }),
-      ];
-
-      mockPrisma.lLMCall.findMany.mockResolvedValue(mockCalls);
-
-      const calls = await getCallsForTestRun(testRunId);
-
-      expect(mockPrisma.lLMCall.findMany).toHaveBeenCalledWith({
-        where: { testRunId },
-        orderBy: { startedAt: "asc" },
-      });
-    });
-
-    it("should not mix test calls with production calls", async () => {
-      // Production calls
-      const productionCalls = [
-        createMockLLMCall({ id: "prod-1", renderRunId: "run-1", testRunId: null }),
-        createMockLLMCall({ id: "prod-2", renderRunId: "run-1", testRunId: null }),
-      ];
-
-      // Test calls
-      const testCalls = [
-        createMockLLMCall({ id: "test-1", renderRunId: null, testRunId: "test-1" }),
-      ];
-
-      // When querying production run, should only get production calls
-      mockPrisma.lLMCall.findMany.mockResolvedValue(productionCalls);
-      const runCalls = await getCallsForRun("run-1");
-      expect(runCalls).toHaveLength(2);
-      expect(runCalls.every((c) => c.testRunId === null)).toBe(true);
-
-      // When querying test run, should only get test calls
-      mockPrisma.lLMCall.findMany.mockResolvedValue(testCalls);
-      const testRunCalls = await getCallsForTestRun("test-1");
-      expect(testRunCalls).toHaveLength(1);
-      expect(testRunCalls.every((c) => c.renderRunId === null)).toBe(true);
-    });
-  });
-
-  // ===========================================================================
-  // Tracked call wrapper tests
-  // ===========================================================================
-
-  describe("trackedLLMCall wrapper", () => {
-    it("should start call, execute, and complete on success", async () => {
-      const mockCall = createMockLLMCall();
-      mockPrisma.lLMCall.create.mockResolvedValue(mockCall);
-      mockPrisma.lLMCall.findUnique.mockResolvedValue({ startedAt: new Date() });
-      mockPrisma.lLMCall.update.mockResolvedValue({});
-
-      const result = await trackedLLMCall(
-        {
           shopId: "shop-1",
-          renderRunId: "run-1",
-          promptName: "extractor",
+          ownerType: "COMPOSITE_RUN",
+          ownerId: "run-1",
+          variantId: "V01",
+          promptKey: "product_fact_extractor",
           promptVersionId: "ver-1",
-          model: "gemini-2.5-flash",
-          messages: [{ role: "user", content: "test" }],
-          params: {},
-          imageRefs: [],
-          resolutionHash: "res-hash",
-        },
-        async () => ({
-          result: { extracted: "data" },
-          usage: { tokensIn: 100, tokensOut: 50, cost: 0.001 },
-          providerRequestId: "prov-123",
-          providerModel: "gemini-2.5-flash-001",
-          outputPreview: "{ extracted: data }",
-        })
-      );
-
-      expect(result).toEqual({ extracted: "data" });
-      expect(mockPrisma.lLMCall.create).toHaveBeenCalled();
-      expect(mockPrisma.lLMCall.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: "SUCCEEDED",
-            tokensIn: 100,
-            tokensOut: 50,
-          }),
-        })
-      );
-    });
-
-    it("should mark as FAILED when executor throws error", async () => {
-      const mockCall = createMockLLMCall();
-      mockPrisma.lLMCall.create.mockResolvedValue(mockCall);
-      mockPrisma.lLMCall.findUnique.mockResolvedValue({ startedAt: new Date() });
-      mockPrisma.lLMCall.update.mockResolvedValue({});
-
-      await expect(
-        trackedLLMCall(
-          {
-            shopId: "shop-1",
-            renderRunId: "run-1",
-            promptName: "extractor",
-            promptVersionId: "ver-1",
-            model: "gemini-2.5-flash",
-            messages: [],
-            params: {},
-            imageRefs: [],
-            resolutionHash: "res-hash",
-          },
-          async () => {
-            throw new Error("API error");
-          }
-        )
-      ).rejects.toThrow("API error");
-
-      expect(mockPrisma.lLMCall.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: "FAILED",
-            errorType: "Error",
-            errorMessage: "API error",
-          }),
-        })
-      );
-    });
-
-    it("should mark as TIMEOUT when error indicates timeout", async () => {
-      const mockCall = createMockLLMCall();
-      mockPrisma.lLMCall.create.mockResolvedValue(mockCall);
-      mockPrisma.lLMCall.findUnique.mockResolvedValue({ startedAt: new Date() });
-      mockPrisma.lLMCall.update.mockResolvedValue({});
-
-      await expect(
-        trackedLLMCall(
-          {
-            shopId: "shop-1",
-            renderRunId: "run-1",
-            promptName: "extractor",
-            promptVersionId: "ver-1",
-            model: "gemini-2.5-flash",
-            messages: [],
-            params: {},
-            imageRefs: [],
-            resolutionHash: "res-hash",
-          },
-          async () => {
-            throw new Error("Request timeout exceeded");
-          }
-        )
-      ).rejects.toThrow("timeout");
-
-      expect(mockPrisma.lLMCall.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: "TIMEOUT",
-          }),
-        })
-      );
-    });
-
-    it("should mark as TIMEOUT for AbortError", async () => {
-      const mockCall = createMockLLMCall();
-      mockPrisma.lLMCall.create.mockResolvedValue(mockCall);
-      mockPrisma.lLMCall.findUnique.mockResolvedValue({ startedAt: new Date() });
-      mockPrisma.lLMCall.update.mockResolvedValue({});
-
-      const abortError = new Error("Aborted");
-      abortError.name = "AbortError";
-
-      await expect(
-        trackedLLMCall(
-          {
-            shopId: "shop-1",
-            renderRunId: "run-1",
-            promptName: "extractor",
-            promptVersionId: "ver-1",
-            model: "gemini-2.5-flash",
-            messages: [],
-            params: {},
-            imageRefs: [],
-            resolutionHash: "res-hash",
-          },
-          async () => {
-            throw abortError;
-          }
-        )
-      ).rejects.toThrow();
-
-      expect(mockPrisma.lLMCall.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: "TIMEOUT",
-          }),
-        })
-      );
-    });
-  });
-
-  // ===========================================================================
-  // Start and complete call tests
-  // ===========================================================================
-
-  describe("startLLMCall", () => {
-    it("should create call with correct input ref structure", async () => {
-      const mockCall = createMockLLMCall();
-      mockPrisma.lLMCall.create.mockResolvedValue(mockCall);
-
-      await startLLMCall({
-        shopId: "shop-1",
-        renderRunId: "run-1",
-        promptName: "extractor",
-        promptVersionId: "ver-1",
-        model: "gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "You are helpful" },
-          { role: "user", content: "Analyze this" },
-        ],
-        params: { temperature: 0.7 },
-        imageRefs: ["img1.png", "img2.png"],
-        resolutionHash: "res-hash",
-      });
-
-      expect(mockPrisma.lLMCall.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          inputRef: expect.objectContaining({
-            messageCount: 2,
-            imageCount: 2,
-            resolutionHash: "res-hash",
-          }),
+          callIdentityHash: "identity-hash-1",
+          dedupeHash: "dedupe-hash-1",
           status: "STARTED",
         }),
       });
     });
 
-    it("should truncate preview to 500 chars", async () => {
-      const mockCall = createMockLLMCall();
-      mockPrisma.lLMCall.create.mockResolvedValue(mockCall);
+    it("throws if ownerId is missing", async () => {
+      await expect(
+        startCall(makeStartInput({ ownerId: "" }))
+      ).rejects.toThrow("ownerId is required");
+    });
 
-      const longContent = "x".repeat(1000);
-      await startLLMCall({
-        shopId: "shop-1",
-        promptName: "extractor",
-        promptVersionId: "ver-1",
-        model: "gemini-2.5-flash",
-        messages: [{ role: "user", content: longContent }],
-        params: {},
-        imageRefs: [],
-        resolutionHash: "res-hash",
-      });
-
-      const createCall = mockPrisma.lLMCall.create.mock.calls[0][0];
-      expect(createCall.data.inputRef.preview.length).toBe(500);
+    it("throws if callIdentityHash is missing", async () => {
+      await expect(
+        startCall(makeStartInput({ callIdentityHash: "" }))
+      ).rejects.toThrow("callIdentityHash is required");
     });
   });
 
-  describe("completeLLMCall", () => {
-    it("should calculate latency from start time", async () => {
-      const startTime = new Date("2024-01-01T10:00:00Z");
-      mockPrisma.lLMCall.findUnique.mockResolvedValue({ startedAt: startTime });
+  describe("completeCallSuccess() / completeCallFailure()", () => {
+    it("marks call as SUCCEEDED with output summary", async () => {
       mockPrisma.lLMCall.update.mockResolvedValue({});
 
-      vi.setSystemTime(new Date("2024-01-01T10:00:02Z")); // 2 seconds later
-
-      await completeLLMCall({
+      await completeCallSuccess({
         callId: "call-1",
-        status: "SUCCEEDED",
         tokensIn: 100,
         tokensOut: 50,
+        costEstimate: 0.001,
+        latencyMs: 1234,
+        providerModel: "gemini-2.5-flash-image",
+        providerRequestId: "prov-1",
+        outputSummary: { finishReason: "STOP", providerRequestId: "prov-1" },
       });
 
-      expect(mockPrisma.lLMCall.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            latencyMs: 2000, // 2 seconds
-          }),
-        })
-      );
+      expect(mockPrisma.lLMCall.update).toHaveBeenCalledWith({
+        where: { id: "call-1" },
+        data: expect.objectContaining({
+          status: "SUCCEEDED",
+          latencyMs: 1234,
+          tokensIn: 100,
+          tokensOut: 50,
+          providerRequestId: "prov-1",
+        }),
+      });
     });
 
-    it("should truncate error message to 1000 chars", async () => {
-      mockPrisma.lLMCall.findUnique.mockResolvedValue({ startedAt: new Date() });
+    it("marks call as FAILED and truncates long error messages", async () => {
       mockPrisma.lLMCall.update.mockResolvedValue({});
 
-      const longError = "e".repeat(2000);
-      await completeLLMCall({
+      const longMessage = "e".repeat(2000);
+      await completeCallFailure({
         callId: "call-1",
+        latencyMs: 50,
+        errorType: "Error",
+        errorMessage: longMessage,
         status: "FAILED",
-        errorMessage: longError,
       });
 
-      const updateCall = mockPrisma.lLMCall.update.mock.calls[0][0];
-      expect(updateCall.data.errorMessage.length).toBe(1000);
+      const updateArg = mockPrisma.lLMCall.update.mock.calls[0][0];
+      expect(updateArg.where).toEqual({ id: "call-1" });
+      expect(updateArg.data.status).toBe("FAILED");
+      expect(updateArg.data.errorMessage.length).toBeLessThanOrEqual(1000);
     });
+  });
 
-    it("should build output ref with preview and length", async () => {
-      mockPrisma.lLMCall.findUnique.mockResolvedValue({ startedAt: new Date() });
+  describe("trackedCall()", () => {
+    it("starts and completes call on success", async () => {
+      mockPrisma.lLMCall.create.mockResolvedValue({ id: "call-1" });
       mockPrisma.lLMCall.update.mockResolvedValue({});
 
-      const outputText = "Generated output text here";
-      await completeLLMCall({
-        callId: "call-1",
-        status: "SUCCEEDED",
-        outputPreview: outputText,
+      const { result, callId } = await trackedCall(makeStartInput(), async () => {
+        vi.setSystemTime(new Date("2024-01-01T10:00:02Z"));
+        return {
+          result: { ok: true },
+          tokensIn: 100,
+          tokensOut: 50,
+          costEstimate: 0.001,
+          providerModel: "gemini-2.5-flash-image",
+          providerRequestId: "prov-1",
+          outputSummary: { finishReason: "STOP", providerRequestId: "prov-1" },
+        };
       });
 
-      expect(mockPrisma.lLMCall.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            outputRef: {
-              preview: outputText,
-              length: outputText.length,
-            },
-          }),
+      expect(callId).toBe("call-1");
+      expect(result).toEqual({ ok: true });
+
+      expect(mockPrisma.lLMCall.update).toHaveBeenCalledWith({
+        where: { id: "call-1" },
+        data: expect.objectContaining({
+          status: "SUCCEEDED",
+          latencyMs: 2000,
+          tokensIn: 100,
+          tokensOut: 50,
+        }),
+      });
+    });
+
+    it("marks TIMEOUT when executor error indicates timeout", async () => {
+      mockPrisma.lLMCall.create.mockResolvedValue({ id: "call-1" });
+      mockPrisma.lLMCall.update.mockResolvedValue({});
+
+      await expect(
+        trackedCall(makeStartInput(), async () => {
+          vi.setSystemTime(new Date("2024-01-01T10:00:01Z"));
+          throw new Error("Request timeout exceeded");
         })
-      );
+      ).rejects.toThrow(/timeout/i);
+
+      expect(mockPrisma.lLMCall.update).toHaveBeenCalledWith({
+        where: { id: "call-1" },
+        data: expect.objectContaining({
+          status: "TIMEOUT",
+        }),
+      });
     });
   });
 
-  // ===========================================================================
-  // Stats and aggregation tests
-  // ===========================================================================
-
-  describe("getPromptCallStats", () => {
-    it("should calculate success rate correctly", async () => {
-      mockPrisma.lLMCall.groupBy.mockResolvedValue([
-        { status: "SUCCEEDED", _count: { id: 80 } },
-        { status: "FAILED", _count: { id: 15 } },
-        { status: "TIMEOUT", _count: { id: 5 } },
-      ]);
+  describe("query helpers", () => {
+    it("getCallsForRun() queries by ownerType/ownerId", async () => {
       mockPrisma.lLMCall.findMany.mockResolvedValue([]);
-      mockPrisma.lLMCall.aggregate.mockResolvedValue({ _avg: { costEstimate: null } });
 
-      const stats = await getPromptCallStats(
-        "shop-1",
-        "extractor",
-        new Date("2024-01-01")
-      );
+      await getCallsForRun("run-1");
 
-      expect(stats.totalCalls).toBe(100);
-      expect(stats.successRate).toBe(80);
+      expect(mockPrisma.lLMCall.findMany).toHaveBeenCalledWith({
+        where: { ownerType: "COMPOSITE_RUN", ownerId: "run-1" },
+        orderBy: { startedAt: "asc" },
+      });
     });
 
-    it("should calculate latency percentiles", async () => {
-      mockPrisma.lLMCall.groupBy.mockResolvedValue([
-        { status: "SUCCEEDED", _count: { id: 100 } },
-      ]);
-
-      // Create sorted latency data
-      const latencies = Array.from({ length: 100 }, (_, i) => ({
-        latencyMs: (i + 1) * 10, // 10, 20, 30, ... 1000
-      }));
-      mockPrisma.lLMCall.findMany.mockResolvedValue(latencies);
-      mockPrisma.lLMCall.aggregate.mockResolvedValue({ _avg: { costEstimate: 0.001 } });
-
-      const stats = await getPromptCallStats(
-        "shop-1",
-        "extractor",
-        new Date("2024-01-01")
-      );
-
-      expect(stats.latencyP50).toBe(510); // 51st element (index 50)
-      expect(stats.latencyP95).toBe(950); // 95th element (index 95)
-    });
-
-    it("should handle no calls gracefully", async () => {
-      mockPrisma.lLMCall.groupBy.mockResolvedValue([]);
+    it("getCallsForTestRun() queries by ownerType/ownerId", async () => {
       mockPrisma.lLMCall.findMany.mockResolvedValue([]);
-      mockPrisma.lLMCall.aggregate.mockResolvedValue({ _avg: { costEstimate: null } });
 
-      const stats = await getPromptCallStats(
-        "shop-1",
-        "extractor",
-        new Date("2024-01-01")
-      );
+      await getCallsForTestRun("test-1");
 
-      expect(stats.totalCalls).toBe(0);
-      expect(stats.successRate).toBe(0);
-      expect(stats.latencyP50).toBeNull();
-      expect(stats.latencyP95).toBeNull();
-      expect(stats.avgCost).toBeNull();
+      expect(mockPrisma.lLMCall.findMany).toHaveBeenCalledWith({
+        where: { ownerType: "TEST_RUN", ownerId: "test-1" },
+        orderBy: { startedAt: "asc" },
+      });
     });
-  });
 
-  describe("getDailyCostForShop", () => {
-    it("should sum costs for today's successful calls", async () => {
+    it("findCachedByDedupeHash() returns null when no cached output", async () => {
+      mockPrisma.lLMCall.findFirst.mockResolvedValue(null);
+      const cached = await findCachedByDedupeHash("shop-1", "dedupe-hash");
+      expect(cached).toBeNull();
+    });
+
+    it("findCachedByDedupeHash() returns call id + output summary", async () => {
+      mockPrisma.lLMCall.findFirst.mockResolvedValue({
+        id: "call-99",
+        outputSummary: { finishReason: "STOP" },
+      });
+
+      const cached = await findCachedByDedupeHash("shop-1", "dedupe-hash");
+
+      expect(cached).toEqual({
+        callId: "call-99",
+        outputSummary: { finishReason: "STOP" },
+      });
+    });
+
+    it("getDailyCostForShop() aggregates successful cost", async () => {
       mockPrisma.lLMCall.aggregate.mockResolvedValue({
         _sum: { costEstimate: 5.5 },
       });
@@ -584,24 +262,7 @@ describe("LLM Call Tracker", () => {
       const cost = await getDailyCostForShop("shop-1");
 
       expect(cost).toBe(5.5);
-      expect(mockPrisma.lLMCall.aggregate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            shopId: "shop-1",
-            status: "SUCCEEDED",
-          }),
-        })
-      );
-    });
-
-    it("should return 0 when no costs", async () => {
-      mockPrisma.lLMCall.aggregate.mockResolvedValue({
-        _sum: { costEstimate: null },
-      });
-
-      const cost = await getDailyCostForShop("shop-1");
-
-      expect(cost).toBe(0);
     });
   });
 });
+

@@ -34,24 +34,18 @@ export {
 
 // LLM Call Tracking
 export {
-  startLLMCall,
-  completeLLMCall,
-  trackedLLMCall,
+  startCall,
+  completeCallSuccess,
+  completeCallFailure,
+  trackedCall,
   getCallsForRun,
   getCallsForTestRun,
-  getPromptCallStats,
   getDailyCostForShop,
-  // Deduplication/caching
-  getRequestHash,
-  findCachedRender,
-  recordCacheHit,
-  updateLLMCallWithOutput,
-  findRecentCallForRun,
-  type StartLLMCallInput,
-  type CompleteLLMCallInput,
-  type PromptStats,
-  type CachedRenderResult,
-  // Legacy type aliases
+  findCachedByDedupeHash,
+  // Legacy wrappers (deprecated)
+  startLLMCall,
+  completeLLMCall,
   type StartCallInput,
-  type CompleteCallInput,
+  type CompleteCallSuccessInput,
+  type CompleteCallFailureInput,
 } from "./llm-call-tracker.server";

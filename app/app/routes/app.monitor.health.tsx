@@ -193,14 +193,6 @@ export default function MonitorHealthPage() {
                     {stats.storageErrors24h}
                   </Text>
                 </div>
-                <div>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Telemetry Dropped
-                  </Text>
-                  <Text as="p" variant="headingLg">
-                    {stats.telemetryDropped24h}
-                  </Text>
-                </div>
               </InlineStack>
             </Box>
           </Card>

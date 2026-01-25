@@ -472,20 +472,6 @@ export default function MonitorRunDetailPage() {
                     {selectedVariant.latencyMs ? `${(selectedVariant.latencyMs / 1000).toFixed(2)}s` : "-"}
                   </Text>
                 </BlockStack>
-
-                <BlockStack gap="100">
-                  <Text as="span" tone="subdued" variant="bodySm">Provider Time</Text>
-                  <Text as="span" variant="bodyMd">
-                    {selectedVariant.providerMs ? `${(selectedVariant.providerMs / 1000).toFixed(2)}s` : "-"}
-                  </Text>
-                </BlockStack>
-
-                <BlockStack gap="100">
-                  <Text as="span" tone="subdued" variant="bodySm">Upload Time</Text>
-                  <Text as="span" variant="bodyMd">
-                    {selectedVariant.uploadMs ? `${(selectedVariant.uploadMs / 1000).toFixed(2)}s` : "-"}
-                  </Text>
-                </BlockStack>
               </InlineStack>
 
               {selectedVariant.errorMessage && (
