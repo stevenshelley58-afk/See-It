@@ -1,5 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Cache bust: 2026-01-25T11:45:00Z
 
 generator client {
   provider      = "prisma-client-js"
