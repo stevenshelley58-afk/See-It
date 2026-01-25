@@ -1,9 +1,15 @@
 // =============================================================================
-// PROMPT RESOLVER SERVICE - v3 (All bugs fixed)
+// PROMPT RESOLVER SERVICE - v4 (Canonical Pipeline)
+// The ONLY entry point for prompt resolution
 // =============================================================================
 
 import { createHash } from "crypto";
 import prisma from "~/db.server";
+import type {
+  PromptName,
+  ResolvedPrompt as CanonicalResolvedPrompt,
+  PipelineConfigSnapshot,
+} from "../see-it-now/types";
 
 // =============================================================================
 // Constants
@@ -11,6 +17,21 @@ import prisma from "~/db.server";
 
 // System tenant for global/shared prompts (fallback)
 export const SYSTEM_TENANT_ID = "SYSTEM";
+
+// Canonical prompt names
+export const CANONICAL_PROMPT_NAMES: PromptName[] = [
+  'product_fact_extractor',
+  'placement_set_generator',
+  'composite_instruction',
+];
+
+// Default runtime config for pipeline
+const DEFAULT_RUNTIME_CONFIG = {
+  timeouts: { perVariantMs: 45000, totalMs: 180000 },
+  retries: { maxPerVariant: 1 },
+  variantCount: 8,
+  earlyReturnAt: 4,
+};
 
 // =============================================================================
 // Types
@@ -611,4 +632,120 @@ export async function buildResolvedConfigSnapshot(input: {
   }
 
   return snapshot;
+}
+
+// =============================================================================
+// CANONICAL: Build Pipeline Config Snapshot
+// Returns the full pipeline configuration for a render run
+// =============================================================================
+
+/**
+ * Build a complete pipeline config snapshot for a shop.
+ * This is the ONLY way to get pipeline config for a render run.
+ *
+ * @param shopId - Shop ID
+ * @returns PipelineConfigSnapshot with all 3 prompts and runtime config
+ */
+export async function buildPipelineConfigSnapshot(
+  shopId: string
+): Promise<PipelineConfigSnapshot> {
+  // Load runtime config
+  const runtime = await loadRuntimeConfig(shopId);
+
+  // Batch load all canonical prompts
+  const definitionsMap = await batchLoadDefinitions(shopId, CANONICAL_PROMPT_NAMES);
+
+  // Build prompts record
+  const prompts: Record<PromptName, CanonicalResolvedPrompt> = {} as Record<PromptName, CanonicalResolvedPrompt>;
+
+  for (const promptName of CANONICAL_PROMPT_NAMES) {
+    const shopDefinition = definitionsMap.get(`${shopId}:${promptName}`);
+    const systemDefinition = definitionsMap.get(`${SYSTEM_TENANT_ID}:${promptName}`);
+    const definition = shopDefinition ?? systemDefinition;
+
+    if (!definition) {
+      throw new Error(`Missing prompt definition: ${promptName}`);
+    }
+
+    const activeVersion = definition.versions[0];
+    if (!activeVersion) {
+      throw new Error(`No active version for prompt: ${promptName}`);
+    }
+
+    // Get model and params
+    const model = activeVersion.model ?? definition.defaultModel;
+    const params: Record<string, unknown> = {
+      ...((definition.defaultParams as Record<string, unknown>) ?? {}),
+      ...((activeVersion.params as Record<string, unknown>) ?? {}),
+    };
+
+    prompts[promptName] = {
+      name: promptName,
+      versionId: activeVersion.id,
+      templateHash: activeVersion.templateHash,
+      model,
+      params,
+    };
+  }
+
+  return {
+    prompts,
+    runtimeConfig: {
+      timeouts: {
+        perVariantMs: DEFAULT_RUNTIME_CONFIG.timeouts.perVariantMs,
+        totalMs: DEFAULT_RUNTIME_CONFIG.timeouts.totalMs,
+      },
+      retries: {
+        maxPerVariant: DEFAULT_RUNTIME_CONFIG.retries.maxPerVariant,
+      },
+      variantCount: DEFAULT_RUNTIME_CONFIG.variantCount,
+      earlyReturnAt: DEFAULT_RUNTIME_CONFIG.earlyReturnAt,
+    },
+    resolvedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Resolve a single prompt and render it with variables.
+ * Returns the rendered prompt text along with version info.
+ *
+ * @param shopId - Shop ID
+ * @param promptName - Canonical prompt name
+ * @param variables - Template variables to substitute
+ * @returns Rendered prompt text and metadata
+ */
+export async function resolvePromptText(
+  shopId: string,
+  promptName: PromptName,
+  variables: Record<string, string>
+): Promise<{
+  promptText: string;
+  versionId: string;
+  model: string;
+  params: Record<string, unknown>;
+}> {
+  const runtimeConfig = await loadRuntimeConfig(shopId);
+
+  const result = await resolvePrompt({
+    shopId,
+    promptName,
+    variables,
+    runtimeConfig,
+  });
+
+  if (!result.resolved) {
+    throw new Error(`Failed to resolve prompt ${promptName}: ${result.blockReason}`);
+  }
+
+  // Build prompt text from messages
+  const promptText = result.resolved.messages
+    .map(m => m.content)
+    .join('\n\n');
+
+  return {
+    promptText,
+    versionId: result.resolved.promptVersionId ?? '',
+    model: result.resolved.model,
+    params: result.resolved.params,
+  };
 }

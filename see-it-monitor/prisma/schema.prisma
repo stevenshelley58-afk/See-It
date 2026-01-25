@@ -25,13 +25,6 @@ enum PromptStatus {
   ARCHIVED
 }
 
-enum CallStatus {
-  STARTED
-  SUCCEEDED
-  FAILED
-  TIMEOUT
-}
-
 enum AuditAction {
   PROMPT_CREATE
   PROMPT_UPDATE_DRAFT
@@ -156,57 +149,65 @@ model ShopRuntimeConfig {
 }
 
 // =============================================================================
-// Prompt Control Plane: LLMCall
+// CANONICAL: LLMCall
 // One row per model call - the core instrumentation table
 // =============================================================================
 
 model LLMCall {
   id String @id @default(cuid())
 
-  shopId          String  @map("shop_id")
-  renderRunId     String? @map("render_run_id")
-  variantResultId String? @map("variant_result_id")
-  testRunId       String? @map("test_run_id")
+  // Tenant context
+  shopId String @map("shop_id")
 
-  promptName      String  @map("prompt_name")
+  // Owner context (NO DEFAULTS - callers must populate)
+  ownerType String @map("owner_type") // "COMPOSITE_RUN" | "PRODUCT_ASSET" | "TEST_RUN"
+  ownerId   String @map("owner_id")
+  variantId String? @map("variant_id") // null for non-variant calls
+
+  // Prompt context (NO DEFAULTS)
+  promptKey       String  @map("prompt_key") // "product_fact_extractor" | "placement_set_generator" | "composite_instruction"
   promptVersionId String? @map("prompt_version_id")
 
-  model String
+  // Identity hashes (NO DEFAULTS - callers must populate)
+  callIdentityHash String  @map("call_identity_hash")
+  dedupeHash       String? @map("dedupe_hash")
 
-  resolutionHash String @map("resolution_hash")
-  requestHash    String @map("request_hash")
+  // Payloads (REQUIRED for auditability)
+  callSummary   Json  @map("call_summary") // { promptName, model, imageCount, promptPreview }
+  debugPayload  Json  @map("debug_payload") // Full Gemini request context
+  outputSummary Json? @map("output_summary") // Populated on completion
 
-  status     CallStatus
-  startedAt  DateTime   @map("started_at")
-  finishedAt DateTime?  @map("finished_at")
-  latencyMs  Int?       @map("latency_ms")
+  // Status and timing
+  status     String   @default("STARTED") // "STARTED" | "SUCCEEDED" | "FAILED" | "TIMEOUT"
+  startedAt  DateTime @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  latencyMs  Int?      @map("latency_ms")
 
+  // Tokens and cost
   tokensIn     Int?     @map("tokens_in")
   tokensOut    Int?     @map("tokens_out")
   costEstimate Decimal? @map("cost_estimate") @db.Decimal(10, 6)
 
+  // Error tracking
   errorType    String? @map("error_type")
   errorMessage String? @map("error_message")
-  retryCount   Int     @default(0) @map("retry_count")
 
-  providerRequestId String? @map("provider_request_id")
+  // Provider metadata
   providerModel     String? @map("provider_model")
-
-  inputRef  Json? @map("input_ref")
-  inputPayload Json? @map("input_payload")
-  outputRef Json? @map("output_ref")
+  providerRequestId String? @map("provider_request_id")
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  // Relations
   shop          Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  promptVersion PromptVersion? @relation(fields: [promptVersionId], references: [id])
-  testRun       PromptTestRun? @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  promptVersion PromptVersion? @relation(fields: [promptVersionId], references: [id], onDelete: SetNull)
 
   @@index([shopId, createdAt])
-  @@index([renderRunId])
-  @@index([testRunId])
-  @@index([promptName, createdAt])
+  @@index([ownerType, ownerId])
+  @@index([promptKey, createdAt])
   @@index([status, createdAt])
+  @@index([callIdentityHash])
+  @@index([dedupeHash])
   @@map("llm_calls")
 }
 
@@ -237,8 +238,7 @@ model PromptTestRun {
   createdAt DateTime @default(now()) @map("created_at")
   createdBy String   @map("created_by")
 
-  shop     Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  llmCalls LLMCall[]
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId, promptName, createdAt])
   @@map("prompt_test_runs")

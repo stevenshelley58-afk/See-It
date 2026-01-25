@@ -16,6 +16,7 @@ import type {
   ArtifactListResponseV1,
   HealthStatsV1,
   DebugBundleV1,
+  LLMCallSummaryV1,
 } from "./types";
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -40,14 +41,11 @@ export async function getRuns(
     if (filters.dateFrom) where.createdAt.gte = filters.dateFrom;
     if (filters.dateTo) where.createdAt.lte = filters.dateTo;
   }
-  if (filters.promptVersion) {
-    where.promptPackVersion = filters.promptVersion;
+  if (filters.pipelineConfigHash) {
+    where.pipelineConfigHash = filters.pipelineConfigHash;
   }
-  if (filters.model) {
-    where.model = filters.model;
-  }
-  if (filters.requestId) {
-    where.requestId = filters.requestId;
+  if (filters.traceId) {
+    where.traceId = filters.traceId;
   }
   if (filters.productId) {
     where.productAsset = { productId: filters.productId };
@@ -75,14 +73,12 @@ export async function getRuns(
       productTitle: run.productAsset?.productTitle || null,
       productId: run.productAsset?.productId || null,
       status: run.status,
-      promptPackVersion: run.promptPackVersion,
-      model: run.model,
+      pipelineConfigHash: run.pipelineConfigHash,
       totalDurationMs: run.totalDurationMs,
       variantCount: 8, // Always 8 variants
       successCount: run.successCount,
       failCount: run.failCount,
       timeoutCount: run.timeoutCount,
-      requestId: run.requestId,
       traceId: run.traceId,
     })),
     total,
@@ -92,11 +88,12 @@ export async function getRuns(
 }
 
 /**
- * Get full run detail with variants and signed URLs.
+ * Get full run detail with variants, LLM calls, and signed URLs.
  */
 export async function getRunDetail(
   runId: string,
-  shopId: string
+  shopId: string,
+  revealEnabled: boolean = false
 ): Promise<RunDetailV1 | null> {
   const run = await prisma.renderRun.findFirst({
     where: { id: runId, shopId },
@@ -112,14 +109,23 @@ export async function getRunDetail(
 
   if (!run) return null;
 
+  // Fetch LLM calls for this run
+  const llmCalls = await prisma.lLMCall.findMany({
+    where: {
+      ownerType: "COMPOSITE_RUN",
+      ownerId: runId,
+    },
+    orderBy: { startedAt: "asc" },
+  });
+
   // Generate signed URLs for variant images
   const variants = await Promise.all(
     run.variantResults.map(async (v: typeof run.variantResults[number]) => {
       let imageUrl: string | null = null;
-      if (v.outputImageKey) {
+      if (v.imageRef) {
         try {
           imageUrl = await StorageService.getSignedReadUrl(
-            v.outputImageKey,
+            v.imageRef,
             60 * 60 * 1000 // 1 hour
           );
         } catch {
@@ -132,21 +138,41 @@ export async function getRunDetail(
         variantId: v.variantId,
         status: v.status,
         latencyMs: v.latencyMs,
-        providerMs: v.providerMs,
-        uploadMs: v.uploadMs,
         errorCode: v.errorCode,
         errorMessage: v.errorMessage,
         imageUrl,
-        outputImageKey: v.outputImageKey,
+        imageRef: v.imageRef,
+        imageHash: v.imageHash,
       };
     })
   );
+
+  // Format LLM calls - only include debugPayload if reveal is enabled
+  const formattedCalls: LLMCallSummaryV1[] = llmCalls.map((call) => {
+    const result: LLMCallSummaryV1 = {
+      id: call.id,
+      variantId: call.variantId,
+      promptKey: call.promptKey,
+      status: call.status,
+      latencyMs: call.latencyMs,
+      tokensIn: call.tokensIn,
+      tokensOut: call.tokensOut,
+      costEstimate: call.costEstimate?.toString() || null,
+      callSummary: call.callSummary as LLMCallSummaryV1["callSummary"],
+    };
+
+    if (revealEnabled) {
+      result.debugPayload = call.debugPayload as Record<string, unknown>;
+      result.outputSummary = call.outputSummary as Record<string, unknown> | undefined;
+    }
+
+    return result;
+  });
 
   return {
     id: run.id,
     createdAt: run.createdAt.toISOString(),
     completedAt: run.completedAt?.toISOString() || null,
-    requestId: run.requestId,
     traceId: run.traceId,
     shopId: run.shopId,
     productAssetId: run.productAssetId,
@@ -154,16 +180,20 @@ export async function getRunDetail(
     productId: run.productAsset?.productId || null,
     roomSessionId: run.roomSessionId,
     status: run.status,
-    promptPackVersion: run.promptPackVersion,
-    model: run.model,
+    pipelineConfigHash: run.pipelineConfigHash,
     totalDurationMs: run.totalDurationMs,
     successCount: run.successCount,
     failCount: run.failCount,
     timeoutCount: run.timeoutCount,
-    telemetryDropped: run.telemetryDropped,
     variants,
-    resolvedFactsJson: run.resolvedFactsJson as Record<string, unknown>,
-    promptPackJson: run.promptPackJson as Record<string, unknown>,
+    resolvedFactsSnapshot: run.resolvedFactsSnapshot as Record<string, unknown>,
+    placementSetSnapshot: run.placementSetSnapshot as Record<string, unknown>,
+    pipelineConfigSnapshot: run.pipelineConfigSnapshot as Record<string, unknown>,
+    llmCalls: formattedCalls,
+    preparedProductImageRef: run.preparedProductImageRef,
+    roomImageRef: run.roomImageRef,
+    waterfallMs: run.waterfallMs as Record<string, unknown> | null,
+    runTotals: run.runTotals as Record<string, unknown> | null,
   };
 }
 
@@ -245,29 +275,25 @@ export async function getHealthStats(shopId: string): Promise<HealthStatsV1> {
     failed24h,
     total7d,
     failed7d,
-    telemetryDropped24h,
     latencyData,
   ] = await Promise.all([
     prisma.renderRun.count({
       where: { shopId, createdAt: { gte: oneHourAgo } },
     }),
     prisma.renderRun.count({
-      where: { shopId, createdAt: { gte: oneHourAgo }, status: "failed" },
+      where: { shopId, createdAt: { gte: oneHourAgo }, status: "FAILED" },
     }),
     prisma.renderRun.count({
       where: { shopId, createdAt: { gte: oneDayAgo } },
     }),
     prisma.renderRun.count({
-      where: { shopId, createdAt: { gte: oneDayAgo }, status: "failed" },
+      where: { shopId, createdAt: { gte: oneDayAgo }, status: "FAILED" },
     }),
     prisma.renderRun.count({
       where: { shopId, createdAt: { gte: sevenDaysAgo } },
     }),
     prisma.renderRun.count({
-      where: { shopId, createdAt: { gte: sevenDaysAgo }, status: "failed" },
-    }),
-    prisma.renderRun.count({
-      where: { shopId, createdAt: { gte: oneDayAgo }, telemetryDropped: true },
+      where: { shopId, createdAt: { gte: sevenDaysAgo }, status: "FAILED" },
     }),
     prisma.renderRun.findMany({
       where: {
@@ -326,7 +352,6 @@ export async function getHealthStats(shopId: string): Promise<HealthStatsV1> {
     latencyP95,
     providerErrors24h: providerErrors,
     storageErrors24h: storageErrors,
-    telemetryDropped24h: telemetryDropped24h,
   };
 }
 
@@ -337,9 +362,9 @@ export async function exportDebugBundle(
   runId: string,
   shopId: string
 ): Promise<DebugBundleV1 | null> {
-  // Fetch all data in parallel
+  // Fetch all data in parallel (with reveal=true for full debug info)
   const [run, eventsResult, artifactsResult] = await Promise.all([
-    getRunDetail(runId, shopId),
+    getRunDetail(runId, shopId, true),
     getRunEvents(runId, shopId),
     getRunArtifacts(runId, shopId),
   ]);
@@ -509,15 +534,13 @@ export interface ExternalRunsListItem {
   productTitle: string | null;
   productId: string | null;
   status: string;
-  promptPackVersion: number;
-  model: string;
+  pipelineConfigHash: string;
   totalDurationMs: number | null;
   variantCount: number;
   successCount: number;
   failCount: number;
   timeoutCount: number;
-  requestId: string;
-  traceId: string | null;
+  traceId: string;
 }
 
 export interface ExternalRunsListResponse {
@@ -605,14 +628,12 @@ export async function getRunsExternal(
       productTitle: run.productAsset?.productTitle || null,
       productId: run.productAsset?.productId || null,
       status: run.status,
-      promptPackVersion: run.promptPackVersion,
-      model: run.model,
+      pipelineConfigHash: run.pipelineConfigHash,
       totalDurationMs: run.totalDurationMs,
       variantCount: 8,
       successCount: run.successCount,
       failCount: run.failCount,
       timeoutCount: run.timeoutCount,
-      requestId: run.requestId,
       traceId: run.traceId,
     })),
     cursor: nextCursor,
@@ -632,8 +653,7 @@ export interface ExternalRunDetail {
   id: string;
   createdAt: string;
   completedAt: string | null;
-  requestId: string;
-  traceId: string | null;
+  traceId: string;
   shopId: string;
   shopDomain: string;
   productAssetId: string;
@@ -641,27 +661,28 @@ export interface ExternalRunDetail {
   productId: string | null;
   roomSessionId: string | null;
   status: string;
-  promptPackVersion: number;
-  model: string;
+  pipelineConfigHash: string;
   totalDurationMs: number | null;
   successCount: number;
   failCount: number;
   timeoutCount: number;
-  telemetryDropped: boolean;
   variants: {
     id: string;
     variantId: string;
     status: string;
     latencyMs: number | null;
-    providerMs: number | null;
-    uploadMs: number | null;
     errorCode: string | null;
     errorMessage: string | null;
     imageUrl: string | null;
+    imageRef: string | null;
+    imageHash: string | null;
   }[];
+  // LLM calls (summarized unless revealed)
+  llmCalls: LLMCallSummaryV1[];
   // Only included if revealEnabled
-  resolvedFactsJson?: Record<string, unknown>;
-  promptPackJson?: Record<string, unknown>;
+  resolvedFactsSnapshot?: Record<string, unknown>;
+  placementSetSnapshot?: Record<string, unknown>;
+  pipelineConfigSnapshot?: Record<string, unknown>;
 }
 
 /**
@@ -688,14 +709,23 @@ export async function getRunDetailExternal(
 
   if (!run) return null;
 
+  // Fetch LLM calls for this run
+  const llmCalls = await prisma.lLMCall.findMany({
+    where: {
+      ownerType: "COMPOSITE_RUN",
+      ownerId: runId,
+    },
+    orderBy: { startedAt: "asc" },
+  });
+
   // Generate signed URLs for variant images (always included)
   const variants = await Promise.all(
     run.variantResults.map(async (v: typeof run.variantResults[number]) => {
       let imageUrl: string | null = null;
-      if (v.outputImageKey) {
+      if (v.imageRef) {
         try {
           imageUrl = await StorageService.getSignedReadUrl(
-            v.outputImageKey,
+            v.imageRef,
             60 * 60 * 1000 // 1 hour
           );
         } catch {
@@ -708,20 +738,41 @@ export async function getRunDetailExternal(
         variantId: v.variantId,
         status: v.status,
         latencyMs: v.latencyMs,
-        providerMs: v.providerMs,
-        uploadMs: v.uploadMs,
         errorCode: v.errorCode,
         errorMessage: v.errorMessage,
         imageUrl,
+        imageRef: v.imageRef,
+        imageHash: v.imageHash,
       };
     })
   );
+
+  // Format LLM calls
+  const formattedCalls: LLMCallSummaryV1[] = llmCalls.map((call) => {
+    const result: LLMCallSummaryV1 = {
+      id: call.id,
+      variantId: call.variantId,
+      promptKey: call.promptKey,
+      status: call.status,
+      latencyMs: call.latencyMs,
+      tokensIn: call.tokensIn,
+      tokensOut: call.tokensOut,
+      costEstimate: call.costEstimate?.toString() || null,
+      callSummary: call.callSummary as LLMCallSummaryV1["callSummary"],
+    };
+
+    if (revealEnabled) {
+      result.debugPayload = call.debugPayload as Record<string, unknown>;
+      result.outputSummary = call.outputSummary as Record<string, unknown> | undefined;
+    }
+
+    return result;
+  });
 
   const result: ExternalRunDetail = {
     id: run.id,
     createdAt: run.createdAt.toISOString(),
     completedAt: run.completedAt?.toISOString() || null,
-    requestId: run.requestId,
     traceId: run.traceId,
     shopId: run.shopId,
     shopDomain: run.shop.shopDomain,
@@ -730,20 +781,20 @@ export async function getRunDetailExternal(
     productId: run.productAsset?.productId || null,
     roomSessionId: run.roomSessionId,
     status: run.status,
-    promptPackVersion: run.promptPackVersion,
-    model: run.model,
+    pipelineConfigHash: run.pipelineConfigHash,
     totalDurationMs: run.totalDurationMs,
     successCount: run.successCount,
     failCount: run.failCount,
     timeoutCount: run.timeoutCount,
-    telemetryDropped: run.telemetryDropped,
     variants,
+    llmCalls: formattedCalls,
   };
 
-  // Only include sensitive fields if revealed
+  // Only include snapshots if revealed
   if (revealEnabled) {
-    result.resolvedFactsJson = run.resolvedFactsJson as Record<string, unknown>;
-    result.promptPackJson = run.promptPackJson as Record<string, unknown>;
+    result.resolvedFactsSnapshot = run.resolvedFactsSnapshot as Record<string, unknown>;
+    result.placementSetSnapshot = run.placementSetSnapshot as Record<string, unknown>;
+    result.pipelineConfigSnapshot = run.pipelineConfigSnapshot as Record<string, unknown>;
   }
 
   return result;
@@ -958,7 +1009,7 @@ export async function getShopsExternal(
     where: {
       shopId: { in: shopIds },
       createdAt: { gte: windowStart },
-      status: "complete",
+      status: "COMPLETE",
     },
     _count: { _all: true },
   });
@@ -1074,7 +1125,7 @@ export async function getShopDetailExternal(
   const failedVariants = await prisma.variantResult.findMany({
     where: {
       renderRun: { shopId },
-      status: "error",
+      status: "FAILED",
       createdAt: { gte: oneDayAgo },
       errorMessage: { not: null },
     },
@@ -1113,14 +1164,12 @@ export async function getShopDetailExternal(
       productTitle: run.productAsset?.productTitle || null,
       productId: run.productAsset?.productId || null,
       status: run.status,
-      promptPackVersion: run.promptPackVersion,
-      model: run.model,
+      pipelineConfigHash: run.pipelineConfigHash,
       totalDurationMs: run.totalDurationMs,
       variantCount: 8,
       successCount: run.successCount,
       failCount: run.failCount,
       timeoutCount: run.timeoutCount,
-      requestId: run.requestId,
       traceId: run.traceId,
     })),
     topErrors,
@@ -1164,13 +1213,13 @@ export async function getHealthStatsExternal(): Promise<ExternalHealthStats> {
       where: { createdAt: { gte: oneHourAgo } },
     }),
     prisma.renderRun.count({
-      where: { createdAt: { gte: oneHourAgo }, status: "failed" },
+      where: { createdAt: { gte: oneHourAgo }, status: "FAILED" },
     }),
     prisma.renderRun.count({
       where: { createdAt: { gte: oneDayAgo } },
     }),
     prisma.renderRun.count({
-      where: { createdAt: { gte: oneDayAgo }, status: "failed" },
+      where: { createdAt: { gte: oneDayAgo }, status: "FAILED" },
     }),
     prisma.renderRun.findMany({
       where: {

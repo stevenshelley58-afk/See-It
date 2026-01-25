@@ -21,13 +21,6 @@ enum PromptStatus {
   ARCHIVED
 }
 
-enum CallStatus {
-  STARTED
-  SUCCEEDED
-  FAILED
-  TIMEOUT
-}
-
 enum AuditAction {
   PROMPT_CREATE
   PROMPT_UPDATE_DRAFT
@@ -116,34 +109,13 @@ model ProductAsset {
   geminiFileExpiresAt DateTime? @map("gemini_file_expires_at") // Gemini file expiration (48h from upload)
 
   // ==========================================================================
-  // NEW: See It Now Pipeline Fields
+  // CANONICAL: See It Now Pipeline Fields
   // ==========================================================================
-  extractedFacts    Json?     @map("extracted_facts") // LLM #1 output
+  extractedFacts    Json?     @map("extracted_facts") // LLM #1 output: ProductFacts
   merchantOverrides Json?     @map("merchant_overrides") // Merchant edits (diff only)
   resolvedFacts     Json?     @map("resolved_facts") // merged(extracted, overrides)
-  promptPack        Json?     @map("prompt_pack") // LLM #2 output: { product_context, variants[] }
-  promptPackVersion Int       @default(0) @map("prompt_pack_version")
+  placementSet      Json?     @map("placement_set") // LLM #2 output: { productDescription, variants[] }
   extractedAt       DateTime? @map("extracted_at")
-
-  // ==========================================================================
-  // DEPRECATED: Keep for migration, stop using
-  // ==========================================================================
-  renderInstructions         String?  @map("render_instructions") // Custom AI instructions for final render (optional)
-  renderInstructionsSeeItNow String?  @map("render_instructions_see_it_now") // Custom AI instructions for See It Now hero shot renders (optional)
-  sceneRole                  String?  @map("scene_role") // Placement rules: "Dominant" | "Integrated"
-  replacementRule            String?  @map("replacement_rule") // Placement rules: "Same Role Only" | "Similar Size or Position" | "Any Blocking Object" | "None"
-  allowSpaceCreation         Boolean? @map("allow_space_creation") // Placement rules: Allow minimal space creation for placement
-  placementFields            Json?    @map("placement_fields") // Structured placement fields: { surface, material, orientation, shadow, dimensions: { height, width }, additionalNotes, fieldSource?: { [field]: "auto" | "merchant" } }
-  // Field-level provenance (current state snapshot)
-  fieldConfidence            Json?    @map("field_confidence") // JSON: { fieldName: "high" | "medium" | "low" }
-  fieldSource                Json?    @map("field_source") // JSON: { fieldName: "auto" | "merchant" }
-  fieldOverrides             Json?    @map("field_overrides") // JSON: { fieldName: true | false }
-  fieldEvidence              Json?    @map("field_evidence") // JSON: { fieldName: "snippet/keywords/image cues" }
-  // See It Now per-product prompt fields
-  generatedSeeItNowPrompt    String?  @map("generated_see_it_now_prompt") // LLM-generated complete product-specific prompt
-  seeItNowVariants           Json?    @map("see_it_now_variants") // JSON: Array of {id: string, prompt: string}
-  detectedArchetype          String?  @map("detected_archetype") // Detected archetype: oversized_architectural, large_furniture, medium_furniture, small_homewares, wall_mounted_decor
-  useGeneratedPrompt         Boolean  @default(false) @map("use_generated_prompt") // When true, uses per-product prompts instead of shop-level
 
   createdAt DateTime @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -181,6 +153,7 @@ model RoomSession {
 
   shop       Shop        @relation(fields: [shopId], references: [id], onDelete: Cascade)
   renderJobs RenderJob[]
+  renderRuns RenderRun[]
 
   @@map("room_sessions")
 }
@@ -300,28 +273,7 @@ model PrepEvent {
 }
 
 // =============================================================================
-// LEGACY: PromptConfigVersion - Track prompt config history (renamed from PromptVersion)
-// =============================================================================
-
-model PromptConfigVersion {
-  id                    String   @id @default(uuid())
-  version               Int      @unique
-  extractorPromptHash   String   @map("extractor_prompt_hash")
-  builderPromptHash     String   @map("builder_prompt_hash")
-  globalPromptHash      String   @map("global_prompt_hash")
-  variantIntentsHash    String   @map("variant_intents_hash")
-  materialBehaviorsHash String   @map("material_behaviors_hash")
-  scaleGuardrailsHash   String   @map("scale_guardrails_hash")
-  configSnapshot        Json     @map("config_snapshot")
-  createdAt             DateTime @default(now()) @map("created_at")
-
-  renderRuns RenderRun[]
-
-  @@map("prompt_versions")
-}
-
-// =============================================================================
-// NEW: RenderRun - One per render request
+// CANONICAL: RenderRun - One per render request
 // =============================================================================
 
 model RenderRun {
@@ -329,99 +281,71 @@ model RenderRun {
   shopId         String  @map("shop_id")
   productAssetId String  @map("product_asset_id")
   roomSessionId  String? @map("room_session_id")
-  requestId      String  @map("request_id")
 
-  promptPackVersion Int    @map("prompt_pack_version")
-  model             String
+  traceId String @map("trace_id")
 
-  productImageHash String @map("product_image_hash")
-  productImageMeta Json   @map("product_image_meta")
-  roomImageHash    String @map("room_image_hash")
-  roomImageMeta    Json   @map("room_image_meta")
+  // Image references
+  preparedProductImageRef  String  @map("prepared_product_image_ref")
+  preparedProductImageHash String? @map("prepared_product_image_hash")
+  roomImageRef             String  @map("room_image_ref")
+  roomImageHash            String? @map("room_image_hash")
 
-  resolvedFactsHash String @map("resolved_facts_hash")
-  resolvedFactsJson Json   @map("resolved_facts_json")
-  promptPackHash    String @map("prompt_pack_hash")
-  promptPackJson    Json   @map("prompt_pack_json")
+  // Snapshots (complete audit trail)
+  resolvedFactsSnapshot  Json   @map("resolved_facts_snapshot")
+  placementSetSnapshot   Json   @map("placement_set_snapshot")
+  pipelineConfigSnapshot Json   @map("pipeline_config_snapshot")
+  pipelineConfigHash     String @map("pipeline_config_hash")
 
-  totalDurationMs Int?   @map("total_duration_ms")
-  status          String // "partial" | "complete" | "failed"
+  // Status
+  status String @default("RUNNING") // "RUNNING" | "COMPLETE" | "PARTIAL" | "FAILED"
 
-  createdAt DateTime @default(now()) @map("created_at")
+  // Timing
+  createdAt       DateTime  @default(now()) @map("created_at")
+  completedAt     DateTime? @map("completed_at")
+  totalDurationMs Int?      @map("total_duration_ms")
+  waterfallMs     Json?     @map("waterfall_ms")
 
-  // Observability v2 fields
-  traceId          String?   @map("trace_id")
-  startedAt        DateTime  @default(now()) @map("started_at")
-  completedAt      DateTime? @map("completed_at")
-  successCount     Int       @default(0) @map("success_count")
-  failCount        Int       @default(0) @map("fail_count")
-  timeoutCount     Int       @default(0) @map("timeout_count")
-  telemetryDropped Boolean   @default(false) @map("telemetry_dropped")
+  // Aggregates
+  successCount Int   @default(0) @map("success_count")
+  failCount    Int   @default(0) @map("fail_count")
+  timeoutCount Int   @default(0) @map("timeout_count")
+  runTotals    Json? @map("run_totals")
 
-  // ==========================================================================
-  // Prompt Control Plane fields
-  // ==========================================================================
-  // Per-run overrides (optional)
-  // Shape: { [promptName]: PromptOverride }
-  promptOverrides Json? @map("prompt_overrides")
-
-  // Complete resolved config snapshot (for audit/replay)
-  // Shape: ResolvedConfigSnapshot
-  resolvedConfigSnapshot Json? @map("resolved_config_snapshot")
-
-  // Waterfall timing
-  // Shape: { download_ms, prompt_build_ms, inference_ms, upload_ms, total_ms }
-  waterfallMs Json? @map("waterfall_ms")
-
-  // Aggregated totals
-  // Shape: { tokens_in, tokens_out, cost_estimate, calls_total, calls_failed }
-  runTotals Json? @map("run_totals")
-
-  shop                Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  productAsset        ProductAsset        @relation(fields: [productAssetId], references: [id], onDelete: Cascade)
-  promptConfigVersion PromptConfigVersion @relation(fields: [promptPackVersion], references: [version])
-  variantResults      VariantResult[]
-  llmCalls            LLMCall[]
+  shop           Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  productAsset   ProductAsset   @relation(fields: [productAssetId], references: [id], onDelete: Cascade)
+  roomSession    RoomSession?   @relation(fields: [roomSessionId], references: [id], onDelete: SetNull)
+  variantResults VariantResult[]
 
   @@index([shopId, createdAt])
   @@index([productAssetId])
-  @@index([promptPackVersion])
   @@index([status])
   @@index([traceId])
+  @@index([pipelineConfigHash])
   @@map("render_runs")
 }
 
 // =============================================================================
-// NEW: VariantResult - One per variant per RenderRun
+// CANONICAL: VariantResult - One per variant per RenderRun
 // =============================================================================
 
 model VariantResult {
-  id              String @id @default(uuid())
-  renderRunId     String @map("render_run_id")
-  variantId       String @map("variant_id")
-  finalPromptHash String @map("final_prompt_hash")
+  id        String @id @default(uuid())
+  runId     String @map("run_id")
+  variantId String @map("variant_id") // 'V01' .. 'V08'
 
-  status          String // "success" | "failed" | "timeout"
-  latencyMs       Int?    @map("latency_ms")
-  outputImageKey  String? @map("output_image_key")
-  outputImageHash String? @map("output_image_hash")
-  errorMessage    String? @map("error_message")
+  status       String  // "SUCCESS" | "FAILED" | "TIMEOUT"
+  imageRef     String? @map("image_ref")
+  imageHash    String? @map("image_hash")
+  latencyMs    Int?    @map("latency_ms")
+  errorCode    String? @map("error_code")
+  errorMessage String? @map("error_message")
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  // Observability v2 fields
-  startedAt        DateTime? @map("started_at")
-  completedAt      DateTime? @map("completed_at")
-  providerMs       Int?      @map("provider_ms")
-  uploadMs         Int?      @map("upload_ms")
-  errorCode        String?   @map("error_code")
-  outputArtifactId String?   @map("output_artifact_id")
+  renderRun RenderRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
-  renderRun RenderRun @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
-  llmCalls  LLMCall[]
-
-  @@index([renderRunId])
-  @@index([variantId])
+  @@unique([runId, variantId])
+  @@index([runId])
   @@index([status])
   @@map("variant_results")
 }
@@ -495,7 +419,7 @@ model MonitorArtifact {
 model PromptDefinition {
   id          String  @id @default(cuid())
   shopId      String  @map("shop_id")
-  name        String // e.g., "extractor", "prompt_builder", "global_render"
+  name        String // e.g., "product_fact_extractor", "placement_set_generator", "composite_instruction"
   description String?
 
   // Defaults (fallback if version doesn't specify)
@@ -592,8 +516,7 @@ model ShopRuntimeConfig {
 }
 
 // =============================================================================
-// Prompt Control Plane: LLMCall
-// One row per model call - the core instrumentation table
+// CANONICAL: LLMCall - One row per model call
 // =============================================================================
 
 model LLMCall {
@@ -602,29 +525,31 @@ model LLMCall {
   // Tenant context
   shopId String @map("shop_id")
 
-  // Run context (nullable for test calls)
-  renderRunId     String? @map("render_run_id")
-  variantResultId String? @map("variant_result_id")
-  testRunId       String? @map("test_run_id")
+  // Owner context (NO DEFAULTS - callers must populate)
+  ownerType String @map("owner_type") // "COMPOSITE_RUN" | "PRODUCT_ASSET" | "TEST_RUN"
+  ownerId   String @map("owner_id")
+  variantId String? @map("variant_id") // null for non-variant calls
 
-  // Prompt info
-  promptName      String  @map("prompt_name")
-  promptVersionId String? @map("prompt_version_id") // Always stored, even if overridden
+  // Prompt context (NO DEFAULTS)
+  promptKey       String  @map("prompt_key") // "product_fact_extractor" | "placement_set_generator" | "composite_instruction"
+  promptVersionId String? @map("prompt_version_id")
 
-  // Model info
-  model String
+  // Identity hashes (NO DEFAULTS - callers must populate)
+  callIdentityHash String  @map("call_identity_hash")
+  dedupeHash       String? @map("dedupe_hash")
 
-  // Hashes for identity and deduplication
-  resolutionHash String @map("resolution_hash") // Hash of rendered call
-  requestHash    String @map("request_hash") // Hash for deduplication (sorted imageRefs)
+  // Payloads (REQUIRED for auditability)
+  callSummary   Json  @map("call_summary") // { promptName, model, imageCount, promptPreview }
+  debugPayload  Json  @map("debug_payload") // Full Gemini request context
+  outputSummary Json? @map("output_summary") // Populated on completion
 
-  // Timing
-  status     CallStatus
-  startedAt  DateTime   @map("started_at")
-  finishedAt DateTime?  @map("finished_at")
-  latencyMs  Int?       @map("latency_ms")
+  // Status and timing
+  status     String   @default("STARTED") // "STARTED" | "SUCCEEDED" | "FAILED" | "TIMEOUT"
+  startedAt  DateTime @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  latencyMs  Int?      @map("latency_ms")
 
-  // Token usage
+  // Tokens and cost
   tokensIn     Int?     @map("tokens_in")
   tokensOut    Int?     @map("tokens_out")
   costEstimate Decimal? @map("cost_estimate") @db.Decimal(10, 6)
@@ -632,35 +557,23 @@ model LLMCall {
   // Error tracking
   errorType    String? @map("error_type")
   errorMessage String? @map("error_message")
-  retryCount   Int     @default(0) @map("retry_count")
 
   // Provider metadata
-  providerRequestId String? @map("provider_request_id")
   providerModel     String? @map("provider_model")
-
-  // References (truncated for storage)
-  inputRef  Json? @map("input_ref") // { messageCount, imageCount, preview, resolutionHash }
-  // Full request payload (for debugging / replay). May include sensitive content.
-  // Stored as JSONB to allow rich inspection in See It Monitor (gated behind Reveal).
-  inputPayload Json? @map("input_payload")
-  outputRef Json? @map("output_ref") // { preview, length }
+  providerRequestId String? @map("provider_request_id")
 
   createdAt DateTime @default(now()) @map("created_at")
 
   // Relations
   shop          Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
   promptVersion PromptVersion? @relation(fields: [promptVersionId], references: [id], onDelete: SetNull)
-  variantResult VariantResult? @relation(fields: [variantResultId], references: [id], onDelete: SetNull)
-  renderRun     RenderRun?     @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
-  testRun       PromptTestRun? @relation(fields: [testRunId], references: [id], onDelete: Cascade)
 
   @@index([shopId, createdAt])
-  @@index([renderRunId])
-  @@index([testRunId])
-  @@index([variantResultId])
-  @@index([promptVersionId])
-  @@index([promptName, createdAt])
+  @@index([ownerType, ownerId])
+  @@index([promptKey, createdAt])
   @@index([status, createdAt])
+  @@index([callIdentityHash])
+  @@index([dedupeHash])
   @@map("llm_calls")
 }
 
@@ -696,8 +609,7 @@ model PromptTestRun {
   createdAt DateTime @default(now()) @map("created_at")
   createdBy String   @map("created_by")
 
-  shop     Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  llmCalls LLMCall[]
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@index([shopId, promptName, createdAt])
   @@map("prompt_test_runs")

@@ -1,6 +1,10 @@
 // =============================================================================
-// SEED SCRIPT: Backfill existing prompts into database
-// Run this once after migration to populate PromptDefinition and PromptVersion
+// SEED SCRIPT: Canonical Prompts for See It Now Pipeline
+//
+// Populates PromptDefinition and PromptVersion for the 3 canonical prompts:
+// - product_fact_extractor (LLM #1)
+// - placement_set_generator (LLM #2)
+// - composite_instruction (LLM #3)
 //
 // Prerequisites:
 //   1. Run the migration first: npx prisma migrate dev
@@ -16,17 +20,6 @@
 
 import { createHash } from "crypto";
 import { PrismaClient, Prisma } from "@prisma/client";
-
-// Import prompts from existing config files
-import {
-  EXTRACTOR_SYSTEM_PROMPT,
-  EXTRACTOR_USER_PROMPT_TEMPLATE,
-} from "~/config/prompts/extractor.prompt.js";
-import {
-  PROMPT_BUILDER_SYSTEM_PROMPT,
-  PROMPT_BUILDER_USER_PROMPT_TEMPLATE,
-} from "~/config/prompts/prompt-builder.prompt.js";
-import { GLOBAL_RENDER_STATIC } from "~/config/prompts/global-render.prompt.js";
 
 const prisma = new PrismaClient();
 
@@ -53,7 +46,160 @@ function computeTemplateHash(data: {
 }
 
 // =============================================================================
-// Prompt seed data from existing prompt files
+// CANONICAL PROMPT TEMPLATES (Inlined - no external dependencies)
+// =============================================================================
+
+const PRODUCT_FACT_EXTRACTOR_SYSTEM = `You extract product placement facts for a photorealistic product-in-room rendering system.
+
+Extract as much as possible from the provided text and images.
+If multiple placement modes are plausible, include them with confidence scores.
+If something is unknown, mark it unknown — do not guess.
+
+CRITICAL RULES:
+- Do not write marketing copy
+- Do not write prompts
+- Do not invent dimensions or scale
+- Extract relative scale cues only when supported by evidence (title, text, tags, metafields, or obvious visual cues)
+
+RELATIVE SCALE EXTRACTION:
+Look for these keywords and capture them as relative_scale.class with evidence:
+- "oversized", "large", "XL", "floor mirror", "statement piece" → oversized or large
+- "petite", "tabletop", "small", "mini" → small or tiny
+- Standard furniture terms without size modifiers → medium
+
+MATERIAL EXTRACTION:
+Be specific enough to drive render behavior:
+- "mirror" vs "glass" vs "reclaimed teak" vs "ceramic" vs "metal"
+- Note sheen: matte, satin, gloss
+- Note transparency: opaque, translucent, transparent
+
+Return ProductFacts as JSON.`;
+
+const PRODUCT_FACT_EXTRACTOR_USER = `Product Title: {{title}}
+
+Product Description:
+{{description}}
+
+Product Type: {{productType}}
+Vendor: {{vendor}}
+Tags: {{tags}}
+
+Metafields:
+{{metafields}}
+
+Analyze the product information and images above. Return ProductFacts JSON.`;
+
+const PLACEMENT_SET_GENERATOR_SYSTEM = `You write product context and placement variations for a product visualization system.
+
+You will receive:
+1. resolved_facts: Complete product placement facts
+2. material_rules: Specific rendering rules for this product's material
+3. variant_intents: The 8 variation strategies you must implement
+
+YOUR OUTPUT:
+You generate TWO things only:
+1. productDescription: A paragraph describing the product for the rendering system
+2. variants: An array of 8 objects, each with id and placementInstruction text
+
+YOU DO NOT GENERATE:
+- Global rules (these are hardcoded separately)
+- Image handling instructions
+- Aspect ratio rules
+- Room preservation rules
+
+PRODUCT DESCRIPTION REQUIREMENTS:
+- Describe the product's visual identity, materials, and character
+- Include the material rendering rules provided
+- MUST include this exact line: "Relative scale: {scale_guardrails}"
+- Keep it factual and specific, not marketing copy
+
+PLACEMENT INSTRUCTION REQUIREMENTS:
+- Each instruction describes WHERE and HOW to place the product
+- Each instruction MUST include a short camera/framing clause (1-2 sentences) describing viewpoint/framing consistency
+- Follow the intent and scale strategy specified for each variant ID
+- V01, V04, V06 must reference a specific in-frame scale anchor
+- V02 must be 15-25% smaller than V01
+- V03 must be 15-25% larger than V01
+- V05 must be 15-25% smaller than V04
+- V07 emphasizes multiple scale references
+- V08 is the conservative escape hatch
+
+Output JSON only:
+{
+  "productDescription": "string",
+  "variants": [
+    { "id": "V01", "placementInstruction": "string" },
+    { "id": "V02", "placementInstruction": "string" },
+    { "id": "V03", "placementInstruction": "string" },
+    { "id": "V04", "placementInstruction": "string" },
+    { "id": "V05", "placementInstruction": "string" },
+    { "id": "V06", "placementInstruction": "string" },
+    { "id": "V07", "placementInstruction": "string" },
+    { "id": "V08", "placementInstruction": "string" }
+  ]
+}`;
+
+const PLACEMENT_SET_GENERATOR_USER = `RESOLVED FACTS:
+{{resolvedFactsJson}}
+
+MATERIAL RULES FOR {{materialPrimary}}:
+{{materialRules}}
+
+SCALE GUARDRAILS (must include verbatim in productDescription):
+{{scaleGuardrails}}
+
+VARIANT INTENTS:
+{{variantIntentsJson}}
+
+Generate productDescription and 8 placement instructions following the intents exactly.`;
+
+const COMPOSITE_INSTRUCTION_SYSTEM = `You are compositing a product into a customer's room photo for ecommerce visualization.
+
+IMAGE ROLES
+- prepared_product_image: The product with transparent background. This is the exact item being sold.
+- customer_room_image: The customer's real room photo. This must be preserved exactly.
+
+MANDATORY RULES
+
+0. COMPOSITION: Place the product from prepared_product_image into customer_room_image. The room remains the base image.
+
+0b. LIGHTING MATCH: Match direction, softness, intensity, and color temperature of the room light. Ensure the product's contact shadow matches room cues.
+
+0c. PHOTOGRAPHIC MATCH: Match the room photo's camera height and perspective. Match lens look and depth of field behavior to the room.
+
+0d. PRESERVATION:
+Do not redesign the product. Preserve exact geometry, proportions, materials, texture, and color.
+
+1. ASPECT RATIO: Output must match the aspect ratio and full frame of customer_room_image exactly.
+
+2. ROOM PRESERVATION: Change only what is required to realistically insert the product into customer_room_image. Keep everything else exactly the same — geometry, furnishings, colors, lighting, objects.
+
+3. SINGLE COMPOSITE: Output a single photoreal image of customer_room_image with the product added naturally. Not a collage. Not a split view. Not a new room. Not a background swap.
+
+4. SCALE DOWN, NEVER CROP: If the product would be cut off by the frame, reduce its scale slightly until the entire product is visible. Do not crop the product.
+
+5. BACKGROUND DISCARD: The transparent background of prepared_product_image must be completely discarded. Only the product itself appears in the output.
+
+6. IDENTITY PRESERVATION: Preserve the exact character of the product — natural patina, wood grain variations, surface imperfections, weathering marks. These are features, not flaws. Do not smooth, polish, or idealize.
+
+7. NO INVENTED HARDWARE: For mirrors and framed items, preserve the exact frame, mounting hardware, and edge details from prepared_product_image. Do not add, remove, or modify hardware.
+
+8. PHYSICAL REALISM: Correct perspective matching the room's camera angle. Accurate shadows based on room lighting. Proper occlusion where the product meets room surfaces. Reflections consistent with room environment (for reflective materials).
+
+9. NO STYLIZATION: No filters, color grading, vignettes, or artistic effects. No text or logos.
+
+Return only the final composed image.`;
+
+const COMPOSITE_INSTRUCTION_USER = `PRODUCT DESCRIPTION:
+{{productDescription}}
+
+PLACEMENT INSTRUCTION:
+{{placementInstruction}}
+
+Compose the product into the room following the placement instruction above.`;
+
+// =============================================================================
+// Prompt seed data
 // =============================================================================
 interface PromptSeed {
   name: string;
@@ -62,51 +208,47 @@ interface PromptSeed {
   defaultParams: Record<string, unknown>;
   systemTemplate: string;
   developerTemplate: string | null;
-  userTemplate: string | null;
+  userTemplate: string;
 }
 
 const PROMPTS_TO_SEED: PromptSeed[] = [
   {
-    name: "extractor",
+    name: "product_fact_extractor",
     description:
-      "LLM #1: Extract product placement facts from images and text (text+vision model)",
+      "LLM #1: Extract product placement facts from images and text",
     defaultModel: "gemini-2.5-flash",
     defaultParams: {
       temperature: 0.3,
-      top_p: 0.95,
-      max_tokens: 4096,
+      responseMimeType: "application/json",
     },
-    systemTemplate: EXTRACTOR_SYSTEM_PROMPT,
+    systemTemplate: PRODUCT_FACT_EXTRACTOR_SYSTEM,
     developerTemplate: null,
-    userTemplate: EXTRACTOR_USER_PROMPT_TEMPLATE,
+    userTemplate: PRODUCT_FACT_EXTRACTOR_USER,
   },
   {
-    name: "prompt_builder",
+    name: "placement_set_generator",
     description:
-      "LLM #2: Generate product context and 8 placement variations (text-only model)",
+      "LLM #2: Generate productDescription and 8 placement instructions",
     defaultModel: "gemini-2.5-flash",
     defaultParams: {
-      temperature: 0.5,
-      top_p: 0.95,
-      max_tokens: 4096,
+      temperature: 0.2,
+      responseMimeType: "application/json",
     },
-    systemTemplate: PROMPT_BUILDER_SYSTEM_PROMPT,
+    systemTemplate: PLACEMENT_SET_GENERATOR_SYSTEM,
     developerTemplate: null,
-    userTemplate: PROMPT_BUILDER_USER_PROMPT_TEMPLATE,
+    userTemplate: PLACEMENT_SET_GENERATOR_USER,
   },
   {
-    name: "global_render",
+    name: "composite_instruction",
     description:
-      "Global rendering rules prepended to all render prompts (image generation model)",
-    defaultModel: "gemini-2.5-flash-image",
+      "LLM #3: Composite product into room (image generation)",
+    defaultModel: "gemini-2.5-flash-preview-04-17",
     defaultParams: {
-      temperature: 0.3,
-      top_p: 0.95,
-      max_tokens: 8192,
+      responseModalities: ["TEXT", "IMAGE"],
     },
-    systemTemplate: GLOBAL_RENDER_STATIC,
+    systemTemplate: COMPOSITE_INSTRUCTION_SYSTEM,
     developerTemplate: null,
-    userTemplate: null,
+    userTemplate: COMPOSITE_INSTRUCTION_USER,
   },
 ];
 
@@ -131,13 +273,12 @@ async function ensureSystemShop(): Promise<void> {
   }
 
   // Create the SYSTEM shop entry
-  // Note: shopDomain is unique, so we use a special domain
   await prisma.shop.create({
     data: {
       id: SYSTEM_TENANT_ID,
       shopDomain: "system.see-it.internal",
-      shopifyShopId: "0", // Placeholder - not a real Shopify shop
-      accessToken: "system-internal-token", // Placeholder - never used for API calls
+      shopifyShopId: "0",
+      accessToken: "system-internal-token",
       plan: "system",
       monthlyQuota: 0,
       dailyQuota: 0,
@@ -149,11 +290,11 @@ async function ensureSystemShop(): Promise<void> {
 }
 
 /**
- * Seed system prompts from existing prompt files.
+ * Seed canonical prompts.
  * Creates PromptDefinitions and active PromptVersions.
  */
-async function seedSystemPrompts(): Promise<void> {
-  console.log("Seeding system prompts...\n");
+async function seedCanonicalPrompts(): Promise<void> {
+  console.log("Seeding canonical prompts...\n");
 
   for (const prompt of PROMPTS_TO_SEED) {
     console.log(`  Processing "${prompt.name}"...`);
@@ -186,11 +327,11 @@ async function seedSystemPrompts(): Promise<void> {
         name: prompt.name,
         description: prompt.description,
         defaultModel: prompt.defaultModel,
-        defaultParams: (prompt.defaultParams ?? undefined) as unknown as Prisma.InputJsonValue,
+        defaultParams: prompt.defaultParams as unknown as Prisma.InputJsonValue,
       },
     });
 
-    // Compute template hash per PRD spec
+    // Compute template hash
     const templateHash = computeTemplateHash({
       systemTemplate: prompt.systemTemplate,
       developerTemplate: prompt.developerTemplate,
@@ -209,9 +350,9 @@ async function seedSystemPrompts(): Promise<void> {
         developerTemplate: prompt.developerTemplate,
         userTemplate: prompt.userTemplate,
         model: prompt.defaultModel,
-        params: (prompt.defaultParams ?? undefined) as unknown as Prisma.InputJsonValue,
+        params: prompt.defaultParams as unknown as Prisma.InputJsonValue,
         templateHash,
-        changeNotes: "Initial version migrated from hardcoded prompts",
+        changeNotes: "Initial version - canonical pipeline",
         createdBy: "system",
         activatedAt: new Date(),
         activatedBy: "system",
@@ -221,24 +362,19 @@ async function seedSystemPrompts(): Promise<void> {
     console.log(`    [created] Definition + v1 ACTIVE (hash: ${templateHash})\n`);
   }
 
-  console.log("System prompts seeded successfully!\n");
+  console.log("Canonical prompts seeded successfully!\n");
 }
 
 /**
  * Create default ShopRuntimeConfig for all existing shops that don't have one.
- * This ensures all shops have the runtime guardrails configured.
  */
 async function seedShopRuntimeConfigs(): Promise<void> {
   console.log("Creating default runtime configs for existing shops...\n");
 
-  // Get all shops that don't have a runtime config
-  // Exclude the SYSTEM tenant (it doesn't need runtime config)
   const shopsWithoutConfig = await prisma.shop.findMany({
     where: {
       runtimeConfig: null,
-      id: {
-        not: SYSTEM_TENANT_ID,
-      },
+      id: { not: SYSTEM_TENANT_ID },
     },
     select: {
       id: true,
@@ -261,7 +397,7 @@ async function seedShopRuntimeConfigs(): Promise<void> {
         forceFallbackModel: null,
         modelAllowList: [],
         maxTokensOutputCap: 8192,
-        maxImageBytesCap: 20_000_000, // 20MB
+        maxImageBytesCap: 20_000_000,
         dailyCostCap: 50.0,
         disabledPromptNames: [],
         updatedBy: "system",
@@ -275,18 +411,16 @@ async function seedShopRuntimeConfigs(): Promise<void> {
 }
 
 /**
- * Verify the seed was successful by checking the data.
+ * Verify the seed was successful.
  */
 async function verifySeed(): Promise<void> {
   console.log("Verifying seed...\n");
 
-  // Check SYSTEM shop exists
   const systemShop = await prisma.shop.findUnique({
     where: { id: SYSTEM_TENANT_ID },
   });
   console.log(`  SYSTEM shop: ${systemShop ? "OK" : "MISSING"}`);
 
-  // Check all prompts exist with active versions
   for (const prompt of PROMPTS_TO_SEED) {
     const definition = await prisma.promptDefinition.findUnique({
       where: {
@@ -309,7 +443,6 @@ async function verifySeed(): Promise<void> {
     console.log(`  ${prompt.name}: ${status}`);
   }
 
-  // Count runtime configs
   const configCount = await prisma.shopRuntimeConfig.count();
   const shopCount = await prisma.shop.count({
     where: { id: { not: SYSTEM_TENANT_ID } },
@@ -323,20 +456,13 @@ async function verifySeed(): Promise<void> {
 
 async function main(): Promise<void> {
   console.log("\n========================================");
-  console.log("  PROMPT CONTROL PLANE - SEED SCRIPT");
+  console.log("  CANONICAL PIPELINE - PROMPT SEED");
   console.log("========================================\n");
 
   try {
-    // Step 1: Ensure SYSTEM shop exists (required for foreign key)
     await ensureSystemShop();
-
-    // Step 2: Seed system prompts
-    await seedSystemPrompts();
-
-    // Step 3: Create default runtime configs for existing shops
+    await seedCanonicalPrompts();
     await seedShopRuntimeConfigs();
-
-    // Step 4: Verify
     await verifySeed();
 
     console.log("========================================");
