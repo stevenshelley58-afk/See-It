@@ -107,7 +107,8 @@ async function getPromptMetrics(
       by: ["status"],
       where: {
         shopId,
-        promptName,
+        // Canonical schema uses promptKey (not promptName)
+        promptKey: promptName,
         startedAt: { gte: since },
       },
       _count: { id: true },
@@ -115,7 +116,8 @@ async function getPromptMetrics(
     prisma.lLMCall.findMany({
       where: {
         shopId,
-        promptName,
+        // Canonical schema uses promptKey (not promptName)
+        promptKey: promptName,
         startedAt: { gte: since },
         latencyMs: { not: null },
       },
@@ -125,7 +127,8 @@ async function getPromptMetrics(
     prisma.lLMCall.aggregate({
       where: {
         shopId,
-        promptName,
+        // Canonical schema uses promptKey (not promptName)
+        promptKey: promptName,
         startedAt: { gte: since },
         status: "SUCCEEDED",
         costEstimate: { not: null },
