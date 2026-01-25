@@ -753,19 +753,33 @@ export async function testPrompt(
   const llmCall = await prisma.lLMCall.create({
     data: {
       shopId,
-      testRunId: testRun.id,
-      promptName,
+      ownerType: "TEST_RUN",
+      ownerId: testRun.id,
+      promptKey: promptName,
       promptVersionId: activeVersion?.id ?? null,
-      model,
-      resolutionHash,
-      requestHash,
       status: "STARTED",
       startedAt: new Date(),
-      inputRef: {
-        messageCount: messages.length,
+
+      // Canonical identity hashes
+      callIdentityHash: resolutionHash,
+      dedupeHash: requestHash,
+
+      // Canonical payloads (required)
+      callSummary: {
+        promptName,
+        model,
         imageCount: options.imageRefs?.length ?? 0,
-        preview: messages.map((m) => m.content).join("\n").slice(0, 500),
+        promptPreview: messages.map((m) => m.content).join("\n").slice(0, 500),
+      },
+      debugPayload: {
+        messages,
+        model,
+        params,
+        variables,
+        imageRefs: options.imageRefs ?? [],
         resolutionHash,
+        requestHash,
+        overrides,
       },
     },
   });
@@ -794,7 +808,7 @@ export async function testPrompt(
       tokensIn: 0,
       tokensOut: 0,
       costEstimate: 0,
-      outputRef: {
+      outputSummary: {
         preview: JSON.stringify(mockOutput).slice(0, 500),
         length: JSON.stringify(mockOutput).length,
       },
