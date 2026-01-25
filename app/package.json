@@ -3,6 +3,10 @@
   "version": "1.0.29",
   "private": true,
   "scripts": {
+    "check:schema-sync": "tsx scripts/check-schema-sync.ts",
+    "check:deprecations": "tsx scripts/check-deprecations.ts",
+    "check:consistency": "tsx scripts/check-schema-sync.ts && tsx scripts/check-deprecations.ts",
+    "prebuild": "npm run check:consistency",
     "build": "remix vite:build",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",

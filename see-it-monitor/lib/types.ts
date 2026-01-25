@@ -1,3 +1,31 @@
+/**
+ * =============================================================================
+ * See It Monitor - API Type Definitions
+ * =============================================================================
+ *
+ * SYNC SOURCE: These types must match the backend API responses.
+ *
+ * Run `npm run check:consistency` in the app directory to validate alignment.
+ *
+ * Source files:
+ * - app/services/see-it-now/types.ts (ProductPlacementFacts, PromptPack)
+ * - app/services/monitor/types.ts (RunListItemV1, RunDetailV1, etc.)
+ * - app/routes/external.v1.*.tsx (API response shapes)
+ *
+ * Key types synced from backend:
+ * - WaterfallMs: Waterfall timing breakdown (download, inference, upload)
+ * - RunTotals: Aggregated run metrics (tokens, cost, call counts)
+ * - LLMCall: LLM call instrumentation data
+ * - VariantResult: Individual variant output details
+ *
+ * Naming conventions:
+ * - All API responses use camelCase (not snake_case)
+ * - Timestamps are ISO 8601 strings
+ * - IDs are UUIDs or CUIDs depending on the model
+ *
+ * =============================================================================
+ */
+
 // =============================================================================
 // Health API - matches backend ExternalHealthStats
 // =============================================================================

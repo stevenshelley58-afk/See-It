@@ -12,6 +12,77 @@
  *   - Consumes whatever number of variants the API returns (not hardcoded to 5)
  */
 
+// =============================================================================
+// API Response Types - Keep in sync with backend
+// Source: app/routes/app-proxy.*.ts
+// =============================================================================
+
+/**
+ * Response from POST /apps/see-it/room/upload
+ * @typedef {Object} RoomUploadResponse
+ * @property {string} room_session_id - Unique session ID for this room upload
+ * @property {string} upload_url - Signed URL for uploading the room image
+ * @property {string} content_type - Expected content type for the upload
+ */
+
+/**
+ * Response from POST /apps/see-it/room/confirm
+ * @typedef {Object} RoomConfirmResponse
+ * @property {boolean} success - Whether confirmation succeeded
+ * @property {string} [message] - Optional status message
+ */
+
+/**
+ * Individual variant result from the render endpoint
+ * @typedef {Object} RenderVariant
+ * @property {string} id - Variant ID (V01-V08)
+ * @property {'success'|'failed'|'timeout'} status - Render status
+ * @property {string|null} image_url - Signed URL to the rendered image (null if failed)
+ * @property {number} latency_ms - Time taken to render this variant
+ */
+
+/**
+ * Response from POST /apps/see-it/see-it-now/render
+ * @typedef {Object} RenderResponse
+ * @property {string} run_id - Unique ID for this render run
+ * @property {RenderVariant[]} variants - Array of variant results
+ * @property {number} duration_ms - Total render duration
+ * @property {string} [request_id] - Request ID for debugging
+ */
+
+/**
+ * SSE event for run started
+ * @typedef {Object} RunStartedEvent
+ * @property {string} run_id - Unique ID for this render run
+ * @property {string} request_id - Request ID for debugging
+ */
+
+/**
+ * SSE event for progress updates
+ * @typedef {Object} ProgressEvent
+ * @property {number} succeeded - Number of variants completed successfully
+ * @property {number} failed - Number of variants that failed
+ * @property {number} pending - Number of variants still processing
+ */
+
+/**
+ * SSE event for individual variant completion
+ * @typedef {Object} VariantEvent
+ * @property {string} id - Variant ID (V01-V08)
+ * @property {'success'|'failed'|'timeout'} status - Render status
+ * @property {string|null} image_url - Signed URL to the rendered image
+ * @property {number} latency_ms - Time taken to render this variant
+ */
+
+/**
+ * Response from POST /apps/see-it/see-it-now/select
+ * @typedef {Object} SelectResponse
+ * @property {boolean} success - Whether selection was recorded
+ * @property {string} [final_image_url] - URL to final/upscaled image if requested
+ */
+
+// =============================================================================
+
 document.addEventListener('DOMContentLoaded', function () {
   const VERSION = '1.0.0';
   console.log('[See It Now] === LOADED ===', { VERSION, timestamp: Date.now() });
