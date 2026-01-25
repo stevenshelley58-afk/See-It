@@ -43,11 +43,11 @@ export async function GET(
   const { session } = authResult;
 
   try {
-    // First, find the render run and get its shopId
-    // Note: RenderRun model is in the main app schema, we need to access it
-    // For now, we get the shopId from the first LLM call
+    // First, find the run's shopId.
+    // The canonical schema does NOT store a renderRunId column on LLMCall.
+    // Instead, the run is referenced via (ownerType, ownerId).
     const firstCall = await prisma.lLMCall.findFirst({
-      where: { renderRunId: runId },
+      where: { ownerType: "COMPOSITE_RUN", ownerId: runId },
       select: { shopId: true },
     });
 
@@ -63,16 +63,16 @@ export async function GET(
     // Fetch all LLM calls for this run
     const llmCalls = await prisma.lLMCall.findMany({
       where: {
-        renderRunId: runId,
+        ownerType: "COMPOSITE_RUN",
+        ownerId: runId,
       },
       orderBy: {
         startedAt: "asc",
       },
       select: {
         id: true,
-        promptName: true,
+        promptKey: true,
         promptVersionId: true,
-        model: true,
         status: true,
         startedAt: true,
         finishedAt: true,
@@ -82,26 +82,68 @@ export async function GET(
         costEstimate: true,
         errorType: true,
         errorMessage: true,
-        retryCount: true,
         providerRequestId: true,
         providerModel: true,
-        resolutionHash: true,
-        requestHash: true,
-        inputRef: true,
-        inputPayload: reveal, // sensitive; only return when explicitly revealed
-        outputRef: true,
+        callIdentityHash: true,
+        dedupeHash: true,
+        callSummary: true,
+        debugPayload: reveal, // sensitive; only return when explicitly revealed
+        outputSummary: true,
       },
     });
 
-    // Convert Decimal to number for JSON serialization
-    const serializedCalls = llmCalls.map((call) => ({
-      ...call,
-      costEstimate: call.costEstimate ? Number(call.costEstimate) : null,
-      startedAt: call.startedAt.toISOString(),
-      finishedAt: call.finishedAt ? call.finishedAt.toISOString() : null,
-      // Prisma omits fields not selected; normalize to null for API clients
-      inputPayload: (call as any).inputPayload ?? null,
-    }));
+    // Map canonical DB fields to the monitor API contract in lib/types.ts
+    const serializedCalls = llmCalls.map((call) => {
+      const callSummary = (call.callSummary ?? {}) as Record<string, unknown>;
+      const outputSummary = (call.outputSummary ?? {}) as Record<string, unknown>;
+
+      const promptName =
+        (typeof callSummary.promptName === "string" && callSummary.promptName) ||
+        call.promptKey;
+
+      const model =
+        (typeof callSummary.model === "string" && callSummary.model) ||
+        call.providerModel ||
+        "unknown";
+
+      const imageCount =
+        typeof callSummary.imageCount === "number" ? callSummary.imageCount : undefined;
+      const preview =
+        typeof callSummary.promptPreview === "string"
+          ? callSummary.promptPreview
+          : undefined;
+
+      const outputPreview =
+        typeof outputSummary.preview === "string" ? outputSummary.preview : undefined;
+
+      return {
+        id: call.id,
+        promptName,
+        promptVersionId: call.promptVersionId ?? null,
+        model,
+        status: call.status as any,
+        startedAt: call.startedAt.toISOString(),
+        finishedAt: call.finishedAt ? call.finishedAt.toISOString() : null,
+        latencyMs: call.latencyMs ?? null,
+        tokensIn: call.tokensIn ?? null,
+        tokensOut: call.tokensOut ?? null,
+        costEstimate: call.costEstimate ? Number(call.costEstimate) : null,
+        errorType: call.errorType ?? null,
+        errorMessage: call.errorMessage ?? null,
+        retryCount: 0,
+        providerRequestId: call.providerRequestId ?? null,
+        providerModel: call.providerModel ?? null,
+        resolutionHash: call.callIdentityHash,
+        requestHash: call.dedupeHash ?? call.callIdentityHash,
+        inputRef: {
+          imageCount,
+          preview,
+          resolutionHash: call.callIdentityHash,
+        },
+        inputPayload: (call as any).debugPayload ?? null,
+        outputRef: outputPreview ? { preview: outputPreview } : null,
+      };
+    });
 
     return jsonSuccess({
       llmCalls: serializedCalls,
