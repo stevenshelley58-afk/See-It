@@ -29,11 +29,16 @@ export const action = async ({ request }) => {
         const enabledRaw = formData.get("enabled")?.toString();
         const enabled = enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : null;
 
+        // Extract placement fields for merchantOverrides
+        const dimensionHeight = formData.get("dimensionHeight") ? parseFloat(formData.get("dimensionHeight")) : null;
+        const dimensionWidth = formData.get("dimensionWidth") ? parseFloat(formData.get("dimensionWidth")) : null;
+        const material = formData.get("material")?.toString() || null;
+
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
         }
 
-        logger.info(logContext, `Update instructions: productId=${productId}, enabled=${enabled}`);
+        logger.info(logContext, `Update instructions: productId=${productId}, enabled=${enabled}, dimensions=${dimensionHeight}x${dimensionWidth}, material=${material}`);
 
         // Get shop record
         const shop = await prisma.shop.findUnique({
@@ -56,6 +61,35 @@ export const action = async ({ request }) => {
         const updateData = {
             updatedAt: new Date(),
         };
+
+        // Build merchantOverrides if any placement fields changed
+        const hasDimensions = dimensionHeight !== null || dimensionWidth !== null;
+        const hasMaterial = material !== null;
+
+        if (hasDimensions || hasMaterial) {
+            // Get existing merchantOverrides to merge
+            const existingOverrides = asset?.merchantOverrides && typeof asset.merchantOverrides === 'object'
+                ? asset.merchantOverrides
+                : {};
+
+            const newOverrides = { ...existingOverrides };
+
+            if (hasDimensions) {
+                newOverrides.dimensions_cm = {
+                    h: dimensionHeight,
+                    w: dimensionWidth,
+                    d: null,
+                    diameter: null,
+                    thickness: null,
+                };
+            }
+
+            if (hasMaterial) {
+                newOverrides.material_profile = { primary: material };
+            }
+
+            updateData.merchantOverrides = newOverrides;
+        }
 
         // Handle enabled toggle and status transitions
         if (enabled !== null && asset) {
@@ -155,6 +189,7 @@ export const action = async ({ request }) => {
                 actorType: "merchant",
                 payload: {
                     enabled: enabled !== null ? enabled : undefined,
+                    merchantOverrides: updateData.merchantOverrides || undefined,
                 },
             },
             session,

@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card } from '../ui';
 import { buildPlacementTabMetadata } from './placementTabMetadata';
 
@@ -10,11 +9,12 @@ import { buildPlacementTabMetadata } from './placementTabMetadata';
  * Fields (from ProductAsset):
  * - extractedFacts: LLM output from batch prep (read-only)
  * - resolvedFacts: merged facts (read-only)
- * - placementSet: LLM output with product description and variants (read-only)
+ * - merchantOverrides: sparse merchant edits (dimensions, material)
  *
  * Flow:
  * 1. Batch prep extracts product facts and generates placement prompts
- * 2. Merchant reviews and can enable/disable product for customers
+ * 2. Merchant reviews and can adjust dimensions/material
+ * 3. Merchant enables/disables product for customers
  */
 
 // ============================================================================
@@ -47,7 +47,6 @@ function extractDimsFromText(rawText) {
     if (!text) return { height: null, width: null };
 
     // Try JSON-ish values first (common when metafields store structured data)
-    // e.g. {"height":180,"width":95} or {"h":180,"w":95}
     try {
         const maybeJson = text.trim();
         if (maybeJson.startsWith('{') && maybeJson.endsWith('}')) {
@@ -70,9 +69,6 @@ function extractDimsFromText(rawText) {
     // Common patterns:
     // - "H: 180cm W: 95cm"
     // - "Height 180 Width 95"
-    //
-    // NOTE: Be conservative with unlabeled "A × B" patterns.
-    // Many Shopify PDPs use "25×25cm" to mean footprint (W×D), not height×width.
     const hasExplicitAxes =
         /\b(h(?:eight)?)\b/i.test(text) ||
         /\b(w(?:idth)?)\b/i.test(text) ||
@@ -131,16 +127,12 @@ function autoDetectFields(product) {
     const descriptionText = stripHtml(product.description || product.descriptionHtml || '');
     const metafieldText = flattenMetafields(product).map(m => stripHtml(m.value || '')).join(' ');
     const tagsText = Array.isArray(product.tags) ? product.tags.join(' ') : (product.tags || '');
-    // Important: split "label" vs "context" so we don't misclassify placement based on
-    // sentences like "style it on a table" inside the description.
     const labelText = `${product.title} ${tagsText} ${product.productType || ''} ${product.vendor || ''}`.toLowerCase();
     const contextText = `${descriptionText} ${metafieldText}`.toLowerCase();
     const allText = `${labelText} ${contextText}`.toLowerCase();
 
     // Surface detection
     const surfaceKeywords = {
-        // NOTE: do NOT include ambiguous words like "table" here because descriptions
-        // frequently mention a surface the item can be styled on.
         floor: ['sofa', 'couch', 'chair', 'bed', 'dresser', 'cabinet', 'bookshelf', 'rug', 'carpet', 'bench', 'ottoman'],
         wall: ['mirror', 'art', 'painting', 'print', 'poster', 'frame', 'canvas', 'clock', 'sconce', 'wall', 'wall-mounted', 'wall mount', 'wall hung', 'wall-hung'],
         table: ['lamp', 'vase', 'planter', 'pot', 'candle', 'sculpture', 'figurine', 'bowl', 'tray', 'ornament', 'caddy'],
@@ -156,10 +148,8 @@ function autoDetectFields(product) {
         /\bon (a|the) coffee table\b/i.test(contextText) ||
         /\bon (a|the) console table\b/i.test(contextText) ||
         /\bconsole table\b/i.test(contextText) ||
-        // last-resort: "table" in context text (common on Shopify PDPs)
         /\btable\b/i.test(contextText);
 
-    // If the PRODUCT itself is a table/desk/console, that's a floor item.
     const isFloorFurnitureByLabel =
         /\btable\b/i.test(labelText) ||
         /\bdesk\b/i.test(labelText) ||
@@ -169,7 +159,6 @@ function autoDetectFields(product) {
 
     let surface = 'floor';
 
-    // Prefer explicit categories first
     if (surfaceKeywords.ceiling.some(k => allText.includes(k))) {
         surface = 'ceiling';
     } else if (surfaceKeywords.wall.some(k => allText.includes(k))) {
@@ -181,8 +170,6 @@ function autoDetectFields(product) {
     } else if (isFloorFurnitureByLabel) {
         surface = 'floor';
     } else if (mentionsTableSurface) {
-        // If the description says "on a table"/"tabletop", treat as a tabletop item
-        // unless the label indicates it's actually a table/desk/console itself.
         surface = 'table';
     } else if (surfaceKeywords.floor.some(k => allText.includes(k))) {
         surface = 'floor';
@@ -220,24 +207,12 @@ function autoDetectFields(product) {
     }
 
     // Dimensions from description
-    // Pull from metafields first (if present), else from description/descriptionHtml.
     let dimensions = extractDimsFromMetafields(product);
     if (!dimensions.height && !dimensions.width) {
         dimensions = extractDimsFromText(descriptionText);
     }
 
-    // Placement rules: auto-detect defaults
-    // Large items (sofas, mirrors, cabinets) → Dominant + Similar Size or Position + Yes
-    // Small items (lamps, decor) → Integrated + None + No
-    // Use labelText to avoid false positives from descriptions like "style it on a console table".
-    const largeItemKeywords = ['sofa', 'couch', 'sectional', 'mirror', 'cabinet', 'dresser', 'bookshelf', 'bed', 'table', 'desk', 'console', 'credenza', 'sideboard'];
-    const isLargeItem = largeItemKeywords.some(k => labelText.includes(k));
-
-    const sceneRole = isLargeItem ? 'Dominant' : 'Integrated';
-    const replacementRule = isLargeItem ? 'Similar Size or Position' : 'None';
-    const allowSpaceCreation = isLargeItem;
-
-    return { surface, material, orientation, dimensions, sceneRole, replacementRule, allowSpaceCreation };
+    return { surface, material, orientation, dimensions };
 }
 
 
@@ -250,83 +225,55 @@ function isPlainObject(value) {
 // ============================================================================
 
 export function PlacementTab({ product, asset, onChange }) {
-    const fetcher = useFetcher();
-
     // Auto-detect initial fields (fallback if no saved data)
     const detectedFields = useMemo(() => autoDetectFields(product), [product]);
-    
+
     // Check if batch prep has run (has extracted facts)
     const hasExtractedFacts = useMemo(() => {
         return isPlainObject(asset?.extractedFacts) || isPlainObject(asset?.resolvedFacts);
     }, [asset?.extractedFacts, asset?.resolvedFacts]);
-    
-    // Get placementSet for prompt display
-    const placementSet = useMemo(() => {
-        if (isPlainObject(asset?.placementSet)) return asset.placementSet;
-        return null;
-    }, [asset?.placementSet]);
 
-    // Initialize fields from extractedFacts/resolvedFacts (canonical) or auto-detect
+    // Get initial values from asset or auto-detection
+    // Priority: merchantOverrides > resolvedFacts > extractedFacts > autoDetect
     const initialFields = useMemo(() => {
-        // Try to get values from resolvedFacts (canonical pipeline)
+        const overrides = isPlainObject(asset?.merchantOverrides) ? asset.merchantOverrides : null;
         const resolved = isPlainObject(asset?.resolvedFacts) ? asset.resolvedFacts : null;
         const extracted = isPlainObject(asset?.extractedFacts) ? asset.extractedFacts : null;
         const facts = resolved || extracted;
 
-        if (facts) {
-            // Map canonical facts to UI fields where possible
-            return {
-                surface: detectedFields.surface, // not in canonical schema, use auto-detect
-                material: facts?.material_profile?.primary || detectedFields.material,
-                orientation: detectedFields.orientation, // not in canonical schema
-                shadow: detectedFields.surface === 'ceiling' ? 'none' : 'contact',
-                dimensions: facts?.typical_dimensions_cm || detectedFields.dimensions || { height: null, width: null },
-                additionalNotes: '',
+        // Get dimensions: overrides > facts > detected
+        let dimensions = { height: null, width: null };
+        if (overrides?.dimensions_cm) {
+            dimensions = {
+                height: overrides.dimensions_cm.h ?? null,
+                width: overrides.dimensions_cm.w ?? null,
             };
+        } else if (facts?.typical_dimensions_cm) {
+            dimensions = facts.typical_dimensions_cm;
+        } else if (detectedFields.dimensions) {
+            dimensions = detectedFields.dimensions;
         }
-        // Fallback to auto-detection
-        return {
-            surface: detectedFields.surface,
-            material: detectedFields.material,
-            orientation: detectedFields.orientation,
-            shadow: detectedFields.surface === 'ceiling' ? 'none' : 'contact',
-            dimensions: detectedFields.dimensions || { height: null, width: null },
-            additionalNotes: '',
-        };
-    }, [asset?.resolvedFacts, asset?.extractedFacts, detectedFields]);
+
+        // Get material: overrides > facts > detected
+        let material = detectedFields.material;
+        if (overrides?.material_profile?.primary) {
+            material = overrides.material_profile.primary;
+        } else if (facts?.material_profile?.primary) {
+            material = facts.material_profile.primary;
+        }
+
+        // Surface and orientation are auto-detected read-only values
+        const surface = detectedFields.surface;
+        const orientation = detectedFields.orientation;
+
+        return { surface, material, orientation, dimensions };
+    }, [asset?.merchantOverrides, asset?.resolvedFacts, asset?.extractedFacts, detectedFields]);
+
+    // Track original values for dirty detection
+    const originalFields = useMemo(() => initialFields, [initialFields]);
 
     // State
     const [fields, setFields] = useState(initialFields);
-
-    // Update state when canonical facts change (e.g., asset loads async)
-    useEffect(() => {
-        const resolved = isPlainObject(asset?.resolvedFacts) ? asset.resolvedFacts : null;
-        const extracted = isPlainObject(asset?.extractedFacts) ? asset.extractedFacts : null;
-        const facts = resolved || extracted;
-        if (facts) {
-            setFields(prev => ({
-                surface: prev.surface, // keep user selection
-                material: facts?.material_profile?.primary || prev.material,
-                orientation: prev.orientation,
-                shadow: prev.shadow,
-                dimensions: facts?.typical_dimensions_cm || prev.dimensions || { height: null, width: null },
-                additionalNotes: prev.additionalNotes,
-            }));
-        }
-    }, [asset?.resolvedFacts, asset?.extractedFacts]);
-
-    // placement rules state - use auto-detected defaults (legacy columns removed from schema)
-    // These are now UI-only fields for the Generate Prompt feature
-    const [placementRulesFields, setPlacementRulesFields] = useState({
-        sceneRole: detectedFields.sceneRole || null,
-        replacementRule: detectedFields.replacementRule || null,
-        allowSpaceCreation: detectedFields.allowSpaceCreation,
-    });
-
-
-
-
-    // Enable toggle state
     const [enabled, setEnabled] = useState(asset?.enabled || false);
 
     // Sync enabled state with asset prop changes
@@ -334,8 +281,12 @@ export function PlacementTab({ product, asset, onChange }) {
         setEnabled(asset?.enabled || false);
     }, [asset?.enabled]);
 
-    // Hydrate missing dimensions from server-side extraction (Shopify descriptionHtml + metafields).
-    // This runs once per product open and only fills dims if the current dims are empty.
+    // Update fields when asset changes (e.g., async load)
+    useEffect(() => {
+        setFields(initialFields);
+    }, [initialFields]);
+
+    // Hydrate missing dimensions from server-side extraction
     useEffect(() => {
         let cancelled = false;
         const numericId = product?.id ? String(product.id).split('/').pop() : null;
@@ -354,7 +305,6 @@ export function PlacementTab({ product, asset, onChange }) {
                 if (!h && !w) return;
 
                 setFields(prev => {
-                    // only fill if still empty
                     const prevH = prev?.dimensions?.height;
                     const prevW = prev?.dimensions?.width;
                     if (prevH || prevW) return prev;
@@ -367,7 +317,7 @@ export function PlacementTab({ product, asset, onChange }) {
                     };
                 });
             } catch {
-                // silent: never break merchant UI
+                // silent
             }
         })();
 
@@ -377,15 +327,19 @@ export function PlacementTab({ product, asset, onChange }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [product?.id]);
 
-    // Notify parent when enabled changes
+    // Notify parent when any editable field changes
     useEffect(() => {
         if (onChange) {
             onChange(buildPlacementTabMetadata({
                 enabled,
                 originalEnabled: asset?.enabled || false,
+                dimensions: fields.dimensions,
+                originalDimensions: originalFields.dimensions,
+                material: fields.material,
+                originalMaterial: originalFields.material,
             }));
         }
-    }, [enabled, asset?.enabled, onChange]);
+    }, [enabled, fields.dimensions, fields.material, asset?.enabled, originalFields, onChange]);
 
     // Update a field
     const updateField = useCallback((field, value) => {
@@ -401,33 +355,22 @@ export function PlacementTab({ product, asset, onChange }) {
         });
     }, []);
 
-
-
-    // Options for dropdowns
-    const surfaces = ['floor', 'wall', 'table', 'ceiling', 'shelf', 'other'];
-    const orientations = ['upright', 'flat', 'leaning', 'wall-mounted', 'hanging', 'draped', 'other'];
+    // Options for material
     const materials = ['fabric', 'wood', 'metal', 'glass', 'ceramic', 'stone', 'leather', 'mixed', 'other'];
-    const shadows = ['contact', 'cast', 'soft', 'none'];
 
-    // Placement rule options
-    const sceneRoles = ['Dominant', 'Integrated'];
-    const replacementRules = ['Same Role Only', 'Similar Size or Position', 'Any Blocking Object', 'None'];
+    // Format display values
+    const formatSurface = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Unknown';
+    const formatOrientation = (o) => o ? o.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Unknown';
 
     return (
-        // Give the Placement tab a subtle surface so Cards visually stand out inside the Polaris modal.
-        <div className="space-y-6 fade-in -mx-6 px-6 py-6 bg-[#FAFAFA]" data-ui-rev="placement-2026-01-25-616a921">
-            {/* Debug marker: proves the iframe is loading the latest bundle. Remove after verification. */}
-            <div className="text-[11px] text-[#737373]">
-                Placement UI rev: <span className="font-mono">placement-2026-01-25-616a921</span>
-            </div>
-
-            {/* SECTION 1: Structured Fields */}
+        <div className="space-y-6 fade-in -mx-6 px-6 py-6 bg-[#FAFAFA]">
+            {/* SECTION 1: Product Properties */}
             <Card className="space-y-6">
                 <div className="flex items-center justify-between">
                     <h3 className="text-lg font-semibold text-[#1A1A1A]">Product Properties</h3>
                     {hasExtractedFacts ? (
                         <span className="text-xs text-[#737373] bg-[#F0F0F0] px-2 py-1 rounded-full">
-                            Auto-detected • Review & adjust
+                            Auto-detected
                         </span>
                     ) : (
                         <span className="text-xs text-[#737373] bg-[#F0F0F0] px-2 py-1 rounded-full">
@@ -436,31 +379,25 @@ export function PlacementTab({ product, asset, onChange }) {
                     )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Surface */}
-                    <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-[#1A1A1A]">
-                            Typical Placement
-                        </label>
-                        <p className="text-xs text-[#737373]">Where does this product usually go?</p>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                            {surfaces.map(s => (
-                                <button
-                                    key={s}
-                                    onClick={() => updateField('surface', s)}
-                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${fields.surface === s
-                                        ? 'bg-[#171717] text-white shadow-sm'
-                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
-                                        }`}
-                                >
-                                    {s.charAt(0).toUpperCase() + s.slice(1)}
-                                </button>
-                            ))}
-                        </div>
+                {/* Read-only detected values */}
+                <div className="flex flex-wrap gap-3">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm text-[#737373]">Detected Placement:</span>
+                        <span className="px-3 py-1 bg-[#F0F0F0] text-[#1A1A1A] text-sm font-medium rounded-full">
+                            {formatSurface(fields.surface)}
+                        </span>
                     </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm text-[#737373]">Orientation:</span>
+                        <span className="px-3 py-1 bg-[#F0F0F0] text-[#1A1A1A] text-sm font-medium rounded-full">
+                            {formatOrientation(fields.orientation)}
+                        </span>
+                    </div>
+                </div>
 
-                    {/* Material */}
-                    <div className="space-y-2">
+                <div className="border-t border-[#E5E5E5] pt-6">
+                    {/* Material - Editable */}
+                    <div className="space-y-2 mb-6">
                         <label className="block text-sm font-semibold text-[#1A1A1A]">
                             Primary Material
                         </label>
@@ -481,209 +418,40 @@ export function PlacementTab({ product, asset, onChange }) {
                         </div>
                     </div>
 
-                    {/* Orientation */}
+                    {/* Dimensions - Editable */}
                     <div className="space-y-2">
                         <label className="block text-sm font-semibold text-[#1A1A1A]">
-                            Typical Orientation
+                            Product Dimensions (cm) <span className="font-normal text-[#A3A3A3]">(optional)</span>
                         </label>
-                        <p className="text-xs text-[#737373]">How is it usually positioned?</p>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                            {orientations.map(o => (
-                                <button
-                                    key={o}
-                                    onClick={() => updateField('orientation', o)}
-                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${fields.orientation === o
-                                        ? 'bg-[#171717] text-white shadow-sm'
-                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
-                                        }`}
-                                >
-                                    {o.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Shadow */}
-                    <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-[#1A1A1A]">
-                            Shadow Type
-                        </label>
-                        <p className="text-xs text-[#737373]">How should shadows render?</p>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                            {shadows.map(s => (
-                                <button
-                                    key={s}
-                                    onClick={() => updateField('shadow', s)}
-                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${fields.shadow === s
-                                        ? 'bg-[#171717] text-white shadow-sm'
-                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
-                                        }`}
-                                >
-                                    {s.charAt(0).toUpperCase() + s.slice(1)}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Dimensions */}
-                <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-[#1A1A1A]">
-                        Product dimensions (cm) <span className="font-normal text-[#A3A3A3]">(optional)</span>
-                    </label>
-                    <p className="text-xs text-[#737373]">
-                        Used to help the AI keep proportions consistent. This is for merchant setup only (not shown to customers).
-                    </p>
-                    <div className="grid grid-cols-2 gap-4 max-w-xs">
-                        <div className="relative">
-                            <input
-                                type="number"
-                                step="any"
-                                placeholder="Height"
-                                value={fields.dimensions?.height || ''}
-                                onChange={(e) => updateField('dimensions.height', e.target.value ? parseFloat(e.target.value) : null)}
-                                className="w-full pl-3 pr-10 py-2 bg-white border border-[#E5E5E5] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#171717]/10 focus:border-[#171717]"
-                            />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#A3A3A3]">cm</span>
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="number"
-                                step="any"
-                                placeholder="Width"
-                                value={fields.dimensions?.width || ''}
-                                onChange={(e) => updateField('dimensions.width', e.target.value ? parseFloat(e.target.value) : null)}
-                                className="w-full pl-3 pr-10 py-2 bg-white border border-[#E5E5E5] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#171717]/10 focus:border-[#171717]"
-                            />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#A3A3A3]">cm</span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Additional Notes */}
-                <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-[#1A1A1A]">
-                        Special Notes <span className="font-normal text-[#A3A3A3]">(anything the AI should know)</span>
-                    </label>
-                    <textarea
-                        placeholder="e.g., 'Brass frame has aged patina', 'Glass shelves are transparent', 'Fabric has subtle sheen'"
-                        value={fields.additionalNotes || ''}
-                        onChange={(e) => updateField('additionalNotes', e.target.value)}
-                        className="w-full px-3 py-2 bg-white border border-[#E5E5E5] rounded-xl text-sm min-h-[80px] resize-none focus:outline-none focus:ring-2 focus:ring-[#171717]/10 focus:border-[#171717]"
-                        maxLength={200}
-                    />
-                    <p className="text-xs text-[#A3A3A3] text-right">{(fields.additionalNotes || '').length}/200</p>
-                </div>
-            </Card>
-
-            {/* SECTION: Placement Rules */}
-            <Card className="space-y-6">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-[#1A1A1A]">Placement Rules</h3>
-                    {hasExtractedFacts ? (
-                        <span className="text-xs text-[#737373] bg-[#F0F0F0] px-2 py-1 rounded-full">
-                            Auto-detected • Review & adjust
-                        </span>
-                    ) : (
-                        <span className="text-xs text-[#737373] bg-[#F0F0F0] px-2 py-1 rounded-full">
-                            Not detected yet
-                        </span>
-                    )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Scene Role */}
-                    <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-[#1A1A1A]">
-                            Scene Role
-                        </label>
-                        <p className="text-xs text-[#737373]">How does this product fit in the room?</p>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                            {sceneRoles.map(role => (
-                                <button
-                                    key={role}
-                                    onClick={() => setPlacementRulesFields(prev => ({ ...prev, sceneRole: role }))}
-                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all ${placementRulesFields.sceneRole === role
-                                        ? 'bg-[#171717] text-white shadow-sm'
-                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
-                                        }`}
-                                >
-                                    {role}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Replacement Rule */}
-                    <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-[#1A1A1A]">
-                            Replacement Rule
-                        </label>
-                        <p className="text-xs text-[#737373]">What can be replaced when placing this product?</p>
-                        <div className="flex flex-col gap-2 mt-2">
-                            {replacementRules.map(rule => (
-                                <button
-                                    key={rule}
-                                    onClick={() => setPlacementRulesFields(prev => ({ ...prev, replacementRule: rule }))}
-                                    className={`px-3 py-1.5 rounded-xl text-sm font-medium transition-all text-left ${placementRulesFields.replacementRule === rule
-                                        ? 'bg-[#171717] text-white shadow-sm'
-                                        : 'bg-white border border-[#E5E5E5] text-[#737373] hover:border-[#A3A3A3] hover:bg-[#FAFAFA]'
-                                        }`}
-                                >
-                                    {rule}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Allow Space Creation */}
-                <div className="space-y-2">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={placementRulesFields.allowSpaceCreation === true}
-                            onChange={(e) => setPlacementRulesFields(prev => ({ ...prev, allowSpaceCreation: e.target.checked }))}
-                            className="w-4 h-4 text-[#171717] border-[#E5E5E5] rounded focus:ring-[#171717]/10"
-                        />
-                        <div>
-                            <span className="block text-sm font-semibold text-[#1A1A1A]">Allow Space Creation</span>
-                            <span className="block text-xs text-[#737373]">Allow minimal space creation if product doesn't fit</span>
-                        </div>
-                    </label>
-                </div>
-            </Card>
-
-            {/* SECTION: Placement Prompt */}
-            <Card className="space-y-4">
-                <div>
-                    <h3 className="text-lg font-semibold text-[#1A1A1A]">Placement Prompt</h3>
-                    <p className="text-sm text-[#737373] mt-1">
-                        Generated prompt from batch preparation. This is used for rendering your product in room photos.
-                    </p>
-                </div>
-
-                {placementSet?.productDescription ? (
-                    <div className="bg-[#171717] rounded-xl p-4">
-                        <pre className="text-white text-sm leading-relaxed whitespace-pre-wrap font-sans">
-                            {placementSet.productDescription}
-                        </pre>
-                    </div>
-                ) : (
-                    <div className="bg-[#FAFAFA] border border-[#E5E5E5] rounded-xl p-8 text-center">
-                        <p className="text-sm text-[#737373]">
-                            Not generated yet — run Prepare Image (batch) first.
+                        <p className="text-xs text-[#737373]">
+                            Used to help the AI keep proportions consistent
                         </p>
+                        <div className="grid grid-cols-2 gap-4 max-w-xs">
+                            <div className="relative">
+                                <input
+                                    type="number"
+                                    step="any"
+                                    placeholder="Height"
+                                    value={fields.dimensions?.height || ''}
+                                    onChange={(e) => updateField('dimensions.height', e.target.value ? parseFloat(e.target.value) : null)}
+                                    className="w-full pl-3 pr-10 py-2 bg-white border border-[#E5E5E5] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#171717]/10 focus:border-[#171717]"
+                                />
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#A3A3A3]">cm</span>
+                            </div>
+                            <div className="relative">
+                                <input
+                                    type="number"
+                                    step="any"
+                                    placeholder="Width"
+                                    value={fields.dimensions?.width || ''}
+                                    onChange={(e) => updateField('dimensions.width', e.target.value ? parseFloat(e.target.value) : null)}
+                                    className="w-full pl-3 pr-10 py-2 bg-white border border-[#E5E5E5] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#171717]/10 focus:border-[#171717]"
+                                />
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#A3A3A3]">cm</span>
+                            </div>
+                        </div>
                     </div>
-                )}
-
-                {placementSet?.variants && placementSet.variants.length > 0 && (
-                    <div className="mt-4">
-                        <p className="text-xs text-[#737373] mb-2">
-                            {placementSet.variants.length} placement variants available
-                        </p>
-                    </div>
-                )}
+                </div>
             </Card>
 
             {/* Enable Toggle Section */}

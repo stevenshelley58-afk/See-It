@@ -99,10 +99,19 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
         const formData = new FormData();
         formData.append("productId", product.id.split('/').pop());
 
-        // Only send enabled flag
+        // Send all placement fields
         if (pendingMetadata && typeof pendingMetadata === 'object') {
             if (pendingMetadata.enabled !== undefined) {
                 formData.append("enabled", pendingMetadata.enabled ? 'true' : 'false');
+            }
+            if (pendingMetadata.dimensionHeight !== undefined) {
+                formData.append("dimensionHeight", pendingMetadata.dimensionHeight);
+            }
+            if (pendingMetadata.dimensionWidth !== undefined) {
+                formData.append("dimensionWidth", pendingMetadata.dimensionWidth);
+            }
+            if (pendingMetadata.material !== undefined) {
+                formData.append("material", pendingMetadata.material);
             }
         }
 
@@ -354,7 +363,7 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                 <Modal.Section>
                     <BlockStack gap="200">
                         <Text as="p">
-                            You have unsaved changes on the Placement tab. If you discard them, your enabled status change will be lost.
+                            You have unsaved changes on the Placement tab. If you discard them, your changes to dimensions, material, or enabled status will be lost.
                         </Text>
                     </BlockStack>
                 </Modal.Section>
