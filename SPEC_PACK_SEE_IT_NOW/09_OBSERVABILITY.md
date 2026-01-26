@@ -50,18 +50,18 @@ export function createLogContext(
 
 ## Monitoring Tables (2-LLM Pipeline)
 
-### RenderRun Table
+### CompositeRun Table
 
 Provides full lineage tracking for every See It Now render request.
 
 ```prisma
-model RenderRun {
+model CompositeRun {
   id                String   @id @default(uuid())
   shopId            String   @map("shop_id")
   productAssetId    String   @map("product_asset_id")
   roomSessionId     String   @map("room_session_id")
   requestId         String   @map("request_id")
-  promptPackVersion Int      @map("prompt_pack_version")
+  pipelineVersion Int      @map("pipeline_version")
   model             String
   
   // Image hashes for deduplication
@@ -73,8 +73,8 @@ model RenderRun {
   // Prompt tracking (full snapshots)
   resolvedFactsHash String   @map("resolved_facts_hash")
   resolvedFactsJson Json     @map("resolved_facts_json")
-  promptPackHash    String   @map("prompt_pack_hash")
-  promptPackJson    Json     @map("prompt_pack_json")
+  pipelineConfigHash    String   @map("prompt_pack_hash")
+  placementSetSnapshot    Json     @map("prompt_pack_json")
   
   // Results
   totalDurationMs   Int?     @map("total_duration_ms")
@@ -82,18 +82,18 @@ model RenderRun {
   
   createdAt         DateTime @default(now()) @map("created_at")
   
-  @@map("render_runs")
+  @@map("composite_runs")
 }
 ```
 
-### VariantResult Table
+### CompositeVariant Table
 
-One record per variant per RenderRun.
+One record per variant per CompositeRun.
 
 ```prisma
-model VariantResult {
+model CompositeVariant {
   id              String   @id @default(uuid())
-  renderRunId     String   @map("render_run_id")
+  renderRunId     String   @map("composite_run_id")
   variantId       String   @map("variant_id")  // "V01" through "V08"
   finalPromptHash String   @map("final_prompt_hash")
   status          String   // "success" | "failed" | "timeout"
@@ -104,7 +104,7 @@ model VariantResult {
   
   createdAt       DateTime @default(now()) @map("created_at")
   
-  @@map("variant_results")
+  @@map("composite_variants")
 }
 ```
 
@@ -132,17 +132,17 @@ model PromptVersion {
 
 ### Route: /app/monitor
 
-Displays RenderRun history with:
+Displays CompositeRun history with:
 - DataTable with filters (status, version)
 - Pagination
 - Modal to view run details
 
 ### Route: /api/monitor/run/:id
 
-Returns RenderRun details with:
+Returns CompositeRun details with:
 - All variant results
 - Signed URLs for variant images
-- resolvedFactsJson and promptPackJson
+- resolvedFactsJson and placementSetSnapshot
 
 ---
 
@@ -314,8 +314,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 ### Find all variants for a render run
 
 ```sql
-SELECT * FROM variant_results 
-WHERE render_run_id = 'uuid-here'
+SELECT * FROM composite_variants 
+WHERE composite_run_id = 'uuid-here'
 ORDER BY variant_id;
 ```
 
@@ -327,7 +327,7 @@ SELECT
   COUNT(*) as total,
   SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
   ROUND(100.0 * SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) / COUNT(*), 2) as success_rate
-FROM variant_results
+FROM composite_variants
 WHERE created_at > NOW() - INTERVAL '24 hours'
 GROUP BY variant_id
 ORDER BY variant_id;
@@ -342,8 +342,8 @@ SELECT
   vr.error_message,
   vr.latency_ms,
   rr.created_at
-FROM variant_results vr
-JOIN render_runs rr ON vr.render_run_id = rr.id
+FROM composite_variants vr
+JOIN composite_runs rr ON vr.composite_run_id = rr.id
 WHERE vr.status = 'failed'
 AND rr.created_at > NOW() - INTERVAL '1 hour'
 ORDER BY rr.created_at DESC;
@@ -353,13 +353,13 @@ ORDER BY rr.created_at DESC;
 
 ```sql
 SELECT 
-  prompt_pack_version,
+  pipeline_version,
   AVG(total_duration_ms) as avg_duration_ms,
   COUNT(*) as render_count
-FROM render_runs
+FROM composite_runs
 WHERE created_at > NOW() - INTERVAL '7 days'
-GROUP BY prompt_pack_version
-ORDER BY prompt_pack_version DESC;
+GROUP BY pipeline_version
+ORDER BY pipeline_version DESC;
 ```
 
 ---

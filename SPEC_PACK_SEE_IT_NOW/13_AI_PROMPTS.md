@@ -20,7 +20,7 @@ See It Now uses a **2-LLM pipeline** to generate hero shot visualizations:
 │           ▼                                                                 │
 │   ┌───────────────┐                                                         │
 │   │   LLM #1      │  gemini-2.5-flash-preview-05-20 (text + vision)        │
-│   │   Extractor   │  Analyzes product → ProductPlacementFacts JSON         │
+│   │   Extractor   │  Analyzes product → ProductFacts JSON         │
 │   └───────────────┘                                                         │
 │           │                                                                 │
 │           ▼                                                                 │
@@ -32,11 +32,11 @@ See It Now uses a **2-LLM pipeline** to generate hero shot visualizations:
 │           ▼                                                                 │
 │   ┌───────────────┐                                                         │
 │   │   LLM #2      │  gemini-2.5-flash-preview-05-20 (text only)            │
-│   │ Prompt Builder│  resolvedFacts + rules → PromptPack (8 variants)       │
+│   │ Prompt Builder│  resolvedFacts + rules → PlacementSet (8 variants)       │
 │   └───────────────┘                                                         │
 │           │                                                                 │
 │           ▼                                                                 │
-│   Store: extractedFacts, resolvedFacts, promptPack → ProductAsset          │
+│   Store: extractedFacts, resolvedFacts, placementSet → ProductAsset          │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
@@ -48,12 +48,12 @@ See It Now uses a **2-LLM pipeline** to generate hero shot visualizations:
 │   Request: room_session_id + product_id                                     │
 │           │                                                                 │
 │           ▼                                                                 │
-│   Load: resolvedFacts, promptPack from ProductAsset                         │
+│   Load: resolvedFacts, placementSet from ProductAsset                         │
 │           │                                                                 │
 │           ▼                                                                 │
 │   ┌───────────────┐                                                         │
 │   │   Assembler   │  Deterministic concatenation:                           │
-│   │               │  GLOBAL_RENDER_STATIC + product_context + variation     │
+│   │               │  GLOBAL_RENDER_STATIC + productDescription + variation     │
 │   └───────────────┘                                                         │
 │           │                                                                 │
 │           ▼                                                                 │
@@ -63,7 +63,7 @@ See It Now uses a **2-LLM pipeline** to generate hero shot visualizations:
 │   └───────────────┘                                                         │
 │           │                                                                 │
 │           ▼                                                                 │
-│   Upload to GCS, log to RenderRun + VariantResult tables                    │
+│   Upload to GCS, log to CompositeRun + CompositeVariant tables                    │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -118,9 +118,9 @@ interface ExtractionInput {
 }
 ```
 
-### Output: ProductPlacementFacts
+### Output: ProductFacts
 ```typescript
-interface ProductPlacementFacts {
+interface ProductFacts {
   identity: {
     title: string;
     product_kind: string | null;
@@ -197,9 +197,9 @@ Merge extractedFacts with merchantOverrides to produce resolvedFacts.
 ### Logic
 ```typescript
 function resolveProductFacts(
-  extractedFacts: ProductPlacementFacts,
-  merchantOverrides: Partial<ProductPlacementFacts> | null
-): ProductPlacementFacts {
+  extractedFacts: ProductFacts,
+  merchantOverrides: Partial<ProductFacts> | null
+): ProductFacts {
   if (!merchantOverrides) return extractedFacts;
   return deepMerge(extractedFacts, merchantOverrides);
 }
@@ -215,24 +215,24 @@ Merchant overrides are stored as a **diff only** - only the fields the merchant 
 ## LLM #2: Prompt Builder
 
 ### Purpose
-Generate product_context and 8 variant-specific prompts from resolvedFacts.
+Generate productDescription and 8 variant-specific prompts from resolvedFacts.
 
 ### Input
-- resolvedFacts: ProductPlacementFacts
+- resolvedFacts: ProductFacts
 - Material rules (from material-behaviors.config.ts)
 - Variant intents (V01-V08 from variant-intents.config.ts)
 - Scale guardrails (from scale-guardrails.config.ts)
 
-### Output: PromptPack
+### Output: PlacementSet
 ```typescript
-interface PromptPack {
-  product_context: string;    // ~200-400 words describing the product
-  variants: PromptPackVariant[];  // Exactly 8 variants (V01-V08)
+interface PlacementSet {
+  productDescription: string;    // ~200-400 words describing the product
+  variants: PlacementVariant[];  // Exactly 8 variants (V01-V08)
 }
 
-interface PromptPackVariant {
+interface PlacementVariant {
   id: string;        // "V01" through "V08"
-  variation: string; // The specific prompt for this variant
+  placementInstruction: string; // The specific prompt for this variant
 }
 ```
 
@@ -410,21 +410,21 @@ model ProductAsset {
   extractedFacts      Json?     @map("extracted_facts")      // LLM #1 output
   merchantOverrides   Json?     @map("merchant_overrides")   // Merchant edits (diff only)
   resolvedFacts       Json?     @map("resolved_facts")       // merged(extracted, overrides)
-  promptPack          Json?     @map("prompt_pack")          // LLM #2 output
-  promptPackVersion   Int?      @map("prompt_pack_version")
+  placementSet          Json?     @map("prompt_pack")          // LLM #2 output
+  placementSetVersion   Int?      @map("prompt_pack_version")
   extractedAt         DateTime? @map("extracted_at")
 }
 ```
 
-### RenderRun Table (New)
+### CompositeRun Table (New)
 ```prisma
-model RenderRun {
+model CompositeRun {
   id                String   @id @default(uuid())
   shopId            String   @map("shop_id")
   productAssetId    String   @map("product_asset_id")
   roomSessionId     String   @map("room_session_id")
   requestId         String   @map("request_id")
-  promptPackVersion Int      @map("prompt_pack_version")
+  placementSetVersion Int      @map("prompt_pack_version")
   model             String
   
   // Image hashes for deduplication
@@ -436,8 +436,8 @@ model RenderRun {
   // Prompt tracking
   resolvedFactsHash String   @map("resolved_facts_hash")
   resolvedFactsJson Json     @map("resolved_facts_json")
-  promptPackHash    String   @map("prompt_pack_hash")
-  promptPackJson    Json     @map("prompt_pack_json")
+  placementSetHash    String   @map("prompt_pack_hash")
+  placementSetJson    Json     @map("prompt_pack_json")
   
   // Results
   totalDurationMs   Int?     @map("total_duration_ms")
@@ -448,15 +448,15 @@ model RenderRun {
   // Relations
   shop           Shop           @relation(fields: [shopId], references: [id])
   productAsset   ProductAsset   @relation(fields: [productAssetId], references: [id])
-  variantResults VariantResult[]
+  compositeVariants CompositeVariant[]
   
-  @@map("render_runs")
+  @@map("composite_runs")
 }
 ```
 
-### VariantResult Table (New)
+### CompositeVariant Table (New)
 ```prisma
-model VariantResult {
+model CompositeVariant {
   id              String   @id @default(uuid())
   renderRunId     String   @map("render_run_id")
   variantId       String   @map("variant_id")  // "V01" through "V08"
@@ -469,9 +469,9 @@ model VariantResult {
   
   createdAt       DateTime @default(now()) @map("created_at")
   
-  renderRun RenderRun @relation(fields: [renderRunId], references: [id])
+  renderRun CompositeRun @relation(fields: [renderRunId], references: [id])
   
-  @@map("variant_results")
+  @@map("composite_variants")
 }
 ```
 
@@ -513,7 +513,7 @@ see-it-now/550e8400-e29b-41d4-a716-446655440000/V08.jpg
 ### Partial Success
 If some variants succeed and others fail:
 - Return successful variants
-- Log failed variants to VariantResult
+- Log failed variants to CompositeVariant
 - Status = "partial" if 1-7 succeed
 - Status = "failed" if 0 succeed
 

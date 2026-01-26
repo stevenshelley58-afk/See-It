@@ -40,7 +40,7 @@ see-it-now/{runId}/{variantId}.jpg
 | `see-it-now/{runId}/{variantId}.jpg` | Generated hero shot | JPEG |
 
 Where:
-- `runId` = UUID from RenderRun table
+- `runId` = UUID from CompositeRun table
 - `variantId` = `V01` through `V08`
 
 **Example:**

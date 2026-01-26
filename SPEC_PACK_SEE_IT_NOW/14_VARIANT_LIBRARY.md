@@ -132,57 +132,57 @@ export const VARIANT_INTENTS: VariantIntent[] = [
 
 ## Prompt Pack Structure
 
-LLM #2 generates a PromptPack with exactly 8 variants:
+LLM #2 generates a PlacementSet with exactly 8 variants:
 
 ```typescript
-interface PromptPack {
-  product_context: string;  // ~200-400 words describing the product
-  variants: PromptPackVariant[];
+interface PlacementSet {
+  productDescription: string;  // ~200-400 words describing the product
+  variants: PlacementSetVariant[];
 }
 
-interface PromptPackVariant {
+interface PlacementSetVariant {
   id: string;        // "V01" through "V08"
-  variation: string; // The specific prompt text for this variant
+  placementInstruction: string; // The specific prompt text for this variant
 }
 ```
 
-### Example PromptPack
+### Example PlacementSet
 
 ```json
 {
-  "product_context": "This is a reclaimed teak dining table measuring approximately 180cm long × 90cm wide × 75cm tall. It is floor-standing furniture with rigid construction and heavy weight. The material shows natural wood grain variations and weathered patina that must be preserved. Scale relative to doorways and existing dining furniture. The table should be the dominant element in dining areas.",
+  "productDescription": "This is a reclaimed teak dining table measuring approximately 180cm long × 90cm wide × 75cm tall. It is floor-standing furniture with rigid construction and heavy weight. The material shows natural wood grain variations and weathered patina that must be preserved. Scale relative to doorways and existing dining furniture. The table should be the dominant element in dining areas.",
   "variants": [
     {
       "id": "V01",
-      "variation": "Place the dining table in the center of the dining area, sized relative to the nearest doorway or existing dining furniture. Use best-guess scale based on 180cm length."
+      "placementInstruction": "Place the dining table in the center of the dining area, sized relative to the nearest doorway or existing dining furniture. Use best-guess scale based on 180cm length."
     },
     {
       "id": "V02",
-      "variation": "Place the dining table in the center of the dining area, scaled 20% smaller than typical to ensure comfortable fit. Should be visibly smaller but still a substantial piece."
+      "placementInstruction": "Place the dining table in the center of the dining area, scaled 20% smaller than typical to ensure comfortable fit. Should be visibly smaller but still a substantial piece."
     },
     {
       "id": "V03",
-      "variation": "Place the dining table in the center of the dining area, scaled 20% larger to create a bold, dominant presence. Should command the space while remaining physically plausible."
+      "placementInstruction": "Place the dining table in the center of the dining area, scaled 20% larger to create a bold, dominant presence. Should command the space while remaining physically plausible."
     },
     {
       "id": "V04",
-      "variation": "Place the dining table near a window or alternate wall, using best-guess scale relative to the nearest furniture or architectural feature."
+      "placementInstruction": "Place the dining table near a window or alternate wall, using best-guess scale relative to the nearest furniture or architectural feature."
     },
     {
       "id": "V05",
-      "variation": "Place the dining table in the secondary location, scaled conservatively at 15-20% smaller to ensure it fits without crowding."
+      "placementInstruction": "Place the dining table in the secondary location, scaled conservatively at 15-20% smaller to ensure it fits without crowding."
     },
     {
       "id": "V06",
-      "variation": "Place the dining table using a different room anchor (opposite wall, near kitchen entry) with best-guess scale relative to that anchor."
+      "placementInstruction": "Place the dining table using a different room anchor (opposite wall, near kitchen entry) with best-guess scale relative to that anchor."
     },
     {
       "id": "V07",
-      "variation": "Place the dining table where multiple scale references are visible (doorway AND existing furniture AND ceiling height). Maximize scale accuracy."
+      "placementInstruction": "Place the dining table where multiple scale references are visible (doorway AND existing furniture AND ceiling height). Maximize scale accuracy."
     },
     {
       "id": "V08",
-      "variation": "Place the dining table in the most realistic configuration possible. Prioritize physical believability. Use conservative scale if uncertain. Strictest room preservation."
+      "placementInstruction": "Place the dining table in the most realistic configuration possible. Prioritize physical believability. Use conservative scale if uncertain. Strictest room preservation."
     }
   ]
 }
@@ -194,34 +194,34 @@ interface PromptPackVariant {
 
 ### In ProductAsset
 
-The PromptPack is stored in ProductAsset.promptPack as JSON:
+The PlacementSet is stored in ProductAsset.placementSet as JSON:
 
 ```prisma
 model ProductAsset {
   // ... other fields ...
-  promptPack          Json?     @map("prompt_pack")
-  promptPackVersion   Int?      @map("prompt_pack_version")
+  placementSet          Json?     @map("placement_set")
+  placementSetVersion   Int?      @map("placement_set_version")
 }
 ```
 
-### In RenderRun
+### In CompositeRun
 
-Each render logs the exact promptPack used:
+Each render logs the exact placementSet used:
 
 ```prisma
-model RenderRun {
+model CompositeRun {
   // ... other fields ...
-  promptPackHash    String   @map("prompt_pack_hash")
-  promptPackJson    Json     @map("prompt_pack_json")
+  placementSetHash    String   @map("placement_set_hash")
+  placementSetJson    Json     @map("placement_set_json")
 }
 ```
 
-### In VariantResult
+### In CompositeVariant
 
 Each variant result tracks which variant was rendered:
 
 ```prisma
-model VariantResult {
+model CompositeVariant {
   variantId       String   @map("variant_id")  // "V01" through "V08"
   finalPromptHash String   @map("final_prompt_hash")
   // ... other fields ...
@@ -276,7 +276,7 @@ In the product edit modal, merchants will be able to:
 
 ### New Files
 - `config/prompts/variant-intents.config.ts` — V01-V08 definitions
-- `services/see-it-now/prompt-builder.server.ts` — LLM #2 that generates PromptPack
+- `services/see-it-now/prompt-builder.server.ts` — LLM #2 that generates PlacementSet
 
 ### Data Migration
 Existing ProductAssets with old `seeItNowVariants` field will be regenerated when:
@@ -288,9 +288,9 @@ Existing ProductAssets with old `seeItNowVariants` field will be regenerated whe
 
 ## Validation
 
-### PromptPack Validation
+### PlacementSet Validation
 
-After LLM #2 generates a PromptPack:
+After LLM #2 generates a PlacementSet:
 
 ```typescript
 // Validate we have exactly 8 variants

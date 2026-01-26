@@ -128,12 +128,12 @@ Get detailed information about a specific run.
   "durationMs": 5000,
   "variants": [...],
   "resolvedFactsJson": null,
-  "promptPackJson": null
+  "placementSetSnapshot": null
 }
 ```
 
 **Redaction (without X-Monitor-Reveal):**
-- `resolvedFactsJson` and `promptPackJson` are omitted
+- `resolvedFactsJson` and `placementSetSnapshot` are omitted
 
 **With X-Monitor-Reveal:**
 - All fields included

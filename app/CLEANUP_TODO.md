@@ -22,12 +22,12 @@ Reason: Old 10-variant creative system replaced by:
 ### Services
 - `app/services/see-it-now/index.ts` - Exports
 - `app/services/see-it-now/types.ts` - Type definitions
-- `app/services/see-it-now/extractor.server.ts` - LLM #1 (ProductPlacementFacts)
+- `app/services/see-it-now/extractor.server.ts` - LLM #1 (ProductFacts)
 - `app/services/see-it-now/resolver.server.ts` - Merge extracted + merchant overrides
-- `app/services/see-it-now/prompt-builder.server.ts` - LLM #2 (PromptPack)
+- `app/services/see-it-now/prompt-builder.server.ts` - LLM #2 (PlacementSet)
 - `app/services/see-it-now/prompt-assembler.server.ts` - Deterministic concatenation
 - `app/services/see-it-now/renderer.server.ts` - 8 parallel renders
-- `app/services/see-it-now/monitor.server.ts` - RenderRun/VariantResult logging
+- `app/services/see-it-now/monitor.server.ts` - CompositeRun/CompositeVariant logging
 - `app/services/see-it-now/versioning.server.ts` - Prompt version tracking
 
 ### Config

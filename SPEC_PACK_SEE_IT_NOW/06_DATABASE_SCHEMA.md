@@ -68,7 +68,7 @@ model Shop {
   productAssets    ProductAsset[]
   roomSessions     RoomSession[]
   renderJobs       RenderJob[]
-  renderRuns       RenderRun[]
+  compositeRuns    CompositeRun[]
   usageDaily       UsageDaily[]
 
   @@map("shops")
@@ -115,11 +115,10 @@ model ProductAsset {
   // ============================================================
   // NEW: 2-LLM Pipeline Fields
   // ============================================================
-  extractedFacts      Json?     @map("extracted_facts")      // LLM #1 output (ProductPlacementFacts)
+  extractedFacts      Json?     @map("extracted_facts")      // LLM #1 output (ProductFacts)
   merchantOverrides   Json?     @map("merchant_overrides")   // Merchant edits (diff only)
   resolvedFacts       Json?     @map("resolved_facts")       // merged(extracted, overrides)
-  promptPack          Json?     @map("prompt_pack")          // LLM #2 output (PromptPack)
-  promptPackVersion   Int?      @map("prompt_pack_version")  // Links to PromptVersion.version
+  placementSet        Json?     @map("placement_set")        // LLM #2 output (PlacementSet)
   extractedAt         DateTime? @map("extracted_at")         // When facts were extracted
   
   // Gemini Files API cache
@@ -132,7 +131,7 @@ model ProductAsset {
   // Relations
   shop        Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
   renderJobs  RenderJob[]
-  renderRuns  RenderRun[]
+  compositeRuns  CompositeRun[]
 
   @@index([shopId, productId])
   @@index([shopId, productId, isDefault])
@@ -153,16 +152,16 @@ model ProductAsset {
 
 #### ProductAsset.extractedFacts Structure
 
-See `ProductPlacementFacts` in 13_AI_PROMPTS.md
+See `ProductFacts` in 13_AI_PROMPTS.md
 
-#### ProductAsset.promptPack Structure
+#### ProductAsset.placementSet Structure
 
 ```typescript
-interface PromptPack {
-  product_context: string;
+interface PlacementSet {
+  productDescription: string;
   variants: Array<{
     id: string;        // "V01" through "V08"
-    variation: string;
+    placementInstruction: string;
   }>;
 }
 ```
@@ -281,18 +280,17 @@ model PromptVersion {
 
 ---
 
-### RenderRun (NEW)
+### CompositeRun (NEW)
 
 One record per See It Now render request. Provides full lineage tracking.
 
 ```prisma
-model RenderRun {
+model CompositeRun {
   id                String   @id @default(uuid())
   shopId            String   @map("shop_id")
   productAssetId    String   @map("product_asset_id")
   roomSessionId     String   @map("room_session_id")
   requestId         String   @map("request_id")
-  promptPackVersion Int      @map("prompt_pack_version")
   model             String                              // e.g. "gemini-2.5-flash-image"
   
   // Image hashes for deduplication and debugging
@@ -304,8 +302,8 @@ model RenderRun {
   // Prompt tracking - store full snapshots for reproducibility
   resolvedFactsHash String   @map("resolved_facts_hash")
   resolvedFactsJson Json     @map("resolved_facts_json")
-  promptPackHash    String   @map("prompt_pack_hash")
-  promptPackJson    Json     @map("prompt_pack_json")
+  pipelineConfigHash    String   @map("pipeline_config_hash")
+  placementSetSnapshot    Json     @map("placement_set_snapshot")
   
   // Results
   totalDurationMs   Int?     @map("total_duration_ms")
@@ -316,22 +314,22 @@ model RenderRun {
   // Relations
   shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
   productAsset   ProductAsset    @relation(fields: [productAssetId], references: [id])
-  variantResults VariantResult[]
-  
-  @@map("render_runs")
+  compositeVariants CompositeVariant[]
+
+  @@map("composite_runs")
 }
 ```
 
 ---
 
-### VariantResult (NEW)
+### CompositeVariant (NEW)
 
-One record per variant per RenderRun.
+One record per variant per CompositeRun.
 
 ```prisma
-model VariantResult {
+model CompositeVariant {
   id              String   @id @default(uuid())
-  renderRunId     String   @map("render_run_id")
+  compositeRunId  String   @map("composite_run_id")
   variantId       String   @map("variant_id")       // "V01" through "V08"
   finalPromptHash String   @map("final_prompt_hash")
   status          String                            // "success" | "failed" | "timeout"
@@ -341,11 +339,11 @@ model VariantResult {
   errorMessage    String?  @map("error_message")
   
   createdAt       DateTime @default(now()) @map("created_at")
-  
+
   // Relations
-  renderRun RenderRun @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
-  
-  @@map("variant_results")
+  compositeRun CompositeRun @relation(fields: [compositeRunId], references: [id], onDelete: Cascade)
+
+  @@map("composite_variants")
 }
 ```
 
@@ -400,12 +398,12 @@ Required indexes for performance:
    - ready → live (enable)
    - live → ready (disable)
 3. **Live Requires Ready**: Cannot set status = "live" unless preparedImageKey is non-null
-4. **Pipeline Data**: For See It Now v2 renders, resolvedFacts and promptPack must be non-null
+4. **Pipeline Data**: For See It Now v2 renders, resolvedFacts and placementSet must be non-null
 
-### RenderRun Invariants
+### CompositeRun Invariants
 
 1. **Valid Status**: status must be one of: "complete", "partial", "failed"
-2. **Variant Count**: Should have 8 VariantResult records (one per V01-V08)
+2. **Variant Count**: Should have 8 CompositeVariant records (one per V01-V08)
 3. **Success Criteria**: 
    - status = "complete" → all 8 variants succeeded
    - status = "partial" → 1-7 variants succeeded
@@ -428,7 +426,7 @@ Shop delete causes deletion of:
   - ProductAsset
   - RoomSession
   - RenderJob
-  - RenderRun → VariantResult
+  - CompositeRun → CompositeVariant
   - UsageDaily
 ```
 
@@ -453,15 +451,15 @@ npx prisma generate
 
 | Model | Field | TypeScript Type |
 |-------|-------|-----------------|
-| ProductAsset | extractedFacts | ProductPlacementFacts |
-| ProductAsset | merchantOverrides | Partial<ProductPlacementFacts> |
-| ProductAsset | resolvedFacts | ProductPlacementFacts |
-| ProductAsset | promptPack | PromptPack |
+| ProductAsset | extractedFacts | ProductFacts |
+| ProductAsset | merchantOverrides | Partial<ProductFacts> |
+| ProductAsset | resolvedFacts | ProductFacts |
+| ProductAsset | placementSet | PlacementSet |
 | ProductAsset | placementFields | PlacementFields (legacy) |
-| RenderRun | productImageMeta | ImageMeta |
-| RenderRun | roomImageMeta | ImageMeta |
-| RenderRun | resolvedFactsJson | ProductPlacementFacts |
-| RenderRun | promptPackJson | PromptPack |
+| CompositeRun | productImageMeta | ImageMeta |
+| CompositeRun | roomImageMeta | ImageMeta |
+| CompositeRun | resolvedFactsJson | ProductFacts |
+| CompositeRun | placementSetSnapshot | PlacementSet |
 | PromptVersion | configSnapshot | object |
 
 See 13_AI_PROMPTS.md for full interface definitions.

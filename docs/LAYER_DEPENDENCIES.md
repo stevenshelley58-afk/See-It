@@ -8,29 +8,29 @@ Documents the relationships between different layers of the See It codebase.
 
 ### ProductAsset.resolvedFacts
 
-- **TypeScript**: `ProductPlacementFacts` in `app/services/see-it-now/types.ts`
+- **TypeScript**: `ProductFacts` in `app/services/see-it-now/types.ts`
 - **Written by**: `prepare-processor.server.ts`, `extractor.server.ts`
 - **Read by**: `renderer.server.ts`, `prompt-assembler.server.ts`, PlacementTab.jsx
 
-### ProductAsset.promptPack
+### ProductAsset.placementSet
 
-- **TypeScript**: `PromptPack` in `app/services/see-it-now/types.ts`
+- **TypeScript**: `PlacementSet` in `app/services/see-it-now/types.ts`
 - **Written by**: `prompt-builder.server.ts`
 - **Read by**: `renderer.server.ts`
 
-### RenderRun.resolvedConfigSnapshot
+### CompositeRun.resolvedConfigSnapshot
 
 - **TypeScript**: `ResolvedConfigSnapshot` in `see-it-monitor/lib/types.ts`
 - **Written by**: `prompt-control/resolver.server.ts`
 - **Read by**: Monitor dashboard `/runs/[id]`
 
-### RenderRun.waterfallMs
+### CompositeRun.waterfallMs
 
 - **TypeScript**: `WaterfallMs` in `see-it-monitor/lib/types.ts`
 - **Written by**: `renderer.server.ts`
 - **Read by**: Monitor dashboard `/runs/[id]`
 
-### RenderRun.runTotals
+### CompositeRun.runTotals
 
 - **TypeScript**: `RunTotals` in `see-it-monitor/lib/types.ts`
 - **Written by**: `renderer.server.ts`
@@ -78,7 +78,7 @@ Documents the relationships between different layers of the See It codebase.
 |------|--------|-------------|-------|
 | `WaterfallMs` | `app/services/see-it-now/types.ts` | `see-it-monitor/lib/types.ts` | Waterfall timing breakdown |
 | `RunTotals` | `app/services/see-it-now/types.ts` | `see-it-monitor/lib/types.ts` | Aggregated run metrics |
-| `VariantResult` | `app/services/monitor/types.ts` | `see-it-monitor/lib/types.ts` | Variant output details |
+| `CompositeVariant` | `app/services/monitor/types.ts` | `see-it-monitor/lib/types.ts` | Variant output details |
 | `LLMCall` | `app/services/prompt-control/types.ts` | `see-it-monitor/lib/types.ts` | LLM call instrumentation |
 
 ### Enums shared between schemas
@@ -127,8 +127,8 @@ These models exist only in the main schema:
 - `SeeItCapture`
 - `PrepEvent`
 - `PromptConfigVersion`
-- `RenderRun`
-- `VariantResult`
+- `CompositeRun`
+- `CompositeVariant`
 - `MonitorEvent`
 - `MonitorArtifact`
 
@@ -147,7 +147,7 @@ Backend (Remix)
 ├── app/routes/external.v1.*.tsx
 │   └── Serves: Monitor APIs
 ├── app/services/see-it-now/types.ts
-│   └── Source of truth: ProductPlacementFacts, PromptPack
+│   └── Source of truth: ProductFacts, PlacementSet
 ├── app/services/monitor/types.ts
 │   └── Source of truth: RunListItemV1, RunDetailV1
 │

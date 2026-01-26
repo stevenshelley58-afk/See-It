@@ -255,7 +255,7 @@ model LLMCall {
   // Relations
   shop          Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
   promptVersion PromptVersion? @relation(fields: [promptVersionId], references: [id])
-  renderRun     RenderRun?     @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
+  renderRun     CompositeRun?     @relation(fields: [renderRunId], references: [id], onDelete: Cascade)
   testRun       PromptTestRun? @relation(fields: [testRunId], references: [id], onDelete: Cascade)
 
   @@index([shopId, createdAt])
@@ -339,12 +339,12 @@ model PromptAuditLog {
 }
 ```
 
-## 3.8 RenderRun Additions
+## 3.8 CompositeRun Additions
 
-Add these fields to existing RenderRun model:
+Add these fields to existing CompositeRun model:
 
 ```prisma
-model RenderRun {
+model CompositeRun {
   // ... existing fields ...
 
   // Per-run overrides (optional)
@@ -1114,7 +1114,7 @@ const snapshot = await buildResolvedConfigSnapshot({
   },
 });
 
-// Store on RenderRun
+// Store on CompositeRun
 await prisma.renderRun.update({
   where: { id: runId },
   data: { resolvedConfigSnapshot: snapshot },
@@ -1225,7 +1225,7 @@ console.log(`Rolled back from v${result.previousActiveVersion} to v${result.newA
 ## Phase 1: Schema (Days 1-2)
 
 1. Add enums and new tables to `schema.prisma`
-2. Add fields to existing `RenderRun` model
+2. Add fields to existing `CompositeRun` model
 3. Add relations to existing `Shop` model
 4. Run `npx prisma migrate dev --name add_prompt_control`
 
@@ -1242,7 +1242,7 @@ console.log(`Rolled back from v${result.previousActiveVersion} to v${result.newA
 
 1. Replace hardcoded prompt loading with `resolvePrompt()`
 2. Wrap all LLM calls with `trackedLLMCall()`
-3. Store `resolvedConfigSnapshot` on each `RenderRun`
+3. Store `resolvedConfigSnapshot` on each `CompositeRun`
 4. Verify `LLMCall` rows are being written
 
 ## Phase 4: API Routes (Days 6-7)

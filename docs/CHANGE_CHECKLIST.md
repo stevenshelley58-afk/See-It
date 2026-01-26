@@ -41,9 +41,9 @@ A reference for developers when making changes across the See It codebase.
 
 ## Change Type Quick Reference
 
-### Adding a New Field to RenderRun
+### Adding a New Field to CompositeRun
 
-1. Add field to `app/prisma/schema.prisma` (RenderRun model)
+1. Add field to `app/prisma/schema.prisma` (CompositeRun model)
 2. Add field to `see-it-monitor/prisma/schema.prisma` if monitor reads it
 3. Create migration: `npm run migrate:dev`
 4. Update TypeScript types in `app/services/monitor/types.ts`
