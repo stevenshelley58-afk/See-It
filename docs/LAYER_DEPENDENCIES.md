@@ -151,14 +151,6 @@ Backend (Remix)
 ├── app/services/monitor/types.ts
 │   └── Source of truth: RunListItemV1, RunDetailV1
 │
-Shared Utilities
-├── app/utils/cors.server.ts
-│   └── Used by: app-proxy routes, external API routes
-├── app/utils/image-download.server.ts
-│   └── Used by: prepare-processor, gemini services
-├── app/utils/cron-auth.server.ts
-│   └── Used by: cron routes (cleanup, daily-usage)
-│
 Monitor App
 ├── see-it-monitor/lib/types.ts
 │   └── Consumes: /external/v1/* endpoints (camelCase)

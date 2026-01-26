@@ -216,26 +216,11 @@ export async function getOrRefreshGeminiFile(
         };
     }
 
-    // Log specific reason for re-upload
-    if (existingUri && existingExpiry) {
-        // Had a cached file but it expired
-        logger.info(
-            createLogContext("render", requestId, "cache-expired", { displayName }),
-            `Gemini file cache expired (was: ${existingUri}, expired: ${existingExpiry.toISOString()}), triggering re-upload`
-        );
-    } else if (existingUri && !existingExpiry) {
-        // Had URI but no expiry timestamp (shouldn't happen, but log it)
-        logger.info(
-            createLogContext("render", requestId, "cache-no-expiry", { displayName }),
-            `Gemini file has no expiry timestamp, triggering re-upload`
-        );
-    } else {
-        // No cached file at all
-        logger.info(
-            createLogContext("render", requestId, "cache-miss", { displayName }),
-            `No cached Gemini file found, uploading new file`
-        );
-    }
+    // Need to upload new file
+    logger.info(
+        createLogContext("render", requestId, "cache-miss", { displayName }),
+        `Gemini file expired or missing, uploading new file`
+    );
 
     return uploadToGeminiFiles(buffer, mimeType, displayName, requestId);
 }

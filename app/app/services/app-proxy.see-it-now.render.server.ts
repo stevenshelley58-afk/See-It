@@ -11,18 +11,15 @@ import { checkRateLimit } from "../rate-limit.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
+import sharp from "sharp";
 import crypto from "crypto";
+import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 import { emit, EventSource, EventType } from "~/services/telemetry";
 import {
   getOrRefreshGeminiFile,
   validateMagicBytes,
 } from "../services/gemini-files.server";
-import { getCorsHeaders } from "../utils/cors.server";
-import {
-  downloadAndProcessImage,
-  downloadRawImage,
-} from "../utils/image-download.server";
 
 // Import from 2-LLM pipeline
 import {
@@ -57,6 +54,110 @@ function errorJson(
     },
     { status, headers }
   );
+}
+
+// ============================================================================
+// CORS Headers
+// ============================================================================
+function getCorsHeaders(shopDomain: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    Pragma: "no-cache",
+    Expires: "0",
+  };
+
+  if (shopDomain) {
+    headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
+  }
+
+  return headers;
+}
+
+// ============================================================================
+// Image Download Helper
+// ============================================================================
+async function downloadToBuffer(
+  url: string,
+  logContext: ReturnType<typeof createLogContext>,
+  maxDimension: number = 2048,
+  format: "png" | "jpeg" = "png"
+): Promise<{ buffer: Buffer; meta: ImageMeta }> {
+  validateTrustedUrl(url, "image URL");
+
+  logger.info(
+    { ...logContext, stage: "download", format },
+    `[See It Now] Downloading image: ${url.substring(0, 80)}...`
+  );
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const inputBuffer = Buffer.from(arrayBuffer);
+
+  // Resize and normalize
+  const pipeline = sharp(inputBuffer)
+    .rotate() // Auto-orient based on EXIF
+    .resize({
+      width: maxDimension,
+      height: maxDimension,
+      fit: "inside",
+      withoutEnlargement: true,
+    });
+
+  const { data: buffer, info } =
+    format === "png"
+      ? await pipeline.png({ force: true }).toBuffer({ resolveWithObject: true })
+      : await pipeline
+          .jpeg({ quality: 90, force: true })
+          .toBuffer({ resolveWithObject: true });
+
+  // IMPORTANT: Use final encoded dimensions (post-resize) for meta
+  const meta: ImageMeta = {
+    width: info.width || 0,
+    height: info.height || 0,
+    bytes: buffer.length,
+    format: format,
+  };
+
+  logger.info(
+    { ...logContext, stage: "download" },
+    `[See It Now] Downloaded & Optimized (${format}): ${buffer.length} bytes`
+  );
+
+  return { buffer, meta };
+}
+
+async function downloadRawToBuffer(
+  url: string,
+  logContext: ReturnType<typeof createLogContext>
+): Promise<Buffer> {
+  validateTrustedUrl(url, "image URL");
+
+  logger.info(
+    { ...logContext, stage: "download-raw" },
+    `[See It Now] Downloading raw image: ${url.substring(0, 80)}...`
+  );
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (buffer.length === 0) {
+    throw new Error("Downloaded image was empty");
+  }
+  return buffer;
 }
 
 /**
@@ -427,10 +528,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Download both images in parallel
     // Product is forced to PNG (cutout), Room is JPEG (photograph)
     const [productImageData, roomImageData] = await Promise.all([
-      downloadAndProcessImage(productImageUrl, shopLogContext, 2048, "png"),
+      downloadToBuffer(productImageUrl, shopLogContext, 2048, "png"),
       roomImageSource === "canonical"
         ? (async () => {
-            const buffer = await downloadRawImage(roomImageUrl, shopLogContext);
+            const buffer = await downloadRawToBuffer(roomImageUrl, shopLogContext);
             return {
               buffer,
               meta: {
@@ -441,7 +542,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               },
             };
           })()
-        : downloadAndProcessImage(roomImageUrl, shopLogContext, 2048, "jpeg"),
+        : downloadToBuffer(roomImageUrl, shopLogContext, 2048, "jpeg"),
     ]);
 
     // Hard guard: magic bytes validation (prevents MIME/bytes mismatch corruption)

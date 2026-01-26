@@ -1,7 +1,6 @@
 import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
 import prisma from "../db.server";
 import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
-import { validateCronAuth } from "../utils/cron-auth.server";
 
 /**
  * Room Session Cleanup Cron Job
@@ -18,6 +17,32 @@ import { validateCronAuth } from "../utils/cron-auth.server";
 
 const BATCH_SIZE = 100;
 const MAX_BATCHES = 10; // Process up to 1000 sessions per run
+
+async function validateCronAuth(request: Request): Promise<boolean> {
+    const cronSecret = process.env.CRON_SECRET;
+
+    // If no CRON_SECRET is set, only allow in development
+    if (!cronSecret) {
+        if (process.env.NODE_ENV !== "production") {
+            console.warn("[SessionCleanup] CRON_SECRET not set - allowing request in development");
+            return true;
+        }
+        console.error("[SessionCleanup] CRON_SECRET not configured");
+        return false;
+    }
+
+    const authHeader = request.headers.get("Authorization");
+    if (!authHeader) {
+        return false;
+    }
+
+    // Support both "Bearer <token>" and raw token
+    const token = authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : authHeader;
+
+    return token === cronSecret;
+}
 
 async function deleteGcsFiles(keys: string[]): Promise<{ deleted: number; errors: number }> {
     const storage = getGcsClient();
@@ -171,7 +196,7 @@ async function cleanupExpiredSessions(): Promise<{
 
 // Support both GET and POST for flexibility with different cron services
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-    if (!await validateCronAuth(request, "SessionCleanup")) {
+    if (!await validateCronAuth(request)) {
         return json({ error: "Unauthorized" }, { status: 401 });
     }
 
