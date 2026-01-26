@@ -32,6 +32,7 @@ Set these in Vercel project settings:
 | Variable | Description |
 |----------|-------------|
 | `DATABASE_URL` | Same PostgreSQL connection as Railway |
+| `DATABASE_PUBLIC_URL` | (Alternative) Railway public DB URL. If set without `DATABASE_URL`, the monitor build maps it to `DATABASE_URL` for Prisma generate. |
 | `RAILWAY_API_URL` | `https://see-it-production.up.railway.app` |
 | `MONITOR_API_TOKEN` | API token for auth |
 

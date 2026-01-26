@@ -11,8 +11,17 @@ declare global {
   var prismaMonitor: PrismaClient | undefined;
 }
 
+function isRailwayInternalHost(urlString: string): boolean {
+  return urlString.includes(".railway.internal");
+}
+
 function getDatabaseUrl(): string {
-  const baseUrl = process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL;
+  const privateUrl = process.env.DATABASE_URL;
+  const publicUrl = process.env.DATABASE_PUBLIC_URL;
+
+  // Prefer the public URL if DATABASE_URL is Railway-internal (Vercel can't reach it).
+  const baseUrl =
+    privateUrl && !isRailwayInternalHost(privateUrl) ? privateUrl : publicUrl;
   if (!baseUrl) {
     throw new Error("DATABASE_URL or DATABASE_PUBLIC_URL environment variable is not set");
   }

@@ -30,6 +30,7 @@ Required environment variables:
 | `RAILWAY_API_URL` | Base URL of the Railway API (e.g., `https://see-it-production.up.railway.app`) |
 | `MONITOR_API_TOKEN` | API token for authenticating with the External Operator API and enabling implicit dashboard auth |
 | `DATABASE_URL` | PostgreSQL connection string (same database as main app, required for prompt-control APIs) |
+| `DATABASE_PUBLIC_URL` | Alternative DB URL (Railway public URL). If set without `DATABASE_URL`, builds will map it to `DATABASE_URL` for Prisma generate. |
 | `MONITOR_REVEAL_TOKEN` | (Optional) Token for accessing revealed data |
 | `MONITOR_ALLOW_IMPLICIT_DASHBOARD_AUTH` | (Optional) Set to `"true"` to enable implicit auth in production. In development, implicit auth is enabled by default when `MONITOR_API_TOKEN` is set |
 
