@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -141,126 +141,6 @@ async function runTest(
   }
   return response.json();
 }
-
-// =============================================================================
-// Mock Data (replace with API)
-// =============================================================================
-
-const MOCK_PROMPT_DETAIL: PromptDetailResponse = {
-  definition: {
-    id: "def_1",
-    name: "extractor",
-    description: "LLM #1: Extract product placement facts from images and text",
-    defaultModel: "gemini-2.5-flash",
-    defaultParams: { temperature: 0.2, max_tokens: 4096 },
-    createdAt: "2026-01-01T00:00:00Z",
-    updatedAt: "2026-01-22T14:00:00Z",
-  },
-  activeVersion: {
-    id: "ver_1a",
-    version: 3,
-    status: "ACTIVE",
-    systemTemplate: `You are an expert product analyst specializing in home decor and furniture.
-Your task is to extract detailed placement information from product images.
-
-Always respond in valid JSON format.`,
-    developerTemplate: null,
-    userTemplate: `Analyze the following product:
-
-Product Title: {{product.title}}
-Product Type: {{product.type}}
-Description: {{product.description}}
-
-Extract:
-1. Primary product category
-2. Typical room placements (living room, bedroom, etc.)
-3. Style attributes (modern, rustic, etc.)
-4. Material composition
-5. Size category (small, medium, large)`,
-    model: "gemini-2.5-flash",
-    params: { temperature: 0.2, max_tokens: 4096 },
-    templateHash: "abc123def456789",
-    changeNotes: "Improved extraction accuracy for furniture",
-    createdAt: "2026-01-18T10:00:00Z",
-    createdBy: "steven@labcast.com.au",
-    activatedAt: "2026-01-20T10:30:00Z",
-    activatedBy: "steven@labcast.com.au",
-  },
-  draftVersion: {
-    id: "ver_1b",
-    version: 4,
-    status: "DRAFT",
-    systemTemplate: `You are an expert product analyst specializing in home decor and furniture.
-Your task is to extract detailed placement information from product images.
-
-IMPORTANT: Be specific about room placements and provide confidence scores.
-
-Always respond in valid JSON format.`,
-    developerTemplate: null,
-    userTemplate: `Analyze the following product:
-
-Product Title: {{product.title}}
-Product Type: {{product.type}}
-Description: {{product.description}}
-
-Extract with confidence scores (0-1):
-1. Primary product category (confidence: X)
-2. Typical room placements with confidence
-3. Style attributes with confidence
-4. Material composition
-5. Size category (small, medium, large)
-6. Price range estimate`,
-    model: "gemini-2.5-flash",
-    params: { temperature: 0.3, max_tokens: 4096 },
-    templateHash: "xyz789abc123456",
-    changeNotes: "Added confidence scores and price range",
-    createdAt: "2026-01-22T14:00:00Z",
-    createdBy: "steven@labcast.com.au",
-    activatedAt: null,
-    activatedBy: null,
-  },
-  versions: [
-    {
-      id: "ver_1b",
-      version: 4,
-      model: "gemini-2.5-flash",
-      templateHash: "xyz789abc123456",
-      createdAt: "2026-01-22T14:00:00Z",
-      activatedAt: null,
-    },
-    {
-      id: "ver_1a",
-      version: 3,
-      model: "gemini-2.5-flash",
-      templateHash: "abc123def456789",
-      createdAt: "2026-01-18T10:00:00Z",
-      activatedAt: "2026-01-20T10:30:00Z",
-    },
-    {
-      id: "ver_1c",
-      version: 2,
-      model: "gemini-2.5-flash",
-      templateHash: "def456ghi789012",
-      createdAt: "2026-01-10T09:00:00Z",
-      activatedAt: "2026-01-12T11:00:00Z",
-    },
-    {
-      id: "ver_1d",
-      version: 1,
-      model: "gemini-2.5-flash",
-      templateHash: "ghi789jkl012345",
-      createdAt: "2026-01-01T00:00:00Z",
-      activatedAt: "2026-01-01T12:00:00Z",
-    },
-  ],
-  metrics: {
-    calls24h: 1247,
-    successRate24h: 97.2,
-    latencyP50: 2340,
-    latencyP95: 4120,
-    avgCost: 0.0023,
-  },
-};
 
 // =============================================================================
 // Status Badge Component
@@ -570,11 +450,12 @@ function CardSkeleton() {
 
 export default function PromptDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const promptName = params.name as string;
   const queryClient = useQueryClient();
 
-  // TODO: Get shopId from context or session
-  const shopId = "shop_123";
+  // Get shopId from URL params, default to SYSTEM for system-wide prompts
+  const shopId = searchParams.get("shopId") || "SYSTEM";
 
   // State for version detail modal
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
@@ -590,12 +471,7 @@ export default function PromptDetailPage() {
     isFetching,
   } = useQuery({
     queryKey: ["prompts", shopId, promptName],
-    queryFn: async () => {
-      // Simulate API delay - replace with actual API call
-      await new Promise((r) => setTimeout(r, 500));
-      return MOCK_PROMPT_DETAIL;
-      // return getPromptDetail(shopId, promptName);
-    },
+    queryFn: () => getPromptDetail(shopId, promptName),
   });
 
   // Mutation for creating/updating draft
