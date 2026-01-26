@@ -7,7 +7,6 @@ import { GoogleGenAI } from "@google/genai";
 import sharp from "sharp";
 import crypto from "crypto";
 import { logger, createLogContext } from "~/utils/logger.server";
-import { GEMINI_IMAGE_MODEL_FAST, GEMINI_IMAGE_MODEL_PRO } from "~/config/ai-models.config";
 import { StorageService } from "~/services/storage.server";
 import prisma from "~/db.server";
 import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
@@ -15,9 +14,9 @@ import { resolvePromptText, buildPipelineConfigSnapshot } from "../prompt-contro
 import { startCall, completeCallSuccess, completeCallFailure } from "../prompt-control/llm-call-tracker.server";
 import { computeCallIdentityHash, computeDedupeHash, computePipelineConfigHash, computeImageHash } from "./hashing.server";
 import type {
-  RenderInput,
-  RenderRunResult,
-  VariantRenderResult,
+  CompositeInput,
+  CompositeRunResult,
+  CompositeVariantResult,
   PlacementSet,
   PlacementVariant,
   ProductFacts,
@@ -34,12 +33,6 @@ import type {
 } from "./types";
 
 const VARIANT_TIMEOUT_MS = 45000; // 45 seconds per variant
-
-// Env-based toggle for model selection (allows forcing PRO for testing)
-const BASE_RENDER_MODEL =
-  process.env.SEE_IT_NOW_RENDER_MODEL === "PRO"
-    ? GEMINI_IMAGE_MODEL_PRO
-    : GEMINI_IMAGE_MODEL_FAST;
 
 // Gemini-compatible aspect ratios (label values per Gemini docs)
 const GEMINI_SUPPORTED_RATIOS: Array<{ label: string; value: number }> = [
@@ -97,17 +90,18 @@ class VariantBlockedError extends Error {
   }
 }
 
-export type RenderAllVariantsMode = "early_return" | "wait_all";
+class InfrastructureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InfrastructureError";
+  }
+}
+
+export type RenderAllVariantsMode = "wait_all";
 
 export type RenderAllVariantsCallbacks = {
   onRunStarted?: (info: { runId: string; totalVariants: number; model: string }) => void;
-  onVariantCompleted?: (result: VariantRenderResult & { imageRef?: string }) => void;
-  onEarlyReturn?: (info: {
-    runId: string;
-    successCount: number;
-    completedCount: number;
-    elapsedMs: number;
-  }) => void;
+  onVariantCompleted?: (result: CompositeVariantResult & { imageRef?: string }) => void;
 };
 
 // =============================================================================
@@ -119,8 +113,8 @@ interface VariantRenderContext {
   shopId: string;
   variant: PlacementVariant;
   productDescription: string;
-  productImage: RenderInput['productImage'];
-  roomImage: RenderInput['roomImage'];
+  productImage: CompositeInput['productImage'];
+  roomImage: CompositeInput['roomImage'];
   pipelineConfigSnapshot: PipelineConfigSnapshot;
   logContext: ReturnType<typeof createLogContext>;
 }
@@ -131,7 +125,7 @@ interface VariantRenderContext {
 
 async function renderSingleVariant(
   ctx: VariantRenderContext
-): Promise<VariantRenderResult> {
+): Promise<CompositeVariantResult> {
   const startTime = Date.now();
   const { runId, shopId, variant, productDescription, productImage, roomImage, pipelineConfigSnapshot, logContext } = ctx;
   const variantLogContext = { ...logContext, variantId: variant.id };
@@ -231,6 +225,7 @@ async function renderSingleVariant(
     params: {
       responseModalities: ['TEXT', 'IMAGE'],
       aspectRatio: aspectRatio ?? undefined,
+      ...resolvedPrompt.params,
     },
     images: preparedImages,
     aspectRatioSource: aspectRatio ? 'ROOM_IMAGE_LAST' : 'UNKNOWN',
@@ -280,7 +275,10 @@ async function renderSingleVariant(
       `Variant ${variant.id} aspect ratio resolved: ${aspectRatio ?? "none"}`
     );
 
-    const config: any = { responseModalities: ["TEXT", "IMAGE"] as any };
+    const config: any = {
+      responseModalities: ["TEXT", "IMAGE"] as any,
+      ...(resolvedPrompt.params ?? {}),
+    };
     if (aspectRatio) {
       config.imageConfig = { aspectRatio };
     }
@@ -339,6 +337,14 @@ async function renderSingleVariant(
       throw new Error(`No image in response${reasonSuffix}`);
     }
 
+    const providerRequestId =
+      (result as any)?.response?.requestId ??
+      (result as any)?.requestId ??
+      (result as any)?.responseId ??
+      (result as any)?.response?.id ??
+      (result as any)?.id ??
+      undefined;
+
     // Extract usage metadata
     const usageMetadata = (result as any)?.usageMetadata;
     const tokensIn = usageMetadata?.promptTokenCount ?? 0;
@@ -350,16 +356,27 @@ async function renderSingleVariant(
     const costEstimate = inCost + outCost;
 
     const latencyMs = Date.now() - startTime;
-    const imageBuffer = Buffer.from(imageBase64, "base64");
-    const imageHash = computeImageHash(imageBuffer);
 
-    // Complete LLM call with success
+    // Upload variant image (fail-hard: upload must succeed)
+    let uploaded: { key: string; hash: string };
+    try {
+      uploaded = await uploadVariantImage(runId, variant.id, imageBase64);
+    } catch (e) {
+      throw new InfrastructureError(
+        `Failed to upload variant image (variantId=${variant.id}): ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+
     const outputSummary: OutputSummary = {
-      finishReason: String(finishReason ?? 'STOP'),
-      safetyRatings: safetyRatings ? safetyRatings.map((r: any) => ({
-        category: r.category,
-        probability: r.probability,
-      })) : undefined,
+      finishReason: String(finishReason ?? "STOP"),
+      safetyRatings: safetyRatings
+        ? safetyRatings.map((r: any) => ({
+            category: r.category,
+            probability: r.probability,
+          }))
+        : undefined,
+      imageRef: uploaded.key,
+      providerRequestId,
     };
 
     await completeCallSuccess({
@@ -369,6 +386,7 @@ async function renderSingleVariant(
       costEstimate,
       latencyMs,
       providerModel: resolvedPrompt.model,
+      providerRequestId,
       outputSummary,
     });
 
@@ -379,16 +397,16 @@ async function renderSingleVariant(
 
     return {
       variantId: variant.id,
-      status: 'SUCCESS',
+      status: "SUCCESS",
       latencyMs,
-      imageHash,
-      // Carry the base64 for upload (not stored in result, just for internal use)
-      _imageBase64: imageBase64,
-    } as VariantRenderResult & { _imageBase64?: string };
+      imageRef: uploaded.key,
+      imageHash: uploaded.hash,
+    };
   } catch (error: any) {
     const latencyMs = Date.now() - startTime;
     const isTimeout = error.message === "Timeout";
     const isBlocked = error instanceof VariantBlockedError;
+    const isInfrastructure = error instanceof InfrastructureError;
 
     // Complete LLM call with failure
     await completeCallFailure({
@@ -407,6 +425,10 @@ async function renderSingleVariant(
       },
       `Variant ${variant.id} failed: ${error.message}`
     );
+
+    if (isInfrastructure) {
+      throw error;
+    }
 
     return {
       variantId: variant.id,
@@ -447,14 +469,17 @@ async function uploadVariantImage(
 // =============================================================================
 
 export async function renderAllVariants(
-  input: RenderInput,
+  input: CompositeInput,
   options?: {
     mode?: RenderAllVariantsMode;
   } & RenderAllVariantsCallbacks
-): Promise<RenderRunResult> {
+): Promise<CompositeRunResult> {
   const startTime = Date.now();
   const runId = crypto.randomUUID();
-  const mode: RenderAllVariantsMode = options?.mode ?? "early_return";
+  const mode: RenderAllVariantsMode = options?.mode ?? "wait_all";
+  if (mode !== "wait_all") {
+    throw new Error(`Unsupported render mode (fail-hard): ${mode}`);
+  }
 
   const logContext = createLogContext("render", input.traceId, "start", {
     runId,
@@ -462,9 +487,28 @@ export async function renderAllVariants(
     roomSessionId: input.roomSessionId,
   });
 
+  // ==========================================================================
+  // Build Pipeline Config Snapshot
+  // ==========================================================================
+  const PIPELINE_PROMPT_KEYS = [
+    "product_fact_extractor",
+    "placement_set_generator",
+    "composite_instruction",
+  ];
+  const pipelineConfigSnapshot = await buildPipelineConfigSnapshot(
+    input.shopId,
+    PIPELINE_PROMPT_KEYS
+  );
+  const pipelineConfigHash = computePipelineConfigHash(pipelineConfigSnapshot);
+
+  const compositeModel = pipelineConfigSnapshot.prompts["composite_instruction"]?.model;
+  if (!compositeModel) {
+    throw new Error("Missing composite_instruction model in pipeline config snapshot");
+  }
+
   logger.info(
     logContext,
-    `Starting render run with ${input.placementSet.variants.length} variants (baseModel=${BASE_RENDER_MODEL})`
+    `Starting render run with ${input.placementSet.variants.length} variants (model=${compositeModel})`
   );
 
   // Emit composite started event
@@ -477,15 +521,9 @@ export async function renderAllVariants(
     payload: {
       runId,
       variantCount: input.placementSet.variants.length,
-      model: BASE_RENDER_MODEL,
+      model: compositeModel,
     },
   });
-
-  // ==========================================================================
-  // Build Pipeline Config Snapshot
-  // ==========================================================================
-  const pipelineConfigSnapshot = await buildPipelineConfigSnapshot(input.shopId);
-  const pipelineConfigHash = computePipelineConfigHash(pipelineConfigSnapshot);
 
   // ==========================================================================
   // Create CompositeRun record
@@ -509,43 +547,22 @@ export async function renderAllVariants(
     },
   });
 
-  // Inform caller that run exists
-  if (options?.onRunStarted) {
-    try {
-      options.onRunStarted({
-        runId,
-        totalVariants: input.placementSet.variants.length,
-        model: BASE_RENDER_MODEL,
-      });
-    } catch (e) {
-      logger.warn(
-        { ...logContext, stage: "callback-error" },
-        `onRunStarted callback failed: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  }
-
-  // Track results
-  const results: VariantRenderResult[] = [];
-  let successCount = 0;
-  let completedCount = 0;
   const totalVariants = input.placementSet.variants.length;
 
-  // Create resolvers for early return and all done
-  let resolveEarly: (value: void | PromiseLike<void>) => void;
-  const earlyReturnPromise = new Promise<void>((resolve) => {
-    resolveEarly = resolve;
-  });
+  // Inform caller that run exists (fail-hard: callback errors abort run)
+  if (options?.onRunStarted) {
+    options.onRunStarted({
+      runId,
+      totalVariants,
+      model: compositeModel,
+    });
+  }
 
-  let resolveAllDone: (value: void | PromiseLike<void>) => void;
-  const allDonePromise = new Promise<void>((resolve) => {
-    resolveAllDone = resolve;
-  });
+  // Fire all variants in parallel and wait for all to complete (no early return).
+  const totalTimeoutMs =
+    pipelineConfigSnapshot.runtimeConfig?.timeouts?.totalMs ?? 60000;
 
-  let earlyReturnFired = false;
-
-  // Fire all variants in parallel
-  for (const variant of input.placementSet.variants) {
+  const variantTasks = input.placementSet.variants.map(async (variant) => {
     const ctx: VariantRenderContext = {
       runId,
       shopId: input.shopId,
@@ -557,105 +574,83 @@ export async function renderAllVariants(
       logContext,
     };
 
-    renderSingleVariant(ctx).then(async (result) => {
-      let imageRef: string | undefined;
-      let imageHash: string | undefined = result.imageHash;
+    const result = await renderSingleVariant(ctx);
 
-      // Upload if successful
-      if (result.status === 'SUCCESS' && (result as any)._imageBase64) {
-        try {
-          const uploaded = await uploadVariantImage(runId, result.variantId, (result as any)._imageBase64);
-          imageRef = uploaded.key;
-          imageHash = uploaded.hash;
-        } catch (err) {
-          logger.error(
-            { ...logContext, variantId: result.variantId },
-            `Failed to upload variant image: ${err}`
-          );
-        }
-      }
+    const imageRef = result.imageRef;
+    const imageHash = result.imageHash;
 
-      // Write CompositeVariant record
-      await prisma.compositeVariant.create({
-        data: {
-          runId,
-          variantId: result.variantId,
-          status: result.status,
-          imageRef,
-          imageHash,
-          latencyMs: result.latencyMs,
-          errorCode: result.errorCode,
-          errorMessage: result.errorMessage,
-        },
-      }).catch((e: unknown) => {
-        logger.error(
-          { ...logContext, variantId: result.variantId },
-          `Failed to write variant result: ${e instanceof Error ? e.message : String(e)}`
-        );
-      });
+    if (result.status === "SUCCESS" && !imageRef) {
+      throw new InfrastructureError(`Missing imageRef for successful variant ${result.variantId}`);
+    }
 
-      // Update result with imageRef
-      const finalResult: VariantRenderResult = {
-        ...result,
+    // Write CompositeVariant record (fail-hard: DB write must succeed)
+    await prisma.compositeVariant.create({
+      data: {
+        runId,
+        variantId: result.variantId,
+        status: result.status,
         imageRef,
         imageHash,
-      };
-      results.push(finalResult);
-
-      completedCount++;
-      if (result.status === 'SUCCESS') {
-        successCount++;
-      }
-
-      const elapsed = Date.now() - startTime;
-
-      // Check for completion
-      if (completedCount === totalVariants) {
-        resolveEarly();
-        resolveAllDone();
-      } else if (successCount >= 4 && elapsed > 10000) {
-        resolveEarly();
-        if (!earlyReturnFired) {
-          earlyReturnFired = true;
-          if (options?.onEarlyReturn) {
-            try {
-              options.onEarlyReturn({
-                runId,
-                successCount,
-                completedCount,
-                elapsedMs: elapsed,
-              });
-            } catch (e) {
-              logger.warn(
-                { ...logContext, stage: "callback-error" },
-                `onEarlyReturn callback failed: ${e instanceof Error ? e.message : String(e)}`
-              );
-            }
-          }
-        }
-      }
-
-      // Notify caller
-      if (options?.onVariantCompleted) {
-        try {
-          options.onVariantCompleted(finalResult);
-        } catch (e) {
-          logger.warn(
-            { ...logContext, stage: "callback-error", variantId: result.variantId },
-            `onVariantCompleted callback failed: ${e instanceof Error ? e.message : String(e)}`
-          );
-        }
-      }
+        latencyMs: result.latencyMs,
+        errorCode: result.errorCode,
+        errorMessage: result.errorMessage,
+      },
     });
+
+    const finalResult: CompositeVariantResult = {
+      ...result,
+      imageRef,
+      imageHash,
+    };
+
+    // Notify caller (fail-hard: callback errors abort run)
+    if (options?.onVariantCompleted) {
+      await options.onVariantCompleted(finalResult);
+    }
+
+    return finalResult;
+  });
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Composite run timed out after ${totalTimeoutMs}ms`));
+    }, totalTimeoutMs);
+  });
+
+  let results: CompositeVariantResult[];
+  try {
+    results = await Promise.race([Promise.all(variantTasks), timeoutPromise]);
+  } catch (error) {
+    const totalDurationMs = Date.now() - startTime;
+    await prisma.compositeRun.update({
+      where: { id: runId },
+      data: {
+        status: "FAILED",
+        completedAt: new Date(),
+        totalDurationMs,
+      },
+    });
+    emit({
+      shopId: input.shopId,
+      requestId: input.traceId,
+      source: EventSource.COMPOSITE_RUNNER,
+      type: EventType.COMPOSITE_RUN_COMPLETED,
+      severity: Severity.INFO,
+      payload: {
+        runId,
+        status: "FAILED",
+        successCount: 0,
+        failCount: 0,
+        timeoutCount: 0,
+        totalDurationMs,
+      },
+    });
+    throw error;
   }
 
-  // Wait for early return or all complete
-  const safetyTimeout = new Promise<void>(r => setTimeout(r, 60000));
-
-  await Promise.race([
-    mode === "wait_all" ? allDonePromise : earlyReturnPromise,
-    safetyTimeout,
-  ]);
+  const successCount = results.filter(r => r.status === "SUCCESS").length;
+  const failCount = results.filter(r => r.status === "FAILED").length;
+  const timeoutCount = results.filter(r => r.status === "TIMEOUT").length;
 
   const totalDurationMs = Date.now() - startTime;
 
@@ -727,8 +722,8 @@ export async function renderAllVariants(
       completedAt: new Date(),
       totalDurationMs,
       successCount,
-      failCount: results.filter(r => r.status === 'FAILED').length,
-      timeoutCount: results.filter(r => r.status === 'TIMEOUT').length,
+      failCount,
+      timeoutCount,
       waterfallMs: waterfallMs as any,
       runTotals: runTotals as any,
     },
@@ -745,8 +740,8 @@ export async function renderAllVariants(
       runId,
       status,
       successCount,
-      failCount: results.filter(r => r.status === 'FAILED').length,
-      timeoutCount: results.filter(r => r.status === 'TIMEOUT').length,
+      failCount,
+      timeoutCount,
       totalDurationMs,
     },
   });
@@ -766,76 +761,7 @@ export async function renderAllVariants(
   };
 }
 
-// =============================================================================
-// Legacy Export for backward compatibility
-// =============================================================================
-
-/** @deprecated Use PlacementSet type instead of PromptPack */
-export interface LegacyPromptPack {
-  product_context: string;
-  variants: Array<{ id: string; variation: string }>;
-}
-
-/** @deprecated Use RenderInput instead */
-export interface LegacyRenderInput {
-  shopId: string;
-  productAssetId: string;
-  roomSessionId: string;
-  requestId: string;
-  productImage: {
-    buffer: Buffer;
-    hash: string;
-    meta: ImageMeta;
-    geminiUri?: string;
-  };
-  roomImage: {
-    buffer: Buffer;
-    hash: string;
-    meta: ImageMeta;
-    geminiUri?: string;
-  };
-  resolvedFacts: ProductFacts;
-  promptPack: LegacyPromptPack;
-  promptPackVersion?: string;
-}
-
-/** @deprecated Use renderAllVariants with RenderInput instead */
-export async function renderAllVariantsLegacy(
-  input: LegacyRenderInput,
-  options?: {
-    mode?: RenderAllVariantsMode;
-  } & RenderAllVariantsCallbacks
-): Promise<RenderRunResult> {
-  // Transform legacy input to canonical
-  const canonicalInput: RenderInput = {
-    shopId: input.shopId,
-    productAssetId: input.productAssetId,
-    roomSessionId: input.roomSessionId,
-    traceId: input.requestId,
-    productImage: {
-      buffer: input.productImage.buffer,
-      hash: input.productImage.hash,
-      meta: input.productImage.meta,
-      ref: input.productImage.geminiUri || `inline:${input.productImage.hash}`,
-    },
-    roomImage: {
-      buffer: input.roomImage.buffer,
-      hash: input.roomImage.hash,
-      meta: input.roomImage.meta,
-      ref: input.roomImage.geminiUri || `inline:${input.roomImage.hash}`,
-    },
-    resolvedFacts: input.resolvedFacts,
-    placementSet: {
-      productDescription: input.promptPack.product_context,
-      variants: input.promptPack.variants.map(v => ({
-        id: v.id,
-        placementInstruction: v.variation,
-      })),
-    },
-  };
-
-  return renderAllVariants(canonicalInput, options);
-}
+// Fail-hard: no legacy exports/backward-compat adapters.
 
 // =============================================================================
 // New Canonical Export Names

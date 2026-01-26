@@ -99,27 +99,10 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
         const formData = new FormData();
         formData.append("productId", product.id.split('/').pop());
 
-        // Only send canonical fields (legacy fields removed from schema)
+        // Only send enabled flag
         if (pendingMetadata && typeof pendingMetadata === 'object') {
-            // Add enabled flag
             if (pendingMetadata.enabled !== undefined) {
                 formData.append("enabled", pendingMetadata.enabled ? 'true' : 'false');
-            }
-
-            // merchantOverrides (sparse diff) for v2 pipeline - only send if dirty
-            if (pendingMetadata.merchantOverridesDirty === true) {
-                const overrides = pendingMetadata.merchantOverrides;
-                const isEmptyObject =
-                    overrides &&
-                    typeof overrides === 'object' &&
-                    !Array.isArray(overrides) &&
-                    Object.keys(overrides).length === 0;
-                if (!overrides || isEmptyObject) {
-                    // empty string => clears to null on the server
-                    formData.append("merchantOverrides", "");
-                } else {
-                    formData.append("merchantOverrides", JSON.stringify(overrides));
-                }
             }
         }
 
@@ -371,7 +354,7 @@ export function ProductDetailPanel({ product, asset, isOpen, onClose, onSave }) 
                 <Modal.Section>
                     <BlockStack gap="200">
                         <Text as="p">
-                            You have unsaved changes on the Placement tab. If you discard them, your See It Now overrides and prompt edits will be lost.
+                            You have unsaved changes on the Placement tab. If you discard them, your enabled status change will be lost.
                         </Text>
                     </BlockStack>
                 </Modal.Section>

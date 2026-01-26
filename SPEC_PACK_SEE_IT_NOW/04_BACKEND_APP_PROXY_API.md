@@ -138,7 +138,7 @@ Generate 8 hero shot visualization variants using the 2-LLM pipeline.
 
 ### Architecture
 This endpoint uses pre-computed prompt data from the product preparation phase:
-1. Fetches `resolvedFacts` and `promptPack` from ProductAsset
+1. Fetches `resolvedFacts` and `placementSet` from ProductAsset
 2. Calls `renderAllVariants()` which fires 8 parallel Gemini image generation calls
 3. Returns successful variants with signed URLs
 
@@ -244,13 +244,13 @@ This endpoint uses pre-computed prompt data from the product preparation phase:
 5. Validate:
    - ProductAsset.status === "live"
    - ProductAsset.resolvedFacts is not null
-   - ProductAsset.promptPack is not null
+   - ProductAsset.placementSet is not null
 6. Get signed URLs for room and product images
 7. Download both images (max 2048px)
 8. Build RenderInput object
 9. Call renderAllVariants() → 8 parallel Gemini calls
 10. Upload successful variants to GCS
-11. Write RenderRun + VariantResult records
+11. Write CompositeRun + CompositeVariant records
 12. Increment quota
 13. Return results
 ```
@@ -264,7 +264,7 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-image" });
 const parts = [
   { inlineData: { mimeType: "image/png", data: productBase64 } },
   { inlineData: { mimeType: "image/jpeg", data: roomBase64 } },
-  { text: finalPrompt }  // GLOBAL_RENDER_STATIC + product_context + variation
+  { text: finalPrompt }  // GLOBAL_RENDER_STATIC + productDescription + placementInstruction
 ];
 
 const result = await model.generateContent({

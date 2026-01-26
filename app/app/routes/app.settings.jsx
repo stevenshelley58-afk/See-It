@@ -69,7 +69,6 @@ export const loader = async ({ request }) => {
     version,
     settings: {
       seeItPrompt: settings.seeItPrompt || "",
-      seeItNowPrompt: settings.seeItNowPrompt || "",
       coordinateInstructions: settings.coordinateInstructions || ""
     }
   });
@@ -81,7 +80,6 @@ export default function Settings() {
   const fetcher = useFetcher();
   const [prompts, setPrompts] = useState({
     seeItPrompt: settings.seeItPrompt || "",
-    seeItNowPrompt: settings.seeItNowPrompt || "",
     coordinateInstructions: settings.coordinateInstructions || ""
   });
   const [saving, setSaving] = useState(false);
@@ -93,7 +91,6 @@ export default function Settings() {
     fetcher.submit(
       {
         seeItPrompt: prompts.seeItPrompt,
-        seeItNowPrompt: prompts.seeItNowPrompt,
         coordinateInstructions: prompts.coordinateInstructions
       },
       {
@@ -216,23 +213,6 @@ export default function Settings() {
                 rows={4}
                 className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
                 placeholder="Enter the prompt for See It composite renders..."
-              />
-            </div>
-
-            {/* See It Now Prompt */}
-            <div>
-              <label className="block text-sm font-medium text-neutral-900 mb-1.5">
-                See It Now Prompt
-              </label>
-              <p className="text-xs text-neutral-500 mb-2">
-                This is the prompt used for hero shot renders. Combined with per-product placement prompts.
-              </p>
-              <textarea
-                value={prompts.seeItNowPrompt}
-                onChange={(e) => setPrompts({ ...prompts, seeItNowPrompt: e.target.value })}
-                rows={4}
-                className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent"
-                placeholder="Enter the prompt for See It Now hero shots..."
               />
             </div>
 

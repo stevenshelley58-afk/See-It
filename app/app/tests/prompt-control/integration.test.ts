@@ -217,7 +217,6 @@ import {
 } from "~/services/prompt-control/prompt-version-manager.server";
 
 import {
-  SYSTEM_TENANT_ID,
   resolvePrompt,
   buildResolvedConfigSnapshot,
   loadRuntimeConfig,

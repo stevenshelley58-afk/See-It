@@ -25,7 +25,7 @@ See It Now uses a **2-LLM pipeline** for prompt generation:
 │         ▼                                                       │
 │  ┌─────────────┐                                                │
 │  │   LLM #1    │  Extractor (gemini-2.5-flash)                 │
-│  │             │  → ProductPlacementFacts JSON                  │
+│  │             │  → ProductFacts JSON                  │
 │  └─────────────┘                                                │
 │         │                                                       │
 │         ▼                                                       │
@@ -37,7 +37,7 @@ See It Now uses a **2-LLM pipeline** for prompt generation:
 │         ▼                                                       │
 │  ┌─────────────┐                                                │
 │  │   LLM #2    │  Prompt Builder (gemini-2.5-flash)            │
-│  │             │  → PromptPack (8 variants: V01-V08)           │
+│  │             │  → PlacementSet (8 variants: V01-V08)           │
 │  └─────────────┘                                                │
 │         │                                                       │
 │         ▼                                                       │
@@ -51,12 +51,12 @@ See It Now uses a **2-LLM pipeline** for prompt generation:
 │  Request: room_session_id + product_id                          │
 │         │                                                       │
 │         ▼                                                       │
-│  Load: resolvedFacts, promptPack from ProductAsset              │
+│  Load: resolvedFacts, placementSet from ProductAsset              │
 │         │                                                       │
 │         ▼                                                       │
 │  ┌─────────────┐                                                │
-│  │  Assembler  │  GLOBAL_RENDER_STATIC + product_context        │
-│  │             │  + variation (deterministic)                   │
+│  │  Assembler  │  GLOBAL_RENDER_STATIC + productDescription        │
+│  │             │  + placementInstruction (deterministic)                   │
 │  └─────────────┘                                                │
 │         │                                                       │
 │         ▼                                                       │
@@ -66,7 +66,7 @@ See It Now uses a **2-LLM pipeline** for prompt generation:
 │  └─────────────┘                                                │
 │         │                                                       │
 │         ▼                                                       │
-│  Upload to GCS, log to RenderRun + VariantResult               │
+│  Upload to GCS, log to CompositeRun + CompositeVariant               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -195,7 +195,7 @@ Last updated: January 2025
 **Breaking changes in this version:**
 - Replaced 10-variant creative library with 8-variant controlled bracket (V01-V08)
 - Introduced 2-LLM pipeline (Extractor + Prompt Builder)
-- Added RenderRun and VariantResult tables for lineage tracking
+- Added CompositeRun and CompositeVariant tables for lineage tracking
 - Added PromptVersion table for reproducibility
 
 If you find inconsistencies between spec documents, the higher-numbered document takes precedence (e.g., 13 overrides 14 for prompt details).
