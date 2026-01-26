@@ -182,19 +182,40 @@ export async function listPromptsForShop(shopId: string): Promise<PromptListResp
   });
   const disabledPrompts = runtimeConfig?.disabledPromptNames ?? [];
 
-  // Get all prompt definitions for shop with active/draft versions
-  const definitions = await prisma.promptDefinition.findMany({
-    where: { shopId },
-    include: {
-      versions: {
-        where: {
-          status: { in: ["ACTIVE", "DRAFT"] },
+  // Get prompt definitions for shop + system fallback.
+  // System definitions act as defaults for shops that haven't customized prompts yet.
+  const [shopDefinitions, systemDefinitions] = await Promise.all([
+    prisma.promptDefinition.findMany({
+      where: { shopId },
+      include: {
+        versions: {
+          where: { status: { in: ["ACTIVE", "DRAFT"] } },
+          orderBy: { version: "desc" },
         },
-        orderBy: { version: "desc" },
       },
-    },
-    orderBy: { name: "asc" },
-  });
+      orderBy: { name: "asc" },
+    }),
+    shopId === SYSTEM_TENANT_ID
+      ? Promise.resolve([])
+      : prisma.promptDefinition.findMany({
+          where: { shopId: SYSTEM_TENANT_ID },
+          include: {
+            versions: {
+              where: { status: { in: ["ACTIVE", "DRAFT"] } },
+              orderBy: { version: "desc" },
+            },
+          },
+          orderBy: { name: "asc" },
+        }),
+  ]);
+
+  // Merge by name: shop overrides system.
+  const byName = new Map<string, (typeof shopDefinitions)[number]>();
+  for (const def of systemDefinitions) byName.set(def.name, def);
+  for (const def of shopDefinitions) byName.set(def.name, def);
+  const definitions = Array.from(byName.values()).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
 
   // Build response
   const prompts: PromptSummary[] = await Promise.all(
@@ -240,14 +261,18 @@ export async function getPromptDetail(
   shopId: string,
   promptName: string
 ): Promise<PromptDetailResponse | null> {
-  const definition = await prisma.promptDefinition.findUnique({
-    where: { shopId_name: { shopId, name: promptName } },
-    include: {
-      versions: {
-        orderBy: { version: "desc" },
-      },
-    },
-  });
+  const definition =
+    (await prisma.promptDefinition.findUnique({
+      where: { shopId_name: { shopId, name: promptName } },
+      include: { versions: { orderBy: { version: "desc" } } },
+    })) ??
+    // System fallback (only if not already requesting SYSTEM)
+    (shopId === SYSTEM_TENANT_ID
+      ? null
+      : await prisma.promptDefinition.findUnique({
+          where: { shopId_name: { shopId: SYSTEM_TENANT_ID, name: promptName } },
+          include: { versions: { orderBy: { version: "desc" } } },
+        }));
 
   if (!definition) {
     return null;

@@ -11,6 +11,7 @@ import {
   requireShopAccessAndPermission,
 } from "@/lib/api-utils";
 import { getPromptDetail } from "@/lib/prompt-service";
+import { resolveShopId } from "@/lib/shop-resolver";
 
 type RouteContext = {
   params: Promise<{ shopId: string; name: string }>;
@@ -22,15 +23,21 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const params = await context.params;
-    const shopId = validateShopId(params.shopId);
+    const validatedId = validateShopId(params.shopId);
     const promptName = params.name;
 
-    if (!shopId) {
+    if (!validatedId) {
       return jsonError(400, "bad_request", "Invalid or missing shopId");
     }
 
     if (!promptName || typeof promptName !== "string") {
       return jsonError(400, "bad_request", "Invalid or missing prompt name");
+    }
+
+    // Resolve shop ID (supports UUID, domain name, or "SYSTEM")
+    const shopId = await resolveShopId(validatedId);
+    if (!shopId) {
+      return jsonError(404, "not_found", `Shop not found: ${validatedId}`);
     }
 
     // Verify authentication and shop access
