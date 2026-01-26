@@ -70,14 +70,11 @@ export interface PlacementVariant {
 // Pipeline Config Types
 // =============================================================================
 
-/**
- * Prompt keys are stored as strings in the DB and must be extensible.
- * Adding a new prompt must not require schema changes.
- */
-export type PromptName = string;
+/** Canonical prompt names - stored as strings in DB */
+export type PromptName = 'product_fact_extractor' | 'placement_set_generator' | 'composite_instruction';
 
 export interface ResolvedPrompt {
-  name: string;
+  name: PromptName;
   versionId: string;
   templateHash: string;
   model: string;
@@ -85,7 +82,7 @@ export interface ResolvedPrompt {
 }
 
 export interface PipelineConfigSnapshot {
-  prompts: Record<string, ResolvedPrompt>;
+  prompts: Record<PromptName, ResolvedPrompt>;
   runtimeConfig: {
     timeouts: { perVariantMs: number; totalMs: number };
     retries: { maxPerVariant: number };
@@ -134,7 +131,7 @@ export interface OutputSummary {
 }
 
 export interface CallSummary {
-  promptName: string;
+  promptName: PromptName;
   model: string;
   imageCount: number;
   promptPreview: string;  // First 200 chars of promptText
@@ -210,6 +207,9 @@ export interface CompositeInput {
   placementSet: PlacementSet;  // Renamed from promptPack
 }
 
+/** @deprecated Use CompositeInput instead */
+export type RenderInput = CompositeInput;
+
 export interface CompositeVariantResult {
   variantId: string;
   status: VariantStatus;
@@ -220,6 +220,9 @@ export interface CompositeVariantResult {
   errorMessage?: string;
 }
 
+/** @deprecated Use CompositeVariantResult instead */
+export type VariantRenderResult = CompositeVariantResult;
+
 export interface CompositeRunResult {
   runId: string;
   status: RunStatus;
@@ -228,6 +231,9 @@ export interface CompositeRunResult {
   waterfallMs: WaterfallMs;
   runTotals: RunTotals;
 }
+
+/** @deprecated Use CompositeRunResult instead */
+export type RenderRunResult = CompositeRunResult;
 
 // =============================================================================
 // Variant Intent Config
@@ -247,3 +253,21 @@ export interface VariantIntent {
   anchorRule: string | null; // null for V07, V08 which have special rules
 }
 
+// =============================================================================
+// Legacy Type Aliases (for migration compatibility)
+// =============================================================================
+
+/** @deprecated Use ProductFacts instead */
+export type ProductPlacementFacts = ProductFacts;
+
+/** @deprecated Use PlacementVariant instead */
+export interface PromptPackVariant {
+  id: string;
+  variation: string;
+}
+
+/** @deprecated Use PlacementSet instead */
+export interface PromptPack {
+  product_context: string;
+  variants: PromptPackVariant[];
+}

@@ -1,4 +1,4 @@
-import type { ProductFacts } from "./types";
+import type { ProductPlacementFacts } from "./types";
 import { deriveScaleGuardrails } from "~/config/prompts/scale-guardrails.config";
 
 /**
@@ -8,9 +8,9 @@ import { deriveScaleGuardrails } from "~/config/prompts/scale-guardrails.config"
  * We deep-merge it over extractedFacts.
  */
 export function resolveProductFacts(
-  extractedFacts: ProductFacts,
-  merchantOverrides: Partial<ProductFacts> | null
-): ProductFacts {
+  extractedFacts: ProductPlacementFacts,
+  merchantOverrides: Partial<ProductPlacementFacts> | null
+): ProductPlacementFacts {
   if (!merchantOverrides || Object.keys(merchantOverrides).length === 0) {
     return extractedFacts;
   }

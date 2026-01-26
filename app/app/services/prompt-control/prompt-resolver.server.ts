@@ -15,6 +15,16 @@ import type {
 // Constants
 // =============================================================================
 
+// System tenant for global/shared prompts (fallback)
+export const SYSTEM_TENANT_ID = "SYSTEM";
+
+// Canonical prompt names
+export const CANONICAL_PROMPT_NAMES: PromptName[] = [
+  'product_fact_extractor',
+  'placement_set_generator',
+  'composite_instruction',
+];
+
 // Default runtime config for pipeline
 const DEFAULT_RUNTIME_CONFIG = {
   timeouts: { perVariantMs: 45000, totalMs: 180000 },
@@ -54,12 +64,13 @@ export interface ResolvedPrompt {
     user: string | null;
   };
   resolutionHash: string; // Hash of rendered messages + resolved model + params
-  source: "active" | "override";
+  source: "active" | "system-fallback" | "override";
   overridesApplied: string[];
 }
 
 export interface RuntimeConfigSnapshot {
   maxConcurrency: number;
+  forceFallbackModel: string | null;
   modelAllowList: string[];
   caps: {
     maxTokensOutput: number;
@@ -194,6 +205,7 @@ export async function loadRuntimeConfig(shopId: string): Promise<RuntimeConfigSn
   // Return config or defaults
   return {
     maxConcurrency: config?.maxConcurrency ?? 5,
+    forceFallbackModel: config?.forceFallbackModel ?? null,
     modelAllowList: config?.modelAllowList ?? [],
     caps: {
       maxTokensOutput: config?.maxTokensOutputCap ?? 8192,
@@ -210,10 +222,11 @@ export async function loadRuntimeConfig(shopId: string): Promise<RuntimeConfigSn
 
 /**
  * Resolve a single prompt for a shop
- *
+ * 
  * Resolution order:
  * 1. Shop's own PromptDefinition (shopId)
- * 2. Error if it does not exist
+ * 2. System PromptDefinition (SYSTEM_TENANT_ID) as fallback
+ * 3. Error if neither exists
  */
 export async function resolvePrompt(
   input: ResolvePromptInput
@@ -229,7 +242,7 @@ export async function resolvePrompt(
     };
   }
 
-  // 2. Load prompt definition - shop only (no system fallback)
+  // 2. Load prompt definition - shop first, then system fallback
   let definition = await prisma.promptDefinition.findUnique({
     where: { shopId_name: { shopId, name: promptName } },
     include: {
@@ -240,11 +253,27 @@ export async function resolvePrompt(
     },
   });
 
+  let isSystemFallback = false;
+
+  // Fallback to system tenant if shop doesn't have this prompt
+  if (!definition) {
+    definition = await prisma.promptDefinition.findUnique({
+      where: { shopId_name: { shopId: SYSTEM_TENANT_ID, name: promptName } },
+      include: {
+        versions: {
+          where: { status: "ACTIVE" },
+          take: 1,
+        },
+      },
+    });
+    isSystemFallback = true;
+  }
+
   if (!definition) {
     return {
       resolved: null,
       blocked: true,
-      blockReason: `Prompt "${promptName}" not found for shop`,
+      blockReason: `Prompt "${promptName}" not found for shop or system`,
     };
   }
 
@@ -272,8 +301,13 @@ export async function resolvePrompt(
     };
   }
 
-  // 4. Resolve model (override > version > definition default)
+  // 4. Resolve model (override > version > definition default > force fallback)
   let model = override?.model ?? activeVersion?.model ?? definition.defaultModel;
+
+  // Apply force fallback if configured
+  if (runtimeConfig.forceFallbackModel) {
+    model = runtimeConfig.forceFallbackModel;
+  }
 
   // Check model allow list
   if (runtimeConfig.modelAllowList.length > 0 && !runtimeConfig.modelAllowList.includes(model)) {
@@ -326,6 +360,8 @@ export async function resolvePrompt(
   let source: ResolvedPrompt["source"] = "active";
   if (overridesApplied.length > 0) {
     source = "override";
+  } else if (isSystemFallback) {
+    source = "system-fallback";
   }
 
   // 12. Build resolved prompt
@@ -381,6 +417,7 @@ interface LoadedDefinition {
 function resolvePromptFromData(
   promptName: string,
   shopDefinition: LoadedDefinition | undefined,
+  systemDefinition: LoadedDefinition | undefined,
   variables: Record<string, string>,
   override: PromptOverride | undefined,
   runtimeConfig: RuntimeConfigSnapshot
@@ -394,14 +431,15 @@ function resolvePromptFromData(
     };
   }
 
-  // 2. Select definition - shop only (no system fallback)
-  const definition = shopDefinition;
+  // 2. Select definition - shop first, then system fallback
+  const definition = shopDefinition ?? systemDefinition;
+  const isSystemFallback = !shopDefinition && !!systemDefinition;
 
   if (!definition) {
     return {
       resolved: null,
       blocked: true,
-      blockReason: `Prompt "${promptName}" not found for shop`,
+      blockReason: `Prompt "${promptName}" not found for shop or system`,
     };
   }
 
@@ -429,8 +467,13 @@ function resolvePromptFromData(
     };
   }
 
-  // 4. Resolve model (override > version > definition default)
+  // 4. Resolve model (override > version > definition default > force fallback)
   let model = override?.model ?? activeVersion?.model ?? definition.defaultModel;
+
+  // Apply force fallback if configured
+  if (runtimeConfig.forceFallbackModel) {
+    model = runtimeConfig.forceFallbackModel;
+  }
 
   // Check model allow list
   if (runtimeConfig.modelAllowList.length > 0 && !runtimeConfig.modelAllowList.includes(model)) {
@@ -482,6 +525,8 @@ function resolvePromptFromData(
   let source: ResolvedPrompt["source"] = "active";
   if (overridesApplied.length > 0) {
     source = "override";
+  } else if (isSystemFallback) {
+    source = "system-fallback";
   }
 
   // 12. Build resolved prompt
@@ -514,10 +559,10 @@ async function batchLoadDefinitions(
   shopId: string,
   promptNames: string[]
 ): Promise<Map<string, LoadedDefinition>> {
-  // Single query to load ALL definitions for this shop
+  // Single query to load ALL definitions from both shop and system tenants
   const definitions = await prisma.promptDefinition.findMany({
     where: {
-      shopId,
+      shopId: { in: [shopId, SYSTEM_TENANT_ID] },
       name: { in: promptNames },
     },
     include: {
@@ -566,12 +611,14 @@ export async function buildResolvedConfigSnapshot(input: {
 
   // Resolve each prompt IN MEMORY (no additional DB queries)
   for (const promptName of promptNames) {
-    // Look up shop definition from pre-loaded map
+    // Look up shop definition and system fallback from pre-loaded map
     const shopDefinition = definitionsMap.get(`${shopId}:${promptName}`);
+    const systemDefinition = definitionsMap.get(`${SYSTEM_TENANT_ID}:${promptName}`);
 
     const result = resolvePromptFromData(
       promptName,
       shopDefinition,
+      systemDefinition,
       variables,
       overrides?.[promptName],
       runtimeConfig
@@ -600,21 +647,21 @@ export async function buildResolvedConfigSnapshot(input: {
  * @returns PipelineConfigSnapshot with all 3 prompts and runtime config
  */
 export async function buildPipelineConfigSnapshot(
-  shopId: string,
-  promptNames: string[]
+  shopId: string
 ): Promise<PipelineConfigSnapshot> {
   // Load runtime config
   const runtime = await loadRuntimeConfig(shopId);
 
-  // Batch load prompts
-  const definitionsMap = await batchLoadDefinitions(shopId, promptNames);
+  // Batch load all canonical prompts
+  const definitionsMap = await batchLoadDefinitions(shopId, CANONICAL_PROMPT_NAMES);
 
   // Build prompts record
-  const prompts: Record<string, CanonicalResolvedPrompt> = {};
+  const prompts: Record<PromptName, CanonicalResolvedPrompt> = {} as Record<PromptName, CanonicalResolvedPrompt>;
 
-  for (const promptName of promptNames) {
+  for (const promptName of CANONICAL_PROMPT_NAMES) {
     const shopDefinition = definitionsMap.get(`${shopId}:${promptName}`);
-    const definition = shopDefinition;
+    const systemDefinition = definitionsMap.get(`${SYSTEM_TENANT_ID}:${promptName}`);
+    const definition = shopDefinition ?? systemDefinition;
 
     if (!definition) {
       throw new Error(`Missing prompt definition: ${promptName}`);

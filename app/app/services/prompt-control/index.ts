@@ -4,6 +4,7 @@
 
 // Resolver
 export {
+  SYSTEM_TENANT_ID,
   resolvePrompt,
   buildResolvedConfigSnapshot,
   loadRuntimeConfig,
@@ -41,6 +42,9 @@ export {
   getCallsForTestRun,
   getDailyCostForShop,
   findCachedByDedupeHash,
+  // Legacy wrappers (deprecated)
+  startLLMCall,
+  completeLLMCall,
   type StartCallInput,
   type CompleteCallSuccessInput,
   type CompleteCallFailureInput,

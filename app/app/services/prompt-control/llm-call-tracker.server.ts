@@ -303,3 +303,47 @@ export async function getDailyCostForShop(shopId: string): Promise<number> {
   return Number(result._sum.costEstimate ?? 0);
 }
 
+// =============================================================================
+// Legacy Exports for Backward Compatibility
+// =============================================================================
+
+/** @deprecated Use startCall instead */
+export const startLLMCall = startCall;
+
+/** @deprecated Use completeCallSuccess/completeCallFailure instead */
+export async function completeLLMCall(input: {
+  callId: string;
+  status: CallStatus;
+  tokensIn?: number;
+  tokensOut?: number;
+  costEstimate?: number;
+  errorType?: string;
+  errorMessage?: string;
+  providerRequestId?: string;
+  providerModel?: string;
+  outputPreview?: string;
+}): Promise<void> {
+  if (input.status === 'SUCCEEDED') {
+    await completeCallSuccess({
+      callId: input.callId,
+      tokensIn: input.tokensIn ?? 0,
+      tokensOut: input.tokensOut ?? 0,
+      costEstimate: input.costEstimate ?? 0,
+      latencyMs: 0, // Not available in legacy interface
+      providerModel: input.providerModel,
+      providerRequestId: input.providerRequestId,
+      outputSummary: {
+        finishReason: 'STOP',
+        providerRequestId: input.providerRequestId,
+      },
+    });
+  } else {
+    await completeCallFailure({
+      callId: input.callId,
+      latencyMs: 0, // Not available in legacy interface
+      errorType: input.errorType ?? 'UnknownError',
+      errorMessage: input.errorMessage ?? 'Unknown error',
+      status: input.status === 'TIMEOUT' ? 'TIMEOUT' : 'FAILED',
+    });
+  }
+}

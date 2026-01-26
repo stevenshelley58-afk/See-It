@@ -4,14 +4,26 @@ import prisma from "../db.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { emitPrepEvent } from "../services/prep-events.server";
 import { setSeeItLiveTag } from "../utils/shopify-tags.server";
+import {
+    buildPlacementSet,
+    resolveProductFacts,
+} from "../services/see-it-now/index";
 
 /**
  * POST /api/products/update-instructions
  *
- * Update enabled status for a product asset.
+ * Update merchant overrides and enabled status for a product asset.
+ *
+ * Canonical Pipeline Fields:
+ * - merchantOverrides: JSON object with sparse diff of fact overrides
+ * - enabled: boolean for ready ↔ live status transitions
+ *
+ * Legacy fields (renderInstructions, placementFields, sceneRole, etc.) have been
+ * removed from the schema. This endpoint now only handles canonical fields.
  *
  * Body (FormData):
  * - productId: Shopify product ID (numeric) - required
+ * - merchantOverrides: (optional) JSON string with sparse diff overrides, empty string to clear
  * - enabled: (optional) "true" | "false" - Controls ready ↔ live status transitions
  */
 export const action = async ({ request }) => {
@@ -29,11 +41,43 @@ export const action = async ({ request }) => {
         const enabledRaw = formData.get("enabled")?.toString();
         const enabled = enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : null;
 
+        // Merchant overrides (sparse diff) for canonical pipeline
+        // 3-state semantics:
+        // - missing field => no change
+        // - empty string => null (clear)
+        // - JSON object => set
+        let merchantOverrides = undefined;
+        if (formData.has("merchantOverrides")) {
+            const raw = formData.get("merchantOverrides")?.toString();
+            if (!raw || raw.trim() === "") {
+                merchantOverrides = null;
+            } else {
+                try {
+                    merchantOverrides = JSON.parse(raw);
+                    if (
+                        merchantOverrides === null ||
+                        typeof merchantOverrides !== "object" ||
+                        Array.isArray(merchantOverrides)
+                    ) {
+                        return json(
+                            { success: false, error: "merchantOverrides must be a JSON object" },
+                            { status: 400 }
+                        );
+                    }
+                } catch (e) {
+                    return json(
+                        { success: false, error: "Invalid merchantOverrides JSON format" },
+                        { status: 400 }
+                    );
+                }
+            }
+        }
+
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
         }
 
-        logger.info(logContext, `Update instructions: productId=${productId}, enabled=${enabled}`);
+        logger.info(logContext, `Update instructions: productId=${productId}, enabled=${enabled}, hasMerchantOverrides=${merchantOverrides !== undefined}`);
 
         // Get shop record
         const shop = await prisma.shop.findUnique({
@@ -52,10 +96,14 @@ export const action = async ({ request }) => {
             },
         });
 
-        // Prepare update data
+        // Prepare update data - only canonical fields
         const updateData = {
             updatedAt: new Date(),
         };
+
+        if (merchantOverrides !== undefined) {
+            updateData.merchantOverrides = merchantOverrides;
+        }
 
         // Handle enabled toggle and status transitions
         if (enabled !== null && asset) {
@@ -125,6 +173,59 @@ export const action = async ({ request }) => {
                 `Created new asset for product ${productId}`
             );
 
+            // If merchantOverrides were provided, attempt to rebuild v2 prompt pack immediately.
+            if (merchantOverrides !== undefined) {
+                try {
+                    if (!asset.extractedFacts) {
+                        return json({
+                            success: true,
+                            message:
+                                "Saved. Facts are not extracted yet; prompt pack will generate after preparation.",
+                            assetId: asset.id,
+                            status: asset.status,
+                            enabled: asset.enabled || false,
+                            pipelineUpdated: false,
+                            pipelineStatus: "missing_extracted_facts",
+                        });
+                    }
+                    const resolvedFacts = resolveProductFacts(
+                        asset.extractedFacts,
+                        asset.merchantOverrides || null
+                    );
+                    const placementSet = await buildPlacementSet({
+                        resolvedFacts,
+                        productAssetId: asset.id,
+                        shopId: asset.shopId,
+                        traceId: requestId,
+                    });
+                    await prisma.productAsset.update({
+                        where: { id: asset.id },
+                        data: {
+                            resolvedFacts,
+                            placementSet,
+                        },
+                    });
+                    return json({
+                        success: true,
+                        message: "Saved and regenerated placement set",
+                        assetId: asset.id,
+                        status: asset.status,
+                        enabled: asset.enabled || false,
+                        pipelineUpdated: true,
+                        variantCount: placementSet.variants.length,
+                    });
+                } catch (e) {
+                    const msg = e instanceof Error ? e.message : "Unknown error";
+                    return json(
+                        {
+                            success: false,
+                            error: `Saved overrides, but failed to regenerate prompt pack: ${msg}`,
+                        },
+                        { status: 500 }
+                    );
+                }
+            }
+
             return json({
                 success: true,
                 message: "Asset created",
@@ -154,6 +255,7 @@ export const action = async ({ request }) => {
                 eventType: "merchant_placement_saved",
                 actorType: "merchant",
                 payload: {
+                    merchantOverrides: merchantOverrides !== undefined ? merchantOverrides : undefined,
                     enabled: enabled !== null ? enabled : undefined,
                 },
             },
@@ -162,6 +264,62 @@ export const action = async ({ request }) => {
         ).catch(() => {
             // Non-critical
         });
+
+        // If merchantOverrides were provided, regenerate prompt pack immediately.
+        if (merchantOverrides !== undefined) {
+            try {
+                if (!updatedAsset.extractedFacts) {
+                    return json({
+                        success: true,
+                        message:
+                            "Saved. Facts are not extracted yet; prompt pack will generate after preparation.",
+                        assetId: asset.id,
+                        status: updatedAsset.status,
+                        enabled: updatedAsset.enabled,
+                        pipelineUpdated: false,
+                        pipelineStatus: "missing_extracted_facts",
+                    });
+                }
+
+                const resolvedFacts = resolveProductFacts(
+                    updatedAsset.extractedFacts,
+                    updatedAsset.merchantOverrides || null
+                );
+                const placementSet = await buildPlacementSet({
+                    resolvedFacts,
+                    productAssetId: asset.id,
+                    shopId: asset.shopId,
+                    traceId: requestId,
+                });
+
+                await prisma.productAsset.update({
+                    where: { id: asset.id },
+                    data: {
+                        resolvedFacts,
+                        placementSet,
+                    },
+                });
+
+                return json({
+                    success: true,
+                    message: "Saved and regenerated placement set",
+                    assetId: asset.id,
+                    status: updatedAsset.status,
+                    enabled: updatedAsset.enabled,
+                    pipelineUpdated: true,
+                    variantCount: placementSet.variants.length,
+                });
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : "Unknown error";
+                return json(
+                    {
+                        success: false,
+                        error: `Saved overrides, but failed to regenerate prompt pack: ${msg}`,
+                    },
+                    { status: 500 }
+                );
+            }
+        }
 
         return json({
             success: true,

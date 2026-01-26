@@ -54,8 +54,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const status = url.searchParams.get("status");
   if (status) filters.status = status;
 
-  // Fail-hard: traceId is canonical. No legacy requestId support.
-  const traceId = url.searchParams.get("traceId");
+  // Prefer traceId (canonical), but accept legacy requestId param for backwards compatibility.
+  const traceId = url.searchParams.get("traceId") || url.searchParams.get("requestId");
   if (traceId) filters.traceId = traceId;
 
   const configHash =
@@ -108,7 +108,7 @@ export default function MonitorRunsPage() {
       : []
   );
   const [traceIdFilter, setTraceIdFilter] = useState(
-    searchParams.get("traceId") || ""
+    searchParams.get("traceId") || searchParams.get("requestId") || ""
   );
 
   const handleStatusChange = useCallback(
@@ -151,6 +151,7 @@ export default function MonitorRunsPage() {
       params.set("traceId", traceIdFilter);
     } else {
       params.delete("traceId");
+      params.delete("requestId"); // legacy
     }
     params.set("page", "1");
     setSearchParams(params);
@@ -239,6 +240,7 @@ export default function MonitorRunsPage() {
               setTraceIdFilter("");
               const params = new URLSearchParams(searchParams);
               params.delete("traceId");
+              params.delete("requestId"); // legacy
               setSearchParams(params);
             },
           },
@@ -302,6 +304,7 @@ export default function MonitorRunsPage() {
                       setTraceIdFilter("");
                       const params = new URLSearchParams(searchParams);
                       params.delete("traceId");
+                      params.delete("requestId"); // legacy
                       setSearchParams(params);
                     }}
                   />

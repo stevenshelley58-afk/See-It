@@ -1,15 +1,12 @@
 export * from "./types";
 export { extractProductFacts } from "./extractor.server";
 export { resolveProductFacts } from "./resolver.server";
-export { buildPlacementSet } from "./prompt-builder.server";
+export { buildPlacementSet, buildPromptPack } from "./prompt-builder.server";
+export { renderAllVariants, renderAllVariantsLegacy } from "./renderer.server";
 export {
-  runComposite,
-  renderAllVariants,
-  type RenderAllVariantsMode,
-  type RenderAllVariantsCallbacks,
-  type RunCompositeMode,
-  type RunCompositeCallbacks,
-} from "./composite-runner.server";
+  getCurrentPromptVersion,
+  ensurePromptVersion,
+} from "./versioning.server";
 export {
   computePipelineConfigHash,
   computeCallIdentityHash,

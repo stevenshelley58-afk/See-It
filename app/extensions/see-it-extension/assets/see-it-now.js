@@ -84,7 +84,7 @@
 // =============================================================================
 
 document.addEventListener('DOMContentLoaded', function () {
-  const VERSION = '1.0.30';
+  const VERSION = '1.0.0';
   console.log('[See It Now] === LOADED ===', { VERSION, timestamp: Date.now() });
 
   // ============================================================================
@@ -690,7 +690,35 @@ document.addEventListener('DOMContentLoaded', function () {
       return data;
     }
 
-    // Fail-hard: no selection/backfill endpoints from the storefront client.
+    async function recordFinalSelection({ variantId, imageUrl, upscale }) {
+      if (!state.sessionId || !state.roomSessionId) return null;
+      if (!variantId || !imageUrl) return null;
+
+      try {
+        const res = await fetch('/apps/see-it/see-it-now/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: state.sessionId,
+            room_session_id: state.roomSessionId,
+            selected_variant_id: variantId,
+            selected_image_url: imageUrl,
+            upscale: !!upscale,
+            product_id: state.productId || undefined,
+          }),
+        });
+
+        const { data } = await readJsonOrText(res);
+        if (!res.ok) {
+          console.warn('[See It Now] Selection endpoint failed:', data);
+          return null;
+        }
+        return data;
+      } catch (err) {
+        console.warn('[See It Now] Selection endpoint error:', err);
+        return null;
+      }
+    }
 
     // ============================================================================
     // SWIPE CAROUSEL
@@ -875,16 +903,13 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // ============================================================================
-    // SHARE (fail-hard: no fallbacks)
+    // SHARE (with proper canShare check and CORS fallback)
     // ============================================================================
 
     async function handleShare() {
       const currentVariant = state.variants[state.currentIndex];
       const currentUrl = currentVariant?.image_url || state.images[state.currentIndex];
-      if (!currentUrl) {
-        showError('Missing image URL for share', null);
-        return;
-      }
+      if (!currentUrl) return;
 
       // Track share action (this implies the user "selected" this variant as their favorite)
       if (window.SeeItNowAnalytics) {
@@ -896,29 +921,71 @@ document.addEventListener('DOMContentLoaded', function () {
       }
 
       try {
-        if (!navigator.share || !navigator.canShare) {
-          showError('Sharing is not supported on this browser/device.', null);
-          return;
+        // Best-effort: record the user's selection (and optionally upscale for a "final" image)
+        // If it succeeds, swap the image URL to the returned final_image_url for sharing.
+        if (currentVariant?.id) {
+          const selection = await recordFinalSelection({
+            variantId: currentVariant.id,
+            imageUrl: currentUrl,
+            upscale: true,
+          });
+
+          const finalUrl = selection?.final_image_url;
+          if (finalUrl && typeof finalUrl === 'string') {
+            // Update state so the carousel also uses the final URL
+            state.variants[state.currentIndex] = { ...currentVariant, image_url: finalUrl };
+            state.images[state.currentIndex] = finalUrl;
+          }
         }
 
-        const response = await fetch(currentUrl);
-        if (!response.ok) throw new Error('Failed to fetch image for sharing');
-        const blob = await response.blob();
-        const file = new File([blob], 'see-it-now.jpg', { type: blob.type || 'image/jpeg' });
+        const shareUrl = state.images[state.currentIndex] || currentUrl;
 
-        if (!navigator.canShare({ files: [file] })) {
-          showError('This browser cannot share files.', null);
+        // Try native share with file (mobile)
+        if (navigator.share && navigator.canShare) {
+          const response = await fetch(shareUrl);
+          if (!response.ok) throw new Error('Fetch failed');
+          const blob = await response.blob();
+          const file = new File([blob], 'see-it-now.jpg', { type: 'image/jpeg' });
+          
+          // Check if we can share files
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: state.productTitle || 'See It Now'
+            });
+            return;
+          }
+        }
+        
+        // Try native share without file (URL only)
+        if (navigator.share) {
+          await navigator.share({
+            title: state.productTitle || 'See It Now',
+            url: shareUrl
+          });
           return;
         }
-
-        await navigator.share({
-          files: [file],
-          title: state.productTitle || 'See It Now'
-        });
+        
+        // Fallback: direct download via link
+        downloadImage(shareUrl);
+        
       } catch (err) {
-        if (err?.name === 'AbortError') return; // User cancelled
-        showError(`Share failed: ${err instanceof Error ? err.message : String(err)}`, null);
+        if (err.name === 'AbortError') return; // User cancelled
+        console.warn('[See It Now] Share failed, falling back to download:', err);
+        downloadImage(state.images[state.currentIndex] || currentUrl);
       }
+    }
+
+    function downloadImage(url) {
+      // Open in new tab as fallback (works even without CORS)
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'see-it-now.jpg';
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
 
     if (shareBtn) shareBtn.addEventListener('click', handleShare);
@@ -987,14 +1054,11 @@ document.addEventListener('DOMContentLoaded', function () {
         assertActive();
         const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
 
-        // Start session (fail-hard: snake_case response only)
-        const session = await startSession(normalizedFile.type);
+        // Start session (handle both camelCase and snake_case responses)
+        const session = await startSession(normalizedFile.type, signal);
         assertActive();
-        if (!session || !session.room_session_id || !session.upload_url) {
-          throw new Error('Start session returned invalid payload');
-        }
-        state.roomSessionId = session.room_session_id;
-        const uploadUrl = session.upload_url;
+        state.roomSessionId = session.sessionId || session.room_session_id;
+        const uploadUrl = session.uploadUrl || session.upload_url;
         console.log('[See It Now] Session:', state.roomSessionId);
 
         // Upload

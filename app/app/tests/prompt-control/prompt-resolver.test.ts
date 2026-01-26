@@ -2,9 +2,10 @@
  * Acceptance Tests for Prompt Control Plane - Prompt Resolver
  *
  * Tests:
- * - #3: No system tenant fallback (missing prompt hard-blocks)
+ * - #3: System tenant fallback (shop without custom prompt uses SYSTEM)
  * - #5: View run's resolved config snapshot
  * - #7: Disable prompt via runtime config -> calls blocked
+ * - #8: Force fallback model -> next run uses that model
  * - #9: Model not in allow list -> call blocked
  * - #14: Same images, different order -> same requestHash (sorted)
  * - #15: Template with dot path -> {{product.title}} renders correctly
@@ -32,6 +33,7 @@ vi.mock("~/db.server", () => ({
 
 // Import after mocking
 import {
+  SYSTEM_TENANT_ID,
   resolvePrompt,
   buildResolvedConfigSnapshot,
   loadRuntimeConfig,
@@ -86,6 +88,7 @@ function createMockVersion(
 function createDefaultRuntimeConfig(): RuntimeConfigSnapshot {
   return {
     maxConcurrency: 5,
+    forceFallbackModel: null,
     modelAllowList: [],
     caps: {
       maxTokensOutput: 8192,
@@ -106,15 +109,25 @@ describe("Prompt Resolver", () => {
   });
 
   // ===========================================================================
-  // Test #3: No system tenant fallback (fail-hard)
+  // Test #3: System tenant fallback
   // ===========================================================================
 
-  describe("AC #3: No system tenant fallback", () => {
-    it("should block when shop has no prompt definition", async () => {
+  describe("AC #3: System tenant fallback", () => {
+    it("should fall back to system tenant when shop has no custom prompt", async () => {
       const shopId = "shop-1";
       const promptName = "extractor";
 
-      mockPrisma.promptDefinition.findUnique.mockResolvedValueOnce(null);
+      // Shop has no custom prompt
+      const shopDef = null;
+      // System has the prompt
+      const systemDef = {
+        ...createMockDefinition(SYSTEM_TENANT_ID, promptName, "sys-def"),
+        versions: [createMockVersion("sys-def", 1, "ACTIVE")],
+      };
+
+      mockPrisma.promptDefinition.findUnique
+        .mockResolvedValueOnce(shopDef) // Shop lookup
+        .mockResolvedValueOnce(systemDef); // System fallback lookup
 
       const result = await resolvePrompt({
         shopId,
@@ -123,12 +136,13 @@ describe("Prompt Resolver", () => {
         runtimeConfig: createDefaultRuntimeConfig(),
       });
 
-      expect(result.blocked).toBe(true);
-      expect(result.resolved).toBeNull();
-      expect(result.blockReason).toContain("not found for shop");
+      expect(result.blocked).toBe(false);
+      expect(result.resolved).not.toBeNull();
+      expect(result.resolved?.source).toBe("system-fallback");
+      expect(result.resolved?.promptDefinitionId).toBe("sys-def");
     });
 
-    it("should use shop prompt when available", async () => {
+    it("should use shop prompt when available (not system fallback)", async () => {
       const shopId = "shop-1";
       const promptName = "extractor";
 
@@ -149,6 +163,25 @@ describe("Prompt Resolver", () => {
       expect(result.blocked).toBe(false);
       expect(result.resolved?.source).toBe("active");
       expect(result.resolved?.promptDefinitionId).toBe("shop-def");
+    });
+
+    it("should block when neither shop nor system has the prompt", async () => {
+      const shopId = "shop-1";
+      const promptName = "nonexistent";
+
+      mockPrisma.promptDefinition.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+
+      const result = await resolvePrompt({
+        shopId,
+        promptName,
+        variables: {},
+        runtimeConfig: createDefaultRuntimeConfig(),
+      });
+
+      expect(result.blocked).toBe(true);
+      expect(result.blockReason).toContain("not found");
     });
   });
 
@@ -201,6 +234,7 @@ describe("Prompt Resolver", () => {
         shopId,
         disabledPromptNames: ["disabled_prompt"],
         maxConcurrency: 5,
+        forceFallbackModel: null,
         modelAllowList: [],
         maxTokensOutputCap: 8192,
         maxImageBytesCap: 20000000,
@@ -310,6 +344,71 @@ describe("Prompt Resolver", () => {
 
       expect(result.blocked).toBe(false);
       expect(result.resolved).not.toBeNull();
+    });
+  });
+
+  // ===========================================================================
+  // Test #8: Force fallback model -> next run uses that model
+  // ===========================================================================
+
+  describe("AC #8: Force fallback model", () => {
+    it("should override model when forceFallbackModel is set", async () => {
+      const shopId = "shop-1";
+      const promptName = "extractor";
+
+      const def = {
+        ...createMockDefinition(shopId, promptName, "def-1"),
+        defaultModel: "gemini-2.5-flash",
+        versions: [
+          {
+            ...createMockVersion("def-1", 1, "ACTIVE"),
+            model: "gemini-2.5-pro",
+          },
+        ],
+      };
+
+      mockPrisma.promptDefinition.findUnique.mockResolvedValueOnce(def);
+
+      const runtimeConfig: RuntimeConfigSnapshot = {
+        ...createDefaultRuntimeConfig(),
+        forceFallbackModel: "gemini-1.5-flash",
+      };
+
+      const result = await resolvePrompt({
+        shopId,
+        promptName,
+        variables: { input: "test" },
+        runtimeConfig,
+      });
+
+      expect(result.resolved?.model).toBe("gemini-1.5-flash");
+    });
+
+    it("should use version model when no force fallback", async () => {
+      const shopId = "shop-1";
+      const promptName = "extractor";
+
+      const def = {
+        ...createMockDefinition(shopId, promptName, "def-1"),
+        defaultModel: "gemini-2.5-flash",
+        versions: [
+          {
+            ...createMockVersion("def-1", 1, "ACTIVE"),
+            model: "gemini-2.5-pro",
+          },
+        ],
+      };
+
+      mockPrisma.promptDefinition.findUnique.mockResolvedValueOnce(def);
+
+      const result = await resolvePrompt({
+        shopId,
+        promptName,
+        variables: { input: "test" },
+        runtimeConfig: createDefaultRuntimeConfig(),
+      });
+
+      expect(result.resolved?.model).toBe("gemini-2.5-pro");
     });
   });
 
@@ -642,6 +741,7 @@ describe("Prompt Resolver", () => {
       const config = await loadRuntimeConfig("shop-1");
 
       expect(config.maxConcurrency).toBe(5);
+      expect(config.forceFallbackModel).toBeNull();
       expect(config.modelAllowList).toEqual([]);
       expect(config.caps.maxTokensOutput).toBe(8192);
       expect(config.dailyCostCap).toBe(50);
@@ -652,6 +752,7 @@ describe("Prompt Resolver", () => {
       mockPrisma.shopRuntimeConfig.findUnique.mockResolvedValue({
         shopId: "shop-1",
         maxConcurrency: 10,
+        forceFallbackModel: "gemini-1.5-flash",
         modelAllowList: ["gemini-1.5-flash"],
         maxTokensOutputCap: 2048,
         maxImageBytesCap: 10000000,
@@ -662,6 +763,7 @@ describe("Prompt Resolver", () => {
       const config = await loadRuntimeConfig("shop-1");
 
       expect(config.maxConcurrency).toBe(10);
+      expect(config.forceFallbackModel).toBe("gemini-1.5-flash");
       expect(config.modelAllowList).toEqual(["gemini-1.5-flash"]);
       expect(config.caps.maxTokensOutput).toBe(2048);
       expect(config.dailyCostCap).toBe(100);
