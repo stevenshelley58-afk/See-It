@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useFetcher } from '@remix-run/react';
 import { Card } from '../ui';
 import { buildPlacementTabMetadata } from './placementTabMetadata';
 
