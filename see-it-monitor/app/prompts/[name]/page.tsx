@@ -519,44 +519,7 @@ export default function PromptDetailPage() {
     request: TestPromptRequest,
     options?: { signal?: AbortSignal }
   ): Promise<TestPromptResponse> => {
-    // Simulate test run - replace with actual API call
-    // Support cancellation in mock mode by racing with abort signal
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(resolve, 2000);
-      options?.signal?.addEventListener("abort", () => {
-        clearTimeout(timeout);
-        reject(new DOMException("Aborted", "AbortError"));
-      });
-    });
-    return {
-      testRunId: "test_123",
-      status: "succeeded",
-      output: {
-        category: "Coffee Table",
-        placements: ["Living Room", "Study"],
-        styles: ["Modern", "Minimalist"],
-        materials: ["Teak", "Metal"],
-        size: "medium",
-      },
-      latencyMs: 2340,
-      tokensIn: 1250,
-      tokensOut: 340,
-      costEstimate: 0.0023,
-      providerRequestId: "req_abc123def456",
-      providerModel: "gemini-2.5-flash",
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert product analyst...",
-        },
-        {
-          role: "user",
-          content: "Analyze the following product:\n\nProduct Title: Teak Coffee Table...",
-        },
-      ],
-      resolutionHash: "hash123456",
-    };
-    // return runTest(shopId, promptName, request, options);
+    return runTest(shopId, promptName, request, options);
   };
 
   // Handler for promote to draft

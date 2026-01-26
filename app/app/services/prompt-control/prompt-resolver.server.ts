@@ -229,7 +229,7 @@ export async function resolvePrompt(
     };
   }
 
-  // 2. Load prompt definition - shop only (no system fallback)
+  // 2. Load prompt definition - try shop first, fallback to SYSTEM
   let definition = await prisma.promptDefinition.findUnique({
     where: { shopId_name: { shopId, name: promptName } },
     include: {
@@ -240,11 +240,24 @@ export async function resolvePrompt(
     },
   });
 
+  // Fallback to SYSTEM tenant if not found for shop
+  if (!definition && shopId !== "SYSTEM") {
+    definition = await prisma.promptDefinition.findUnique({
+      where: { shopId_name: { shopId: "SYSTEM", name: promptName } },
+      include: {
+        versions: {
+          where: { status: "ACTIVE" },
+          take: 1,
+        },
+      },
+    });
+  }
+
   if (!definition) {
     return {
       resolved: null,
       blocked: true,
-      blockReason: `Prompt "${promptName}" not found for shop`,
+      blockReason: `Prompt "${promptName}" not found for shop or SYSTEM fallback`,
     };
   }
 
@@ -394,14 +407,30 @@ function resolvePromptFromData(
     };
   }
 
-  // 2. Select definition - shop only (no system fallback)
-  const definition = shopDefinition;
+  // 2. Select definition - try shop first, fallback to SYSTEM
+  let definition = shopDefinition;
+
+  // Fallback to SYSTEM tenant if not found for shop
+  if (!definition && shopId !== "SYSTEM") {
+    const systemDefinition = await prisma.promptDefinition.findUnique({
+      where: { shopId_name: { shopId: "SYSTEM", name: promptName } },
+      include: {
+        versions: {
+          where: { status: "ACTIVE" },
+          take: 1,
+        },
+      },
+    });
+    if (systemDefinition) {
+      definition = systemDefinition as LoadedDefinition;
+    }
+  }
 
   if (!definition) {
     return {
       resolved: null,
       blocked: true,
-      blockReason: `Prompt "${promptName}" not found for shop`,
+      blockReason: `Prompt "${promptName}" not found for shop or SYSTEM fallback`,
     };
   }
 
@@ -509,13 +538,14 @@ function resolvePromptFromData(
 /**
  * Batch load all prompt definitions for given names from both shop and system tenants
  * Returns a map keyed by `${shopId}:${name}` for easy lookup
+ * Falls back to SYSTEM tenant for missing shop definitions
  */
 async function batchLoadDefinitions(
   shopId: string,
   promptNames: string[]
 ): Promise<Map<string, LoadedDefinition>> {
-  // Single query to load ALL definitions for this shop
-  const definitions = await prisma.promptDefinition.findMany({
+  // Load ALL definitions for this shop
+  const shopDefinitions = await prisma.promptDefinition.findMany({
     where: {
       shopId,
       name: { in: promptNames },
@@ -530,8 +560,34 @@ async function batchLoadDefinitions(
 
   // Build lookup map: `${shopId}:${name}` -> definition
   const map = new Map<string, LoadedDefinition>();
-  for (const def of definitions) {
+  for (const def of shopDefinitions) {
     map.set(`${def.shopId}:${def.name}`, def as LoadedDefinition);
+  }
+
+  // Find missing prompts and load from SYSTEM tenant
+  if (shopId !== "SYSTEM") {
+    const foundNames = new Set(shopDefinitions.map(d => d.name));
+    const missingNames = promptNames.filter(name => !foundNames.has(name));
+
+    if (missingNames.length > 0) {
+      const systemDefinitions = await prisma.promptDefinition.findMany({
+        where: {
+          shopId: "SYSTEM",
+          name: { in: missingNames },
+        },
+        include: {
+          versions: {
+            where: { status: "ACTIVE" },
+            take: 1,
+          },
+        },
+      });
+
+      // Add SYSTEM definitions to map (keyed by shopId for resolution logic)
+      for (const def of systemDefinitions) {
+        map.set(`${shopId}:${def.name}`, def as LoadedDefinition);
+      }
+    }
   }
 
   return map;
@@ -613,11 +669,11 @@ export async function buildPipelineConfigSnapshot(
   const prompts: Record<string, CanonicalResolvedPrompt> = {};
 
   for (const promptName of promptNames) {
-    const shopDefinition = definitionsMap.get(`${shopId}:${promptName}`);
-    const definition = shopDefinition;
+    // Look up definition (may be from shop or SYSTEM fallback)
+    const definition = definitionsMap.get(`${shopId}:${promptName}`);
 
     if (!definition) {
-      throw new Error(`Missing prompt definition: ${promptName}`);
+      throw new Error(`Missing prompt definition: ${promptName} (shop and SYSTEM fallback)`);
     }
 
     const activeVersion = definition.versions[0];

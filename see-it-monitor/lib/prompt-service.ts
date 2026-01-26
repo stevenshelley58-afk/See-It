@@ -5,6 +5,7 @@
 
 import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
+import { GoogleGenAI } from "@google/genai";
 import prisma from "./db";
 import type {
   PromptSummary,
@@ -784,48 +785,201 @@ export async function testPrompt(
     },
   });
 
-  // 11. Execute the test call (simulated for now - in real implementation, would call Gemini)
-  // For now, we return a mock response. In production, this would integrate with the actual LLM.
+  // 11. Execute the test call with real Gemini API
   const startTime = Date.now();
 
-  // Simulate API call delay
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY not set");
+  }
 
-  const latencyMs = Date.now() - startTime;
-  const mockOutput = {
-    message: "Test execution simulated. Integrate with actual LLM provider for real results.",
-    model,
-    renderedMessages: messages,
-  };
+  const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-  // 12. Update LLM call and test run
-  await prisma.lLMCall.update({
-    where: { id: llmCall.id },
-    data: {
-      status: "SUCCEEDED",
-      finishedAt: new Date(),
-      latencyMs,
-      tokensIn: 0,
-      tokensOut: 0,
-      costEstimate: 0,
-      outputSummary: {
-        preview: JSON.stringify(mockOutput).slice(0, 500),
-        length: JSON.stringify(mockOutput).length,
-      } as unknown as Prisma.InputJsonValue,
-    },
-  });
+  // Build content parts: messages + images
+  const parts: any[] = [];
 
-  await prisma.promptTestRun.update({
-    where: { id: testRun.id },
-    data: {
-      status: "succeeded",
-      output: mockOutput as unknown as Prisma.InputJsonValue,
-      latencyMs,
-      tokensIn: 0,
-      tokensOut: 0,
-      costEstimate: 0,
-    },
-  });
+  // Add text messages
+  for (const msg of messages) {
+    if (msg.role === "system" || msg.role === "developer") {
+      // System/developer messages go as system role
+      parts.push({ text: msg.content });
+    } else if (msg.role === "user") {
+      parts.push({ text: msg.content });
+    }
+  }
+
+  // Add image parts if provided
+  const imageRefs = options.imageRefs ?? [];
+  for (const imageRef of imageRefs) {
+    if (imageRef.startsWith("https://generativelanguage.googleapis.com/")) {
+      // Gemini file URI - use fileData
+      parts.push({
+        fileData: {
+          fileUri: imageRef,
+        },
+      });
+    } else if (imageRef.startsWith("https://") || imageRef.startsWith("http://")) {
+      // HTTP(S) URL - download and inline
+      try {
+        const response = await fetch(imageRef);
+        if (response.ok) {
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const base64 = buffer.toString("base64");
+          const mimeType = response.headers.get("content-type") || "image/jpeg";
+          parts.push({
+            inlineData: {
+              mimeType,
+              data: base64,
+            },
+          });
+        }
+      } catch (err) {
+        // Log but continue - don't fail the test if image fetch fails
+        console.warn(`Failed to fetch image ${imageRef}:`, err);
+      }
+    }
+  }
+
+  // Determine response modalities based on params
+  const responseModalitiesParam = params.responseModalities as string[] | undefined;
+  const hasImageOutput = Array.isArray(responseModalitiesParam) && 
+                         (responseModalitiesParam.includes("IMAGE") || responseModalitiesParam.includes("image"));
+  const responseModalities = hasImageOutput ? ["TEXT", "IMAGE"] : ["TEXT"];
+
+  let result: any;
+  let latencyMs: number;
+  let tokensIn = 0;
+  let tokensOut = 0;
+  let costEstimate = 0;
+  let providerRequestId: string | null = null;
+  let outputText: string | null = null;
+  let outputImageBase64: string | null = null;
+  let finishReason: string | null = null;
+
+  try {
+    // Make the actual API call
+    result = await client.models.generateContent({
+      model,
+      contents: [{ role: "user", parts }],
+      config: {
+        ...params,
+        responseModalities: responseModalities as any,
+      },
+    });
+
+    latencyMs = Date.now() - startTime;
+
+    // Extract provider request ID
+    providerRequestId =
+      result?.response?.requestId ??
+      result?.requestId ??
+      result?.responseId ??
+      result?.response?.id ??
+      result?.id ??
+      null;
+
+    // Extract usage metadata
+    const usageMetadata = result?.usageMetadata;
+    tokensIn = usageMetadata?.promptTokenCount ?? 0;
+    tokensOut = usageMetadata?.candidatesTokenCount ?? 0;
+
+    // Estimate cost (rough estimate based on Gemini pricing)
+    const inCost = (tokensIn / 1_000_000) * 0.10;
+    const outCost = (tokensOut / 1_000_000) * 0.40;
+    costEstimate = inCost + outCost;
+
+    // Extract output
+    const candidates = result?.candidates;
+    finishReason = candidates?.[0]?.finishReason ?? null;
+
+    // Extract text output
+    if (result?.text) {
+      outputText = result.text;
+    } else if (candidates?.[0]?.content?.parts) {
+      for (const part of candidates[0].content.parts) {
+        if (part.text) {
+          outputText = (outputText || "") + part.text;
+        }
+        if (part.inlineData?.data) {
+          outputImageBase64 = part.inlineData.data;
+        }
+      }
+    }
+
+    // Build bounded output structure (truncate if too large)
+    const output: any = {
+      text: outputText ? outputText.slice(0, 10000) : null, // Truncate to 10k chars
+      textLength: outputText?.length ?? 0,
+      hasImage: !!outputImageBase64,
+      imagePreview: outputImageBase64
+        ? outputImageBase64.slice(0, 100) + "... (truncated)"
+        : null,
+      finishReason,
+      model,
+    };
+
+    // 12. Update LLM call and test run with success
+    await prisma.lLMCall.update({
+      where: { id: llmCall.id },
+      data: {
+        status: "SUCCEEDED",
+        finishedAt: new Date(),
+        latencyMs,
+        tokensIn,
+        tokensOut,
+        costEstimate,
+        providerModel: model,
+        providerRequestId,
+        outputSummary: {
+          finishReason: String(finishReason ?? "STOP"),
+          hasImage: !!outputImageBase64,
+          textLength: outputText?.length ?? 0,
+          providerRequestId,
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    await prisma.promptTestRun.update({
+      where: { id: testRun.id },
+      data: {
+        status: "succeeded",
+        output: output as unknown as Prisma.InputJsonValue,
+        latencyMs,
+        tokensIn,
+        tokensOut,
+        costEstimate,
+      },
+    });
+  } catch (error: any) {
+    latencyMs = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorType = error instanceof Error ? error.name : "UnknownError";
+
+    // Update LLM call with failure
+    await prisma.lLMCall.update({
+      where: { id: llmCall.id },
+      data: {
+        status: "FAILED",
+        finishedAt: new Date(),
+        latencyMs,
+        errorType,
+        errorMessage,
+      },
+    });
+
+    await prisma.promptTestRun.update({
+      where: { id: testRun.id },
+      data: {
+        status: "failed",
+        output: {
+          error: errorMessage,
+          errorType,
+        } as unknown as Prisma.InputJsonValue,
+        latencyMs,
+      },
+    });
+
+    throw error;
+  }
 
   // 13. Audit log
   await prisma.promptAuditLog.create({
@@ -849,12 +1003,17 @@ export async function testPrompt(
   return {
     testRunId: testRun.id,
     status: "succeeded",
-    output: mockOutput,
+    output: {
+      text: outputText,
+      hasImage: !!outputImageBase64,
+      finishReason,
+      model,
+    },
     latencyMs,
-    tokensIn: 0,
-    tokensOut: 0,
-    costEstimate: 0,
-    providerRequestId: null,
+    tokensIn,
+    tokensOut,
+    costEstimate,
+    providerRequestId,
     providerModel: model,
     messages,
     resolutionHash,

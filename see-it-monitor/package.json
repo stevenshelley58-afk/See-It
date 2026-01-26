@@ -10,6 +10,7 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@google/genai": "^0.2.1",
     "@prisma/client": "^6.6.0",
     "@tanstack/react-query": "^5.0.0",
     "clsx": "^2.1.0",

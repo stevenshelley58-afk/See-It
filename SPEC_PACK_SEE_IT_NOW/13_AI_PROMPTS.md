@@ -1,4 +1,4 @@
-# 13 — AI Prompts (2-LLM Pipeline Architecture)
+# 13 — AI Prompts (3-LLM Pipeline Architecture)
 
 ## Purpose
 This document specifies the 2-LLM pipeline architecture for See It Now prompt generation and image rendering.
@@ -7,7 +7,7 @@ This document specifies the 2-LLM pipeline architecture for See It Now prompt ge
 
 ## Architecture Overview
 
-See It Now uses a **2-LLM pipeline** to generate hero shot visualizations:
+See It Now uses a **3-LLM pipeline** to generate hero shot visualizations:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -183,9 +183,8 @@ interface ProductFacts {
 ```
 
 ### Location
-- Prompt: `config/prompts/extractor.prompt.ts`
-- Schema: `config/schemas/product-facts.schema.ts`
-- Service: `services/see-it-now/extractor.server.ts`
+- Service: `app/app/services/see-it-now/extractor.server.ts`
+- Types: `app/app/services/see-it-now/types.ts`
 
 ---
 
@@ -208,7 +207,7 @@ function resolveProductFacts(
 Merchant overrides are stored as a **diff only** - only the fields the merchant changed.
 
 ### Location
-- Service: `services/see-it-now/resolver.server.ts`
+- Service: `app/app/services/see-it-now/resolver.server.ts`
 
 ---
 
@@ -237,8 +236,7 @@ interface PlacementVariant {
 ```
 
 ### Location
-- Prompt: `config/prompts/prompt-builder.prompt.ts`
-- Service: `services/see-it-now/prompt-builder.server.ts`
+- Service: `app/app/services/see-it-now/prompt-builder.server.ts`
 
 ---
 
@@ -258,7 +256,7 @@ The 8-variant "controlled bracket" systematically explores placement and scale:
 | V08 | Escape hatch: maximum realism, conservative scale | primary | conservative |
 
 ### Location
-- Config: `config/prompts/variant-intents.config.ts`
+- Config: `app/app/config/prompts/variant-intents.config.ts`
 
 ---
 
@@ -279,7 +277,7 @@ Material-specific rendering rules applied during prompt building:
 | leather | Show material texture |
 
 ### Location
-- Config: `config/prompts/material-behaviors.config.ts`
+- Config: `app/app/config/prompts/material-behaviors.config.ts`
 
 ---
 
@@ -297,7 +295,7 @@ Scale templates based on relative_scale class:
 | tiny | "This is a tiny decorative item. Keep proportionally small. Do not enlarge to fill space." |
 
 ### Location
-- Config: `config/prompts/scale-guardrails.config.ts`
+- Config: `app/app/config/prompts/scale-guardrails.config.ts`
 
 ---
 
@@ -361,7 +359,7 @@ function assembleFinalPrompt(
 ```
 
 ### Location
-- Service: `services/see-it-now/prompt-assembler.server.ts`
+- Service: `app/app/services/see-it-now/composite-runner.server.ts` (prompt assembly is inline)
 
 ---
 
@@ -395,100 +393,102 @@ const result = await model.generateContent({
 3. Prompt text — LAST
 
 ### Location
-- Service: `services/see-it-now/renderer.server.ts`
+- Service: `app/app/services/see-it-now/composite-runner.server.ts`
 
 ---
 
 ## Database Storage
 
-### ProductAsset Fields (New)
+### ProductAsset Fields
 ```prisma
 model ProductAsset {
   // ... existing fields ...
   
   // 2-LLM Pipeline Fields
-  extractedFacts      Json?     @map("extracted_facts")      // LLM #1 output
+  extractedFacts      Json?     @map("extracted_facts")      // LLM #1 output: ProductFacts
   merchantOverrides   Json?     @map("merchant_overrides")   // Merchant edits (diff only)
   resolvedFacts       Json?     @map("resolved_facts")       // merged(extracted, overrides)
-  placementSet          Json?     @map("prompt_pack")          // LLM #2 output
-  placementSetVersion   Int?      @map("prompt_pack_version")
+  placementSet        Json?     @map("placement_set")         // LLM #2 output: PlacementSet
   extractedAt         DateTime? @map("extracted_at")
 }
 ```
 
-### CompositeRun Table (New)
+### CompositeRun Table
 ```prisma
 model CompositeRun {
-  id                String   @id @default(uuid())
-  shopId            String   @map("shop_id")
-  productAssetId    String   @map("product_asset_id")
-  roomSessionId     String   @map("room_session_id")
-  requestId         String   @map("request_id")
-  placementSetVersion Int      @map("prompt_pack_version")
-  model             String
+  id             String  @id @default(uuid())
+  shopId         String  @map("shop_id")
+  productAssetId String  @map("product_asset_id")
+  roomSessionId  String? @map("room_session_id")
+  traceId        String  @map("trace_id")
   
-  // Image hashes for deduplication
-  productImageHash  String   @map("product_image_hash")
-  productImageMeta  Json     @map("product_image_meta")
-  roomImageHash     String   @map("room_image_hash")
-  roomImageMeta     Json     @map("room_image_meta")
+  // Image references
+  preparedProductImageRef  String  @map("prepared_product_image_ref")
+  preparedProductImageHash String? @map("prepared_product_image_hash")
+  roomImageRef             String  @map("room_image_ref")
+  roomImageHash            String? @map("room_image_hash")
   
-  // Prompt tracking
-  resolvedFactsHash String   @map("resolved_facts_hash")
-  resolvedFactsJson Json     @map("resolved_facts_json")
-  placementSetHash    String   @map("prompt_pack_hash")
-  placementSetJson    Json     @map("prompt_pack_json")
+  // Snapshots (complete audit trail)
+  resolvedFactsSnapshot  Json   @map("resolved_facts_snapshot")
+  placementSetSnapshot   Json   @map("placement_set_snapshot")
+  pipelineConfigSnapshot Json   @map("pipeline_config_snapshot")
+  pipelineConfigHash     String @map("pipeline_config_hash")
   
-  // Results
-  totalDurationMs   Int?     @map("total_duration_ms")
-  status            String   // "complete" | "partial" | "failed"
+  // Status
+  status String @default("RUNNING") // "RUNNING" | "COMPLETE" | "PARTIAL" | "FAILED"
   
-  createdAt         DateTime @default(now()) @map("created_at")
+  // Timing
+  createdAt       DateTime  @default(now()) @map("created_at")
+  completedAt     DateTime? @map("completed_at")
+  totalDurationMs Int?      @map("total_duration_ms")
+  waterfallMs     Json?     @map("waterfall_ms")
+  
+  // Aggregates
+  successCount Int   @default(0) @map("success_count")
+  failCount    Int   @default(0) @map("fail_count")
+  timeoutCount Int   @default(0) @map("timeout_count")
+  runTotals    Json? @map("run_totals")
   
   // Relations
-  shop           Shop           @relation(fields: [shopId], references: [id])
-  productAsset   ProductAsset   @relation(fields: [productAssetId], references: [id])
+  shop              Shop               @relation(fields: [shopId], references: [id])
+  productAsset      ProductAsset       @relation(fields: [productAssetId], references: [id])
+  roomSession       RoomSession?       @relation(fields: [roomSessionId], references: [id])
   compositeVariants CompositeVariant[]
   
   @@map("composite_runs")
 }
 ```
 
-### CompositeVariant Table (New)
+### CompositeVariant Table
 ```prisma
 model CompositeVariant {
-  id              String   @id @default(uuid())
-  renderRunId     String   @map("render_run_id")
-  variantId       String   @map("variant_id")  // "V01" through "V08"
-  finalPromptHash String   @map("final_prompt_hash")
-  status          String   // "success" | "failed" | "timeout"
-  latencyMs       Int      @map("latency_ms")
-  outputImageKey  String?  @map("output_image_key")
-  outputImageHash String?  @map("output_image_hash")
-  errorMessage    String?  @map("error_message")
+  id         String  @id @default(uuid())
+  runId      String  @map("run_id")
+  variantId  String  @map("variant_id") // "V01" through "V08"
   
-  createdAt       DateTime @default(now()) @map("created_at")
+  status       String  // "SUCCESS" | "FAILED" | "TIMEOUT"
+  imageRef     String? @map("image_ref")
+  imageHash    String? @map("image_hash")
+  latencyMs    Int?    @map("latency_ms")
+  errorCode    String? @map("error_code")
+  errorMessage String? @map("error_message")
   
-  renderRun CompositeRun @relation(fields: [renderRunId], references: [id])
+  createdAt DateTime @default(now()) @map("created_at")
   
+  compositeRun CompositeRun @relation(fields: [runId], references: [id])
+  
+  @@unique([runId, variantId])
   @@map("composite_variants")
 }
 ```
 
-### PromptVersion Table (New)
-```prisma
-model PromptVersion {
-  id             String   @id @default(uuid())
-  version        Int      @unique
-  globalHash     String   @map("global_hash")
-  extractorHash  String   @map("extractor_hash")
-  builderHash    String   @map("builder_hash")
-  configSnapshot Json     @map("config_snapshot")
-  createdAt      DateTime @default(now()) @map("created_at")
-  
-  @@map("prompt_versions")
-}
-```
+### Prompt Control Plane Tables
+See `app/prisma/schema.prisma` for full schema:
+- `PromptDefinition` - Prompt type definitions per shop
+- `PromptVersion` - Versioned prompt templates with status (DRAFT/ACTIVE/ARCHIVED)
+- `LLMCall` - Observability: one row per model call
+- `PromptTestRun` - Test panel execution records
+- `ShopRuntimeConfig` - Per-tenant runtime configuration
 
 ---
 
@@ -527,31 +527,25 @@ If some variants succeed and others fail:
 
 ```
 app/
-├── config/
-│   ├── prompts/
-│   │   ├── global-render.prompt.ts      # GLOBAL_RENDER_STATIC
-│   │   ├── extractor.prompt.ts          # LLM #1 system prompt
-│   │   ├── prompt-builder.prompt.ts     # LLM #2 system prompt
-│   │   ├── variant-intents.config.ts    # V01-V08 definitions
-│   │   ├── material-behaviors.config.ts # Material-specific rules
-│   │   └── scale-guardrails.config.ts   # Scale templates
-│   └── schemas/
-│       └── product-facts.schema.ts      # JSON schema for extraction
-├── services/
-│   └── see-it-now/
-│       ├── index.ts                     # Exports
-│       ├── types.ts                     # TypeScript interfaces
-│       ├── extractor.server.ts          # LLM #1
-│       ├── resolver.server.ts           # Merge logic
-│       ├── prompt-builder.server.ts     # LLM #2
-│       ├── prompt-assembler.server.ts   # Deterministic assembly
-│       ├── renderer.server.ts           # Parallel Gemini calls
-│       ├── monitor.server.ts            # DB logging
-│       └── versioning.server.ts         # Prompt version tracking
-└── routes/
-    ├── app-proxy.see-it-now.render.ts   # /apps/see-it/see-it-now/render
-    ├── app.monitor.tsx                  # Admin monitor UI
-    └── api.monitor.run.$id.tsx          # Monitor API
+├── app/
+│   ├── config/
+│   │   └── prompts/
+│   │       ├── variant-intents.config.ts    # V01-V08 definitions
+│   │       ├── material-behaviors.config.ts  # Material-specific rules
+│   │       └── scale-guardrails.config.ts   # Scale templates
+│   └── services/
+│       ├── see-it-now/
+│       │   ├── types.ts                     # TypeScript interfaces (ProductFacts, PlacementSet)
+│       │   ├── extractor.server.ts          # LLM #1: Product fact extraction
+│       │   ├── resolver.server.ts           # Merge logic: extractedFacts + merchantOverrides
+│       │   ├── prompt-builder.server.ts     # LLM #2: PlacementSet generation
+│       │   ├── composite-runner.server.ts   # LLM #3: Composite image generation (8 variants)
+│       │   └── hashing.server.ts            # Deterministic hashing utilities
+│       └── prompt-control/
+│           ├── prompt-resolver.server.ts    # Prompt resolution with SYSTEM fallback
+│           └── llm-call-tracker.server.ts    # Observability: LLMCall tracking
+└── prisma/
+    └── schema.prisma                       # Database schema (ProductAsset, CompositeRun, PromptDefinition, etc.)
 ```
 
 ---

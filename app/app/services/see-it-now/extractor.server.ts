@@ -219,23 +219,29 @@ export async function extractProductFacts(args: ExtractProductFactsInput): Promi
     }
   }
 
-  // Build debug payload
+  // Build final merged provider config (what actually gets sent)
+  const finalConfig = {
+    responseMimeType: "application/json",
+    ...resolvedPrompt.params,
+  };
+
+  // Build debug payload (must match final config)
   const debugPayload: DebugPayload = {
     promptText: resolvedPrompt.promptText,
     model: resolvedPrompt.model,
     params: {
       responseModalities: ['TEXT'],
-      ...resolvedPrompt.params,
+      ...finalConfig,
     },
     images: preparedImages,
     aspectRatioSource: 'UNKNOWN',
   };
 
-  // Compute hashes
+  // Compute hashes from final merged config (what actually gets sent)
   const callIdentityHash = computeCallIdentityHash({
     promptText: resolvedPrompt.promptText,
     model: resolvedPrompt.model,
-    params: resolvedPrompt.params,
+    params: finalConfig,
   });
   const dedupeHash = computeDedupeHash({
     callIdentityHash,
@@ -271,10 +277,7 @@ export async function extractProductFacts(args: ExtractProductFactsInput): Promi
       const result = await client.models.generateContent({
         model: resolvedPrompt.model,
         contents: [{ role: "user", parts }],
-        config: {
-          responseMimeType: "application/json",
-          ...(resolvedPrompt.params ?? {}),
-        },
+        config: finalConfig,
       });
 
       const text = (result as { text?: string })?.text || "{}";

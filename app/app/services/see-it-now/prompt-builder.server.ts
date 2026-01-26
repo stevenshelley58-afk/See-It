@@ -71,23 +71,29 @@ export async function buildPlacementSet(args: BuildPlacementSetInput): Promise<P
     },
   });
 
-  // Build debug payload
+  // Build final merged provider config (what actually gets sent)
+  const finalConfig = {
+    responseMimeType: "application/json",
+    ...resolvedPrompt.params,
+  };
+
+  // Build debug payload (must match final config)
   const debugPayload: DebugPayload = {
     promptText: resolvedPrompt.promptText,
     model: resolvedPrompt.model,
     params: {
       responseModalities: ['TEXT'],
-      ...resolvedPrompt.params,
+      ...finalConfig,
     },
     images: [], // No images for placement set generation
     aspectRatioSource: 'UNKNOWN',
   };
 
-  // Compute hash
+  // Compute hash from final merged config (what actually gets sent)
   const callIdentityHash = computeCallIdentityHash({
     promptText: resolvedPrompt.promptText,
     model: resolvedPrompt.model,
-    params: resolvedPrompt.params,
+    params: finalConfig,
   });
 
   // Build call summary
@@ -121,7 +127,7 @@ export async function buildPlacementSet(args: BuildPlacementSetInput): Promise<P
           parts: [{ text: resolvedPrompt.promptText }],
         },
       ],
-      config: { responseMimeType: "application/json", ...(resolvedPrompt.params ?? {}) },
+      config: finalConfig,
     });
 
     const candidates = (result as any)?.candidates;

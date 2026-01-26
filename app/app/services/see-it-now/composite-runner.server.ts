@@ -218,24 +218,33 @@ async function renderSingleVariant(
     },
   ];
 
-  // Build DebugPayload
+  // Build final merged provider config (what actually gets sent)
+  const finalConfig: any = {
+    responseModalities: ["TEXT", "IMAGE"] as any,
+    ...(resolvedPrompt.params ?? {}),
+  };
+  if (aspectRatio) {
+    finalConfig.imageConfig = { aspectRatio };
+  }
+
+  // Build DebugPayload (must match final config)
   const debugPayload: DebugPayload = {
     promptText: finalPrompt,
     model: resolvedPrompt.model,
     params: {
       responseModalities: ['TEXT', 'IMAGE'],
       aspectRatio: aspectRatio ?? undefined,
-      ...resolvedPrompt.params,
+      ...finalConfig,
     },
     images: preparedImages,
     aspectRatioSource: aspectRatio ? 'ROOM_IMAGE_LAST' : 'UNKNOWN',
   };
 
-  // Compute hashes
+  // Compute hashes from final merged config (what actually gets sent)
   const callIdentityHash = computeCallIdentityHash({
     promptText: finalPrompt,
     model: resolvedPrompt.model,
-    params: resolvedPrompt.params,
+    params: finalConfig,
   });
   const dedupeHash = computeDedupeHash({
     callIdentityHash,
@@ -275,19 +284,11 @@ async function renderSingleVariant(
       `Variant ${variant.id} aspect ratio resolved: ${aspectRatio ?? "none"}`
     );
 
-    const config: any = {
-      responseModalities: ["TEXT", "IMAGE"] as any,
-      ...(resolvedPrompt.params ?? {}),
-    };
-    if (aspectRatio) {
-      config.imageConfig = { aspectRatio };
-    }
-
     const result = await Promise.race([
       client.models.generateContent({
         model: resolvedPrompt.model,
         contents: [{ role: "user", parts }],
-        config,
+        config: finalConfig,
       }),
       timeoutPromise,
     ]);

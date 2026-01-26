@@ -242,7 +242,7 @@ const PROMPTS_TO_SEED: PromptSeed[] = [
     name: "composite_instruction",
     description:
       "LLM #3: Composite product into room (image generation)",
-    defaultModel: "gemini-2.5-flash-preview-04-17",
+    defaultModel: "gemini-2.5-flash-image",
     defaultParams: {
       responseModalities: ["TEXT", "IMAGE"],
     },
