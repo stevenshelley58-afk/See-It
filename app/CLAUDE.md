@@ -79,6 +79,14 @@ extractedAt       DateTime?
 | Placement UI | `app/components/ProductDetailPanel/PlacementTab.jsx` |
 | Save placement API | `app/routes/api.products.update-instructions.jsx` |
 | Compositing | `app/services/gemini.server.ts` |
+| Gemini file cache | `app/services/gemini-files.server.ts` |
+
+## Utility Files
+| Purpose | File |
+|---------|------|
+| CORS headers | `app/utils/cors.server.ts` |
+| Image download | `app/utils/image-download.server.ts` |
+| Cron authentication | `app/utils/cron-auth.server.ts` |
 
 ## Commands
 ```bash
@@ -90,6 +98,24 @@ npm run deploy       # Deploy Shopify app config
 - **App**: Push to GitHub → Railway auto-deploys
 - **Monitor**: Push to GitHub → Vercel auto-deploys
 - **Local dev not supported** - no local database or tunnel
+
+## Important Behaviors
+
+### Settings Refresh Timing
+Shop settings (`seeItPrompt`, `coordinateInstructions`) are loaded **once per batch at prep time** and baked into `placementSet`. This means:
+- Settings changes do NOT affect already-prepared products
+- Changes apply only to the NEXT product preparation
+- To apply new settings: re-prepare the product (click "Prepare" again)
+
+Location: `prepare-processor.server.ts` lines 662-668
+
+### Gemini File Cache
+Product and room images are pre-uploaded to Gemini Files API (48hr expiry).
+- Cache hits use stored URI (saves 3-5s per render)
+- Expired files trigger automatic re-upload with logging
+- 1-hour safety buffer before actual expiration
+
+Location: `gemini-files.server.ts`
 
 ## Rules
 1. Read the spec before coding: `docs/PRODUCT_PREP_REDESIGN.md`

@@ -1,22 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-
-function getCorsHeaders(shopDomain: string | null): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    Pragma: "no-cache",
-    Expires: "0",
-  };
-
-  if (shopDomain) {
-    headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
-  }
-
-  return headers;
-}
+import { getCorsHeaders } from "../utils/cors.server";
 
 /**
  * Storefront Settings (App Proxy)

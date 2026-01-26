@@ -7,6 +7,7 @@ import { logger, createLogContext } from "../utils/logger.server";
 import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { uploadToGeminiFiles, isGeminiFileValid, type GeminiFileInfo } from "./gemini-files.server";
 import { photoroomRemoveBackground } from "./photoroom.server";
+import { downloadAndProcessImage } from "../utils/image-download.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -99,6 +100,15 @@ function buildCompositePrompt(
 
         processed = processed.replace(/\{\{CENTER_X_PX\}\}/g, String(center_x_px || ''));
         processed = processed.replace(/\{\{CENTER_Y_PX\}\}/g, String(center_y_px || ''));
+
+        // Warn about any unreplaced placeholders (typos in template)
+        const unreplacedMatches = processed.match(/\{\{[^}]+\}\}/g);
+        if (unreplacedMatches) {
+            logger.warn(
+                createLogContext("render", "prompt-builder", "unreplaced-placeholders", {}),
+                `Template contains unreplaced placeholders: ${unreplacedMatches.join(', ')}`
+            );
+        }
 
         parts.push(processed);
     }
@@ -209,80 +219,6 @@ function getGeminiClient(): GoogleGenAI {
 
 // Use centralized GCS client
 const storage = getGcsClient();
-
-async function downloadToBuffer(
-    url: string,
-    logContext: ReturnType<typeof createLogContext>,
-    maxDimension: number = 2048,
-    format: 'png' | 'jpeg' = 'png'
-): Promise<Buffer> {
-    // Validate URL to prevent SSRF attacks
-    // Allow both Shopify CDN (product images) and GCS (processed/room images)
-    try {
-        validateTrustedUrl(url, "image URL");
-    } catch (error) {
-        logger.error(
-            { ...logContext, stage: "download" },
-            "URL validation failed - must be from Shopify CDN or GCS",
-            error
-        );
-        throw error;
-    }
-
-    logger.info(
-        { ...logContext, stage: "download", format },
-        `Downloading image from trusted source: ${url.substring(0, 80)}...`
-    );
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-        const error = new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
-        logger.error(
-            { ...logContext, stage: "download" },
-            "Failed to download image from CDN",
-            error
-        );
-        throw error;
-    }
-
-    try {
-        // Use arrayBuffer() to avoid ReadableStream compatibility issues
-        // between Node.js and Web Streams APIs
-        const arrayBuffer = await response.arrayBuffer();
-        const inputBuffer = Buffer.from(arrayBuffer);
-
-        // Resize pipeline: Buffer -> Sharp (Resize) -> Buffer
-        // IMPORTANT: .rotate() with no args auto-orients based on EXIF and removes the tag
-        // This fixes rotation issues with phone photos that have EXIF orientation metadata
-        const pipeline = sharp(inputBuffer)
-            .rotate() // Auto-orient based on EXIF, then strip EXIF orientation tag
-            .resize({
-                width: maxDimension,
-                height: maxDimension,
-                fit: 'inside',
-                withoutEnlargement: true
-            });
-
-        const buffer = format === 'png'
-            ? await pipeline.png({ force: true }).toBuffer()
-            : await pipeline.jpeg({ quality: 90, force: true }).toBuffer();
-
-        logger.info(
-            { ...logContext, stage: "download-optimize" },
-            `Downloaded & Optimized (${format}): ${buffer.length} bytes (max ${maxDimension}px)`
-        );
-
-        return buffer;
-    } catch (error) {
-        logger.error(
-            { ...logContext, stage: "download-error" },
-            "Failed to process download stream",
-            error
-        );
-        throw error;
-    }
-}
 
 async function uploadToGCS(
     key: string,
@@ -508,7 +444,8 @@ export async function prepareProduct(
     let outputBuffer: Buffer | null = null;
 
     try {
-        imageBuffer = await downloadToBuffer(sourceImageUrl, logContext);
+        const downloadResult = await downloadAndProcessImage(sourceImageUrl, logContext);
+        imageBuffer = downloadResult.buffer;
 
         // Convert to PNG format - force PNG output even if input was WebP/AVIF
         // IMPORTANT: .rotate() with no args auto-orients based on EXIF and removes the tag
@@ -867,11 +804,11 @@ export async function compositeScene(
         // STEP 1: Download both images in parallel
         // Product cutout MUST be PNG, Room photograph should be JPEG for speed
         const [productResult, roomResult] = await Promise.all([
-            downloadToBuffer(preparedProductImageUrl, logContext, 2048, 'png'),
-            downloadToBuffer(roomImageUrl, logContext, 2048, 'jpeg')
+            downloadAndProcessImage(preparedProductImageUrl, logContext, 2048, 'png'),
+            downloadAndProcessImage(roomImageUrl, logContext, 2048, 'jpeg')
         ]);
-        productBuffer = productResult;
-        roomBuffer = roomResult;
+        productBuffer = productResult.buffer;
+        roomBuffer = roomResult.buffer;
 
         // STEP 2: Get metadata for sizing calculations
         const [roomMetadata, productMetadata] = await Promise.all([

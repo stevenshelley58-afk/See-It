@@ -1,6 +1,7 @@
 import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
 import prisma from "../db.server";
 import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
+import { validateCronAuth } from "../utils/cron-auth.server";
 
 /**
  * Monitor Data Prune Cron Job
@@ -20,32 +21,6 @@ import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 
 const BATCH_SIZE = 500;
 const MAX_BATCHES = 20; // Process up to 10,000 records per run
-
-async function validateCronAuth(request: Request): Promise<boolean> {
-  const cronSecret = process.env.CRON_SECRET;
-
-  // If no CRON_SECRET is set, only allow in development
-  if (!cronSecret) {
-    if (process.env.NODE_ENV !== "production") {
-      console.warn("[MonitorPrune] CRON_SECRET not set - allowing request in development");
-      return true;
-    }
-    console.error("[MonitorPrune] CRON_SECRET not configured");
-    return false;
-  }
-
-  const authHeader = request.headers.get("Authorization");
-  if (!authHeader) {
-    return false;
-  }
-
-  // Support both "Bearer <token>" and raw token
-  const token = authHeader.startsWith("Bearer ")
-    ? authHeader.slice(7)
-    : authHeader;
-
-  return token === cronSecret;
-}
 
 async function deleteGcsFile(key: string): Promise<boolean> {
   try {
@@ -192,7 +167,7 @@ async function runPruneJob(): Promise<{
 
 // Support both GET and POST for flexibility with different cron services
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  if (!(await validateCronAuth(request))) {
+  if (!(await validateCronAuth(request, "MonitorPrune"))) {
     return json({ error: "Unauthorized" }, { status: 401 });
   }
 
