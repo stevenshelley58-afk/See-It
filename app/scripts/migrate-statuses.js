@@ -19,6 +19,12 @@ import fs from "fs";
 import path from "path";
 import readline from "readline";
 import pg from "pg";
+import {
+  isPostgresUrl,
+  resolveDatabaseUrl,
+  getSslConfig,
+  logConnectionInfo,
+} from "../lib/db-url.js";
 
 const { Client } = pg;
 let db;
@@ -58,21 +64,6 @@ function parseArgs(argv) {
 function ensureDirForFile(filePath) {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
-}
-
-function isPostgresUrl(value) {
-  const v = String(value ?? "");
-  return v.startsWith("postgresql://") || v.startsWith("postgres://");
-}
-
-function isRailwayInternalHost(urlString) {
-  const s = String(urlString ?? "");
-  return s.includes(".railway.internal");
-}
-
-function isRailwayTcpProxyHost(urlString) {
-  const s = String(urlString ?? "");
-  return s.includes(".proxy.rlwy.net");
 }
 
 function timestampForFilename(d = new Date()) {
@@ -437,53 +428,16 @@ async function main() {
   const reportPath = args.reportPath ?? defaultReportPath;
 
   console.log("migrate-statuses");
-  console.log("DATABASE_URL:", process.env.DATABASE_URL ? "Set" : "Not set");
 
-  if (!process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is not set.");
-  }
-  if (!isPostgresUrl(process.env.DATABASE_URL)) {
-    const prefix = String(process.env.DATABASE_URL).slice(0, 40);
-    throw new Error(
-      `DATABASE_URL must be a Postgres URL (postgres:// or postgresql://). Got: ${prefix}...`
-    );
-  }
-
-  // Prefer Railway Postgres public URL when running from outside Railway networking.
-  // This keeps deployed services on private networking while allowing local scripts to connect.
-  const connectionString =
-    isRailwayInternalHost(process.env.DATABASE_URL) && process.env.DATABASE_PUBLIC_URL
-      ? process.env.DATABASE_PUBLIC_URL
-      : process.env.DATABASE_URL;
-
-  if (!isPostgresUrl(connectionString)) {
-    const prefix = String(connectionString).slice(0, 40);
-    throw new Error(`Selected connection string is not Postgres URL. Got: ${prefix}...`);
-  }
-
-  const wantsSsl =
-    connectionString.includes("sslmode=require") ||
-    connectionString.includes("ssl=true") ||
-    process.env.PGSSLMODE === "require" ||
-    isRailwayTcpProxyHost(connectionString);
+  // Use shared DATABASE_URL resolver (handles Railway internal hosts, validation, etc.)
+  const resolved = resolveDatabaseUrl({ checkPassword: true });
+  logConnectionInfo(resolved);
 
   db = new Client({
-    connectionString,
-    ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
+    connectionString: resolved.url,
+    ssl: getSslConfig(resolved.url),
   });
 
-  // Fail fast with a clearer error than pg's SCRAM message if URL has no password.
-  try {
-    const u = new URL(connectionString);
-    const passLen = (u.password ?? "").length;
-    if (passLen === 0) {
-      throw new Error(
-        "DATABASE_URL is missing a password (user@host without :password). Use the Railway Postgres Public URL or include credentials."
-      );
-    }
-  } catch {
-    // If URL() parsing fails, pg will give a clearer connection error; continue.
-  }
   await db.connect();
 
   if (args.rollback) {

@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { getDatabaseUrlWithPooling } from "../lib/db-url.js";
 
 /**
  * Database Connection Pool Configuration
@@ -19,42 +20,11 @@ import { PrismaClient } from "@prisma/client";
  * @see https://www.prisma.io/docs/concepts/components/prisma-client/working-with-prismaclient/connection-pool
  */
 
-// Parse existing DATABASE_URL and ensure pool settings
-function getDatabaseUrl() {
-  const baseUrl = process.env.DATABASE_URL;
-  if (!baseUrl) {
-    throw new Error("DATABASE_URL environment variable is not set");
-  }
-
-  // Check if URL already has pool settings
-  const url = new URL(baseUrl);
-  const searchParams = url.searchParams;
-
-  // Set defaults if not already specified
-  if (!searchParams.has("connection_limit")) {
-    // Conservative limit for serverless/Railway environments
-    // Adjust based on your database's max_connections setting
-    searchParams.set("connection_limit", process.env.DB_POOL_SIZE || "10");
-  }
-
-  if (!searchParams.has("pool_timeout")) {
-    // 20 seconds timeout (allows for cold starts)
-    searchParams.set("pool_timeout", process.env.DB_POOL_TIMEOUT || "20");
-  }
-
-  // Enable connection pooling mode for pgBouncer compatibility if needed
-  if (process.env.DB_PGBOUNCER === "true" && !searchParams.has("pgbouncer")) {
-    searchParams.set("pgbouncer", "true");
-  }
-
-  return url.toString();
-}
-
 // Prisma client configuration
 const prismaClientConfig = {
   datasources: {
     db: {
-      url: getDatabaseUrl(),
+      url: getDatabaseUrlWithPooling(),
     },
   },
   log:

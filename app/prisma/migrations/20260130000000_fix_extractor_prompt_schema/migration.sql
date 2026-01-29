@@ -1,7 +1,7 @@
 -- Fix: Add JSON schema to product_fact_extractor prompt
 -- The LLM was returning arbitrary JSON because no schema was specified
 
-UPDATE "PromptVersion"
+UPDATE "prompt_control_versions"
 SET "systemTemplate" = 'You extract product placement facts for a photorealistic product-in-room rendering system.
 
 Extract as much as possible from the provided text and images.
@@ -78,7 +78,7 @@ Return JSON matching this exact schema:
     "version" = "version" + 1,
     "changeNotes" = 'Add JSON schema to fix LLM output structure'
 WHERE "promptDefinitionId" IN (
-    SELECT "id" FROM "PromptDefinition"
+    SELECT "id" FROM "prompt_definitions"
     WHERE "name" = 'product_fact_extractor'
 )
 AND "status" = 'ACTIVE';

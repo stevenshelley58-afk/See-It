@@ -1,10 +1,15 @@
 import { Client } from "pg";
+import {
+  resolveDatabaseUrl,
+  getSslConfig,
+  logConnectionInfo,
+} from "../lib/db-url.js";
 
 /**
  * Prints end-to-end timing deltas for the most recent composite run.
  *
  * Requires:
- * - DATABASE_URL pointing at the DB containing `composite_runs` + `monitor_events`
+ * - DATABASE_URL or DATABASE_PUBLIC_URL pointing at the DB
  *
  * Notes:
  * - Some "sf.*" events are emitted before `composite_runs` exists (no run_id), so we
@@ -20,14 +25,13 @@ function diffMs(a, b) {
 }
 
 async function main() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    console.error("DATABASE_URL is not set.");
-    process.exitCode = 1;
-    return;
-  }
+  const resolved = resolveDatabaseUrl();
+  logConnectionInfo(resolved);
 
-  const client = new Client({ connectionString });
+  const client = new Client({
+    connectionString: resolved.url,
+    ssl: getSslConfig(resolved.url),
+  });
   await client.connect();
 
   try {

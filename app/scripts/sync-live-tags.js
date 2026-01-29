@@ -1,15 +1,21 @@
 /**
  * One-time migration script to add "see-it-live" tag to all products
  * that are currently in "live" status in the See It database.
- * 
+ *
  * Run from the app directory: node scripts/sync-live-tags.js
- * 
+ *
  * Requires environment variables:
- * - DATABASE_URL - PostgreSQL connection string
+ * - DATABASE_URL or DATABASE_PUBLIC_URL - PostgreSQL connection string
  * - SHOPIFY_API_KEY, SHOPIFY_API_SECRET for admin API access
  */
 
 import pg from 'pg';
+import {
+  resolveDatabaseUrl,
+  getSslConfig,
+  logConnectionInfo,
+} from '../lib/db-url.js';
+
 const { Client } = pg;
 
 const SEE_IT_LIVE_TAG = "see-it-live";
@@ -17,9 +23,12 @@ const SEE_IT_LIVE_TAG = "see-it-live";
 async function main() {
   console.log("🏷️  Starting live product tag sync...\n");
 
+  const resolved = resolveDatabaseUrl();
+  logConnectionInfo(resolved);
+
   const client = new Client({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : false
+    connectionString: resolved.url,
+    ssl: getSslConfig(resolved.url),
   });
 
   try {

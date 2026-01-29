@@ -1,30 +1,50 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
+/**
+ * Check if URL points to Railway's internal networking.
+ */
 function isRailwayInternalHost(urlString) {
   const s = String(urlString ?? "");
   return s.includes(".railway.internal");
 }
 
 /**
- * Prisma schema requires DATABASE_URL to exist at generate time.
+ * Resolve DATABASE_URL for Prisma generate.
  *
+ * Prisma schema requires DATABASE_URL to exist at generate time.
  * In this repo, Vercel often has DATABASE_PUBLIC_URL (from Railway integration)
  * but not DATABASE_URL. Prisma does not support env var fallbacks in schema,
- * so we map DATABASE_PUBLIC_URL -> DATABASE_URL for the generate step.
+ * so we resolve the URL here before running prisma generate.
+ *
+ * Priority:
+ * 1. DATABASE_URL (if not Railway internal)
+ * 2. DATABASE_PUBLIC_URL (fallback)
+ *
+ * This mirrors the logic in app/lib/db-url.js for consistency.
  */
-if (!process.env.DATABASE_URL && process.env.DATABASE_PUBLIC_URL) {
-  process.env.DATABASE_URL = process.env.DATABASE_PUBLIC_URL;
+function resolveDatabaseUrlForPrisma() {
+  const privateUrl = process.env.DATABASE_URL;
+  const publicUrl = process.env.DATABASE_PUBLIC_URL;
+
+  // No DATABASE_URL but have DATABASE_PUBLIC_URL
+  if (!privateUrl && publicUrl) {
+    return publicUrl;
+  }
+
+  // DATABASE_URL is Railway internal - use public URL if available
+  if (privateUrl && isRailwayInternalHost(privateUrl) && publicUrl) {
+    return publicUrl;
+  }
+
+  // Use DATABASE_URL as-is (or undefined if not set)
+  return privateUrl;
 }
 
-// If DATABASE_URL exists but points at Railway private networking, prefer the public URL
-// for build environments like Vercel that cannot reach .railway.internal.
-if (
-  process.env.DATABASE_URL &&
-  isRailwayInternalHost(process.env.DATABASE_URL) &&
-  process.env.DATABASE_PUBLIC_URL
-) {
-  process.env.DATABASE_URL = process.env.DATABASE_PUBLIC_URL;
+// Set DATABASE_URL for Prisma
+const resolvedUrl = resolveDatabaseUrlForPrisma();
+if (resolvedUrl) {
+  process.env.DATABASE_URL = resolvedUrl;
 }
 
 const isWin = process.platform === "win32";
