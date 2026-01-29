@@ -28,20 +28,26 @@ if (
 }
 
 const isWin = process.platform === "win32";
-const localPrisma = isWin
-  ? "node_modules\\.bin\\prisma.cmd"
-  : "node_modules/.bin/prisma";
 
-const useLocalPrisma = fs.existsSync(localPrisma);
+const localPrismaCandidates = isWin
+  ? [
+      "node_modules\\.bin\\prisma.cmd",
+      "..\\app\\node_modules\\.bin\\prisma.cmd",
+      "..\\node_modules\\.bin\\prisma.cmd",
+    ]
+  : ["node_modules/.bin/prisma", "../app/node_modules/.bin/prisma", "../node_modules/.bin/prisma"];
 
-const command = isWin ? "cmd.exe" : useLocalPrisma ? localPrisma : "npx";
+const resolvedLocalPrisma = localPrismaCandidates.find((p) => fs.existsSync(p));
+const useLocalPrisma = Boolean(resolvedLocalPrisma);
+
+const command = isWin ? "cmd.exe" : useLocalPrisma ? resolvedLocalPrisma : "npx";
 const args = isWin
   ? [
       "/d",
       "/s",
       "/c",
       useLocalPrisma
-        ? `"${localPrisma}" generate --schema=./prisma/schema.prisma`
+        ? `${resolvedLocalPrisma} generate --schema=./prisma/schema.prisma`
         : "npx prisma generate --schema=./prisma/schema.prisma",
     ]
   : useLocalPrisma

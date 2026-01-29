@@ -16,9 +16,13 @@ import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
 import {
   getOrRefreshGeminiFile,
+  isGeminiFileValid,
   validateMagicBytes,
 } from "../services/gemini-files.server";
 import { selectPreparedImage } from "../services/product-asset/select-prepared-image.server";
+
+const FILES_API_SAFE_MODE_AVOIDABLE_DOWNLOAD_EVENT_TYPE =
+  "sf_files_api_safe_mode_avoidable_download_ms";
 
 import {
   renderAllVariants,
@@ -331,7 +335,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Fetch shop
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop },
-    select: { id: true, accessToken: true, shopDomain: true },
+    select: {
+      id: true,
+      accessToken: true,
+      shopDomain: true,
+      runtimeConfig: {
+        select: { skipGcsDownloadWhenGeminiUriValid: true },
+      },
+    },
   });
   if (!shop) {
     logger.error(
@@ -405,6 +416,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       (async () => {
         let activeRunId: string | null = null;
+        let filesApiSafeModeTelemetryPayload: Record<string, unknown> | null = null;
+        let filesApiSafeModeTelemetryRunId: string | undefined;
         try {
           // Fetch RoomSession
           const roomSession = await prisma.roomSession.findUnique({
@@ -674,79 +687,157 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             return;
           }
 
-          // Download both images in parallel
-          const [productImageData, roomImageData] = await Promise.all([
-            downloadToBuffer(productImageUrl, logContext, 2048, "png"),
-            roomImageSource === "canonical"
-              ? (async () => {
-                  const buffer = await downloadRawToBuffer(roomImageUrl, logContext);
-                  return {
-                    buffer,
-                    meta: {
-                      width: roomSession.canonicalRoomWidth || 0,
-                      height: roomSession.canonicalRoomHeight || 0,
-                      bytes: buffer.length,
-                      format: "jpeg" as const,
-                    },
-                  };
-                })()
-              : downloadToBuffer(roomImageUrl, logContext, 2048, "jpeg"),
-          ]);
+          const skipGcsDownloadWhenGeminiUriValid =
+            shop.runtimeConfig?.skipGcsDownloadWhenGeminiUriValid ?? false;
 
-          validateMagicBytes(productImageData.buffer, "image/png");
-          validateMagicBytes(roomImageData.buffer, "image/jpeg");
+          const productGeminiUriValid =
+            !!productAsset.geminiFileUri &&
+            isGeminiFileValid(productAsset.geminiFileExpiresAt);
+          const roomGeminiUriValid =
+            !!roomSession.geminiFileUri && isGeminiFileValid(roomSession.geminiFileExpiresAt);
 
-          // Optimize: Upload/Reuse Gemini Files
           const productFilename = `product-${productAsset.id}.png`;
           const roomFilename = `room-${roomSession.id}.jpg`;
 
-          const [productGeminiFile, roomGeminiFile] = await Promise.all([
-            getOrRefreshGeminiFile(
-              productAsset.geminiFileUri,
-              productAsset.geminiFileExpiresAt,
-              productImageData.buffer,
-              "image/png",
-              productFilename,
-              requestId
-            ),
-            getOrRefreshGeminiFile(
-              roomSession.geminiFileUri,
-              roomSession.geminiFileExpiresAt,
-              roomImageData.buffer,
-              "image/jpeg",
-              roomFilename,
-              requestId
-            ),
+          const [productPrepared, roomPrepared] = await Promise.all([
+            (async () => {
+              if (skipGcsDownloadWhenGeminiUriValid && productGeminiUriValid) {
+                const ref = productAsset.geminiFileUri!;
+                return {
+                  image: {
+                    buffer: Buffer.alloc(0),
+                    hash: hashBuffer(Buffer.from(ref)),
+                    meta: { width: 0, height: 0, bytes: 0, format: "png" as const },
+                    ref,
+                  },
+                  geminiFile: {
+                    uri: ref,
+                    expiresAt: productAsset.geminiFileExpiresAt!,
+                  },
+                  avoidableDownloadMs: 0,
+                };
+              }
+
+              const downloadStart = Date.now();
+              const imageData = await downloadToBuffer(productImageUrl, logContext, 2048, "png");
+              const downloadMs = Date.now() - downloadStart;
+
+              validateMagicBytes(imageData.buffer, "image/png");
+
+              const geminiFile = await getOrRefreshGeminiFile(
+                productAsset.geminiFileUri,
+                productAsset.geminiFileExpiresAt,
+                imageData.buffer,
+                "image/png",
+                productFilename,
+                requestId
+              );
+
+              return {
+                image: {
+                  buffer: imageData.buffer,
+                  hash: hashBuffer(imageData.buffer),
+                  meta: imageData.meta,
+                  ref: geminiFile.uri,
+                },
+                geminiFile,
+                avoidableDownloadMs: productGeminiUriValid ? downloadMs : 0,
+              };
+            })(),
+            (async () => {
+              if (skipGcsDownloadWhenGeminiUriValid && roomGeminiUriValid) {
+                const ref = roomSession.geminiFileUri!;
+                return {
+                  image: {
+                    buffer: Buffer.alloc(0),
+                    hash: hashBuffer(Buffer.from(ref)),
+                    meta: {
+                      width: roomSession.canonicalRoomWidth || 0,
+                      height: roomSession.canonicalRoomHeight || 0,
+                      bytes: 0,
+                      format: "jpeg" as const,
+                    },
+                    ref,
+                  },
+                  geminiFile: {
+                    uri: ref,
+                    expiresAt: roomSession.geminiFileExpiresAt!,
+                  },
+                  avoidableDownloadMs: 0,
+                };
+              }
+
+              const downloadStart = Date.now();
+              const imageData =
+                roomImageSource === "canonical"
+                  ? await (async () => {
+                      const buffer = await downloadRawToBuffer(roomImageUrl, logContext);
+                      return {
+                        buffer,
+                        meta: {
+                          width: roomSession.canonicalRoomWidth || 0,
+                          height: roomSession.canonicalRoomHeight || 0,
+                          bytes: buffer.length,
+                          format: "jpeg" as const,
+                        },
+                      };
+                    })()
+                  : await downloadToBuffer(roomImageUrl, logContext, 2048, "jpeg");
+              const downloadMs = Date.now() - downloadStart;
+
+              validateMagicBytes(imageData.buffer, "image/jpeg");
+
+              const geminiFile = await getOrRefreshGeminiFile(
+                roomSession.geminiFileUri,
+                roomSession.geminiFileExpiresAt,
+                imageData.buffer,
+                "image/jpeg",
+                roomFilename,
+                requestId
+              );
+
+              return {
+                image: {
+                  buffer: imageData.buffer,
+                  hash: hashBuffer(imageData.buffer),
+                  meta: imageData.meta,
+                  ref: geminiFile.uri,
+                },
+                geminiFile,
+                avoidableDownloadMs: roomGeminiUriValid ? downloadMs : 0,
+              };
+            })(),
           ]);
 
           // Update DB with new/refreshed URIs (non-blocking)
           const dbUpdates: Array<Promise<unknown>> = [];
           if (
-            productGeminiFile.uri !== productAsset.geminiFileUri ||
-            productGeminiFile.expiresAt.getTime() !==
+            productPrepared.geminiFile.uri !== productAsset.geminiFileUri ||
+            productPrepared.geminiFile.expiresAt.getTime() !==
               productAsset.geminiFileExpiresAt?.getTime()
           ) {
             dbUpdates.push(
               prisma.productAsset.update({
                 where: { id: productAsset.id },
                 data: {
-                  geminiFileUri: productGeminiFile.uri,
-                  geminiFileExpiresAt: productGeminiFile.expiresAt,
+                  geminiFileUri: productPrepared.geminiFile.uri,
+                  geminiFileExpiresAt: productPrepared.geminiFile.expiresAt,
                 },
               })
             );
           }
 
           if (
-            roomGeminiFile.uri !== roomSession.geminiFileUri ||
-            roomGeminiFile.expiresAt.getTime() !== roomSession.geminiFileExpiresAt?.getTime()
+            roomPrepared.geminiFile.uri !== roomSession.geminiFileUri ||
+            roomPrepared.geminiFile.expiresAt.getTime() !==
+              roomSession.geminiFileExpiresAt?.getTime()
           ) {
             dbUpdates.push(
               prisma.roomSession.update({
                 where: { id: roomSession.id },
                 data: {
-                  geminiFileUri: roomGeminiFile.uri,
-                  geminiFileExpiresAt: roomGeminiFile.expiresAt,
+                  geminiFileUri: roomPrepared.geminiFile.uri,
+                  geminiFileExpiresAt: roomPrepared.geminiFile.expiresAt,
                 },
               })
             );
@@ -759,22 +850,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             roomSessionId: room_session_id,
             traceId: requestId,
             productImage: {
-              buffer: productImageData.buffer,
-              hash: hashBuffer(productImageData.buffer),
-              meta: productImageData.meta,
-              ref: productGeminiFile.uri,
+              buffer: productPrepared.image.buffer,
+              hash: productPrepared.image.hash,
+              meta: productPrepared.image.meta,
+              ref: productPrepared.image.ref,
             },
             roomImage: {
-              buffer: roomImageData.buffer,
-              hash: hashBuffer(roomImageData.buffer),
-              meta: roomImageData.meta,
-              ref: roomGeminiFile.uri,
+              buffer: roomPrepared.image.buffer,
+              hash: roomPrepared.image.hash,
+              meta: roomPrepared.image.meta,
+              ref: roomPrepared.image.ref,
             },
             resolvedFacts,
             placementSet,
           };
 
           let firstImageSent = false;
+
+          const avoidableDownloadMsTotal =
+            productPrepared.avoidableDownloadMs + roomPrepared.avoidableDownloadMs;
+          if (avoidableDownloadMsTotal > 0) {
+            filesApiSafeModeTelemetryPayload = {
+              avoidable_download_ms_total: avoidableDownloadMsTotal,
+              avoidable_download_ms_product: productPrepared.avoidableDownloadMs,
+              avoidable_download_ms_room: roomPrepared.avoidableDownloadMs,
+              product_gemini_uri_valid: productGeminiUriValid,
+              room_gemini_uri_valid: roomGeminiUriValid,
+              skip_gcs_download_when_gemini_uri_valid: skipGcsDownloadWhenGeminiUriValid,
+              room_image_source: roomImageSource,
+            };
+          }
 
           const result = await renderAllVariants(renderInput, {
             mode: "wait_all",
@@ -844,6 +949,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               }
             },
           });
+          filesApiSafeModeTelemetryRunId = result.runId;
 
           // Increment quota ONCE for the entire batch (parity with non-stream route)
           await incrementQuota(shop.id, "render", 1);
@@ -873,10 +979,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           );
           close();
         }
+        finally {
+          if (filesApiSafeModeTelemetryPayload) {
+            emit({
+              shopId: shop.id,
+              requestId,
+              runId: filesApiSafeModeTelemetryRunId ?? activeRunId ?? undefined,
+              source: EventSource.APP_PROXY,
+              type: FILES_API_SAFE_MODE_AVOIDABLE_DOWNLOAD_EVENT_TYPE,
+              severity: Severity.INFO,
+              payload: filesApiSafeModeTelemetryPayload,
+            });
+          }
+        }
       })();
     },
   });
 
   return new Response(stream, { headers: sseHeaders(corsHeaders) });
 };
-

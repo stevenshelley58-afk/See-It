@@ -21,6 +21,52 @@ import type {
   AuditAction,
 } from "@/lib/types-prompt-control";
 
+const FILES_API_SAFE_MODE_AVOIDABLE_DOWNLOAD_EVENT_TYPE =
+  "sf_files_api_safe_mode_avoidable_download_ms";
+const FILES_API_OPTIMIZATION_WINDOW_HOURS = 24;
+const FILES_API_OPTIMIZATION_MAX_EVENTS = 2000;
+
+type FilesApiOptimizationMetrics = RuntimeConfigResponse["status"]["filesApiOptimization"];
+
+async function getFilesApiOptimizationMetrics(shopId: string): Promise<FilesApiOptimizationMetrics> {
+  const windowMs = FILES_API_OPTIMIZATION_WINDOW_HOURS * 60 * 60 * 1000;
+  const since = new Date(Date.now() - windowMs);
+
+  const events = await prisma.monitorEvent.findMany({
+    where: {
+      shopId,
+      type: FILES_API_SAFE_MODE_AVOIDABLE_DOWNLOAD_EVENT_TYPE,
+      ts: { gte: since },
+    },
+    select: { payload: true },
+    orderBy: { ts: "desc" },
+    take: FILES_API_OPTIMIZATION_MAX_EVENTS,
+  });
+
+  let avoidableDownloadMsTotal = 0;
+  let avoidableDownloadMsProduct = 0;
+  let avoidableDownloadMsRoom = 0;
+
+  for (const ev of events) {
+    const payload = ev.payload as any;
+    avoidableDownloadMsTotal += Number(payload?.avoidable_download_ms_total ?? 0) || 0;
+    avoidableDownloadMsProduct += Number(payload?.avoidable_download_ms_product ?? 0) || 0;
+    avoidableDownloadMsRoom += Number(payload?.avoidable_download_ms_room ?? 0) || 0;
+  }
+
+  const samples = events.length;
+  const avgAvoidableDownloadMsTotal = samples > 0 ? avoidableDownloadMsTotal / samples : 0;
+
+  return {
+    windowHours: FILES_API_OPTIMIZATION_WINDOW_HOURS,
+    samples,
+    avoidableDownloadMsTotal,
+    avoidableDownloadMsProduct,
+    avoidableDownloadMsRoom,
+    avgAvoidableDownloadMsTotal,
+  };
+}
+
 // =============================================================================
 // Helper: Get Daily Cost for Shop
 // Sums costEstimate for today's LLM calls
@@ -114,9 +160,10 @@ export async function GET(
     }
 
     // Get current status
-    const [currentConcurrency, dailyCostUsed] = await Promise.all([
+    const [currentConcurrency, dailyCostUsed, filesApiOptimization] = await Promise.all([
       getCurrentConcurrency(shopId),
       getDailyCostForShop(shopId),
+      getFilesApiOptimizationMetrics(shopId),
     ]);
 
     const response: RuntimeConfigResponse = {
@@ -129,12 +176,14 @@ export async function GET(
         maxImageBytesCap: config.maxImageBytesCap,
         dailyCostCap: Number(config.dailyCostCap),
         disabledPromptNames: config.disabledPromptNames,
+        skipGcsDownloadWhenGeminiUriValid: config.skipGcsDownloadWhenGeminiUriValid,
         updatedAt: config.updatedAt.toISOString(),
         updatedBy: config.updatedBy,
       },
       status: {
         currentConcurrency,
         dailyCostUsed,
+        filesApiOptimization,
       },
     };
 
@@ -226,6 +275,12 @@ export async function PATCH(
       }
     }
 
+    if (body.skipGcsDownloadWhenGeminiUriValid !== undefined) {
+      if (typeof body.skipGcsDownloadWhenGeminiUriValid !== "boolean") {
+        return jsonError(400, "validation_error", "skipGcsDownloadWhenGeminiUriValid must be a boolean");
+      }
+    }
+
     // Get current config for audit log
     const currentConfig = await prisma.shopRuntimeConfig.findUnique({
       where: { shopId },
@@ -248,6 +303,9 @@ export async function PATCH(
     if (body.maxImageBytesCap !== undefined) updateData.maxImageBytesCap = body.maxImageBytesCap;
     if (body.dailyCostCap !== undefined) updateData.dailyCostCap = body.dailyCostCap;
     if (body.disabledPromptNames !== undefined) updateData.disabledPromptNames = body.disabledPromptNames;
+    if (body.skipGcsDownloadWhenGeminiUriValid !== undefined) {
+      updateData.skipGcsDownloadWhenGeminiUriValid = body.skipGcsDownloadWhenGeminiUriValid;
+    }
 
     // Upsert runtime config
     const updatedConfig = await prisma.shopRuntimeConfig.upsert({
@@ -261,6 +319,7 @@ export async function PATCH(
         maxImageBytesCap: body.maxImageBytesCap ?? 20000000,
         dailyCostCap: body.dailyCostCap ?? 50.0,
         disabledPromptNames: body.disabledPromptNames ?? [],
+        skipGcsDownloadWhenGeminiUriValid: body.skipGcsDownloadWhenGeminiUriValid ?? false,
         updatedBy: actor,
       },
       update: updateData,
@@ -272,12 +331,14 @@ export async function PATCH(
           maxConcurrency: currentConfig.maxConcurrency,
           forceFallbackModel: currentConfig.forceFallbackModel,
           modelAllowList: currentConfig.modelAllowList,
-          maxTokensOutputCap: currentConfig.maxTokensOutputCap,
-          maxImageBytesCap: currentConfig.maxImageBytesCap,
-          dailyCostCap: Number(currentConfig.dailyCostCap),
-          disabledPromptNames: currentConfig.disabledPromptNames,
-        }
-      : null;
+           maxTokensOutputCap: currentConfig.maxTokensOutputCap,
+           maxImageBytesCap: currentConfig.maxImageBytesCap,
+           dailyCostCap: Number(currentConfig.dailyCostCap),
+           disabledPromptNames: currentConfig.disabledPromptNames,
+           skipGcsDownloadWhenGeminiUriValid:
+             currentConfig.skipGcsDownloadWhenGeminiUriValid,
+         }
+       : null;
 
     const afterState = {
       maxConcurrency: updatedConfig.maxConcurrency,
@@ -287,6 +348,7 @@ export async function PATCH(
       maxImageBytesCap: updatedConfig.maxImageBytesCap,
       dailyCostCap: Number(updatedConfig.dailyCostCap),
       disabledPromptNames: updatedConfig.disabledPromptNames,
+      skipGcsDownloadWhenGeminiUriValid: updatedConfig.skipGcsDownloadWhenGeminiUriValid,
     };
 
     await prisma.promptAuditLog.create({
@@ -305,9 +367,10 @@ export async function PATCH(
     });
 
     // Get current status
-    const [currentConcurrency, dailyCostUsed] = await Promise.all([
+    const [currentConcurrency, dailyCostUsed, filesApiOptimization] = await Promise.all([
       getCurrentConcurrency(shopId),
       getDailyCostForShop(shopId),
+      getFilesApiOptimizationMetrics(shopId),
     ]);
 
     const response: RuntimeConfigResponse = {
@@ -320,12 +383,14 @@ export async function PATCH(
         maxImageBytesCap: updatedConfig.maxImageBytesCap,
         dailyCostCap: Number(updatedConfig.dailyCostCap),
         disabledPromptNames: updatedConfig.disabledPromptNames,
+        skipGcsDownloadWhenGeminiUriValid: updatedConfig.skipGcsDownloadWhenGeminiUriValid,
         updatedAt: updatedConfig.updatedAt.toISOString(),
         updatedBy: updatedConfig.updatedBy,
       },
       status: {
         currentConcurrency,
         dailyCostUsed,
+        filesApiOptimization,
       },
     };
 

@@ -408,23 +408,9 @@ function resolvePromptFromData(
   }
 
   // 2. Select definition - try shop first, fallback to SYSTEM
-  let definition = shopDefinition;
-
-  // Fallback to SYSTEM tenant if not found for shop
-  if (!definition && shopId !== "SYSTEM") {
-    const systemDefinition = await prisma.promptDefinition.findUnique({
-      where: { shopId_name: { shopId: "SYSTEM", name: promptName } },
-      include: {
-        versions: {
-          where: { status: "ACTIVE" },
-          take: 1,
-        },
-      },
-    });
-    if (systemDefinition) {
-      definition = systemDefinition as LoadedDefinition;
-    }
-  }
+  // NOTE: The upstream loader is responsible for SYSTEM fallback (see batchLoadDefinitions).
+  // This function must remain in-memory only (no DB queries).
+  const definition = shopDefinition;
 
   if (!definition) {
     return {
@@ -570,7 +556,7 @@ async function batchLoadDefinitions(
     const missingNames = promptNames.filter(name => !foundNames.has(name));
 
     if (missingNames.length > 0) {
-      const systemDefinitions = await prisma.promptDefinition.findMany({
+      const systemDefinitions = (await prisma.promptDefinition.findMany({
         where: {
           shopId: "SYSTEM",
           name: { in: missingNames },
@@ -581,7 +567,7 @@ async function batchLoadDefinitions(
             take: 1,
           },
         },
-      });
+      })) ?? [];
 
       // Add SYSTEM definitions to map (keyed by shopId for resolution logic)
       for (const def of systemDefinitions) {

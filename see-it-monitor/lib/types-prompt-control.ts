@@ -257,12 +257,21 @@ export interface RuntimeConfigResponse {
     maxImageBytesCap: number;
     dailyCostCap: number;
     disabledPromptNames: string[];
+    skipGcsDownloadWhenGeminiUriValid: boolean;
     updatedAt: string;
     updatedBy: string;
   };
   status: {
     currentConcurrency: number;
     dailyCostUsed: number;
+    filesApiOptimization: {
+      windowHours: number;
+      samples: number;
+      avoidableDownloadMsTotal: number;
+      avoidableDownloadMsProduct: number;
+      avoidableDownloadMsRoom: number;
+      avgAvoidableDownloadMsTotal: number;
+    };
   };
 }
 
@@ -274,6 +283,7 @@ export interface UpdateRuntimeConfigRequest {
   maxImageBytesCap?: number;
   dailyCostCap?: number;
   disabledPromptNames?: string[];
+  skipGcsDownloadWhenGeminiUriValid?: boolean;
 }
 
 // =============================================================================

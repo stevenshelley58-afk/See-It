@@ -59,6 +59,7 @@ model Shop {
   llmCalls          LLMCall[]
   promptTestRuns    PromptTestRun[]
   promptAuditLog    PromptAuditLog[]
+  monitorEvents     MonitorEvent[]
 
   @@map("shops")
 }
@@ -142,12 +143,44 @@ model ShopRuntimeConfig {
 
   disabledPromptNames String[] @default([]) @map("disabled_prompt_names")
 
+  skipGcsDownloadWhenGeminiUriValid Boolean @default(false) @map("skip_gcs_download_when_gemini_uri_valid")
+
   updatedAt DateTime @updatedAt @map("updated_at")
   updatedBy String   @map("updated_by")
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("shop_runtime_configs")
+}
+
+// =============================================================================
+// Observability v2: MonitorEvent - Fine-grained event stream
+// =============================================================================
+
+model MonitorEvent {
+  id                 String   @id @default(uuid())
+  ts                 DateTime @default(now())
+  shopId             String   @map("shop_id")
+  requestId          String   @map("request_id")
+  runId              String?  @map("run_id")
+  variantId          String?  @map("variant_id")
+  traceId            String?  @map("trace_id")
+  spanId             String?  @map("span_id")
+  parentSpanId       String?  @map("parent_span_id")
+  source             String
+  type               String
+  severity           String
+  schemaVersion      Int      @default(1) @map("schema_version")
+  payload            Json     @default("{}")
+  overflowArtifactId String?  @map("overflow_artifact_id")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId])
+  @@index([requestId])
+  @@index([runId])
+  @@index([type, ts])
+  @@map("monitor_events")
 }
 
 // =============================================================================

@@ -8,6 +8,7 @@ import {
   Cpu,
   DollarSign,
   AlertTriangle,
+  Zap,
   RefreshCw,
   Save,
   Plus,
@@ -62,6 +63,7 @@ interface LocalConfig {
   maxImageBytesCap: number;
   dailyCostCap: number;
   disabledPromptNames: string[];
+  skipGcsDownloadWhenGeminiUriValid: boolean;
 }
 
 interface ToastState {
@@ -83,6 +85,7 @@ function configToLocal(config: RuntimeConfigResponse["config"]): LocalConfig {
     maxImageBytesCap: config.maxImageBytesCap,
     dailyCostCap: config.dailyCostCap,
     disabledPromptNames: config.disabledPromptNames,
+    skipGcsDownloadWhenGeminiUriValid: config.skipGcsDownloadWhenGeminiUriValid,
   };
 }
 
@@ -94,7 +97,8 @@ function hasChanges(local: LocalConfig, server: RuntimeConfigResponse["config"])
     local.maxTokensOutputCap !== server.maxTokensOutputCap ||
     local.maxImageBytesCap !== server.maxImageBytesCap ||
     local.dailyCostCap !== server.dailyCostCap ||
-    JSON.stringify([...local.disabledPromptNames].sort()) !== JSON.stringify([...server.disabledPromptNames].sort())
+    JSON.stringify([...local.disabledPromptNames].sort()) !== JSON.stringify([...server.disabledPromptNames].sort()) ||
+    local.skipGcsDownloadWhenGeminiUriValid !== server.skipGcsDownloadWhenGeminiUriValid
   );
 }
 
@@ -122,8 +126,18 @@ function buildPatch(local: LocalConfig, server: RuntimeConfigResponse["config"])
   if (JSON.stringify([...local.disabledPromptNames].sort()) !== JSON.stringify([...server.disabledPromptNames].sort())) {
     patch.disabledPromptNames = local.disabledPromptNames;
   }
+  if (local.skipGcsDownloadWhenGeminiUriValid !== server.skipGcsDownloadWhenGeminiUriValid) {
+    patch.skipGcsDownloadWhenGeminiUriValid = local.skipGcsDownloadWhenGeminiUriValid;
+  }
 
   return patch;
+}
+
+function formatMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0ms";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60_000).toFixed(1)}m`;
 }
 
 // =============================================================================
@@ -627,6 +641,69 @@ function ControlsPageContent() {
       </Card>
 
       <div className="space-y-6">
+        {/* Image Pipeline Performance */}
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2 bg-emerald-100 rounded-lg text-emerald-700">
+                <Zap className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900">Image Pipeline Performance</h3>
+                <p className="text-sm text-gray-500">
+                  Control whether See It Now skips storage downloads on Files API cache hits
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start justify-between gap-6">
+              <div className="flex-1">
+                <label className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={localConfig.skipGcsDownloadWhenGeminiUriValid}
+                    onChange={(e) =>
+                      updateConfig("skipGcsDownloadWhenGeminiUriValid", e.target.checked)
+                    }
+                    className="h-4 w-4 accent-primary-600"
+                  />
+                  <span className="text-sm font-medium text-gray-900">
+                    Fast mode: reuse Gemini `fileUri` and skip GCS downloads when valid
+                  </span>
+                </label>
+                <p className="text-xs text-gray-500 mt-2">
+                  When enabled, cache hits avoid downloading/validating image bytes. This improves latency but reduces
+                  safety checks on those hits.
+                </p>
+              </div>
+
+              <div className="min-w-[240px] text-right">
+                <p className="text-xs text-gray-500 uppercase">
+                  Safe-mode cost (last {status.filesApiOptimization.windowHours}h)
+                </p>
+                <p className="text-lg font-medium text-gray-900">
+                  {formatMs(status.filesApiOptimization.avoidableDownloadMsTotal)}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {status.filesApiOptimization.samples} cache hits · avg{" "}
+                  {formatMs(status.filesApiOptimization.avgAvoidableDownloadMsTotal)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-4 text-xs text-gray-600">
+              <div className="flex items-center justify-between gap-3">
+                <span>Product avoidable</span>
+                <span className="font-mono">{formatMs(status.filesApiOptimization.avoidableDownloadMsProduct)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>Room avoidable</span>
+                <span className="font-mono">{formatMs(status.filesApiOptimization.avoidableDownloadMsRoom)}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Concurrency */}
         <Card>
           <CardContent className="p-6">

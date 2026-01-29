@@ -508,6 +508,9 @@ model ShopRuntimeConfig {
   // Disabled prompts (by name)
   disabledPromptNames String[] @default([]) @map("disabled_prompt_names")
 
+  // Performance toggles
+  skipGcsDownloadWhenGeminiUriValid Boolean @default(false) @map("skip_gcs_download_when_gemini_uri_valid")
+
   updatedAt DateTime @updatedAt @map("updated_at")
   updatedBy String   @map("updated_by")
 
