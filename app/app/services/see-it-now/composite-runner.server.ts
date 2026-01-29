@@ -194,18 +194,18 @@ async function renderSingleVariant(
     ...(resolvedPrompt.params ?? {}),
   };
   if (aspectRatio) {
-    finalConfig.imageConfig = { aspectRatio };
+    const existing =
+      finalConfig.imageConfig && typeof finalConfig.imageConfig === "object"
+        ? finalConfig.imageConfig
+        : {};
+    finalConfig.imageConfig = { ...existing, aspectRatio };
   }
 
   // Build DebugPayload (must match final config)
   const debugPayload: DebugPayload = {
     promptText: finalPrompt,
     model: resolvedPrompt.model,
-    params: {
-      responseModalities: ['TEXT', 'IMAGE'],
-      aspectRatio: aspectRatio ?? undefined,
-      ...finalConfig,
-    },
+    params: finalConfig,
     images: preparedImages,
     aspectRatioSource: aspectRatio ? 'ROOM_IMAGE_LAST' : 'UNKNOWN',
   };

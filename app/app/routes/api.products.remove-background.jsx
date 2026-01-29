@@ -192,6 +192,11 @@ export const action = async ({ request }) => {
                 preparedImageUrl,
                 status: nextStatus,
                 errorMessage: null,
+                // Prepared product image changed: bump version and invalidate cached Gemini file
+                preparedProductImageVersion: { increment: 1 },
+                preparedProductImageUpdatedAt: new Date(),
+                geminiFileUri: null,
+                geminiFileExpiresAt: null,
                 updatedAt: new Date(),
             },
         });

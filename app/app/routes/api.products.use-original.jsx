@@ -130,6 +130,11 @@ export const action = async ({ request }) => {
                 // If this product is already enabled/live, do not regress it back to "ready"
                 status: asset.enabled || asset.status === "live" ? "live" : "ready",
                 errorMessage: null,
+                // Prepared product image changed: bump version and invalidate cached Gemini file
+                preparedProductImageVersion: { increment: 1 },
+                preparedProductImageUpdatedAt: new Date(),
+                geminiFileUri: null,
+                geminiFileExpiresAt: null,
                 updatedAt: new Date(),
             },
         });

@@ -36,8 +36,7 @@
  * Individual variant result from the render endpoint
  * @typedef {Object} RenderVariant
  * @property {string} id - Variant ID (V01-V08)
- * @property {'success'|'failed'|'timeout'} status - Render status
- * @property {string|null} image_url - Signed URL to the rendered image (null if failed)
+ * @property {string} image_url - Signed URL to the rendered image
  * @property {number} latency_ms - Time taken to render this variant
  */
 
@@ -54,7 +53,7 @@
  * SSE event for run started
  * @typedef {Object} RunStartedEvent
  * @property {string} run_id - Unique ID for this render run
- * @property {string} request_id - Request ID for debugging
+ * @property {number} variant_count - Total variants in this run
  */
 
 /**
@@ -62,7 +61,7 @@
  * @typedef {Object} ProgressEvent
  * @property {number} succeeded - Number of variants completed successfully
  * @property {number} failed - Number of variants that failed
- * @property {number} pending - Number of variants still processing
+ * @property {number} inFlight - Number of variants still processing
  */
 
 /**
@@ -70,8 +69,9 @@
  * @typedef {Object} VariantEvent
  * @property {string} id - Variant ID (V01-V08)
  * @property {'success'|'failed'|'timeout'} status - Render status
- * @property {string|null} image_url - Signed URL to the rendered image
+ * @property {string|null} [image_url] - Signed URL to the rendered image (success only)
  * @property {number} latency_ms - Time taken to render this variant
+ * @property {string|null} [error_message] - Error message when failed/timeout
  */
 
 /**
@@ -626,11 +626,12 @@ document.addEventListener('DOMContentLoaded', function () {
       return `${name} failed (${status}${statusText ? ` ${statusText}` : ''}): ${err}`;
     }
 
-    async function startSession(contentType = 'image/jpeg') {
+    async function startSession(contentType = 'image/jpeg', signal) {
       const res = await fetch('/apps/see-it/room/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content_type: contentType }),
+        signal,
       });
 
       const { data } = await readJsonOrText(res);
@@ -642,29 +643,31 @@ document.addEventListener('DOMContentLoaded', function () {
       return data;
     }
 
-    async function uploadImage(file, url) {
+    async function uploadImage(file, url, signal) {
       // Use the file's actual type to match signed URL requirements
       const res = await fetch(url, {
         method: 'PUT',
         body: file,
         headers: { 'Content-Type': file.type },
-        mode: 'cors'
+        mode: 'cors',
+        signal,
       });
       if (!res.ok) throw new Error('Upload failed');
     }
 
-    async function confirmRoom(sessionId) {
+    async function confirmRoom(sessionId, signal) {
       const res = await fetch('/apps/see-it/room/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room_session_id: sessionId })
+        body: JSON.stringify({ room_session_id: sessionId }),
+        signal,
       });
       const { data } = await readJsonOrText(res);
       if (!res.ok) throw new Error(buildHttpErrorMessage({ name: 'Confirm room', res, payload: data }));
       return data;
     }
 
-    async function generateImages(roomSessionId, productId) {
+    async function generateImages(roomSessionId, productId, signal) {
       console.log('[See It Now] Generating images...', { roomSessionId, productId });
 
       const res = await fetch('/apps/see-it/see-it-now/render', {
@@ -673,7 +676,8 @@ document.addEventListener('DOMContentLoaded', function () {
         body: JSON.stringify({
           room_session_id: roomSessionId,
           product_id: productId,
-        })
+        }),
+        signal,
       });
 
       const { data } = await readJsonOrText(res);
@@ -693,8 +697,161 @@ document.addEventListener('DOMContentLoaded', function () {
     // Fail-hard: no selection/backfill endpoints from the storefront client.
 
     // ============================================================================
+    // STREAMING (SSE)
+    // ============================================================================
+
+    function SeeItNowStreamError(message, payload) {
+      const err = new Error(message || 'Stream error');
+      err.name = 'SeeItNowStreamError';
+      err.payload = payload || null;
+      return err;
+    }
+
+    function safeParseJson(text) {
+      if (typeof text !== 'string') return null;
+      try { return JSON.parse(text); } catch (e) { return null; }
+    }
+
+    function normalizeVariantStatus(status) {
+      if (!status) return status;
+      const s = String(status).toLowerCase();
+      if (s === 'success') return 'success';
+      if (s === 'failed' || s === 'failure') return 'failed';
+      if (s === 'timeout') return 'timeout';
+      return s;
+    }
+
+    function startRenderStream(roomSessionId, productId, runToken, callbacks) {
+      const cb = callbacks || {};
+      const signal = state.__abortController?.signal || null;
+      const makeAbortError = () => new DOMException('Aborted', 'AbortError');
+
+      const url = new URL('/apps/see-it/see-it-now/stream', window.location.origin);
+      url.searchParams.set('room_session_id', roomSessionId);
+      url.searchParams.set('product_id', productId);
+
+      const es = new EventSource(url.toString());
+
+      let settled = false;
+      const done = new Promise((resolve, reject) => {
+        const finish = (fn, value) => {
+          if (settled) return;
+          settled = true;
+          try { es.close(); } catch (e) { }
+          fn(value);
+        };
+
+        const ensureActive = () => {
+          if (runToken !== state.__generationToken) throw makeAbortError();
+        };
+
+        const handleJsonEvent = (ev) => {
+          if (!ev || typeof ev.data !== 'string') return null;
+          return safeParseJson(ev.data);
+        };
+
+        const onAbort = () => finish(reject, makeAbortError());
+        if (signal) {
+          if (signal.aborted) return onAbort();
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+
+        es.addEventListener('run_started', (ev) => {
+          if (settled) return;
+          try { ensureActive(); } catch (e) { finish(reject, e); return; }
+          const data = handleJsonEvent(ev);
+          if (!data) return;
+          cb.onRunStarted?.(data);
+        });
+
+        es.addEventListener('progress', (ev) => {
+          if (settled) return;
+          try { ensureActive(); } catch (e) { finish(reject, e); return; }
+          const data = handleJsonEvent(ev);
+          if (!data) return;
+          cb.onProgress?.(data);
+        });
+
+        es.addEventListener('first_image', (ev) => {
+          if (settled) return;
+          try { ensureActive(); } catch (e) { finish(reject, e); return; }
+          const data = handleJsonEvent(ev) || {};
+          cb.onFirstImage?.(data);
+        });
+
+        es.addEventListener('variant', (ev) => {
+          if (settled) return;
+          try { ensureActive(); } catch (e) { finish(reject, e); return; }
+          const data = handleJsonEvent(ev);
+          if (!data) return;
+          if (typeof data.status === 'string') data.status = normalizeVariantStatus(data.status);
+          cb.onVariant?.(data);
+        });
+
+        es.addEventListener('complete', (ev) => {
+          if (settled) return;
+          try { ensureActive(); } catch (e) { finish(reject, e); return; }
+          const data = handleJsonEvent(ev) || {};
+          finish(resolve, data);
+        });
+
+        es.addEventListener('error', (ev) => {
+          if (settled) return;
+          try { ensureActive(); } catch (e) { finish(reject, e); return; }
+
+          // Custom SSE error event includes JSON payload in `data`. Network errors do not.
+          if (ev && typeof ev.data === 'string' && ev.data) {
+            const payload = safeParseJson(ev.data) || { message: ev.data };
+            finish(reject, SeeItNowStreamError(payload?.message || 'Something went wrong', payload));
+            return;
+          }
+
+          finish(reject, new Error('Render stream connection failed'));
+        });
+      });
+
+      return { es, done };
+    }
+
+    // ============================================================================
     // SWIPE CAROUSEL
     // ============================================================================
+
+    function appendCarouselImage(url) {
+      if (!url) return;
+      if (!Array.isArray(state.images)) state.images = [];
+      state.images.push(url);
+
+      const count = state.images.length;
+
+      // Add slide
+      const slide = document.createElement('div');
+      slide.className = 'see-it-now-slide';
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = `Visualization ${count}`;
+      img.draggable = false;
+      slide.appendChild(img);
+      swipeTrack.appendChild(slide);
+
+      // Update widths (each slide needs to be 100/count%)
+      swipeTrack.querySelectorAll('.see-it-now-slide').forEach((el) => {
+        el.style.width = `${100 / count}%`;
+      });
+      swipeTrack.style.width = `${count * 100}%`;
+
+      // Add dot
+      const index = count - 1;
+      const dot = document.createElement('button');
+      dot.className = 'see-it-now-dot';
+      dot.setAttribute('aria-label', `View image ${count}`);
+      dot.addEventListener('click', () => navigateTo(index));
+      dotsContainer.appendChild(dot);
+
+      // Keep current slide stable (don’t animate while results stream in)
+      updateTrackPosition(false);
+      updateDots();
+    }
 
     function populateCarousel(images) {
       state.images = images;
@@ -968,6 +1125,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
       showScreen('thinking');
       cancelActiveRun();
+      resetState();
       state.isGenerating = true;
       setErrorMeta(null);
       setStatus(`0 of ${TOTAL_VARIANTS} ready`);
@@ -988,7 +1146,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const normalizedFile = new File([normalized.blob], 'room.jpg', { type: 'image/jpeg' });
 
         // Start session (fail-hard: snake_case response only)
-        const session = await startSession(normalizedFile.type);
+        const session = await startSession(normalizedFile.type, signal);
         assertActive();
         if (!session || !session.room_session_id || !session.upload_url) {
           throw new Error('Start session returned invalid payload');
@@ -1067,6 +1225,11 @@ document.addEventListener('DOMContentLoaded', function () {
             });
           }
         } catch (streamErr) {
+          if (streamErr && streamErr.name === 'AbortError') {
+            state.isGenerating = false;
+            return;
+          }
+
           // If server emitted a structured error, show it and stop (no POST retry).
           if (streamErr && streamErr.name === 'SeeItNowStreamError') {
             const meta = extractMetaFromPayload(streamErr.payload);

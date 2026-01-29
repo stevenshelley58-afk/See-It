@@ -23,15 +23,18 @@ export function buildPlacementTabMetadata({
     const origHeight = originalDimensions?.height != null ? Number(originalDimensions.height) : null;
     const origWidth = originalDimensions?.width != null ? Number(originalDimensions.width) : null;
 
-    const dimensionsDirty = currentHeight !== origHeight || currentWidth !== origWidth;
+    const heightDirty = currentHeight !== origHeight;
+    const widthDirty = currentWidth !== origWidth;
+    const dimensionsDirty = heightDirty || widthDirty;
 
     // Compare material
     const materialDirty = material !== (originalMaterial || null);
 
     return {
         enabled: enabledDirty ? enabled : undefined,
-        dimensionHeight: dimensionsDirty && currentHeight !== null ? currentHeight : undefined,
-        dimensionWidth: dimensionsDirty && currentWidth !== null ? currentWidth : undefined,
+        // Use empty string to signal "clear override" (FormData friendly).
+        dimensionHeight: heightDirty ? (currentHeight !== null ? currentHeight : "") : undefined,
+        dimensionWidth: widthDirty ? (currentWidth !== null ? currentWidth : "") : undefined,
         material: materialDirty ? material : undefined,
         dirty: enabledDirty || dimensionsDirty || materialDirty,
     };

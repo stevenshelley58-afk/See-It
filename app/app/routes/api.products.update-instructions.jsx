@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { emitPrepEvent } from "../services/prep-events.server";
 import { setSeeItLiveTag } from "../utils/shopify-tags.server";
+import { resolveProductFacts, buildPlacementSet } from "../services/see-it-now/index";
 
 /**
  * POST /api/products/update-instructions
@@ -30,9 +31,33 @@ export const action = async ({ request }) => {
         const enabled = enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : null;
 
         // Extract placement fields for merchantOverrides
-        const dimensionHeight = formData.get("dimensionHeight") ? parseFloat(formData.get("dimensionHeight")) : null;
-        const dimensionWidth = formData.get("dimensionWidth") ? parseFloat(formData.get("dimensionWidth")) : null;
-        const material = formData.get("material")?.toString() || null;
+        const dimensionHeightProvided = formData.has("dimensionHeight");
+        const dimensionWidthProvided = formData.has("dimensionWidth");
+        const materialProvided = formData.has("material");
+
+        const dimensionHeightRaw = dimensionHeightProvided
+            ? formData.get("dimensionHeight")?.toString()
+            : undefined;
+        const dimensionWidthRaw = dimensionWidthProvided
+            ? formData.get("dimensionWidth")?.toString()
+            : undefined;
+        const materialRaw = materialProvided ? formData.get("material")?.toString() : undefined;
+
+        // If a field is provided but empty, we treat it as "clear this override"
+        const dimensionHeight = dimensionHeightRaw && dimensionHeightRaw.trim() !== ""
+            ? parseFloat(dimensionHeightRaw)
+            : null;
+        const dimensionWidth = dimensionWidthRaw && dimensionWidthRaw.trim() !== ""
+            ? parseFloat(dimensionWidthRaw)
+            : null;
+        const material = materialRaw && materialRaw.trim() !== "" ? materialRaw.trim() : null;
+
+        if (
+            (dimensionHeightRaw && dimensionHeightRaw.trim() !== "" && !Number.isFinite(dimensionHeight)) ||
+            (dimensionWidthRaw && dimensionWidthRaw.trim() !== "" && !Number.isFinite(dimensionWidth))
+        ) {
+            return json({ success: false, error: "Invalid dimensions" }, { status: 400 });
+        }
 
         if (!productId) {
             return json({ success: false, error: "Missing productId" }, { status: 400 });
@@ -63,10 +88,13 @@ export const action = async ({ request }) => {
         };
 
         // Build merchantOverrides if any placement fields changed
-        const hasDimensions = dimensionHeight !== null || dimensionWidth !== null;
-        const hasMaterial = material !== null;
+        const hasDimensions = dimensionHeightProvided || dimensionWidthProvided;
+        const hasMaterial = materialProvided;
+        const shouldUpdateOverrides = hasDimensions || hasMaterial;
 
-        if (hasDimensions || hasMaterial) {
+        let nextOverrides = null;
+
+        if (shouldUpdateOverrides) {
             // Get existing merchantOverrides to merge
             const existingOverrides = asset?.merchantOverrides && typeof asset.merchantOverrides === 'object'
                 ? asset.merchantOverrides
@@ -75,20 +103,66 @@ export const action = async ({ request }) => {
             const newOverrides = { ...existingOverrides };
 
             if (hasDimensions) {
-                newOverrides.dimensions_cm = {
-                    h: dimensionHeight,
-                    w: dimensionWidth,
-                    d: null,
-                    diameter: null,
-                    thickness: null,
-                };
+                const existingDims = (existingOverrides.dimensions_cm && typeof existingOverrides.dimensions_cm === 'object')
+                    ? { ...existingOverrides.dimensions_cm }
+                    : {};
+
+                const dims = { ...existingDims };
+
+                if (dimensionHeightProvided) {
+                    if (dimensionHeight === null) delete dims.h;
+                    else dims.h = dimensionHeight;
+                }
+
+                if (dimensionWidthProvided) {
+                    if (dimensionWidth === null) delete dims.w;
+                    else dims.w = dimensionWidth;
+                }
+
+                if (Object.keys(dims).length === 0) {
+                    delete newOverrides.dimensions_cm;
+                } else {
+                    newOverrides.dimensions_cm = dims;
+                }
             }
 
             if (hasMaterial) {
-                newOverrides.material_profile = { primary: material };
+                const existingMaterial = (existingOverrides.material_profile && typeof existingOverrides.material_profile === 'object')
+                    ? { ...existingOverrides.material_profile }
+                    : {};
+
+                const materialProfile = { ...existingMaterial };
+
+                if (material === null) {
+                    delete materialProfile.primary;
+                } else {
+                    materialProfile.primary = material;
+                }
+
+                if (Object.keys(materialProfile).length === 0) {
+                    delete newOverrides.material_profile;
+                } else {
+                    newOverrides.material_profile = materialProfile;
+                }
             }
 
+            nextOverrides = newOverrides;
             updateData.merchantOverrides = newOverrides;
+        }
+
+        // If the merchant updated overrides and we have extractedFacts, rebuild resolvedFacts + placementSet
+        // so storefront renders use the updated pipeline data immediately.
+        if (asset && shouldUpdateOverrides && asset.extractedFacts) {
+            const resolvedFacts = resolveProductFacts(asset.extractedFacts, nextOverrides);
+            const placementSet = await buildPlacementSet({
+                resolvedFacts,
+                productAssetId: asset.id,
+                shopId: shop.id,
+                traceId: requestId,
+            });
+
+            updateData.resolvedFacts = resolvedFacts;
+            updateData.placementSet = placementSet;
         }
 
         // Handle enabled toggle and status transitions

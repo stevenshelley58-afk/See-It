@@ -375,8 +375,11 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
                         enabled: false, // Merchant must enable after reviewing
                         preparedImageUrl: prepareResult.url,
                         preparedImageKey: preparedImageKey,
-                        geminiFileUri: prepareResult.geminiFileUri,
-                        geminiFileExpiresAt: prepareResult.geminiFileExpiresAt,
+                        preparedProductImageVersion: { increment: 1 },
+                        preparedProductImageUpdatedAt: new Date(),
+                        // The prepared image changed - ensure we never keep stale Gemini file URIs.
+                        geminiFileUri: prepareResult.geminiFileUri ?? null,
+                        geminiFileExpiresAt: prepareResult.geminiFileExpiresAt ?? null,
                         retryCount: 0, // Reset retry count on success
                         errorMessage: null,
                         updatedAt: new Date(),

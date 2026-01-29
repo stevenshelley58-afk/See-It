@@ -14,14 +14,12 @@ import crypto from "crypto";
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
 import { getCorsHeaders } from "../services/cors.server";
-import { fetchShopifyProductForPrompt } from "../services/shopify-product.server";
 import { downloadAndProcessImage, downloadRawImage } from "../services/image-download.server";
 import {
   getOrRefreshGeminiFile,
   isGeminiFileValid,
   validateMagicBytes,
 } from "../services/gemini-files.server";
-import { selectPreparedImage } from "../services/product-asset/select-prepared-image.server";
 
 const FILES_API_SAFE_MODE_AVOIDABLE_DOWNLOAD_EVENT_TYPE =
   "sf_files_api_safe_mode_avoidable_download_ms";
@@ -31,10 +29,6 @@ import {
   type CompositeInput,
   type ProductFacts,
   type PlacementSet,
-  type ExtractionInput,
-  extractProductFacts,
-  resolveProductFacts,
-  buildPlacementSet,
 } from "../services/see-it-now/index";
 
 function hashBuffer(buffer: Buffer): string {
@@ -292,6 +286,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           let resolvedFacts = productAsset.resolvedFacts as ProductFacts | null;
           let placementSet = productAsset.placementSet as PlacementSet | null;
 
+          /* Legacy: pipeline backfill removed (fail-hard v2).
             // Validate pipeline data exists (attempt backfill for legacy assets)
             if (!resolvedFacts || !placementSet) {
               try {
@@ -418,13 +413,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               }
             }
           }
+          */
 
           if (!resolvedFacts || !placementSet) {
             send(
               "error",
               toStandardErrorPayload(
                 "pipeline_not_ready",
-                "Product prompt data is not ready. Please try again.",
+                "Product prompt data is not ready. Re-run preparation to generate required pipeline fields.",
                 requestId,
                 null
               )
@@ -435,7 +431,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
           // Room image URL - prefer canonical
           let roomImageUrl: string;
-          let roomImageSource: "canonical" | "cleaned" | "original" | "url" = "url";
+          let roomImageSource: "canonical" | "cleaned" | "original";
           if (roomSession.canonicalRoomImageKey) {
             roomImageUrl = await StorageService.getSignedReadUrl(
               roomSession.canonicalRoomImageKey,
@@ -454,9 +450,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               60 * 60 * 1000
             );
             roomImageSource = "original";
-          } else if (roomSession.cleanedRoomImageUrl || roomSession.originalRoomImageUrl) {
-            roomImageUrl = roomSession.cleanedRoomImageUrl ?? roomSession.originalRoomImageUrl!;
-            roomImageSource = "url";
           } else {
             send(
               "error",
@@ -471,32 +464,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             return;
           }
 
-          // Product image URL
-          let productImageUrl: string | null = null;
-          const selected = selectPreparedImage(productAsset);
-          if (selected?.key) {
-            if (selected.key.startsWith("http://") || selected.key.startsWith("https://")) {
-              productImageUrl = selected.key;
-            } else {
-              try {
-                productImageUrl = await StorageService.getSignedReadUrl(
-                  selected.key,
-                  60 * 60 * 1000
-                );
-              } catch {
-                productImageUrl = productAsset.preparedImageUrl ?? null;
-              }
-            }
-          } else if (productAsset.sourceImageUrl) {
-            productImageUrl = productAsset.sourceImageUrl;
-          }
-
-          if (!productImageUrl) {
+          // Product image URL (fail-hard: preparedImageKey required; no URL fallbacks)
+          if (!productAsset.preparedImageKey) {
             send(
               "error",
               toStandardErrorPayload(
-                "no_product_image",
-                "No product image available",
+                "no_prepared_product_image",
+                "Prepared product image is missing. Re-run preparation.",
                 requestId,
                 null
               )
@@ -504,6 +478,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             close();
             return;
           }
+
+          const productImageUrl = await StorageService.getSignedReadUrl(
+            productAsset.preparedImageKey,
+            60 * 60 * 1000
+          );
 
           const skipGcsDownloadWhenGeminiUriValid =
             shop.runtimeConfig?.skipGcsDownloadWhenGeminiUriValid ?? false;
@@ -633,7 +612,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             })(),
           ]);
 
-          // Update DB with new/refreshed URIs (non-blocking)
+          // Fail-hard: DB updates must succeed (keep DB/image state consistent)
           const dbUpdates: Array<Promise<unknown>> = [];
           if (
             productPrepared.geminiFile.uri !== productAsset.geminiFileUri ||
@@ -666,7 +645,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               })
             );
           }
-          Promise.all(dbUpdates).catch(() => {});
+          await Promise.all(dbUpdates);
 
           const renderInput: CompositeInput = {
             shopId: shop.id,

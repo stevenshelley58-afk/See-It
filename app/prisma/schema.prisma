@@ -4,6 +4,9 @@
 
 generator client {
   provider      = "prisma-client-js"
+  // Windows on ARM (Node arm64) has issues loading the Node-API engine (.dll.node).
+  // Use the binary engine to ensure local dev/tests work on win32 arm64.
+  engineType    = "binary"
   binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
 }
 

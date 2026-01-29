@@ -14,10 +14,15 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PrismaClient, Prisma } from "@prisma/client";
 
+const HAS_DATABASE = !!process.env.DATABASE_URL;
+const describeDb = HAS_DATABASE ? describe : describe.skip;
+
 // Create a dedicated Prisma client for testing
-const prisma = new PrismaClient({
-  log: process.env.DEBUG_PRISMA ? ["query", "error", "warn"] : ["error"],
-});
+const prisma = HAS_DATABASE
+  ? new PrismaClient({
+      log: process.env.DEBUG_PRISMA ? ["query", "error", "warn"] : ["error"],
+    })
+  : (null as unknown as PrismaClient);
 
 // Test data constants
 const TEST_PREFIX = "test_integration_";
@@ -61,28 +66,30 @@ async function cleanupTestData() {
   });
 }
 
-beforeAll(async () => {
-  // Clean up any leftover test data from previous runs
-  await cleanupTestData();
+if (HAS_DATABASE) {
+  beforeAll(async () => {
+    // Clean up any leftover test data from previous runs
+    await cleanupTestData();
 
-  // Create a test shop for FK references
-  const shop = await prisma.shop.create({
-    data: {
-      shopDomain: TEST_SHOP_DOMAIN,
-      shopifyShopId: `${Date.now()}`,
-      accessToken: "test-token",
-      plan: "test",
-      monthlyQuota: 1000,
-      dailyQuota: 100,
-    },
+    // Create a test shop for FK references
+    const shop = await prisma.shop.create({
+      data: {
+        shopDomain: TEST_SHOP_DOMAIN,
+        shopifyShopId: `${Date.now()}`,
+        accessToken: "test-token",
+        plan: "test",
+        monthlyQuota: 1000,
+        dailyQuota: 100,
+      },
+    });
+    testShopId = shop.id;
   });
-  testShopId = shop.id;
-});
 
-afterAll(async () => {
-  await cleanupTestData();
-  await prisma.$disconnect();
-});
+  afterAll(async () => {
+    await cleanupTestData();
+    await prisma.$disconnect();
+  });
+}
 
 // =============================================================================
 // Helper Functions
@@ -107,7 +114,7 @@ function computeTemplateHash(content: string): string {
 // Test: Unique Constraint on [shopId, name]
 // =============================================================================
 
-describe("Database Constraints", () => {
+describeDb("Database Constraints", () => {
   describe("Unique constraint on [shopId, name]", () => {
     it("should allow same name for different shops", async () => {
       const promptName = createDefinitionName("unique_test");
@@ -643,7 +650,7 @@ describe("Database Constraints", () => {
 // Test: Concurrent Operations (Serializable Isolation)
 // =============================================================================
 
-describe("Concurrent Operations", () => {
+describeDb("Concurrent Operations", () => {
   it("should handle concurrent version creation with proper isolation", async () => {
     const promptName = createDefinitionName("concurrent_test");
 
@@ -726,7 +733,7 @@ describe("Concurrent Operations", () => {
 // Test: Data Types and Validation
 // =============================================================================
 
-describe("Data Types and Validation", () => {
+describeDb("Data Types and Validation", () => {
   it("should store and retrieve JSON params correctly", async () => {
     const promptName = createDefinitionName("json_params");
 
