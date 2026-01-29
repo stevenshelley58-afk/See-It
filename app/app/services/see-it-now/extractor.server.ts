@@ -39,6 +39,31 @@ class ExtractorOutputError extends Error {
 
 const ALLOWED_SCALE_CLASSES = new Set(Object.keys(SCALE_GUARDRAIL_TEMPLATES));
 
+/**
+ * Normalize LLM scale class output to match allowed values.
+ * Handles variations like "oversized or large" → "oversized"
+ */
+function normalizeScaleClass(raw: unknown): string {
+  if (typeof raw !== "string") return "unknown";
+
+  const lower = raw.toLowerCase().trim();
+
+  // Direct match
+  if (ALLOWED_SCALE_CLASSES.has(lower)) {
+    return lower;
+  }
+
+  // Handle compound values like "oversized or large", "large/medium"
+  // Extract first matching class from the string
+  for (const allowed of ALLOWED_SCALE_CLASSES) {
+    if (lower.includes(allowed)) {
+      return allowed;
+    }
+  }
+
+  return "unknown";
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -95,14 +120,11 @@ function validateExtractorFacts(
   if (!isPlainObject(relativeScale)) {
     issues.push("relative_scale: required object");
   } else {
-    const scaleClass = (relativeScale as Record<string, unknown>).class;
-    if (typeof scaleClass !== "string") {
-      issues.push("relative_scale.class: required string");
-    } else if (!ALLOWED_SCALE_CLASSES.has(scaleClass)) {
-      issues.push(
-        `relative_scale.class: invalid value "${scaleClass}" (allowed: ${Array.from(ALLOWED_SCALE_CLASSES).join(", ")})`
-      );
-    }
+    const rawScaleClass = (relativeScale as Record<string, unknown>).class;
+    // Normalize scale class to handle LLM variations like "oversized or large"
+    const normalizedClass = normalizeScaleClass(rawScaleClass);
+    // Update the object with normalized value for downstream use
+    (relativeScale as Record<string, unknown>).class = normalizedClass;
   }
 
   const renderBehavior = (value as Record<string, unknown>).render_behavior;
