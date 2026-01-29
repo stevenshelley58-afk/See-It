@@ -6,6 +6,7 @@ import { validateSessionId } from "../utils/validation.server";
 import sharp from "sharp";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
+import { getCorsHeaders } from "../services/cors.server";
 
 const MAX_ORIGINAL_DOWNLOAD_BYTES = 25 * 1024 * 1024; // 25MB
 const MAX_CANONICAL_EDGE_PX = 2048;
@@ -48,20 +49,6 @@ async function downloadToBuffer(url: string, maxBytes: number): Promise<Buffer> 
     } finally {
         clearTimeout(timeoutId);
     }
-}
-
-function getCorsHeaders(shopDomain: string | null): Record<string, string> {
-    const headers: Record<string, string> = {
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0",
-    };
-    if (shopDomain) {
-        headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
-    }
-    return headers;
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {

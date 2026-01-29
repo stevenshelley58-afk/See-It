@@ -45,8 +45,8 @@ NUL
 audit-results.md
 
 # Prisma (dev databases only - migrations should be committed!)
-prisma/dev.sqlite
-prisma/dev.sqlite-journal
+**/dev.sqlite
+**/dev.sqlite-journal
 
 # Shopify
 .shopify/

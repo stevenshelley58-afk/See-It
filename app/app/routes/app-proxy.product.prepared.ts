@@ -4,29 +4,11 @@ import prisma from "../db.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
-
-function getCorsHeaders(shopDomain: string | null): Record<string, string> {
-    // Only set CORS origin if we have a valid shop domain
-    // Empty origin or "*" would be a security risk
-    const headers: Record<string, string> = {
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        // Prevent caching to ensure fresh signed URLs are always returned
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0",
-    };
-
-    if (shopDomain) {
-        headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
-    }
-
-    return headers;
-}
+import { getCorsHeaders } from "../services/cors.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { session } = await authenticate.public.appProxy(request);
-    const corsHeaders = getCorsHeaders(session?.shop ?? null);
+    const corsHeaders = getCorsHeaders(session?.shop ?? null, { methods: "GET, OPTIONS" });
 
     // Handle preflight
     if (request.method === "OPTIONS") {
@@ -153,4 +135,3 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         { headers: corsHeaders }
     );
 };
-

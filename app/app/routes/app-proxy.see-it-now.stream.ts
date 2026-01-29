@@ -11,9 +11,11 @@ import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
 import sharp from "sharp";
 import crypto from "crypto";
-import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
+import { getCorsHeaders } from "../services/cors.server";
+import { fetchShopifyProductForPrompt } from "../services/shopify-product.server";
+import { downloadAndProcessImage, downloadRawImage } from "../services/image-download.server";
 import {
   getOrRefreshGeminiFile,
   isGeminiFileValid,
@@ -26,205 +28,20 @@ const FILES_API_SAFE_MODE_AVOIDABLE_DOWNLOAD_EVENT_TYPE =
 
 import {
   renderAllVariants,
-  type RenderInput,
-  type ProductPlacementFacts,
+  type CompositeInput,
+  type ProductFacts,
   type PlacementSet,
-  type ImageMeta,
   type ExtractionInput,
   extractProductFacts,
   resolveProductFacts,
   buildPlacementSet,
 } from "../services/see-it-now/index";
 
-// ============================================================================
-// CORS Headers
-// ============================================================================
-function getCorsHeaders(shopDomain: string | null): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    Pragma: "no-cache",
-    Expires: "0",
-  };
-
-  if (shopDomain) {
-    headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
-  }
-
-  return headers;
-}
-
-// ============================================================================
-// Image Download Helpers (copied from render route for parity)
-// ============================================================================
-async function downloadToBuffer(
-  url: string,
-  logContext: ReturnType<typeof createLogContext>,
-  maxDimension: number = 2048,
-  format: "png" | "jpeg" = "png"
-): Promise<{ buffer: Buffer; meta: ImageMeta }> {
-  validateTrustedUrl(url, "image URL");
-
-  logger.info(
-    { ...logContext, stage: "download", format },
-    `[See It Now] Downloading image: ${url.substring(0, 80)}...`
-  );
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const inputBuffer = Buffer.from(arrayBuffer);
-
-  const pipeline = sharp(inputBuffer)
-    .rotate()
-    .resize({
-      width: maxDimension,
-      height: maxDimension,
-      fit: "inside",
-      withoutEnlargement: true,
-    });
-
-  const { data: buffer, info } =
-    format === "png"
-      ? await pipeline.png({ force: true }).toBuffer({ resolveWithObject: true })
-      : await pipeline
-          .jpeg({ quality: 90, force: true })
-          .toBuffer({ resolveWithObject: true });
-
-  const meta: ImageMeta = {
-    width: info.width || 0,
-    height: info.height || 0,
-    bytes: buffer.length,
-    format,
-  };
-
-  logger.info(
-    { ...logContext, stage: "download" },
-    `[See It Now] Downloaded & Optimized (${format}): ${buffer.length} bytes`
-  );
-
-  return { buffer, meta };
-}
-
-async function downloadRawToBuffer(
-  url: string,
-  logContext: ReturnType<typeof createLogContext>
-): Promise<Buffer> {
-  validateTrustedUrl(url, "image URL");
-
-  logger.info(
-    { ...logContext, stage: "download-raw" },
-    `[See It Now] Downloading raw image: ${url.substring(0, 80)}...`
-  );
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  if (buffer.length === 0) throw new Error("Downloaded image was empty");
-  return buffer;
-}
-
 function hashBuffer(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
 }
 
-type ShopifyProductForPrompt = {
-  title?: string | null;
-  description?: string | null;
-  descriptionHtml?: string | null;
-  productType?: string | null;
-  vendor?: string | null;
-  tags?: string[] | null;
-  images?: { edges?: Array<{ node?: { url?: string } }> } | null;
-  metafields?: {
-    edges?: Array<{
-      node?: { namespace?: string; key?: string; value?: string };
-    }>;
-  } | null;
-};
-
-async function fetchShopifyProductForPrompt(
-  shopDomain: string,
-  accessToken: string,
-  productId: string,
-  requestId: string
-): Promise<ShopifyProductForPrompt | null> {
-  if (!accessToken || accessToken === "pending") return null;
-
-  const endpoint = `https://${shopDomain}/admin/api/2025-01/graphql.json`;
-  const query = `#graphql
-    query GetProductForPrompt($id: ID!) {
-      product(id: $id) {
-        title
-        description
-        descriptionHtml
-        productType
-        vendor
-        tags
-        images(first: 3) {
-          edges {
-            node {
-              url
-            }
-          }
-        }
-        metafields(first: 20) {
-          edges {
-            node {
-              namespace
-              key
-              value
-            }
-          }
-        }
-      }
-    }
-  `;
-
-  try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": accessToken,
-      },
-      body: JSON.stringify({
-        query,
-        variables: { id: `gid://shopify/Product/${productId}` },
-      }),
-    });
-
-    if (!res.ok) {
-      logger.warn(
-        createLogContext("render", requestId, "shopify-product-fetch", {
-          status: res.status,
-          statusText: res.statusText,
-        }),
-        `Failed to fetch product from Shopify Admin API (HTTP ${res.status})`
-      );
-      return null;
-    }
-
-    const json = await res.json().catch(() => null);
-    return (json?.data?.product as ShopifyProductForPrompt | undefined) || null;
-  } catch (err) {
-    logger.warn(
-      createLogContext("render", requestId, "shopify-product-fetch", {
-        error: err instanceof Error ? err.message : String(err),
-      }),
-      "Failed to fetch product from Shopify Admin API (network/parsing)"
-    );
-    return null;
-  }
-}
+// (Shopify product fetching is in ../services/shopify-product.server.ts)
 
 function sseHeaders(corsHeaders: Record<string, string>): HeadersInit {
   return {
@@ -472,19 +289,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             return;
           }
 
-          let resolvedFacts = productAsset.resolvedFacts as ProductPlacementFacts | null;
+          let resolvedFacts = productAsset.resolvedFacts as ProductFacts | null;
           let placementSet = productAsset.placementSet as PlacementSet | null;
 
-          // Validate pipeline data exists (attempt backfill for legacy assets)
-          if (!resolvedFacts || !placementSet) {
-            try {
+            // Validate pipeline data exists (attempt backfill for legacy assets)
+            if (!resolvedFacts || !placementSet) {
+              try {
               const shopifyProduct = shop.accessToken
-                ? await fetchShopifyProductForPrompt(
-                    shop.shopDomain,
-                    shop.accessToken,
-                    product_id,
-                    requestId
-                  )
+                ? await fetchShopifyProductForPrompt({
+                    flow: "render",
+                    shopDomain: shop.shopDomain,
+                    accessToken: shop.accessToken,
+                    productId: product_id,
+                    requestId,
+                  })
                 : null;
 
               const metafieldText = Array.isArray(shopifyProduct?.metafields?.edges)
@@ -719,7 +537,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               }
 
               const downloadStart = Date.now();
-              const imageData = await downloadToBuffer(productImageUrl, logContext, 2048, "png");
+              const imageData = await downloadAndProcessImage(productImageUrl, logContext, {
+                maxDimension: 2048,
+                format: "png",
+              });
               const downloadMs = Date.now() - downloadStart;
 
               validateMagicBytes(imageData.buffer, "image/png");
@@ -771,7 +592,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               const imageData =
                 roomImageSource === "canonical"
                   ? await (async () => {
-                      const buffer = await downloadRawToBuffer(roomImageUrl, logContext);
+                      const buffer = await downloadRawImage(roomImageUrl, logContext);
                       return {
                         buffer,
                         meta: {
@@ -782,7 +603,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                         },
                       };
                     })()
-                  : await downloadToBuffer(roomImageUrl, logContext, 2048, "jpeg");
+                  : await downloadAndProcessImage(roomImageUrl, logContext, {
+                      maxDimension: 2048,
+                      format: "jpeg",
+                    });
               const downloadMs = Date.now() - downloadStart;
 
               validateMagicBytes(imageData.buffer, "image/jpeg");
@@ -844,7 +668,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
           Promise.all(dbUpdates).catch(() => {});
 
-          const renderInput: RenderInput = {
+          const renderInput: CompositeInput = {
             shopId: shop.id,
             productAssetId: productAsset.id,
             roomSessionId: room_session_id,
@@ -900,14 +724,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 }, 3000);
               }
               send("progress", { ...progress });
-            },
-            onEarlyReturn: (info) => {
-              send("ready", {
-                run_id: info.runId,
-                success_count: info.successCount,
-                completed_count: info.completedCount,
-                elapsed_ms: info.elapsedMs,
-              });
             },
             onVariantCompleted: async (v) => {
               // Maintain progress counts.

@@ -5,6 +5,10 @@ describe("buildPlacementTabMetadata", () => {
     const base = {
         enabled: false,
         originalEnabled: false,
+        dimensions: null,
+        originalDimensions: null,
+        material: null,
+        originalMaterial: null,
     } as const;
 
     it("omits enabled when unchanged", () => {

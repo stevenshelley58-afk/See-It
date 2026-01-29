@@ -8,6 +8,7 @@ import { extractStructuredFields, generateProductDescription } from "./descripti
 import { GoogleGenAI } from "@google/genai";
 import { Prisma } from "@prisma/client";
 import { getSeeItNowAllowedShops, isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
+import { fetchShopifyProductForPrompt } from "./shopify-product.server";
 
 // NEW: See It Now 2-LLM pipeline imports
 import {
@@ -94,97 +95,6 @@ interface RenderPromptTelemetry {
 
 // Legacy generatePlacementConfig function removed - placement prompts now come from
 // canonical pipeline: extractedFacts -> merchantOverrides -> resolvedFacts -> placementSet
-
-type ShopifyProductForPrompt = {
-    title?: string | null;
-    description?: string | null;
-    descriptionHtml?: string | null;
-    productType?: string | null;
-    vendor?: string | null;
-    tags?: string[] | null;
-    images?: { edges?: Array<{ node?: { url?: string } }> } | null;
-    metafields?: { edges?: Array<{ node?: { namespace?: string; key?: string; value?: string; type?: string } }> } | null;
-};
-
-async function fetchShopifyProductForPrompt(
-    shopDomain: string,
-    accessToken: string,
-    productId: string,
-    requestId: string
-): Promise<ShopifyProductForPrompt | null> {
-    // Guard: missing/placeholder token
-    if (!accessToken || accessToken === "pending") return null;
-
-    // Shopify Admin API GraphQL endpoint (Jan 2025)
-    const endpoint = `https://${shopDomain}/admin/api/2025-01/graphql.json`;
-
-    const query = `#graphql
-        query GetProductForPrompt($id: ID!) {
-            product(id: $id) {
-                title
-                description
-                descriptionHtml
-                productType
-                vendor
-                tags
-                images(first: 3) {
-                  edges {
-                    node {
-                      url
-                    }
-                  }
-                }
-                metafields(first: 20) {
-                    edges {
-                        node {
-                            namespace
-                            key
-                            value
-                            type
-                        }
-                    }
-                }
-            }
-        }
-    `;
-
-    try {
-        const res = await fetch(endpoint, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-Shopify-Access-Token": accessToken,
-            },
-            body: JSON.stringify({
-                query,
-                variables: { id: `gid://shopify/Product/${productId}` },
-            }),
-        });
-
-        if (!res.ok) {
-            logger.warn(
-                createLogContext("prepare", requestId, "shopify-product-fetch", {
-                    status: res.status,
-                    statusText: res.statusText,
-                }),
-                `Failed to fetch product from Shopify Admin API (HTTP ${res.status})`
-            );
-            return null;
-        }
-
-        const json = await res.json().catch(() => null);
-        const product = json?.data?.product as ShopifyProductForPrompt | undefined;
-        return product || null;
-    } catch (err) {
-        logger.warn(
-            createLogContext("prepare", requestId, "shopify-product-fetch", {
-                error: err instanceof Error ? err.message : String(err),
-            }),
-            "Failed to fetch product from Shopify Admin API (network/parsing)"
-        );
-        return null;
-    }
-}
 
 async function processPendingAssets(batchRequestId: string): Promise<boolean> {
     try {
@@ -361,12 +271,13 @@ async function processPendingAssets(batchRequestId: string): Promise<boolean> {
                     });
 
                     const shopifyProduct = shopRecord
-                        ? await fetchShopifyProductForPrompt(
-                            shopRecord.shopDomain,
-                            shopRecord.accessToken,
-                            asset.productId,
-                            itemRequestId
-                        )
+                        ? await fetchShopifyProductForPrompt({
+                            flow: "prepare",
+                            shopDomain: shopRecord.shopDomain,
+                            accessToken: shopRecord.accessToken,
+                            productId: asset.productId,
+                            requestId: itemRequestId,
+                        })
                         : null;
 
                     const metafieldText = Array.isArray(shopifyProduct?.metafields?.edges)

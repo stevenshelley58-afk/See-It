@@ -10,6 +10,7 @@ import { logger, createLogContext } from "~/utils/logger.server";
 import { StorageService } from "~/services/storage.server";
 import prisma from "~/db.server";
 import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
+import { findClosestGeminiRatioLabel } from "~/services/gemini-aspect-ratio.server";
 import { resolvePromptText, buildPipelineConfigSnapshot } from "../prompt-control/prompt-resolver.server";
 import { startCall, completeCallSuccess, completeCallFailure } from "../prompt-control/llm-call-tracker.server";
 import { computeCallIdentityHash, computeDedupeHash, computePipelineConfigHash, computeImageHash } from "./hashing.server";
@@ -33,37 +34,6 @@ import type {
 } from "./types";
 
 const VARIANT_TIMEOUT_MS = 45000; // 45 seconds per variant
-
-// Gemini-compatible aspect ratios (label values per Gemini docs)
-const GEMINI_SUPPORTED_RATIOS: Array<{ label: string; value: number }> = [
-  { label: "1:1", value: 1.0 },
-  { label: "4:5", value: 0.8 },
-  { label: "5:4", value: 1.25 },
-  { label: "3:4", value: 0.75 },
-  { label: "4:3", value: 4 / 3 },
-  { label: "2:3", value: 2 / 3 },
-  { label: "3:2", value: 1.5 },
-  { label: "9:16", value: 9 / 16 },
-  { label: "16:9", value: 16 / 9 },
-  { label: "21:9", value: 21 / 9 },
-];
-
-function findClosestGeminiRatioLabel(width: number, height: number): string | null {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return null;
-  }
-  const inputRatio = width / height;
-  let closest = GEMINI_SUPPORTED_RATIOS[0];
-  let minDiff = Math.abs(inputRatio - closest.value);
-  for (const r of GEMINI_SUPPORTED_RATIOS) {
-    const diff = Math.abs(inputRatio - r.value);
-    if (diff < minDiff) {
-      minDiff = diff;
-      closest = r;
-    }
-  }
-  return closest.label;
-}
 
 class VariantBlockedError extends Error {
   public readonly code: "SAFETY_BLOCK" | "PROMPT_BLOCK";

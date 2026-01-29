@@ -7,6 +7,7 @@ import { logger, createLogContext } from "../utils/logger.server";
 import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { uploadToGeminiFiles, isGeminiFileValid, type GeminiFileInfo } from "./gemini-files.server";
 import { photoroomRemoveBackground } from "./photoroom.server";
+import { findClosestGeminiRatio } from "./gemini-aspect-ratio.server";
 
 // ============================================================================
 // 🔒 LOCKED MODEL IMPORTS - DO NOT DEFINE MODEL NAMES HERE
@@ -28,33 +29,6 @@ const GEMINI_TIMEOUT_MS = 60000; // 60 seconds
 // ============================================================================
 // ASPECT RATIO NORMALIZATION (Gemini-compatible)
 // ============================================================================
-const GEMINI_SUPPORTED_RATIOS = [
-    { label: '1:1', value: 1.0 },
-    { label: '4:5', value: 0.8 },
-    { label: '5:4', value: 1.25 },
-    { label: '3:4', value: 0.75 },
-    { label: '4:3', value: 4 / 3 },
-    { label: '2:3', value: 2 / 3 },
-    { label: '3:2', value: 1.5 },
-    { label: '9:16', value: 9 / 16 },
-    { label: '16:9', value: 16 / 9 },
-    { label: '21:9', value: 21 / 9 },
-];
-
-function findClosestGeminiRatio(width: number, height: number): { label: string; value: number } {
-    const inputRatio = width / height;
-    let closest = GEMINI_SUPPORTED_RATIOS[0];
-    let minDiff = Math.abs(inputRatio - closest.value);
-
-    for (const r of GEMINI_SUPPORTED_RATIOS) {
-        const diff = Math.abs(inputRatio - r.value);
-        if (diff < minDiff) {
-            minDiff = diff;
-            closest = r;
-        }
-    }
-    return closest;
-}
 
 // ============================================================================
 // PROMPT BUILDER
@@ -431,6 +405,14 @@ async function callGemini(
 
         // Extract image from response
         const candidates = response.candidates;
+        const finishReason = candidates?.[0]?.finishReason ?? null;
+        const safetyRatings =
+            candidates?.[0]?.safetyRatings ?? (response as any)?.promptFeedback?.safetyRatings ?? null;
+
+        logger.info(
+            { ...context, stage: "response-summary", finishReason },
+            `Gemini response summary: finishReason=${String(finishReason ?? "")}, safetyRatings=${safetyRatings ? JSON.stringify(safetyRatings) : "none"}`
+        );
         if (candidates?.[0]?.content?.parts) {
             for (const part of candidates[0].content.parts) {
                 if (part.inlineData?.data) {
@@ -451,7 +433,7 @@ async function callGemini(
         // Log response structure for debugging
         logger.error(
             { ...context, stage: "response-parse-failed" },
-            `No image in Gemini response. Response structure: candidates=${!!candidates}, firstCandidate=${!!candidates?.[0]}, content=${!!candidates?.[0]?.content}, parts=${JSON.stringify(candidates?.[0]?.content?.parts?.map((p: any) => Object.keys(p)) || 'none')}`
+            `No image in Gemini response (finishReason=${String(finishReason ?? "")}). Response structure: candidates=${!!candidates}, firstCandidate=${!!candidates?.[0]}, content=${!!candidates?.[0]?.content}, parts=${JSON.stringify(candidates?.[0]?.content?.parts?.map((p: any) => Object.keys(p)) || 'none')}`
         );
         throw new Error("No image in response - Gemini may have returned text only or blocked the request");
     } catch (error: any) {
@@ -980,6 +962,9 @@ export async function compositeScene(
 
         // Compute closest Gemini-supported aspect ratio
         const closestRatio = findClosestGeminiRatio(roomWidth, roomHeight);
+        if (!closestRatio) {
+            throw new Error("Failed to resolve room aspect ratio");
+        }
 
         logger.info(
             { ...logContext, stage: "pre-gemini" },
@@ -1046,17 +1031,17 @@ export async function compositeScene(
             );
 
             // Build parts array with URI reference for room, inline for product
+            // IMPORTANT (Image Guide): ensure the room is the last image so Gemini adopts the room canvas AR
             const parts: any[] = [
                 { text: prompt },
-                { text: "ROOM IMAGE:" },
-                createPartFromUri(options!.roomGeminiUri!, 'image/jpeg'),
-                { text: "PRODUCT IMAGE:" },
                 {
                     inlineData: {
                         mimeType: 'image/png',
                         data: resizedProduct!.toString('base64')
                     }
-                }
+                },
+                { text: "ROOM IMAGE:" },
+                createPartFromUri(options!.roomGeminiUri!, 'image/jpeg'),
             ];
 
             const config: any = { responseModalities: ['TEXT', 'IMAGE'] };
@@ -1077,6 +1062,14 @@ export async function compositeScene(
 
             // Extract image from response
             const candidates = response.candidates;
+            const finishReason = candidates?.[0]?.finishReason ?? null;
+            const safetyRatings =
+                candidates?.[0]?.safetyRatings ?? (response as any)?.promptFeedback?.safetyRatings ?? null;
+
+            logger.info(
+                { ...logContext, stage: "gemini-response-summary", finishReason },
+                `Gemini (URI mode) response summary: finishReason=${String(finishReason ?? "")}, safetyRatings=${safetyRatings ? JSON.stringify(safetyRatings) : "none"}`
+            );
             if (candidates?.[0]?.content?.parts) {
                 for (const part of candidates[0].content.parts) {
                     if (part.inlineData?.data) {
@@ -1087,13 +1080,16 @@ export async function compositeScene(
             }
 
             if (!base64Data!) {
-                throw new Error("No image in Gemini response (URI mode)");
+                throw new Error(
+                    `No image in Gemini response (URI mode) (finishReason=${String(finishReason ?? "")})`
+                );
             }
         } else {
             // STANDARD PATH: Use inline base64 for both images
+            // IMPORTANT (Image Guide): ensure the room is the last image so Gemini adopts the room canvas AR
             base64Data = await callGemini(prompt, [
+                { label: "PRODUCT IMAGE", buffer: resizedProduct! },
                 { label: "ROOM IMAGE", buffer: roomBuffer! },
-                { label: "PRODUCT IMAGE", buffer: resizedProduct! }
             ], {
                 model: IMAGE_MODEL_PRO,
                 aspectRatio: closestRatio.label,

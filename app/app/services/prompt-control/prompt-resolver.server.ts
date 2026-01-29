@@ -552,7 +552,7 @@ async function batchLoadDefinitions(
 
   // Find missing prompts and load from SYSTEM tenant
   if (shopId !== "SYSTEM") {
-    const foundNames = new Set(shopDefinitions.map(d => d.name));
+    const foundNames = new Set(shopDefinitions.map((d: { name: string }) => d.name));
     const missingNames = promptNames.filter(name => !foundNames.has(name));
 
     if (missingNames.length > 0) {

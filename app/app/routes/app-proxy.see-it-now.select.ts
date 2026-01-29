@@ -11,8 +11,9 @@ import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
 import { GoogleGenAI } from "@google/genai";
 import sharp from "sharp";
-import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { GCS_BUCKET } from "../utils/gcs-client.server";
+import { getCorsHeaders } from "../services/cors.server";
+import { downloadRawImage } from "../services/image-download.server";
 
 // Import model config from centralized source
 import { GEMINI_IMAGE_MODEL_PRO, GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
@@ -58,25 +59,6 @@ function extractGcsKeyFromUrl(url: string): string | null {
 }
 
 // ============================================================================
-// CORS Headers
-// ============================================================================
-function getCorsHeaders(shopDomain: string | null): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-    "Pragma": "no-cache",
-    "Expires": "0",
-  };
-
-  if (shopDomain) {
-    headers["Access-Control-Allow-Origin"] = `https://${shopDomain}`;
-  }
-
-  return headers;
-}
-
-// ============================================================================
 // Gemini Client (lazy init)
 // ============================================================================
 let geminiClient: GoogleGenAI | null = null;
@@ -88,29 +70,6 @@ function getGeminiClient(): GoogleGenAI {
     geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   }
   return geminiClient;
-}
-
-// ============================================================================
-// Image Download Helper
-// ============================================================================
-async function downloadToBuffer(
-  url: string,
-  logContext: ReturnType<typeof createLogContext>
-): Promise<Buffer> {
-  validateTrustedUrl(url, "image URL");
-
-  logger.info(
-    { ...logContext, stage: "download" },
-    `[See It Now] Downloading image: ${url.substring(0, 80)}...`
-  );
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
 }
 
 // ============================================================================
@@ -301,7 +260,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
 
       // Download the selected variant image
-      const imageBuffer = await downloadToBuffer(selected_image_url, shopLogContext);
+      const imageBuffer = await downloadRawImage(selected_image_url, shopLogContext);
 
       // Upscale with Pro model
       const upscaledBuffer = await upscaleImage(imageBuffer, shopLogContext);

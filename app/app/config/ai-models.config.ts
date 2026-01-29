@@ -1,19 +1,13 @@
 /**
- * ╔════════════════════════════════════════════════════════════════════════════╗
- * ║                                                                            ║
- * ║   🔒 LOCKED AI MODEL CONFIGURATION - DO NOT MODIFY WITHOUT APPROVAL 🔒    ║
- * ║                                                                            ║
- * ║   This file is the SINGLE SOURCE OF TRUTH for all AI model names.         ║
- * ║   These model names have been verified against Google's official docs.    ║
- * ║                                                                            ║
- * ║   Last Verified: December 8, 2025 (TODO: verify models against docs)       ║
- * ║   Docs: https://ai.google.dev/gemini-api/docs/image-generation            ║
- * ║                                                                            ║
- * ║   ⚠️  AGENTS: DO NOT CHANGE THESE VALUES ⚠️                               ║
- * ║   If you think a model name is wrong, CHECK THE DOCS FIRST:               ║
- * ║   https://ai.google.dev/gemini-api/docs/models/gemini                     ║
- * ║                                                                            ║
- * ╚════════════════════════════════════════════════════════════════════════════╝
+ * Locked AI model configuration.
+ *
+ * This file is the single source of truth for image model names used with Gemini/Imagen.
+ * If you think a model name is wrong, verify against Google's official docs first.
+ *
+ * Last verified: December 8, 2025 (TODO: re-verify against docs)
+ * Docs:
+ * - https://ai.google.dev/gemini-api/docs/image-generation
+ * - https://ai.google.dev/gemini-api/docs/models/gemini
  */
 
 // =============================================================================
@@ -95,10 +89,10 @@ export const MODEL_FOR_COMPOSITING = GEMINI_IMAGE_MODEL_FAST;
 // =============================================================================
 // These are commonly mistaken model names that DO NOT EXIST:
 // 
-// ❌ "gemini-2.5-flash-image-preview"  - Wrong! Remove the "-preview"
-// ❌ "gemini-3-pro-image"              - Wrong! Needs "-preview" at the end
-// ❌ "imagen-3.0-capability-001"       - Does not exist
-// ❌ "gemini-2.0-flash-preview-image-generation" - Old preview name, deprecated
+// - "gemini-2.5-flash-image-preview"  - Wrong! Remove the "-preview"
+// - "gemini-3-pro-image"              - Wrong! Needs "-preview" at the end
+// - "imagen-3.0-capability-001"       - Does not exist
+// - "gemini-2.0-flash-preview-image-generation" - Old preview name, deprecated
 // =============================================================================
 
 /**
