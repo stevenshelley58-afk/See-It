@@ -30,9 +30,10 @@ import {
   type ProductFacts,
   type PlacementSet,
 } from "../services/see-it-now/index";
+import { computeImageHash } from "~/services/see-it-now/hashing.server";
 
 function hashBuffer(buffer: Buffer): string {
-  return crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
+  return computeImageHash(buffer); // Returns 64-char hash
 }
 
 // (Shopify product fetching is in ../services/shopify-product.server.ts)

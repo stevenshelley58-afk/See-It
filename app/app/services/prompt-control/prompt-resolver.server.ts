@@ -154,11 +154,22 @@ export function renderTemplate(
   if (!template) return null;
 
   // Match {{word}} or {{word.word.word}} patterns
-  return template.replace(/\{\{([\w.]+)\}\}/g, (match, path: string) => {
+  const result = template.replace(/\{\{([\w.]+)\}\}/g, (match, path: string) => {
     // Handle dot-separated paths like "product.title"
     const value = resolveDotPath(variables, path);
     return value ?? match; // Keep original if not found
   });
+
+  // VALIDATION: Check for unreplaced variables
+  const unreplaced = result.match(/\{\{[\w.]+\}\}/g);
+  if (unreplaced) {
+    console.warn(
+      `[Template Validation] Unreplaced variables: ${unreplaced.join(", ")}`,
+      { unreplacedVariables: unreplaced }
+    );
+  }
+
+  return result;
 }
 
 /**
