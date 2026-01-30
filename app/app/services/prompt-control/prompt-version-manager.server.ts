@@ -5,6 +5,7 @@
 
 import { createHash } from "crypto";
 import prisma from "~/db.server";
+import { canonicalize } from "../see-it-now/hashing.server";
 import type { Prisma, PromptStatus, AuditAction } from "@prisma/client";
 
 // =============================================================================
@@ -51,7 +52,7 @@ function computeTemplateHash(data: {
   params: unknown;
 }): string {
   return createHash("sha256")
-    .update(JSON.stringify(data))
+    .update(canonicalize(data))
     .digest("hex")
     .slice(0, 16);
 }

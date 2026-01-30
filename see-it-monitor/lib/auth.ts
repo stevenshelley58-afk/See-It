@@ -23,7 +23,7 @@ import type {
 // Configuration
 // =============================================================================
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.MONITOR_API_TOKEN;
+const JWT_SECRET = process.env.JWT_SECRET;
 const MONITOR_API_TOKEN = process.env.MONITOR_API_TOKEN;
 
 // Token expiration: 24 hours
@@ -36,7 +36,7 @@ const TOKEN_EXPIRATION = "24h";
 function getSecretKey(): Uint8Array {
   if (!JWT_SECRET) {
     throw new Error(
-      "JWT_SECRET or MONITOR_API_TOKEN environment variable is required"
+      "JWT_SECRET environment variable is required for JWT authentication"
     );
   }
   return new TextEncoder().encode(JWT_SECRET);

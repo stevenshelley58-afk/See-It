@@ -19,9 +19,14 @@ import {
 const { Client } = pg;
 
 const SEE_IT_LIVE_TAG = "see-it-live";
+const args = process.argv.slice(2);
+const dryRun = args.includes('--dry-run');
 
 async function main() {
   console.log("🏷️  Starting live product tag sync...\n");
+  if (dryRun) {
+    console.log("[DRY RUN] No tags will be written to Shopify.\n");
+  }
 
   const resolved = resolveDatabaseUrl();
   logConnectionInfo(resolved);
@@ -79,6 +84,12 @@ async function main() {
       for (const product of shopData.products) {
         try {
           const gid = `gid://shopify/Product/${product.id}`;
+
+          if (dryRun) {
+            console.log(`  [DRY RUN] Would add tag "${SEE_IT_LIVE_TAG}" to ${product.title} (${gid})`);
+            successCount++;
+            continue;
+          }
           
           const response = await fetch(`https://${shopDomain}/admin/api/2024-10/graphql.json`, {
             method: 'POST',
@@ -127,8 +138,12 @@ async function main() {
     }
 
     console.log(`\n${'='.repeat(50)}`);
-    console.log(`✅ Success: ${successCount}`);
-    console.log(`❌ Failed: ${failCount}`);
+    if (dryRun) {
+      console.log(`✅ Planned tags: ${successCount}`);
+    } else {
+      console.log(`✅ Success: ${successCount}`);
+      console.log(`❌ Failed: ${failCount}`);
+    }
     console.log(`${'='.repeat(50)}\n`);
 
   } catch (error) {

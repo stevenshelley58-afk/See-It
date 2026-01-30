@@ -114,6 +114,7 @@ model PromptVersion {
   createdBy   String    @map("created_by")
   activatedAt DateTime? @map("activated_at")
   activatedBy String?   @map("activated_by")
+  previousActiveVersionId String? @map("previous_active_version_id")
 
   promptDefinition PromptDefinition @relation(fields: [promptDefinitionId], references: [id], onDelete: Cascade)
   llmCalls         LLMCall[]
@@ -307,5 +308,5 @@ model PromptAuditLog {
   @@index([shopId, createdAt])
   @@index([shopId, targetType, targetId])
   @@index([shopId, action])
-  @@map("prompt_audit_log")
+  @@map("prompt_audit_logs")
 }

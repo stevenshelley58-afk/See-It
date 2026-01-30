@@ -735,10 +735,11 @@ export interface ExternalRunDetail {
  */
 export async function getRunDetailExternal(
   runId: string,
+  shopId: string,
   revealEnabled: boolean
 ): Promise<ExternalRunDetail | null> {
   const run = await prisma.compositeRun.findFirst({
-    where: { id: runId },
+    where: { id: runId, shopId },
     include: {
       shop: {
         select: { shopDomain: true },
@@ -865,10 +866,11 @@ export interface ExternalEvent {
  */
 export async function getRunEventsExternal(
   runId: string,
+  shopId: string,
   revealEnabled: boolean
 ): Promise<{ events: ExternalEvent[] }> {
   const events = await prisma.monitorEvent.findMany({
-    where: { runId },
+    where: { runId, shopId },
     orderBy: { ts: "asc" },
   });
 
@@ -932,10 +934,11 @@ const SENSITIVE_ARTIFACT_TYPES = new Set([
  */
 export async function getRunArtifactsExternal(
   runId: string,
+  shopId: string,
   revealEnabled: boolean
 ): Promise<{ artifacts: ExternalArtifact[] }> {
   const artifacts = await prisma.monitorArtifact.findMany({
-    where: { runId },
+    where: { runId, shopId },
     orderBy: { ts: "asc" },
   });
 

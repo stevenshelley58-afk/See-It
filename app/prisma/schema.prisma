@@ -51,6 +51,8 @@ model Session {
   locale        String?
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
+
+  @@map("sessions")
 }
 
 model Shop {
@@ -650,5 +652,5 @@ model PromptAuditLog {
   @@index([shopId, createdAt])
   @@index([shopId, targetType, targetId])
   @@index([shopId, action])
-  @@map("prompt_audit_log")
+  @@map("prompt_audit_logs")
 }

@@ -29,6 +29,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const shopId = url.searchParams.get("shopId") || undefined;
     const includeTotal = url.searchParams.get("includeTotal") === "true";
 
+    if (!shopId) {
+      return jsonError("bad_request", 400, "Missing shopId", undefined, corsHeaders);
+    }
+
     // Parse and validate limit
     let limit = 20;
     if (limitParam) {

@@ -13,6 +13,15 @@ export function getRequestId(request: Request): string {
   if (existingId) {
     return existingId;
   }
+
+  const traceParent = request.headers.get("traceparent");
+  if (traceParent) {
+    const parts = traceParent.split("-");
+    if (parts.length >= 2 && /^[0-9a-f]{32}$/i.test(parts[1])) {
+      return parts[1];
+    }
+  }
+
   return generateRequestId();
 }
 

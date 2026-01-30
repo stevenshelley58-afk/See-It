@@ -54,10 +54,11 @@ export async function middleware(request: NextRequest) {
   // All other /api/* routes require auth
 
   // Get auth configuration
-  const jwtSecret = process.env.JWT_SECRET || process.env.MONITOR_API_TOKEN;
+  const jwtSecret = process.env.JWT_SECRET;
   const monitorApiToken = process.env.MONITOR_API_TOKEN;
+  const isTestEnv = process.env.NODE_ENV === "test";
 
-  if (!jwtSecret && !monitorApiToken) {
+  if (!jwtSecret && !monitorApiToken && !isTestEnv) {
     console.error("[Middleware] No JWT_SECRET or MONITOR_API_TOKEN configured");
     return new NextResponse(
       JSON.stringify({
@@ -73,16 +74,11 @@ export async function middleware(request: NextRequest) {
 
   // Implicit auth fallback: if no Authorization header, check if implicit auth is enabled
   if (!authHeader) {
-    // Check if implicit dashboard auth is allowed
-    const allowImplicitAuth =
-      process.env.NODE_ENV !== "production" ||
-      process.env.MONITOR_ALLOW_IMPLICIT_DASHBOARD_AUTH === "true";
-
-    if (allowImplicitAuth && monitorApiToken) {
-      // Create admin session using MONITOR_API_TOKEN (same as ApiKey branch)
+    if (isTestEnv && monitorApiToken) {
+      // Test-only bypass for integration tests
       const session = {
-        actor: "dashboard@see-it.app",
-        actorName: "Dashboard User",
+        actor: "dashboard@test",
+        actorName: "Test Harness",
         role: "admin" as const,
         allowedShops: [] as string[],
         hasFullAccess: true,
@@ -99,7 +95,6 @@ export async function middleware(request: NextRequest) {
       });
     }
 
-    // No implicit auth allowed or no token configured
     return new NextResponse(
       JSON.stringify({
         error: "unauthorized",
@@ -112,7 +107,17 @@ export async function middleware(request: NextRequest) {
   // Handle Bearer token (JWT)
   if (authHeader.startsWith("Bearer ")) {
     const token = authHeader.slice(7);
-    const result = await verifyBearerToken(token, jwtSecret!);
+    if (!jwtSecret) {
+      return new NextResponse(
+        JSON.stringify({
+          error: "unauthorized",
+          message: "JWT authentication not configured",
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const result = await verifyBearerToken(token, jwtSecret);
 
     if (!result.success) {
       return new NextResponse(

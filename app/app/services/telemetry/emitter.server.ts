@@ -9,6 +9,47 @@ import prisma from "~/db.server";
 import { Severity, SCHEMA_VERSION, MAX_PAYLOAD_SIZE } from "./constants";
 import type { TelemetryEventInput } from "./types";
 
+const SENSITIVE_KEYS = new Set([
+  "apikey",
+  "api_key",
+  "token",
+  "password",
+  "secret",
+  "authorization",
+]);
+
+/**
+ * Recursively scrub common secret fields from objects/arrays.
+ */
+function scrubSecrets<T>(value: T, visited = new Set<unknown>()): T {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  if (visited.has(value)) {
+    return value;
+  }
+
+  visited.add(value);
+
+  if (Array.isArray(value)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return value.map((item) => scrubSecrets(item, visited)) as any;
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    const lower = key.toLowerCase();
+    if (SENSITIVE_KEYS.has(lower)) {
+      result[key] = "[REDACTED]";
+      continue;
+    }
+    result[key] = scrubSecrets(val, visited);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return result as any;
+}
+
 /**
  * Emit a telemetry event. NEVER throws. Fire and forget.
  *
@@ -67,6 +108,9 @@ export function emitError(
 async function doEmit(input: TelemetryEventInput): Promise<void> {
   let payload = input.payload || {};
   let overflowArtifactId: string | undefined;
+
+  // Redact secrets before any further processing
+  payload = scrubSecrets(payload);
 
   // Truncate payload if too large
   const payloadStr = JSON.stringify(payload);

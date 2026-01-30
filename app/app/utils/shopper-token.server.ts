@@ -7,7 +7,15 @@ import * as crypto from "crypto";
  * Tokens are scoped to shop + email and are opaque to clients.
  */
 
-const TOKEN_SECRET = process.env.SHOPPER_TOKEN_SECRET || process.env.SHOPIFY_API_SECRET || "fallback-secret-change-in-production";
+function requireTokenSecret(): string {
+    const secret = process.env.SHOPPER_TOKEN_SECRET;
+    if (!secret || secret.trim() === "") {
+        throw new Error("SHOPPER_TOKEN_SECRET is required to issue shopper tokens");
+    }
+    return secret;
+}
+
+const TOKEN_SECRET = requireTokenSecret();
 const TOKEN_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
 
 export interface ShopperTokenPayload {

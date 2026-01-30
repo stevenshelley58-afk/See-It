@@ -18,6 +18,9 @@
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const args = process.argv.slice(2);
+const dryRun = args.includes('--dry-run');
+const targetShopDomain = args.find(arg => !arg.startsWith('--'));
 
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2025-01';
 const BATCH_SIZE = 50; // Shopify allows up to 50 nodes per query
@@ -109,6 +112,12 @@ async function backfillShop(shopDomain) {
 
   console.log(`   📊 Found ${assetsWithNullType.length} records with null productType`);
 
+  const pendingByProduct = new Map();
+  for (const asset of assetsWithNullType) {
+    const key = String(asset.productId);
+    pendingByProduct.set(key, (pendingByProduct.get(key) || 0) + 1);
+  }
+
   // Extract unique product IDs
   const uniqueProductIds = [...new Set(assetsWithNullType.map(a => a.productId))];
   console.log(`   🔍 Fetching productType for ${uniqueProductIds.length} unique products`);
@@ -146,21 +155,31 @@ async function backfillShop(shopDomain) {
         const productType = productTypeMap.get(String(productId));
 
         // Update all assets with this productId
-        const result = await prisma.productAsset.updateMany({
-          where: {
-            shopId: shop.id,
-            productId: String(productId),
-            productType: null, // Only update if still null
-          },
-          data: {
-            productType: productType,
-          },
-        });
+        if (dryRun) {
+          const pending = pendingByProduct.get(String(productId)) || 0;
+          updated += pending;
+          console.log(
+            `   [DRY RUN] Would update ${pending} assets for product ${productId} -> ${productType ?? "(null)"}`
+          );
+        } else {
+          const result = await prisma.productAsset.updateMany({
+            where: {
+              shopId: shop.id,
+              productId: String(productId),
+              productType: null, // Only update if still null
+            },
+            data: {
+              productType: productType,
+            },
+          });
 
-        updated += result.count;
+          updated += result.count;
+        }
       }
 
-      console.log(`   ✅ Batch ${batchNum} complete (${updated} total updated so far)`);
+      console.log(
+        `   ✅ Batch ${batchNum} complete (${updated} total ${dryRun ? "simulated" : "updated"} so far)`
+      );
 
       // Small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -177,10 +196,11 @@ async function backfillShop(shopDomain) {
 }
 
 async function main() {
-  const targetShopDomain = process.argv[2];
-
   try {
     if (targetShopDomain) {
+      if (dryRun) {
+        console.log('[DRY RUN] No database changes will be written.');
+      }
       // Backfill specific shop
       const result = await backfillShop(targetShopDomain);
       console.log(`\n🎉 Backfill complete for ${result.shopDomain}`);
@@ -189,9 +209,12 @@ async function main() {
         console.log(`   Errors: ${result.errors.length}`);
         result.errors.forEach(err => console.log(`     - ${err}`));
       }
-    } else {
-      // Backfill all shops
-      console.log('🌍 Backfilling all shops...\n');
+  } else {
+    // Backfill all shops
+    console.log('🌍 Backfilling all shops...\n');
+    if (dryRun) {
+      console.log('[DRY RUN] No database changes will be written.\n');
+    }
 
       const shops = await prisma.shop.findMany({
         select: { shopDomain: true },

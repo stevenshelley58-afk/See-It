@@ -5,6 +5,7 @@
 
 import { createHash } from "crypto";
 import prisma from "~/db.server";
+import { canonicalize } from "../see-it-now/hashing.server";
 import type {
   PromptName,
   ResolvedPrompt as CanonicalResolvedPrompt,
@@ -107,7 +108,13 @@ function computeResolutionHash(
   model: string,
   params: Record<string, unknown>
 ): string {
-  return sha256(JSON.stringify({ messages, model, params }));
+  return sha256(
+    canonicalize({
+      messages,
+      model,
+      params,
+    })
+  );
 }
 
 /**
@@ -121,7 +128,13 @@ export function computeRequestHash(
 ): string {
   // CRITICAL: Sort imageRefs for stable hashing regardless of input order
   const sortedImageRefs = [...imageRefs].sort();
-  return sha256(JSON.stringify({ promptName, resolutionHash, imageRefs: sortedImageRefs }));
+  return sha256(
+    canonicalize({
+      promptName,
+      resolutionHash,
+      imageRefs: sortedImageRefs,
+    })
+  );
 }
 
 // =============================================================================

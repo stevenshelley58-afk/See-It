@@ -68,6 +68,12 @@ npm run deploy
 2. **Vercel Dashboard**: Check build logs
 3. **Monitor Dashboard**: Visit https://see-it-monitor.vercel.app to verify health
 
+## Correlation IDs
+
+- Requests may supply `X-Request-ID`; if absent we fall back to the W3C `traceparent` header and generate an ID otherwise.
+- Structured logs created with `createLogContext()` now include both `requestId` and `traceId` (defaults to the same value) so tracing and logs stay aligned.
+- When proxying or making downstream calls, forward `traceparent`/`X-Request-ID` headers to preserve end-to-end correlation.
+
 ## Troubleshooting
 
 ### Build Fails on Schema Sync

@@ -117,9 +117,13 @@ export async function checkRateLimitAsync(roomSessionId: string): Promise<{
 
         return { allowed: true };
     } catch (error) {
-        // If DB check fails, allow request but log the error
+        // Fail closed on persistence errors to prevent unlimited traffic
         console.error("[RateLimit] Database check failed:", error);
-        return { allowed: true };
+        return {
+            allowed: false,
+            retryAfterMs: RATE_LIMIT_WINDOW_MS,
+            reason: "Rate limit verification unavailable",
+        };
     }
 }
 

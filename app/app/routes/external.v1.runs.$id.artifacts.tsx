@@ -27,7 +27,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       return jsonError("bad_request", 400, "Missing run ID", undefined, corsHeaders);
     }
 
-    const result = await getRunArtifactsExternal(runId, revealEnabled);
+    const shopId = new URL(request.url).searchParams.get("shopId");
+    if (!shopId) {
+      return jsonError("bad_request", 400, "Missing shopId", undefined, corsHeaders);
+    }
+
+    const result = await getRunArtifactsExternal(runId, shopId, revealEnabled);
 
     return jsonWithCors(result, 200, corsHeaders);
   } catch (error) {

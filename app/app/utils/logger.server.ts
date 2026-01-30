@@ -24,6 +24,7 @@ type LogContext = {
   productId?: string | null;
   assetId?: string | null;
   requestId: string;
+   traceId?: string;
   stage: string;
   [key: string]: unknown;
 };
@@ -160,14 +161,21 @@ export function createLogContext(
   stage: string,
   overrides?: Partial<LogContext>
 ): LogContext {
+  const traceId = overrides?.traceId ?? requestId;
+  const effectiveRequestId = overrides?.requestId ?? traceId ?? requestId;
+
   return {
     flow,
-    requestId,
+    requestId: effectiveRequestId,
+    traceId,
     stage,
     shopId: null,
     productId: null,
     assetId: null,
     ...overrides,
+    // Ensure requestId/traceId are never undefined even if overrides lacked them
+    requestId: overrides?.requestId ?? effectiveRequestId,
+    traceId: overrides?.traceId ?? traceId,
   };
 }
 
