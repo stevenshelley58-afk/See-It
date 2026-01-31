@@ -172,6 +172,15 @@ PLACEMENT INSTRUCTION REQUIREMENTS:
 - V07 emphasizes multiple scale references
 - V08 is the conservative escape hatch
 
+CRITICAL - EACH INSTRUCTION MUST BE UNIQUE:
+- Each placementInstruction MUST describe a DIFFERENT placement location, scale, or approach
+- V01-V03 vary SCALE at the PRIMARY location
+- V04-V05 use a SECONDARY location (different wall, corner, or area)
+- V06 uses an ALTERNATIVE anchor point
+- V07-V08 are special cases
+- DO NOT copy or paraphrase the same instruction across variants
+- If a room only has one valid placement spot, vary scale and camera framing significantly
+
 Output JSON only:
 {
   "productDescription": "string",

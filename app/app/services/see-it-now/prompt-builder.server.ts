@@ -179,6 +179,32 @@ export async function buildPlacementSet(args: BuildPlacementSetInput): Promise<P
       );
     }
 
+    // Validate variant IDs are V01-V08
+    const expectedIds = ['V01', 'V02', 'V03', 'V04', 'V05', 'V06', 'V07', 'V08'];
+    const actualIds = placementSet.variants.map(v => v.id);
+    const missingIds = expectedIds.filter(id => !actualIds.includes(id));
+    if (missingIds.length > 0) {
+      throw new Error(`Missing variant IDs: ${missingIds.join(', ')}`);
+    }
+
+    // Validate each variant has a non-empty placementInstruction
+    for (const variant of placementSet.variants) {
+      if (!variant.placementInstruction || variant.placementInstruction.trim().length < 20) {
+        throw new Error(`Variant ${variant.id} has invalid placementInstruction (too short or empty)`);
+      }
+    }
+
+    // Validate placementInstructions are sufficiently unique
+    const instructions = placementSet.variants.map(v => v.placementInstruction.toLowerCase().trim());
+    const uniqueInstructions = new Set(instructions);
+    if (uniqueInstructions.size < 6) {
+      // Allow some similarity but require at least 6 unique instructions
+      logger.warn(
+        { ...logContext, stage: "validation" },
+        `Low instruction diversity: ${uniqueInstructions.size}/8 unique. Some variants may render similarly.`
+      );
+    }
+
     // Validate scale guardrails line exists (fail-hard)
     if (!placementSet.productDescription.toLowerCase().includes("relative scale")) {
       throw new Error("productDescription missing required 'Relative scale' line");

@@ -11,7 +11,7 @@ import { StorageService } from "~/services/storage.server";
 import prisma from "~/db.server";
 import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
 import { findClosestGeminiRatioLabel } from "~/services/gemini-aspect-ratio.server";
-import { resolvePromptText, buildPipelineConfigSnapshot } from "../prompt-control/prompt-resolver.server";
+import { buildPipelineConfigSnapshot, renderTemplate } from "../prompt-control/prompt-resolver.server";
 import { startCall, completeCallSuccess, completeCallFailure } from "../prompt-control/llm-call-tracker.server";
 import { computeCallIdentityHash, computeDedupeHash, computePipelineConfigHash, computeImageHash } from "./hashing.server";
 import type {
@@ -78,6 +78,14 @@ export type RenderAllVariantsCallbacks = {
 // Internal Types
 // =============================================================================
 
+interface CachedPromptTemplates {
+  systemTemplate: string | null;
+  userTemplate: string | null;
+  model: string;
+  params: Record<string, unknown>;
+  versionId: string;
+}
+
 interface VariantRenderContext {
   runId: string;
   shopId: string;
@@ -86,6 +94,7 @@ interface VariantRenderContext {
   productImage: CompositeInput['productImage'];
   roomImage: CompositeInput['roomImage'];
   pipelineConfigSnapshot: PipelineConfigSnapshot;
+  cachedTemplates: CachedPromptTemplates;
   logContext: ReturnType<typeof createLogContext>;
 }
 
@@ -97,10 +106,13 @@ async function renderSingleVariant(
   ctx: VariantRenderContext
 ): Promise<CompositeVariantResult> {
   const startTime = Date.now();
-  const { runId, shopId, variant, productDescription, productImage, roomImage, pipelineConfigSnapshot, logContext } = ctx;
+  const { runId, shopId, variant, productDescription, productImage, roomImage, pipelineConfigSnapshot, cachedTemplates, logContext } = ctx;
   const variantLogContext = { ...logContext, variantId: variant.id };
 
-  logger.info(variantLogContext, `Rendering variant ${variant.id}`);
+  logger.info(
+    { ...variantLogContext, instructionPreview: variant.placementInstruction.slice(0, 100) },
+    `Rendering variant ${variant.id}`
+  );
 
   const roomWidth = roomImage.meta?.width;
   const roomHeight = roomImage.meta?.height;
@@ -111,13 +123,14 @@ async function renderSingleVariant(
   }
   const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-  // Resolve composite_instruction prompt from DB
-  const resolvedPrompt = await resolvePromptText(shopId, 'composite_instruction', {
-    productDescription: productDescription,
+  // Render prompt using cached templates (avoids DB query per variant)
+  const variables = {
+    productDescription,
     placementInstruction: variant.placementInstruction,
-  });
-
-  const finalPrompt = resolvedPrompt.promptText;
+  };
+  const renderedSystem = renderTemplate(cachedTemplates.systemTemplate, variables);
+  const renderedUser = renderTemplate(cachedTemplates.userTemplate, variables);
+  const finalPrompt = [renderedSystem, renderedUser].filter(Boolean).join('\n\n');
 
   // Build content parts
   // Order: [prepared_product_image, customer_room_image, prompt]
@@ -191,7 +204,7 @@ async function renderSingleVariant(
   // Build final merged provider config (what actually gets sent)
   const finalConfig: any = {
     responseModalities: ["TEXT", "IMAGE"] as any,
-    ...(resolvedPrompt.params ?? {}),
+    ...(cachedTemplates.params ?? {}),
   };
   if (aspectRatio) {
     const existing =
@@ -204,7 +217,7 @@ async function renderSingleVariant(
   // Build DebugPayload (must match final config)
   const debugPayload: DebugPayload = {
     promptText: finalPrompt,
-    model: resolvedPrompt.model,
+    model: cachedTemplates.model,
     params: finalConfig,
     images: preparedImages,
     aspectRatioSource: aspectRatio ? 'ROOM_IMAGE_LAST' : 'UNKNOWN',
@@ -213,7 +226,7 @@ async function renderSingleVariant(
   // Compute hashes from final merged config (what actually gets sent)
   const callIdentityHash = computeCallIdentityHash({
     promptText: finalPrompt,
-    model: resolvedPrompt.model,
+    model: cachedTemplates.model,
     params: finalConfig,
   });
   const dedupeHash = computeDedupeHash({
@@ -224,7 +237,7 @@ async function renderSingleVariant(
   // Build CallSummary
   const callSummary: CallSummary = {
     promptName: 'composite_instruction',
-    model: resolvedPrompt.model,
+    model: cachedTemplates.model,
     imageCount: 2,
     promptPreview: finalPrompt.slice(0, 200),
   };
@@ -236,7 +249,7 @@ async function renderSingleVariant(
     ownerId: runId,
     variantId: variant.id,
     promptName: 'composite_instruction',
-    promptVersionId: resolvedPrompt.versionId,
+    promptVersionId: cachedTemplates.versionId,
     callIdentityHash,
     dedupeHash,
     callSummary,
@@ -256,7 +269,7 @@ async function renderSingleVariant(
 
     const result = await Promise.race([
       client.models.generateContent({
-        model: resolvedPrompt.model,
+        model: cachedTemplates.model,
         contents: [{ role: "user", parts }],
         config: finalConfig,
       }),
@@ -356,7 +369,7 @@ async function renderSingleVariant(
       tokensOut,
       costEstimate,
       latencyMs,
-      providerModel: resolvedPrompt.model,
+      providerModel: cachedTemplates.model,
       providerRequestId,
       outputSummary,
     });
@@ -477,9 +490,16 @@ export async function renderAllVariants(
     throw new Error("Missing composite_instruction model in pipeline config snapshot");
   }
 
+  // Log variant instruction diversity for debugging
+  const instructionPreviews = input.placementSet.variants.map(v => ({
+    id: v.id,
+    preview: v.placementInstruction.slice(0, 60),
+  }));
+  const uniqueInstructions = new Set(input.placementSet.variants.map(v => v.placementInstruction));
+
   logger.info(
-    logContext,
-    `Starting render run with ${input.placementSet.variants.length} variants (model=${compositeModel})`
+    { ...logContext, uniqueInstructionCount: uniqueInstructions.size, instructionPreviews },
+    `Starting render run with ${input.placementSet.variants.length} variants (model=${compositeModel}, ${uniqueInstructions.size} unique instructions)`
   );
 
   // Emit composite started event
@@ -495,6 +515,36 @@ export async function renderAllVariants(
       model: compositeModel,
     },
   });
+
+  // ==========================================================================
+  // Load templates once for all variants (optimization: avoids 8 DB queries)
+  // ==========================================================================
+  const compositePromptConfig = pipelineConfigSnapshot.prompts['composite_instruction'];
+  if (!compositePromptConfig?.versionId) {
+    throw new Error("Missing composite_instruction version in pipeline config");
+  }
+
+  const promptVersion = await prisma.promptVersion.findUnique({
+    where: { id: compositePromptConfig.versionId },
+    select: {
+      systemTemplate: true,
+      userTemplate: true,
+      model: true,
+      params: true,
+    },
+  });
+
+  if (!promptVersion) {
+    throw new Error(`PromptVersion not found: ${compositePromptConfig.versionId}`);
+  }
+
+  const cachedTemplates: CachedPromptTemplates = {
+    systemTemplate: promptVersion.systemTemplate,
+    userTemplate: promptVersion.userTemplate,
+    model: promptVersion.model ?? compositeModel,
+    params: (promptVersion.params as Record<string, unknown>) ?? {},
+    versionId: compositePromptConfig.versionId,
+  };
 
   // ==========================================================================
   // Create CompositeRun record
@@ -542,6 +592,7 @@ export async function renderAllVariants(
       productImage: input.productImage,
       roomImage: input.roomImage,
       pipelineConfigSnapshot,
+      cachedTemplates,
       logContext,
     };
 
