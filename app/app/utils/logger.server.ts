@@ -166,8 +166,6 @@ export function createLogContext(
 
   return {
     flow,
-    requestId: effectiveRequestId,
-    traceId,
     stage,
     shopId: null,
     productId: null,

@@ -14,6 +14,44 @@ import type {
 } from "../see-it-now/types";
 
 // =============================================================================
+// Debug Payload Validation
+// =============================================================================
+
+function validateDebugPayload(payload: DebugPayload): string[] {
+  const issues: string[] = [];
+
+  if (!payload.promptText || payload.promptText.length === 0) {
+    issues.push("promptText is empty");
+  }
+
+  if (!payload.model || payload.model.length === 0) {
+    issues.push("model is not specified");
+  }
+
+  if (!payload.params || Object.keys(payload.params).length === 0) {
+    issues.push("params is empty");
+  }
+
+  // Check for unreplaced template variables
+  const unreplaced = payload.promptText.match(/\{\{[\w.]+\}\}/g);
+  if (unreplaced) {
+    issues.push(`Unreplaced variables: ${unreplaced.join(", ")}`);
+  }
+
+  // Validate images have required fields
+  for (const img of payload.images) {
+    if (!img.hash || img.hash.length !== 64) {
+      issues.push(`Image ${img.role} has invalid hash length (expected 64, got ${img.hash?.length})`);
+    }
+    if (!img.mimeType) {
+      issues.push(`Image ${img.role} missing mimeType`);
+    }
+  }
+
+  return issues;
+}
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -67,6 +105,12 @@ export async function startCall(input: StartCallInput): Promise<string> {
   }
   if (!input.callIdentityHash || input.callIdentityHash.length === 0) {
     throw new Error('callIdentityHash is required and cannot be empty');
+  }
+
+  // Validate debug payload
+  const debugIssues = validateDebugPayload(input.debugPayload);
+  if (debugIssues.length > 0) {
+    console.warn(`[LLMCallTracker] Debug payload issues: ${debugIssues.join("; ")}`);
   }
 
   const call = await prisma.lLMCall.create({

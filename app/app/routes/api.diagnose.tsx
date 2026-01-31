@@ -49,7 +49,7 @@ async function fetchDiagnostics(shopIdFilter: string | null) {
   });
 
   return json({
-    shops: shops.map((s) => ({
+    shops: shops.map((s: typeof shops[number]) => ({
       id: s.id.substring(0, 8) + "...",
       domain: s.shopDomain,
       plan: s.plan,
@@ -57,17 +57,17 @@ async function fetchDiagnostics(shopIdFilter: string | null) {
       productAssets: s._count.productAssets,
       roomSessions: s._count.roomSessions,
     })),
-    recentJobs: recentJobs.map((j) => ({
+    recentJobs: recentJobs.map((j: typeof recentJobs[number]) => ({
       id: j.id.substring(0, 8) + "...",
       shopDomain: j.shop?.shopDomain,
       status: j.status,
       createdAt: j.createdAt.toISOString(),
       productId: j.productId?.split("/").pop() || "N/A",
     })),
-    statusCounts: statusCounts.reduce<Record<string, number>>((acc, s) => {
+    statusCounts: statusCounts.reduce((acc: Record<string, number>, s: typeof statusCounts[number]) => {
       acc[s.status] = s._count;
       return acc;
-    }, {}),
+    }, {} as Record<string, number>),
   });
 }
 
