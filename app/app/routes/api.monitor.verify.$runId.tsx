@@ -3,7 +3,7 @@ import { authenticate } from "../shopify.server";
 import { traceDataFlow } from "~/services/telemetry/data-flow-tracer.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  await authenticate.admin(request);
   const { runId } = params;
 
   if (!runId) {

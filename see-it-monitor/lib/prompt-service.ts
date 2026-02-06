@@ -3,10 +3,10 @@
 // Based on PRD Section 5 specifications
 // =============================================================================
 
-import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { GoogleGenAI } from "@google/genai";
 import prisma from "./db";
+import { computeCanonicalHash, computeResolutionHash, computeTemplateHash } from "./hashing";
 import type {
   PromptSummary,
   VersionSummary,
@@ -30,28 +30,6 @@ const SYSTEM_TENANT_ID = "SYSTEM";
 // =============================================================================
 // Hashing Utilities
 // =============================================================================
-
-function sha256(data: string): string {
-  return createHash("sha256").update(data).digest("hex").slice(0, 16);
-}
-
-function computeTemplateHash(data: {
-  systemTemplate: string | null;
-  developerTemplate: string | null;
-  userTemplate: string | null;
-  model: string | null;
-  params: unknown;
-}): string {
-  return sha256(JSON.stringify(data));
-}
-
-function computeResolutionHash(
-  messages: PromptMessage[],
-  model: string,
-  params: Record<string, unknown>
-): string {
-  return sha256(JSON.stringify({ messages, model, params }));
-}
 
 // =============================================================================
 // Template Rendering
@@ -768,13 +746,11 @@ export async function testPrompt(
   });
 
   // 10. Create LLM call record
-  const requestHash = sha256(
-    JSON.stringify({
-      promptName,
-      resolutionHash,
-      imageRefs: [...(options.imageRefs ?? [])].sort(),
-    })
-  );
+  const requestHash = computeCanonicalHash({
+    promptName,
+    resolutionHash,
+    imageRefs: [...(options.imageRefs ?? [])].sort(),
+  });
 
   const llmCall = await prisma.lLMCall.create({
     data: {

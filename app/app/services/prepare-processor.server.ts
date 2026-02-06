@@ -4,10 +4,6 @@ import { logger, createLogContext, generateRequestId } from "../utils/logger.ser
 import { StorageService } from "./storage.server";
 import { incrementQuota } from "../quota.server";
 import { emitPrepEvent } from "./prep-events.server";
-import { extractStructuredFields, generateProductDescription } from "./description-writer.server";
-import { GoogleGenAI } from "@google/genai";
-import { Prisma } from "@prisma/client";
-import { getSeeItNowAllowedShops, isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 import { fetchShopifyProductForPrompt } from "./shopify-product.server";
 
 // NEW: See It Now 2-LLM pipeline imports
@@ -23,11 +19,6 @@ let isProcessing = false;
 // Configuration for retry logic
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 5000; // 5 seconds base delay
-
-// Legacy placement config generation is opt-in (default OFF).
-// This path uses ad-hoc prompt+parsing and should not run in production unless explicitly enabled.
-const ENABLE_LEGACY_PLACEMENT_CONFIG =
-    process.env.SEE_IT_ENABLE_LEGACY_PLACEMENT_CONFIG === "true";
 
 /**
  * Calculate exponential backoff delay

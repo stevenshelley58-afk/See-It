@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -36,6 +37,7 @@ import {
   getRun,
   getRunEvents,
   getRunArtifacts,
+  getArtifact,
   getRunLLMCalls,
   queryKeys,
 } from "@/lib/api";
@@ -464,12 +466,15 @@ function VariantCard({ variant, index, onClick }: VariantCardProps) {
       <CardContent className="p-3">
         <button onClick={onClick} className="w-full text-left">
           {/* Thumbnail */}
-          <div className="aspect-square bg-gray-100 rounded mb-3 overflow-hidden flex items-center justify-center">
+          <div className="relative aspect-square bg-gray-100 rounded mb-3 overflow-hidden flex items-center justify-center">
             {variant.imageUrl ? (
-              <img
+              <Image
                 src={variant.imageUrl}
                 alt={`Variant ${index + 1}`}
-                className="w-full h-full object-cover"
+                fill
+                sizes="200px"
+                className="object-cover"
+                unoptimized
               />
             ) : (
               <ImageIcon className="h-8 w-8 text-gray-300" />
@@ -541,12 +546,15 @@ function VariantModal({ variant, index, onClose, llmCalls, reveal }: VariantModa
     <Modal open={true} onClose={onClose} title={`Variant ${index + 1}`}>
       <div className="space-y-4">
         {/* Large Image */}
-        <div className="aspect-video bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
+        <div className="relative aspect-video bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center">
           {variant.imageUrl ? (
-            <img
+            <Image
               src={variant.imageUrl}
               alt={`Variant ${index + 1}`}
-              className="max-w-full max-h-full object-contain"
+              fill
+              sizes="(max-width: 1024px) 100vw, 800px"
+              className="object-contain"
+              unoptimized
             />
           ) : (
             <div className="text-center text-gray-400">
@@ -662,12 +670,47 @@ function VariantModal({ variant, index, onClose, llmCalls, reveal }: VariantModa
 interface EventRowProps {
   event: RunEvent;
   runStartTime: Date;
+  reveal: boolean;
 }
 
-function EventRow({ event, runStartTime }: EventRowProps) {
+function EventRow({ event, runStartTime, reveal }: EventRowProps) {
   const [expanded, setExpanded] = useState(false);
+  const [openingOverflow, setOpeningOverflow] = useState(false);
+  const [overflowError, setOverflowError] = useState<string | null>(null);
   const eventTime = new Date(event.ts);
   const offsetMs = eventTime.getTime() - runStartTime.getTime();
+  const canExpand = Boolean(event.payload) || Boolean(event.overflowArtifactId);
+
+  const handleOpenOverflow = async () => {
+    if (!event.overflowArtifactId) return;
+    setOverflowError(null);
+
+    if (!reveal) {
+      setOverflowError("Enable reveal to view overflow payload.");
+      return;
+    }
+
+    setOpeningOverflow(true);
+    try {
+      const artifact = await getArtifact(event.overflowArtifactId, true);
+      if (artifact.url) {
+        window.open(artifact.url, "_blank", "noopener,noreferrer");
+      } else {
+        setOverflowError("Overflow artifact URL not available.");
+      }
+    } catch (error: unknown) {
+      const message =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof (error as { message?: unknown }).message === "string"
+          ? String((error as { message: string }).message)
+          : "Failed to load overflow artifact.";
+      setOverflowError(message);
+    } finally {
+      setOpeningOverflow(false);
+    }
+  };
 
   return (
     <div className="border-b border-gray-100 last:border-0">
@@ -675,7 +718,7 @@ function EventRow({ event, runStartTime }: EventRowProps) {
         onClick={() => setExpanded(!expanded)}
         className="w-full px-3 py-2 flex items-center gap-3 text-left hover:bg-gray-50"
       >
-        {event.payload ? (
+        {canExpand ? (
           expanded ? (
             <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />
           ) : (
@@ -702,6 +745,12 @@ function EventRow({ event, runStartTime }: EventRowProps) {
           {event.type}
         </span>
 
+        {event.overflowArtifactId && (
+          <Badge variant="warning" className="shrink-0">
+            overflow
+          </Badge>
+        )}
+
         {event.variantId && (
           <span className="text-xs text-gray-400 font-mono shrink-0">
             {truncateId(event.variantId)}
@@ -709,11 +758,46 @@ function EventRow({ event, runStartTime }: EventRowProps) {
         )}
       </button>
 
-      {expanded && event.payload && (
-        <div className="px-3 pb-3 pl-10">
-          <pre className="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-48">
-            {JSON.stringify(event.payload, null, 2)}
-          </pre>
+      {expanded && (event.payload || event.overflowArtifactId) && (
+        <div className="px-3 pb-3 pl-10 space-y-2">
+          {event.payload && (
+            <pre className="text-xs bg-gray-50 p-2 rounded overflow-auto max-h-48">
+              {JSON.stringify(event.payload, null, 2)}
+            </pre>
+          )}
+
+          {event.overflowArtifactId && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="warning">Overflow payload</Badge>
+              <span className="text-xs text-gray-500">
+                Full payload stored as artifact
+              </span>
+              <span className="text-xs text-gray-400 font-mono">
+                {truncateId(event.overflowArtifactId, 16)}
+              </span>
+              <CopyButton value={event.overflowArtifactId} label="Copy ID" />
+
+              {reveal ? (
+                <button
+                  type="button"
+                  onClick={handleOpenOverflow}
+                  disabled={openingOverflow}
+                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline disabled:text-gray-400 disabled:no-underline"
+                >
+                  {openingOverflow ? "Opening..." : "Open"}
+                  <ExternalLink className="h-3 w-3" />
+                </button>
+              ) : (
+                <span className="text-xs text-gray-400">
+                  Enable reveal to view
+                </span>
+              )}
+
+              {overflowError && (
+                <span className="text-xs text-red-600">{overflowError}</span>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -727,6 +811,7 @@ function EventRow({ event, runStartTime }: EventRowProps) {
 interface TimelinePanelProps {
   events: RunEvent[];
   runStartTime: Date;
+  reveal: boolean;
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
@@ -735,6 +820,7 @@ interface TimelinePanelProps {
 function TimelinePanel({
   events,
   runStartTime,
+  reveal,
   isLoading,
   isError,
   onRetry,
@@ -759,14 +845,19 @@ function TimelinePanel({
             No events recorded
           </p>
         </CardContent>
-      ) : (
-        <div className="divide-y divide-gray-100">
-          {sortedEvents.map((event) => (
-            <EventRow key={event.id} event={event} runStartTime={runStartTime} />
-          ))}
-        </div>
-      )}
-    </Card>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {sortedEvents.map((event) => (
+              <EventRow
+                key={event.id}
+                event={event}
+                runStartTime={runStartTime}
+                reveal={reveal}
+              />
+            ))}
+          </div>
+        )}
+      </Card>
   );
 }
 
@@ -848,12 +939,16 @@ function ArtifactsPanel({
                       : "-"}
                   </td>
                   <td className="px-4 py-2">
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-gray-500 font-mono">
-                        {truncateId(artifact.sha256, 12)}
-                      </span>
-                      <CopyButton value={artifact.sha256} />
-                    </div>
+                    {artifact.sha256 ? (
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-500 font-mono">
+                          {truncateId(artifact.sha256, 12)}
+                        </span>
+                        <CopyButton value={artifact.sha256} />
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
                   </td>
                   <td className="px-4 py-2">
                     {artifact.url ? (
@@ -1742,6 +1837,7 @@ export default function RunPlaybackPage() {
         <TimelinePanel
           events={eventsQuery.data?.events || []}
           runStartTime={run ? new Date(run.createdAt) : new Date()}
+          reveal={reveal}
           isLoading={eventsQuery.isLoading}
           isError={eventsQuery.isError}
           onRetry={() => eventsQuery.refetch()}

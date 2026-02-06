@@ -16,7 +16,7 @@ import { getCorsHeaders } from "../services/cors.server";
 import { downloadRawImage } from "../services/image-download.server";
 
 // Import model config from centralized source
-import { GEMINI_IMAGE_MODEL_PRO, GEMINI_IMAGE_MODEL_FAST } from "~/config/ai-models.config";
+import { GEMINI_IMAGE_MODEL_PRO } from "~/config/ai-models.config";
 
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 import { logSeeItNowEvent } from "~/services/session-logger.server";

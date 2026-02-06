@@ -5,6 +5,7 @@ import type {
   RunDetail,
   RunEventsResponse,
   RunArtifactsResponse,
+  RunArtifact,
   ShopsListResponse,
   ShopsParams,
   ShopDetail,
@@ -111,6 +112,16 @@ export async function getRunArtifacts(
   reveal?: boolean
 ): Promise<RunArtifactsResponse> {
   return fetchApi<RunArtifactsResponse>(`runs/${id}/artifacts`, { reveal });
+}
+
+/**
+ * Get a single artifact by ID
+ */
+export async function getArtifact(
+  id: string,
+  reveal?: boolean
+): Promise<RunArtifact> {
+  return fetchApi<RunArtifact>(`artifacts/${id}`, { reveal });
 }
 
 /**

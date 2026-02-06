@@ -10,4 +10,28 @@ module.exports = {
   globals: {
     shopify: "readonly"
   },
+  settings: {
+    jest: {
+      version: 29,
+    },
+  },
+  rules: {
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      {
+        argsIgnorePattern: "^_",
+        varsIgnorePattern: "^_",
+        caughtErrorsIgnorePattern: "^_",
+      },
+    ],
+  },
+  overrides: [
+    {
+      files: ["**/*.test.{ts,tsx,js,jsx}", "**/*.spec.{ts,tsx,js,jsx}"],
+      rules: {
+        // Vitest patterns often require `vi.mock()` before importing the module under test.
+        "import/first": "off",
+      },
+    },
+  ],
 };

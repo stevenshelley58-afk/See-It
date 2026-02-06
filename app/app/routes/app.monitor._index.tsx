@@ -11,6 +11,8 @@ import {
   useSearchParams,
   useNavigate,
   useRevalidator,
+  useRouteError,
+  isRouteErrorResponse,
 } from "@remix-run/react";
 import { useEffect, useCallback, useState } from "react";
 import { authenticate } from "../shopify.server";
@@ -33,7 +35,6 @@ import {
   Banner,
   BlockStack,
 } from "@shopify/polaris";
-import { useRouteError, isRouteErrorResponse } from "@remix-run/react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);

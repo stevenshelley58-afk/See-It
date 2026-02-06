@@ -13,18 +13,20 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
 import { Resource } from "@opentelemetry/resources";
 // semantic-conventions is CommonJS, must use default import
 import semconv from "@opentelemetry/semantic-conventions";
-const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } = semconv as any;
-const ATTR_DEPLOYMENT_ENVIRONMENT_NAME: string =
-  (semconv as any).ATTR_DEPLOYMENT_ENVIRONMENT_NAME ||
-  "deployment.environment.name";
 // prisma/instrumentation is also CommonJS
 import prismaInstr from "@prisma/instrumentation";
-const { PrismaInstrumentation } = prismaInstr;
 import { trace, context, SpanStatusCode, type Span } from "@opentelemetry/api";
 import * as grpc from "@grpc/grpc-js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+
+const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } = semconv as any;
+const ATTR_DEPLOYMENT_ENVIRONMENT_NAME: string =
+  (semconv as any).ATTR_DEPLOYMENT_ENVIRONMENT_NAME ||
+  "deployment.environment.name";
+
+const { PrismaInstrumentation } = prismaInstr;
 
 // Re-export for use in other modules
 export { trace, context, SpanStatusCode, type Span };

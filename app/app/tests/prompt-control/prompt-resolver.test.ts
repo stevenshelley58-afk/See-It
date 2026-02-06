@@ -192,11 +192,6 @@ describe("Prompt Resolver", () => {
     it("should include blocked prompts with reasons in snapshot", async () => {
       const shopId = "shop-1";
 
-      const runtimeConfig: RuntimeConfigSnapshot = {
-        ...createDefaultRuntimeConfig(),
-        disabledPrompts: ["disabled_prompt"],
-      };
-
       mockPrisma.shopRuntimeConfig.findUnique.mockResolvedValue({
         shopId,
         disabledPromptNames: ["disabled_prompt"],

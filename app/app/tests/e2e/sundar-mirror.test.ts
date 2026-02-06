@@ -90,7 +90,6 @@ describe("Detailed Sundar Mirror - End to End", () => {
   it("should have expected product dimensions reference", () => {
     // Sundar mirror is a large decorative mirror
     // Expected scale class should be large or oversized
-    const expectedScaleClasses = ["large", "oversized", "architectural"];
     const productTitle = sampleProduct.title.toLowerCase();
     
     // Detailed Sundar Mirror is a substantial piece
@@ -100,12 +99,6 @@ describe("Detailed Sundar Mirror - End to End", () => {
 
   it("should validate material profile extraction", () => {
     // Reclaimed teak should be identified as primary material
-    const expectedMaterialProfile = {
-      primary: "reclaimed_teak",
-      sheen: expect.stringMatching(/matte|satin|gloss|unknown/),
-      transparency: "opaque",
-    };
-    
     expect(sampleProduct.tags).toContain("reclaimed_teak");
     expect(sampleProduct.description.toLowerCase()).toContain("reclaimed");
     expect(sampleProduct.description.toLowerCase()).toContain("teak");

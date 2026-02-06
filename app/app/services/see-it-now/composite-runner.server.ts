@@ -18,9 +18,7 @@ import type {
   CompositeInput,
   CompositeRunResult,
   CompositeVariantResult,
-  PlacementSet,
   PlacementVariant,
-  ProductFacts,
   DebugPayload,
   CallSummary,
   OutputSummary,
@@ -28,9 +26,7 @@ import type {
   WaterfallMs,
   RunTotals,
   PipelineConfigSnapshot,
-  ImageMeta,
   RunStatus,
-  VariantStatus,
 } from "./types";
 
 const VARIANT_TIMEOUT_MS = 45000; // 45 seconds per variant
@@ -97,7 +93,7 @@ async function renderSingleVariant(
   ctx: VariantRenderContext
 ): Promise<CompositeVariantResult> {
   const startTime = Date.now();
-  const { runId, shopId, variant, productDescription, productImage, roomImage, pipelineConfigSnapshot, logContext } = ctx;
+  const { runId, shopId, variant, productDescription, productImage, roomImage, logContext } = ctx;
   const variantLogContext = { ...logContext, variantId: variant.id };
 
   logger.info(variantLogContext, `Rendering variant ${variant.id}`);

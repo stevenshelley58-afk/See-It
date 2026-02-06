@@ -7,7 +7,7 @@ import { GoogleGenAI } from "@google/genai";
 import { logger, createLogContext } from "~/utils/logger.server";
 import { getMaterialRulesForPrompt } from "~/config/prompts/material-behaviors.config";
 import { getVariantIntentsForPrompt } from "~/config/prompts/variant-intents.config";
-import type { ProductFacts, PlacementSet, PlacementVariant, DebugPayload, CallSummary, OutputSummary } from "./types";
+import type { ProductFacts, PlacementSet, DebugPayload, CallSummary, OutputSummary } from "./types";
 import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
 import { resolvePromptText } from "../prompt-control/prompt-resolver.server";
 import { startCall, completeCallSuccess, completeCallFailure } from "../prompt-control/llm-call-tracker.server";

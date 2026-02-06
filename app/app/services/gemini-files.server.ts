@@ -138,8 +138,8 @@ export async function uploadToGeminiFiles(
         if (uploadResult.expirationTime) {
             expiresAt = new Date(uploadResult.expirationTime);
         } else {
-            // Fallback: calculate 48 hours from now
-            expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+            // Fallback: assume 48h validity, minus safety buffer
+            expiresAt = new Date(Date.now() + GEMINI_FILE_VALIDITY_HOURS * 60 * 60 * 1000);
         }
 
         logger.info(

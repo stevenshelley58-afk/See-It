@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PLANS } from "../billing";
 import pkg from "../../package.json" with { type: "json" };
-import { GEMINI_IMAGE_MODEL_PRO, MODEL_FOR_COMPOSITING } from "../config/ai-models.config";
+import { MODEL_FOR_COMPOSITING } from "../config/ai-models.config";
 import { PageShell, Card, Button } from "../components/ui";
 import { useEffect, useState } from "react";
 

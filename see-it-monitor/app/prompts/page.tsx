@@ -324,7 +324,7 @@ export default function PromptsPage() {
     queryFn: () => getPrompts(selectedShopId),
   });
 
-  const prompts = data?.prompts ?? [];
+  const prompts = useMemo(() => data?.prompts ?? [], [data?.prompts]);
 
   // Filter prompts based on search and status filter
   const filteredPrompts = useMemo(() => {

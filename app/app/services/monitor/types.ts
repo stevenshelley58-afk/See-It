@@ -124,6 +124,7 @@ export interface EventV1 {
   severity: string;
   variantId: string | null;
   payload: Record<string, unknown>;
+  overflowArtifactId?: string | null;
 }
 
 export interface EventListResponseV1 {

@@ -6,7 +6,12 @@
  */
 
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useRevalidator } from "@remix-run/react";
+import {
+  useLoaderData,
+  useRevalidator,
+  useRouteError,
+  isRouteErrorResponse,
+} from "@remix-run/react";
 import { useEffect } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -23,7 +28,6 @@ import {
   Banner,
   Button,
 } from "@shopify/polaris";
-import { useRouteError, isRouteErrorResponse } from "@remix-run/react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);

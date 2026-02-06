@@ -4,7 +4,7 @@ import crypto from "crypto";
 import sharp from "sharp";
 import { getGcsClient, GCS_BUCKET } from "../utils/gcs-client.server";
 import { logger, createLogContext } from "../utils/logger.server";
-import { validateShopifyUrl, validateTrustedUrl } from "../utils/validate-shopify-url.server";
+import { validateTrustedUrl } from "../utils/validate-shopify-url.server";
 import { uploadToGeminiFiles, isGeminiFileValid, type GeminiFileInfo } from "./gemini-files.server";
 import { photoroomRemoveBackground } from "./photoroom.server";
 import { findClosestGeminiRatio } from "./gemini-aspect-ratio.server";
@@ -143,13 +143,13 @@ function isRetryableGeminiError(error: unknown): boolean {
  * Wrap a promise with a timeout
  * @param promise The promise to wrap
  * @param timeoutMs Timeout in milliseconds
- * @param operation Description of the operation for error messages
+ * @param _operation Description of the operation for error messages
  */
-function withTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number,
-    operation: string = "operation"
-): Promise<T> {
+ function withTimeout<T>(
+     promise: Promise<T>,
+     timeoutMs: number,
+     _operation: string = "operation"
+ ): Promise<T> {
     let timeoutId: NodeJS.Timeout | undefined;
 
     const timeoutPromise = new Promise<never>((_, reject) => {

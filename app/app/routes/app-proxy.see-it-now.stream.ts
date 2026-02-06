@@ -9,8 +9,6 @@ import { checkRateLimit } from "../rate-limit.server";
 import { StorageService } from "../services/storage.server";
 import { logger, createLogContext } from "../utils/logger.server";
 import { getRequestId } from "../utils/request-context.server";
-import sharp from "sharp";
-import crypto from "crypto";
 import { isSeeItNowAllowedShop } from "~/utils/see-it-now-allowlist.server";
 import { emit, EventSource, EventType, Severity } from "~/services/telemetry";
 import { getCorsHeaders } from "../services/cors.server";
@@ -21,9 +19,6 @@ import {
   validateMagicBytes,
 } from "../services/gemini-files.server";
 
-const FILES_API_SAFE_MODE_AVOIDABLE_DOWNLOAD_EVENT_TYPE =
-  "sf_files_api_safe_mode_avoidable_download_ms";
-
 import {
   renderAllVariants,
   type CompositeInput,
@@ -31,6 +26,9 @@ import {
   type PlacementSet,
 } from "../services/see-it-now/index";
 import { computeImageHash } from "~/services/see-it-now/hashing.server";
+
+const FILES_API_SAFE_MODE_AVOIDABLE_DOWNLOAD_EVENT_TYPE =
+  "sf_files_api_safe_mode_avoidable_download_ms";
 
 function hashBuffer(buffer: Buffer): string {
   return computeImageHash(buffer); // Returns 64-char hash
