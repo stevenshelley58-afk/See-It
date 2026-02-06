@@ -14,8 +14,8 @@ COPY app/package.json ./app/
 
 WORKDIR /usr/src/app/app
 
-# Copy .npmrc if it exists
-COPY .npmrc* ./
+# Copy .npmrc if it exists (lives inside app/)
+COPY app/.npmrc* ./
 
 # Copy package-lock.json if it exists for deterministic builds
 COPY app/package-lock.json* ./
