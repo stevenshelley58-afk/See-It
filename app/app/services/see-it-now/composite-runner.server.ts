@@ -18,9 +18,7 @@ import type {
   CompositeInput,
   CompositeRunResult,
   CompositeVariantResult,
-  PlacementSet,
   PlacementVariant,
-  ProductFacts,
   DebugPayload,
   CallSummary,
   OutputSummary,
@@ -28,9 +26,7 @@ import type {
   WaterfallMs,
   RunTotals,
   PipelineConfigSnapshot,
-  ImageMeta,
   RunStatus,
-  VariantStatus,
 } from "./types";
 
 const VARIANT_TIMEOUT_MS = 45000; // 45 seconds per variant

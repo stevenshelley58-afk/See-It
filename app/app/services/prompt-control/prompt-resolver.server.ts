@@ -669,9 +669,6 @@ export async function buildPipelineConfigSnapshot(
   shopId: string,
   promptNames: string[]
 ): Promise<PipelineConfigSnapshot> {
-  // Load runtime config
-  const runtime = await loadRuntimeConfig(shopId);
-
   // Batch load prompts
   const definitionsMap = await batchLoadDefinitions(shopId, promptNames);
 

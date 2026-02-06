@@ -6,7 +6,7 @@
 import { createHash } from "crypto";
 import prisma from "~/db.server";
 import { canonicalize } from "../see-it-now/hashing.server";
-import type { Prisma, PromptStatus, AuditAction } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 // =============================================================================
 // Types

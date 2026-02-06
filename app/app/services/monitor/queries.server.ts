@@ -181,6 +181,8 @@ export async function getRunDetail(
         variantId: v.variantId,
         status: toVariantStatusV1(v.status),
         latencyMs: v.latencyMs,
+        providerMs: null,
+        uploadMs: null,
         errorCode: v.errorCode,
         errorMessage: v.errorMessage,
         imageUrl,
@@ -263,6 +265,7 @@ export async function getRunEvents(
       severity: e.severity,
       variantId: e.variantId,
       payload: e.payload as Record<string, unknown>,
+      overflowArtifactId: e.overflowArtifactId,
     })),
   };
 }
@@ -607,7 +610,7 @@ export async function getRunsExternal(
   const where: any = {};
 
   if (filters.status) {
-    where.status = filters.status;
+    where.status = fromRunStatusFilter(filters.status);
   }
   if (filters.shopId) {
     where.shopId = filters.shopId;
@@ -645,7 +648,7 @@ export async function getRunsExternal(
   const totalPromise = includeTotal
     ? prisma.compositeRun.count({
         where: {
-          ...(filters.status ? { status: filters.status } : {}),
+          ...(filters.status ? { status: fromRunStatusFilter(filters.status) } : {}),
           ...(filters.shopId ? { shopId: filters.shopId } : {}),
         },
       })
@@ -672,7 +675,7 @@ export async function getRunsExternal(
       shopDomain: run.shop.shopDomain,
       productTitle: run.productAsset?.productTitle || null,
       productId: run.productAsset?.productId || null,
-      status: run.status,
+      status: toRunStatusV1(run.status),
       pipelineConfigHash: run.pipelineConfigHash,
       totalDurationMs: run.totalDurationMs,
       variantCount: 8,
@@ -716,6 +719,8 @@ export interface ExternalRunDetail {
     variantId: string;
     status: string;
     latencyMs: number | null;
+    providerMs: number | null;
+    uploadMs: number | null;
     errorCode: string | null;
     errorMessage: string | null;
     imageUrl: string | null;
@@ -735,11 +740,17 @@ export interface ExternalRunDetail {
  */
 export async function getRunDetailExternal(
   runId: string,
-  shopId: string,
+  shopId: string | undefined,
   revealEnabled: boolean
 ): Promise<ExternalRunDetail | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const where: any = { id: runId };
+  if (shopId) {
+    where.shopId = shopId;
+  }
+
   const run = await prisma.compositeRun.findFirst({
-    where: { id: runId, shopId },
+    where,
     include: {
       shop: {
         select: { shopDomain: true },
@@ -782,8 +793,10 @@ export async function getRunDetailExternal(
       return {
         id: v.id,
         variantId: v.variantId,
-        status: v.status,
+        status: toVariantStatusV1(v.status),
         latencyMs: v.latencyMs,
+        providerMs: null,
+        uploadMs: null,
         errorCode: v.errorCode,
         errorMessage: v.errorMessage,
         imageUrl,
@@ -828,7 +841,7 @@ export async function getRunDetailExternal(
     productTitle: run.productAsset?.productTitle || null,
     productId: run.productAsset?.productId || null,
     roomSessionId: run.roomSessionId,
-    status: run.status,
+    status: toRunStatusV1(run.status),
     pipelineConfigHash: run.pipelineConfigHash,
     totalDurationMs: run.totalDurationMs,
     successCount: run.successCount,
@@ -859,6 +872,7 @@ export interface ExternalEvent {
   severity: string;
   variantId: string | null;
   payload: Record<string, unknown>;
+  overflowArtifactId: string | null;
 }
 
 /**
@@ -866,11 +880,17 @@ export interface ExternalEvent {
  */
 export async function getRunEventsExternal(
   runId: string,
-  shopId: string,
+  shopId: string | undefined,
   revealEnabled: boolean
 ): Promise<{ events: ExternalEvent[] }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const where: any = { runId };
+  if (shopId) {
+    where.shopId = shopId;
+  }
+
   const events = await prisma.monitorEvent.findMany({
-    where: { runId, shopId },
+    where,
     orderBy: { ts: "asc" },
   });
 
@@ -901,6 +921,7 @@ export async function getRunEventsExternal(
         severity: e.severity,
         variantId: e.variantId,
         payload,
+        overflowArtifactId: e.overflowArtifactId,
       };
     }),
   };
@@ -911,12 +932,18 @@ export async function getRunEventsExternal(
  */
 export interface ExternalArtifact {
   id: string;
+  /** @deprecated Use createdAt */
   ts: string;
+  createdAt: string;
   type: string;
   contentType: string;
   byteSize: number;
+  /** @deprecated Use dimensions */
   width: number | null;
+  /** @deprecated Use dimensions */
   height: number | null;
+  dimensions: { width: number; height: number } | null;
+  sha256: string | null;
   url: string | null;
 }
 
@@ -934,11 +961,17 @@ const SENSITIVE_ARTIFACT_TYPES = new Set([
  */
 export async function getRunArtifactsExternal(
   runId: string,
-  shopId: string,
+  shopId: string | undefined,
   revealEnabled: boolean
 ): Promise<{ artifacts: ExternalArtifact[] }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const where: any = { runId };
+  if (shopId) {
+    where.shopId = shopId;
+  }
+
   const artifacts = await prisma.monitorArtifact.findMany({
-    where: { runId, shopId },
+    where,
     orderBy: { ts: "asc" },
   });
 
@@ -966,17 +999,71 @@ export async function getRunArtifactsExternal(
       return {
         id: a.id,
         ts: a.ts.toISOString(),
+        createdAt: a.ts.toISOString(),
         type: a.type,
         contentType: a.contentType,
         byteSize: a.byteSize,
         width: a.width,
         height: a.height,
+        dimensions:
+          typeof a.width === "number" && typeof a.height === "number"
+            ? { width: a.width, height: a.height }
+            : null,
+        sha256: a.sha256 ?? null,
         url,
       };
     })
   );
 
   return { artifacts: withUrls };
+}
+
+/**
+ * Get single artifact by ID for external API.
+ * Hides sensitive artifacts unless revealed.
+ */
+export async function getArtifactExternal(
+  artifactId: string,
+  shopId: string | undefined,
+  revealEnabled: boolean
+): Promise<ExternalArtifact | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const where: any = { id: artifactId };
+  if (shopId) {
+    where.shopId = shopId;
+  }
+
+  const artifact = await prisma.monitorArtifact.findFirst({ where });
+  if (!artifact) return null;
+
+  if (!revealEnabled) {
+    if (SENSITIVE_ARTIFACT_TYPES.has(artifact.type)) return null;
+    if (artifact.retentionClass === "sensitive") return null;
+  }
+
+  let url: string | null = null;
+  try {
+    url = await StorageService.getSignedReadUrl(artifact.gcsKey, 60 * 60 * 1000);
+  } catch {
+    // Ignore
+  }
+
+  return {
+    id: artifact.id,
+    ts: artifact.ts.toISOString(),
+    createdAt: artifact.ts.toISOString(),
+    type: artifact.type,
+    contentType: artifact.contentType,
+    byteSize: artifact.byteSize,
+    width: artifact.width,
+    height: artifact.height,
+    dimensions:
+      typeof artifact.width === "number" && typeof artifact.height === "number"
+        ? { width: artifact.width, height: artifact.height }
+        : null,
+    sha256: artifact.sha256 ?? null,
+    url,
+  };
 }
 
 /**
@@ -1213,7 +1300,7 @@ export async function getShopDetailExternal(
       shopDomain: run.shop.shopDomain,
       productTitle: run.productAsset?.productTitle || null,
       productId: run.productAsset?.productId || null,
-      status: run.status,
+      status: toRunStatusV1(run.status),
       pipelineConfigHash: run.pipelineConfigHash,
       totalDurationMs: run.totalDurationMs,
       variantCount: 8,

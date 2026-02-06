@@ -161,7 +161,7 @@ export async function testSavedRoomsSave(
   shopDomain: string,
   email: string,
   roomSessionId: string,
-  originalImageKey: string
+  _originalImageKey: string
 ): Promise<{
   success: boolean;
   savedRoomId?: string;

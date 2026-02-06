@@ -27,10 +27,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       return jsonError("bad_request", 400, "Missing run ID", undefined, corsHeaders);
     }
 
-    const shopId = new URL(request.url).searchParams.get("shopId");
-    if (!shopId) {
-      return jsonError("bad_request", 400, "Missing shopId", undefined, corsHeaders);
-    }
+    const shopId = new URL(request.url).searchParams.get("shopId") || undefined;
 
     const run = await getRunDetailExternal(runId, shopId, revealEnabled);
 

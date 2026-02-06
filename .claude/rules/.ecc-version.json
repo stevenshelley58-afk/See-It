@@ -1,0 +1,14 @@
+{
+  "repo": "affaan-m/everything-claude-code",
+  "ref": "e4e94a7e70f124caea5847fff5a644c988da7b90",
+  "files": {
+    "agents.md": "84acffb05e73de7264c89e6b302e653140a3a5b98897601c14edaf0b11065e93",
+    "coding-style.md": "a044a29c7c925fd701af8ef6dc1cf2e6a6cb0fdaa947892b087dc9815cf19e9a",
+    "git-workflow.md": "d459aa29c87c357e991999ce6e6919cea5ec52b802fa1c32c267070208141a69",
+    "hooks.md": "d74bfc0f630411a695679fe39f13f1bc18963a8af179f01342e43799a9c44f02",
+    "patterns.md": "0df03796612d20e298f63fdf2a1284101cbcd037aee08df5ab32fe32fcb71372",
+    "performance.md": "029e80002d9ade1328cfd52b8799448257da3b614a29dc2ead888c5d9b5478ea",
+    "security.md": "e90ed8521ddcc072f03e9c93fff8e4000c967034b42cb362cbb63fc87fa633c0",
+    "testing.md": "26363f53e5a690de37fb04ef8c9a5f3b27b60ee1382c189aba6e7922859e82e8"
+  }
+}

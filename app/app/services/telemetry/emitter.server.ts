@@ -6,7 +6,8 @@
  */
 
 import prisma from "~/db.server";
-import { Severity, SCHEMA_VERSION, MAX_PAYLOAD_SIZE } from "./constants";
+import { RetentionClass, Severity, SCHEMA_VERSION, MAX_PAYLOAD_SIZE } from "./constants";
+import { storeArtifact } from "~/services/telemetry/artifacts.server";
 import type { TelemetryEventInput } from "./types";
 
 const SENSITIVE_KEYS = new Set([
@@ -48,6 +49,61 @@ function scrubSecrets<T>(value: T, visited = new Set<unknown>()): T {
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return result as any;
+}
+
+/**
+ * JSON.stringify that never throws on circular structures.
+ * (We use this only for telemetry/diagnostics, not as a canonical serializer.)
+ */
+function safeJsonStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  return JSON.stringify(value, (_key, val) => {
+    if (val && typeof val === "object") {
+      const obj = val as object;
+      if (seen.has(obj)) return "[Circular]";
+      seen.add(obj);
+    }
+    return val;
+  });
+}
+
+function truncatePreviewValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    if (value.length <= 500) return value;
+    return `${value.slice(0, 500)}…`;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 10).map(truncatePreviewValue);
+  }
+
+  if (typeof value === "object") {
+    return "[Object]";
+  }
+
+  return String(value);
+}
+
+function buildTruncatedPayloadPreview(
+  payload: Record<string, unknown>,
+  originalSize: number
+): Record<string, unknown> {
+  const keys = Object.keys(payload);
+  const previewEntries = Object.entries(payload)
+    .slice(0, 10)
+    .map(([key, value]) => [key, truncatePreviewValue(value)] as const);
+
+  return {
+    __truncated: true,
+    __originalSize: originalSize,
+    __keyCount: keys.length,
+    __keys: keys.slice(0, 50),
+    __preview: Object.fromEntries(previewEntries),
+  };
 }
 
 /**
@@ -107,24 +163,19 @@ export function emitError(
  */
 async function doEmit(input: TelemetryEventInput): Promise<void> {
   let payload = input.payload || {};
-  let overflowArtifactId: string | undefined;
 
   // Redact secrets before any further processing
   payload = scrubSecrets(payload);
 
-  // Truncate payload if too large
-  const payloadStr = JSON.stringify(payload);
+  // Truncate payload if too large (store full payload as artifact for deep debugging)
+  const payloadStr = safeJsonStringify(payload);
+  const originalPayload = payloadStr.length > MAX_PAYLOAD_SIZE ? payload : undefined;
+
   if (payloadStr.length > MAX_PAYLOAD_SIZE) {
-    // TODO: Store overflow in artifact and link via overflowArtifactId
-    // For now, truncate
-    payload = {
-      _truncated: true,
-      _originalSize: payloadStr.length,
-      ...Object.fromEntries(Object.entries(payload).slice(0, 10)),
-    };
+    payload = buildTruncatedPayloadPreview(payload, payloadStr.length);
   }
 
-  await prisma.monitorEvent.create({
+  const created = await prisma.monitorEvent.create({
     data: {
       shopId: input.shopId,
       requestId: input.requestId,
@@ -137,10 +188,67 @@ async function doEmit(input: TelemetryEventInput): Promise<void> {
       type: input.type,
       severity: input.severity || Severity.INFO,
       payload,
-      overflowArtifactId,
       schemaVersion: SCHEMA_VERSION,
     },
   });
+
+  if (!originalPayload) {
+    return;
+  }
+
+  // Best-effort overflow artifact creation.
+  // Never fail the event emission if artifact storage fails.
+  const artifactId = await storeArtifact({
+    shopId: input.shopId,
+    requestId: input.requestId,
+    runId: input.runId,
+    variantId: input.variantId,
+    type: "monitor_event_payload_overflow",
+    buffer: Buffer.from(
+      safeJsonStringify({
+        event: {
+          id: created.id,
+          ts: created.ts.toISOString(),
+          shopId: created.shopId,
+          requestId: created.requestId,
+          runId: created.runId,
+          variantId: created.variantId,
+          traceId: created.traceId,
+          spanId: created.spanId,
+          parentSpanId: created.parentSpanId,
+          source: created.source,
+          type: created.type,
+          severity: created.severity,
+          schemaVersion: created.schemaVersion,
+        },
+        payload: originalPayload,
+      }) + "\n",
+      "utf8"
+    ),
+    contentType: "application/json",
+    retentionClass: RetentionClass.SENSITIVE,
+    meta: {
+      kind: "monitor_event_payload_overflow",
+      eventId: created.id,
+      eventType: created.type,
+      eventSource: created.source,
+      originalPayloadSize: payloadStr.length,
+    },
+  });
+
+  if (!artifactId) {
+    return;
+  }
+
+  try {
+    await prisma.monitorEvent.update({
+      where: { id: created.id },
+      data: { overflowArtifactId: artifactId },
+    });
+  } catch (error) {
+    // Orphaned artifact is acceptable; do not throw.
+    console.error("[Telemetry] Failed to link overflow artifact to event:", error);
+  }
 }
 
 /**

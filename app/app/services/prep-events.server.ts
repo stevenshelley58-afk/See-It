@@ -140,7 +140,7 @@ async function sendToMonitor(
   payload: PrepEventPayload,
   actorId: string | null | undefined,
   timestamp: Date,
-  logContext: ReturnType<typeof createLogContext>
+  _logContext: ReturnType<typeof createLogContext>
 ): Promise<void> {
   try {
     const monitorEvent = {

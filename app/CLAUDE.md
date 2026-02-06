@@ -11,7 +11,7 @@ Shopify merchants prepare product images (background removal + placement metadat
 - Gemini 2.5 Flash (compositing), Prodia (background removal)
 
 ## Current Task
-Redesigning Products page. See `docs/PRODUCT_PREP_REDESIGN.md` for spec.
+Shopify app approval hardening + monitor stability. See `SPEC_PACK_SEE_IT_NOW/12_ACCEPTANCE_CHECKLIST.md` and `RUNBOOK.md`.
 
 ## Key Data Flow (Canonical Pipeline)
 
@@ -87,12 +87,12 @@ npm run deploy       # Deploy Shopify app config
 ```
 
 ## Deployment
-- **App**: Push to GitHub → Railway auto-deploys
-- **Monitor**: Push to GitHub → Vercel auto-deploys
+- **App**: Push to GitHub -> Railway auto-deploys
+- **Monitor**: Push to GitHub -> Vercel auto-deploys
 - **Local dev not supported** - no local database or tunnel
 
 ## Rules
-1. Read the spec before coding: `docs/PRODUCT_PREP_REDESIGN.md`
+1. Read the checklist before coding: `SPEC_PACK_SEE_IT_NOW/12_ACCEPTANCE_CHECKLIST.md`
 2. Use existing UI components from `app/components/ui/`
-3. Test `npm run build` passes before committing
+3. Run `npm run check:consistency && npm run typecheck && npm test` before committing
 4. One feature at a time - don't batch changes

@@ -4,7 +4,7 @@
  * External API: Paginated list of runs with cursor-based pagination.
  */
 
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { type LoaderFunctionArgs } from "@remix-run/node";
 import {
   requireExternalAuth,
   handleOptions,
@@ -28,10 +28,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const status = url.searchParams.get("status") || undefined;
     const shopId = url.searchParams.get("shopId") || undefined;
     const includeTotal = url.searchParams.get("includeTotal") === "true";
-
-    if (!shopId) {
-      return jsonError("bad_request", 400, "Missing shopId", undefined, corsHeaders);
-    }
 
     // Parse and validate limit
     let limit = 20;

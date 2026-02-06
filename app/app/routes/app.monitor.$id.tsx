@@ -6,7 +6,12 @@
  */
 
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useNavigate, useRevalidator } from "@remix-run/react";
+import {
+  useLoaderData,
+  useRevalidator,
+  useRouteError,
+  isRouteErrorResponse,
+} from "@remix-run/react";
 import { useEffect, useState, useCallback } from "react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -27,13 +32,10 @@ import {
   Box,
   Collapsible,
   Modal,
-  Thumbnail,
-  Icon,
   Divider,
   Banner,
 } from "@shopify/polaris";
 import { ClipboardIcon, ChevronDownIcon, ChevronUpIcon } from "@shopify/polaris-icons";
-import { useRouteError, isRouteErrorResponse } from "@remix-run/react";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -67,7 +69,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
 export default function MonitorRunDetailPage() {
   const { run, events, artifacts } = useLoaderData<typeof loader>();
-  const navigate = useNavigate();
   const revalidator = useRevalidator();
 
   // Polling if in_flight

@@ -18,7 +18,7 @@ export const action = async ({ request }) => {
     const logContext = createLogContext("api", requestId, "generate-description", {});
 
     try {
-        const { session } = await authenticate.admin(request);
+        await authenticate.admin(request);
         
         const body = await request.json();
         const { product, fields } = body;
@@ -76,7 +76,7 @@ export const loader = async ({ request }) => {
     const logContext = createLogContext("api", requestId, "extract-fields", {});
 
     try {
-        const { session, admin } = await authenticate.admin(request);
+        const { admin } = await authenticate.admin(request);
         
         const url = new URL(request.url);
         const productId = url.searchParams.get("productId");

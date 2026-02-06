@@ -10,7 +10,6 @@ import type {
   DebugPayload,
   OutputSummary,
   OwnerType,
-  CallStatus,
 } from "../see-it-now/types";
 
 // =============================================================================

@@ -11,7 +11,7 @@
  * Run with: npm run test:integration
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient, Prisma } from "@prisma/client";
 
 const HAS_DATABASE = !!process.env.DATABASE_URL;

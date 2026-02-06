@@ -112,16 +112,6 @@ function loadEnvFileIfPresent(filePath, { preferDotenv }) {
   }
 }
 
-async function getStatusCounts() {
-  const res = await db.query(
-    `SELECT status, COUNT(*)::int AS count
-     FROM product_assets
-     GROUP BY status
-     ORDER BY count DESC, status ASC`
-  );
-  return (res.rows ?? []).map((r) => ({ status: String(r.status), count: Number(r.count) }));
-}
-
 async function getStatusEnabledCounts() {
   const res = await db.query(
     `SELECT status, enabled, COUNT(*)::int AS count

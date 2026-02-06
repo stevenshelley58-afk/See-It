@@ -12,7 +12,6 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createHash } from "crypto";
 
 // =============================================================================
 // Complete Mock Setup
@@ -196,7 +195,7 @@ const mockPrisma = vi.hoisted(() => ({
     }),
   },
   // Serialize "transactions" to better simulate Serializable isolation.
-  $transaction: vi.fn((callback, options) => {
+  $transaction: vi.fn((callback, _options) => {
     const run = () => callback(mockTx);
     const next = txnQueue.then(run, run);
     txnQueue = next;
@@ -217,12 +216,8 @@ import {
 } from "~/services/prompt-control/prompt-version-manager.server";
 
 import {
-  resolvePrompt,
-  buildResolvedConfigSnapshot,
-  loadRuntimeConfig,
   computeRequestHash,
   renderTemplate,
-  type RuntimeConfigSnapshot,
 } from "~/services/prompt-control/prompt-resolver.server";
 
 // =============================================================================
@@ -355,7 +350,7 @@ describe("Prompt Control Plane Integration", () => {
       });
 
       // Shop B creates v1, v2 and activates v2
-      const shopBv1 = await createVersion({
+      await createVersion({
         shopId: shopB,
         promptName,
         systemTemplate: "Shop B v1",

@@ -10,8 +10,7 @@
  * - #13: Concurrent activation -> only one ACTIVE version
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createHash } from "crypto";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // =============================================================================
 // Mock Prisma
@@ -86,26 +85,7 @@ import {
   activateVersion,
   rollbackToPreviousVersion,
   archiveVersion,
-  getPromptWithVersions,
-  listPromptsForShop,
 } from "~/services/prompt-control/prompt-version-manager.server";
-
-// =============================================================================
-// Test Helpers
-// =============================================================================
-
-function computeTemplateHash(data: {
-  systemTemplate: string | null;
-  developerTemplate: string | null;
-  userTemplate: string | null;
-  model: string | null;
-  params: unknown;
-}): string {
-  return createHash("sha256")
-    .update(JSON.stringify(data))
-    .digest("hex")
-    .slice(0, 16);
-}
 
 function createMockDefinition(shopId: string, name: string, id: string = "def-1") {
   return {
@@ -237,7 +217,6 @@ describe("Prompt Version Manager", () => {
 
   describe("AC #2: Shop isolation", () => {
     it("should not find prompt from another shop", async () => {
-      const shopAId = "shop-A";
       const shopBId = "shop-B";
       const promptName = "extractor";
 

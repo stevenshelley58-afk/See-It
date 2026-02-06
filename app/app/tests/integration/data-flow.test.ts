@@ -1,6 +1,4 @@
 import { describe, it, expect, vi } from "vitest";
-import { extractProductFacts } from "~/services/see-it-now/extractor.server";
-import { buildPlacementSet } from "~/services/see-it-now/prompt-builder.server";
 import { computeImageHash, computeDedupeHash } from "~/services/see-it-now/hashing.server";
 import type { PreparedImage } from "~/services/see-it-now/types";
 

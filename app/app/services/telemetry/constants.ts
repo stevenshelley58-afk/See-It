@@ -87,6 +87,9 @@ export type ArtifactType = (typeof ArtifactType)[keyof typeof ArtifactType];
 
 // Retention classes
 export const RetentionClass = {
+  // Sensitive artifacts are hidden from external APIs unless "reveal" is enabled.
+  // Keep retention short by default to reduce risk/cost.
+  SENSITIVE: "sensitive",
   SHORT: "short", // 7 days
   STANDARD: "standard", // 30 days
   LONG: "long", // 90 days
@@ -96,6 +99,7 @@ export type RetentionClass = (typeof RetentionClass)[keyof typeof RetentionClass
 
 // Retention days mapping
 export const RETENTION_DAYS: Record<RetentionClass, number> = {
+  sensitive: 7,
   short: 7,
   standard: 30,
   long: 90,

@@ -5,7 +5,7 @@
  *
  * SYNC SOURCE: These types must match the backend API responses.
  *
- * Run `npm run check:consistency` in the app directory to validate alignment.
+ * Run `npm run check:consistency && npm run typecheck` in the app directory to validate alignment.
  *
  * Source files:
  * - app/services/see-it-now/types.ts (ProductPlacementFacts, PromptPack)
@@ -217,6 +217,7 @@ export interface RunEvent {
   type: string;                  // e.g., "variant_started", "variant_completed"
   variantId: string | null;      // Linked variant (if applicable)
   payload: Record<string, unknown> | null; // Event-specific data (may be redacted)
+  overflowArtifactId: string | null; // Present when full payload was stored separately
 }
 
 export interface RunEventsResponse {
@@ -233,7 +234,7 @@ export interface RunArtifact {
   contentType: string;           // MIME type: "image/png", "application/json"
   byteSize: number;
   dimensions: { width: number; height: number } | null;
-  sha256: string;
+  sha256: string | null;
   url: string | null;            // Signed URL (may be null if reveal=false)
   createdAt: string;
 }
@@ -284,7 +285,7 @@ export interface ShopDetail {
     latencyP95: number | null;
     providerErrors24h: number;
     storageErrors24h: number;
-    telemetryDropped24h: number;
+    telemetryDropped24h?: number;
   };
 }
 

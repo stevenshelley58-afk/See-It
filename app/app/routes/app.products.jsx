@@ -1,8 +1,8 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useFetcher, useRouteError, isRouteErrorResponse, useRevalidator, Link, useNavigate } from "@remix-run/react";
+import { useLoaderData, useRouteError, isRouteErrorResponse, useRevalidator, Link, useNavigate } from "@remix-run/react";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { Modal, BlockStack, InlineStack, Text } from "@shopify/polaris";
+import { Text } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PLANS } from "../billing";
@@ -445,7 +445,6 @@ export const loader = async ({ request }) => {
 
 export default function Products() {
     const { products, assetsMap, usage, quota, isPro, pageInfo, statusFilter, searchQuery, sortField, sortDir, collections, collectionId } = useLoaderData();
-    const singleFetcher = useFetcher();
     const revalidator = useRevalidator();
     const navigate = useNavigate();
 
@@ -1097,7 +1096,6 @@ export default function Products() {
                                                 console.error("Error accessing asset for product", product.id, e);
                                             }
 
-                                            const status = asset?.status || 'pending';
                                             const displayImage = asset?.preparedImageUrlFresh
                                                 || asset?.preparedImageUrl
                                                 || asset?.sourceImageUrl
@@ -1235,7 +1233,7 @@ export default function Products() {
                         }}
                         product={detailPanelProduct}
                         asset={assetsMap[detailPanelProduct.id]}
-                        onSave={(metadata) => {
+                        onSave={(_metadata) => {
                             showToast("Settings saved!", "success");
                         }}
                     />
