@@ -1,29 +1,46 @@
-# Claude Code (Project Config)
+# Claude Code Project Setup
 
-This repo uses **project-level Claude Code rules** to keep agent output consistent and “Shopify-app-review safe”.
+This repository uses a project-local Everything Claude Code (ECC) setup.
 
-## What’s committed vs local-only
+## What Is Committed
 
-- ✅ Committed: `.claude/rules/*.md` (ECC + repo-specific rules), `.claude/package-manager.json`
-- ❌ Local-only (ignored): `.claude/settings.local.json`, `.claude/skills/`, `.claude-skills/`
+- `.claude/rules/*.md` and `.claude/rules/.ecc-version.json`
+- `.claude/agents/*.md`
+- `.claude/commands/*.md`
+- `.claude/hooks/hooks.json`
+- `.claude/scripts/hooks/*.js` and `.claude/scripts/lib/*.js`
+- `.claude/contexts/dev.md`
 
-## Everything-Claude-Code (ECC)
+## What Stays Local
 
-ECC provides reusable rules/agents/commands/hooks/skills for Claude Code.
+- `.claude/settings.local.json`
+- `.claude/skills/` (installed locally, ignored by git)
+- `.claude-skills/`
 
-- Rules are vendored into this repo at `.claude/rules/` (because Claude Code plugins can’t ship rules).
-- To update to a newer ECC version, use the sync script:
-  - `node scripts/ecc-sync.mjs`
-  - `node scripts/ecc-verify.mjs`
+## ECC Reference
 
-### Installing the ECC plugin (optional, user-level)
+- Source: `affaan-m/everything-claude-code`
+- Pinned ref: `90ad2f3885033c981ae1ab72120cef252296aa6c`
 
-Install ECC’s plugin globally so Claude Code has access to its agents/commands/hooks/skills.
-Follow ECC’s README “Option 1” (marketplace install) or clone-based install.
+## Refresh ECC Rules
 
-## Pre-PR checklist (required)
+```bash
+node scripts/ecc-sync.mjs
+node scripts/ecc-verify.mjs
+```
 
-- `cd app && npm run check:consistency`
-- `cd app && npm run lint && npm run typecheck && npm test`
-- `cd see-it-monitor && npm run lint`
+## Optional Local Skills Install
 
+If skills are missing locally, copy from the ECC clone:
+
+```bash
+cp -r <ecc-clone>/skills/* .claude/skills/
+```
+
+## Pre-PR Checks
+
+```bash
+cd app && npm run check:consistency
+cd app && npm run lint && npm run typecheck && npm test
+cd see-it-monitor && npm run lint
+```

@@ -5,7 +5,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const ECC_REPO = "affaan-m/everything-claude-code";
-const ECC_REF = "e4e94a7e70f124caea5847fff5a644c988da7b90";
+const ECC_REF = "90ad2f3885033c981ae1ab72120cef252296aa6c";
 
 const COMMON_FILES = [
   "agents.md",
