@@ -5,6 +5,7 @@ const required = [
   "BUILD-SPEC.md",
   "AGENTS.md",
   "supabase/migrations/20260619120000_initial.sql",
+  "src/app/privacy/page.tsx",
   "src/lib/ai/router.ts",
   "extension/assets/widget.js",
   "scripts/db-verify.ts",
@@ -111,6 +112,9 @@ for (const requiredSnippet of ["SUPABASE_SERVICE_ROLE_KEY", "createClient", "Sup
 }
 assertContains("scripts/seed-ai-registry.ts", "loadScriptEnv", "AI seed script must load local env files before persistence");
 assertContains("package.json", "db:verify:seeded", "Seeded runtime DB verification script missing");
+assertContains("src/app/privacy/page.tsx", "Temporary room-photo processing", "Public privacy page must disclose temporary room-photo processing");
+assertContains("src/app/privacy/page.tsx", "24 hour operational retention", "Public privacy page must disclose room-photo retention");
+assertContains("src/app/privacy/page.tsx", "customers/data_request", "Public privacy page must disclose Shopify privacy webhooks");
 const persistence = read("src/lib/db/supabase-persistence.ts");
 for (const requiredSnippet of ["persistRenderBundle", "persistRecord", "createSupabaseServiceClient", "loadShopByDomain", "loadQueueableJobs", "hydrateRenderPipelineInputs"]) {
   if (!persistence.includes(requiredSnippet)) {

@@ -10,7 +10,8 @@ const links = [
   ["/founder/ai", "AI"],
   ["/founder/renders", "Renders"],
   ["/founder/quality", "Quality"],
-  ["/founder/ai/costs", "Costs"]
+  ["/founder/ai/costs", "Costs"],
+  ["/privacy", "Privacy"]
 ] as const;
 
 export function Shell({ children }: { children: ReactNode }) {
