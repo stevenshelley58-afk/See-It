@@ -216,6 +216,9 @@ create table room_session (
   source text check (source in ('widget','demo','merchant_test','eval')),
   room_key text,
   normalized_room_key text,
+  verified boolean default false,
+  width integer,
+  height integer,
   expires_at timestamptz,
   created_at timestamptz default now(),
   last_activity_at timestamptz default now()
@@ -235,6 +238,7 @@ create table render_request (
   tap_y numeric,
   hint_text text,
   attempt_count integer default 0,
+  remaining_refinements integer default 3,
   selected_result_asset_id uuid,
   final_gate_score numeric,
   final_error_code text,

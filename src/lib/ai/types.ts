@@ -74,6 +74,7 @@ export type AiNormalizedResult = {
     width?: number;
     height?: number;
     sha256?: string;
+    bytes?: number;
   }>;
   providerResponseId?: string;
   finishReason?: string;

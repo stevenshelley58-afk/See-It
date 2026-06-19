@@ -2,6 +2,7 @@ import { repository } from "@/lib/db/repository";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { readEnv, type AppEnv } from "@/lib/env";
+import { loadShopByDomain } from "@/lib/db/supabase-persistence";
 
 export function requireShop(shopDomain: string) {
   const shop = [...repository.shops.values()].find((item) => item.shopDomain === shopDomain && !item.uninstalledAt);
@@ -19,6 +20,10 @@ type SessionPayload = {
   iss?: string;
   sub?: string;
 };
+
+type VerifiedSessionPayload =
+  | { ok: true; shopDomain: string; payload: SessionPayload }
+  | { ok: false; status: number; error: string };
 
 function base64UrlDecode(value: string) {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
@@ -40,7 +45,7 @@ export type MerchantSession =
   | { ok: true; shop: ReturnType<typeof requireShop>; shopDomain: string; payload: SessionPayload }
   | { ok: false; status: number; error: string };
 
-export function verifyShopifySessionToken(token: string, env: Pick<AppEnv, "SHOPIFY_API_KEY" | "SHOPIFY_API_SECRET">, nowSeconds = Math.floor(Date.now() / 1000)): MerchantSession {
+function verifyShopifySessionPayload(token: string, env: Pick<AppEnv, "SHOPIFY_API_KEY" | "SHOPIFY_API_SECRET">, nowSeconds = Math.floor(Date.now() / 1000)): VerifiedSessionPayload {
   const [encodedHeader, encodedPayload, signature] = token.split(".");
   if (!encodedHeader || !encodedPayload || !signature) {
     return { ok: false, status: 401, error: "invalid_session_token" };
@@ -74,20 +79,37 @@ export function verifyShopifySessionToken(token: string, env: Pick<AppEnv, "SHOP
   if (!shopDomain) {
     return { ok: false, status: 401, error: "session_missing_shop" };
   }
+  return { ok: true, shopDomain, payload };
+}
+
+export function verifyShopifySessionToken(token: string, env: Pick<AppEnv, "SHOPIFY_API_KEY" | "SHOPIFY_API_SECRET">, nowSeconds = Math.floor(Date.now() / 1000)): MerchantSession {
+  const verified = verifyShopifySessionPayload(token, env, nowSeconds);
+  if (!verified.ok) {
+    return verified;
+  }
   try {
-    return { ok: true, shop: requireShop(shopDomain), shopDomain, payload };
+    return { ok: true, shop: requireShop(verified.shopDomain), shopDomain: verified.shopDomain, payload: verified.payload };
   } catch {
     return { ok: false, status: 403, error: "shop_session_required" };
   }
 }
 
-export function authenticateMerchantRequest(request: NextRequest): MerchantSession {
+export async function authenticateMerchantRequest(request: NextRequest): Promise<MerchantSession> {
   const authorization = request.headers.get("authorization");
   const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
   if (!token) {
     return { ok: false, status: 401, error: "merchant_session_required" };
   }
-  return verifyShopifySessionToken(token, readEnv());
+  const env = readEnv();
+  const verified = verifyShopifySessionPayload(token, env);
+  if (!verified.ok) {
+    return verified;
+  }
+  const shop = await loadShopByDomain(verified.shopDomain, env);
+  if (!shop || shop.uninstalledAt || shop.plan === "cancelled") {
+    return { ok: false, status: 403, error: "shop_session_required" };
+  }
+  return { ok: true, shop, shopDomain: verified.shopDomain, payload: verified.payload };
 }
 
 export function merchantAuthErrorBody(auth: Extract<MerchantSession, { ok: false }>) {

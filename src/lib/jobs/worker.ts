@@ -1,4 +1,5 @@
 import { repository } from "@/lib/db/repository";
+import { loadQueueableJobs, persistEvent, persistJob } from "@/lib/db/supabase-persistence";
 import { runRenderPipeline } from "@/lib/render/orchestrator";
 
 export async function runLeasedJob(jobId: string) {
@@ -11,29 +12,34 @@ export async function runLeasedJob(jobId: string) {
       purgeExpiredAssets();
     }
     if (job.type === "usage_rollup") {
-      repository.event({ surface: "billing", name: "usage_rollup_completed", props: job.payload });
+      await persistEvent(repository.event({ surface: "billing", name: "usage_rollup_completed", props: job.payload }));
     }
     if (job.type === "sync_sender") {
-      repository.event({ surface: "outreach", name: "sender_sync_completed", props: job.payload });
+      await persistEvent(repository.event({ surface: "outreach", name: "sender_sync_completed", props: job.payload }));
     }
     if (job.type === "demo_generate") {
-      repository.event({ surface: "demo", name: "demo_batch_completed", props: job.payload });
+      await persistEvent(repository.event({ surface: "demo", name: "demo_batch_completed", props: job.payload }));
     }
     if (job.type === "daily_digest") {
-      repository.event({ surface: "system", name: "daily_digest_completed", props: job.payload });
+      await persistEvent(repository.event({ surface: "system", name: "daily_digest_completed", props: job.payload }));
     }
-    repository.completeJob(job.id);
-    return repository.mustGet(repository.jobs, job.id, "job");
+    const completed = repository.completeJob(job.id);
+    await persistJob(completed);
+    return completed;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
-    return repository.failJob(job.id, "job_failed", message);
+    const failed = repository.failJob(job.id, "job_failed", message);
+    await persistJob(failed);
+    return failed;
   }
 }
 
 export async function sweepJobs(owner = "local-worker") {
+  await loadQueueableJobs(10);
   const jobs = repository.leaseJobs(owner, 10);
   const results = [];
   for (const job of jobs) {
+    await persistJob(job);
     results.push(await runLeasedJob(job.id));
   }
   return results;

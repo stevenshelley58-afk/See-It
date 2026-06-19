@@ -1,4 +1,5 @@
 import { repository } from "@/lib/db/repository";
+import { persistJob } from "@/lib/db/supabase-persistence";
 
 export const JOB_TYPES = [
   "normalize_room",
@@ -24,8 +25,18 @@ export function enqueueJob(type: string, payload: Record<string, unknown>, idemp
   return repository.enqueueJob({ type, payload, idempotencyKey, priority, maxAttempts, runAfter: new Date().toISOString() });
 }
 
+export async function enqueueDurableJob(type: string, payload: Record<string, unknown>, idempotencyKey: string, priority = 100, maxAttempts = 3) {
+  const job = enqueueJob(type, payload, idempotencyKey, priority, maxAttempts);
+  await persistJob(job);
+  return job;
+}
+
 export function enqueueRenderJob(renderRequestId: string) {
   return enqueueJob("render_request", { renderRequestId }, "render_request:" + renderRequestId, 10, 3);
+}
+
+export function enqueueDurableRenderJob(renderRequestId: string) {
+  return enqueueDurableJob("render_request", { renderRequestId }, "render_request:" + renderRequestId, 10, 3);
 }
 
 export function leaseJobs(owner: string, limit = 5) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enqueueJob } from "@/lib/jobs/queue";
+import { enqueueDurableJob } from "@/lib/jobs/queue";
 import { authenticateServiceRequest, serviceAuthErrorBody } from "@/lib/security/service-auth";
 
 export async function POST(request: NextRequest) {
@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(serviceAuthErrorBody(auth), { status: auth.status });
   }
   const period = new Date().toISOString().slice(0, 10);
-  const job = enqueueJob("demo_generate", { period }, "demo_generate:" + period, 90, 3);
+  const job = await enqueueDurableJob("demo_generate", { period }, "demo_generate:" + period, 90, 3);
   return NextResponse.json({ job });
 }
 

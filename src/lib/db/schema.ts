@@ -341,3 +341,98 @@ export interface AuditLogRecord {
   reason?: string;
   createdAt: string;
 }
+
+export interface ManualReviewRecord {
+  id: UUID;
+  renderRequestId: UUID;
+  reviewer: string;
+  score?: number;
+  status: "approved" | "rejected" | "needs_prompt_work" | "needs_model_work" | "needs_asset_work";
+  issueTags: string[];
+  notes?: string;
+  createdAt: string;
+}
+
+export interface EvalDatasetRecord {
+  id: UUID;
+  name: string;
+  description?: string;
+  status: "active" | "archived";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvalCaseRecord {
+  id: UUID;
+  evalDatasetId: UUID;
+  caseSlug: string;
+  productAssetKey?: string;
+  cutoutAssetKey?: string;
+  roomAssetKey?: string;
+  maskAssetKey?: string;
+  expectedJson: Record<string, unknown>;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface EvalRunRecord {
+  id: UUID;
+  evalDatasetId: UUID;
+  name?: string;
+  renderRecipeVersionId?: UUID;
+  modelRoutePolicyId?: UUID;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  summaryJson: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface EvalResultRecord {
+  id: UUID;
+  evalRunId: UUID;
+  evalCaseId?: UUID;
+  renderRequestId?: UUID;
+  automatedScoreJson: Record<string, unknown>;
+  manualScoreJson: Record<string, unknown>;
+  status: "pass" | "fail" | "review";
+  createdAt: string;
+}
+
+export interface AiExperimentRecord {
+  id: UUID;
+  name: string;
+  type: "prompt_version_test" | "model_test" | "recipe_test" | "gate_threshold_test" | "fallback_policy_test" | "parameter_test";
+  surface: Surface;
+  status: "draft" | "running" | "paused" | "completed" | "archived";
+  startAt?: string;
+  endAt?: string;
+  trafficPercent: number;
+  successMetric?: string;
+  guardrailJson: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiExperimentArmRecord {
+  id: UUID;
+  experimentId: UUID;
+  name: string;
+  renderRecipeVersionId?: UUID;
+  aiModelId?: UUID;
+  promptBundleVersionId?: UUID;
+  paramsOverrideJson: Record<string, unknown>;
+  trafficWeight: number;
+  status: "active" | "paused" | "archived";
+  createdAt: string;
+}
+
+export interface AiExperimentAssignmentRecord {
+  id: UUID;
+  experimentId: UUID;
+  armId: UUID;
+  assignmentKey: string;
+  renderRequestId?: UUID;
+  createdAt: string;
+}

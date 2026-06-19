@@ -41,6 +41,13 @@ describe("integration flow", () => {
     expect(deterministicAssignment(shop.id + product.id + room.id, [{ id: "control", trafficWeight: 50 }, { id: "variant", trafficWeight: 50 }])).toBeTruthy();
     repository.createFeedback({ renderRequestId: render.id, verdict: "down", issueTag: "wrong_scale" });
     expect(repository.feedback.size).toBe(1);
+    const review = repository.createManualReview({ renderRequestId: render.id, reviewer: "founder", score: 6, status: "needs_prompt_work", issueTags: ["wrong_scale"] });
+    expect(review.issueTags).toContain("wrong_scale");
+    const dataset = repository.createEvalDataset({ name: "integration_promoted", status: "active" });
+    const fixture = repository.createEvalCase({ evalDatasetId: dataset.id, caseSlug: "promoted-" + render.id, expectedJson: { sourceRenderRequestId: render.id } });
+    const evalRun = repository.createEvalRun({ evalDatasetId: dataset.id, status: "completed", summaryJson: { passCount: 1, total: 1 }, createdBy: "founder", completedAt: new Date().toISOString() });
+    repository.createEvalResult({ evalRunId: evalRun.id, evalCaseId: fixture.id, automatedScoreJson: { score: 8 }, manualScoreJson: {}, status: "pass" });
+    expect(repository.evalResults.size).toBe(1);
     expect(handlePrivacyWebhook("customers/data_request", { shop_domain: shop.shopDomain }).ok).toBe(true);
     expect(handleUninstall(shop.shopDomain).disabled).toBe(true);
     expect(repository.shops.get(shop.id)?.roomPreviewEnabled).toBe(false);

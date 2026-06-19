@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { assertRenderQuota } from "@/lib/billing/quota";
 import { repository } from "@/lib/db/repository";
-import { createRenderRequest } from "@/lib/render/orchestrator";
-import { appProxyErrorBody, authenticateAppProxyRequest } from "@/lib/shopify/app-proxy";
+import { loadRenderRequestById, persistRenderBundle } from "@/lib/db/supabase-persistence";
+import { createDurableRenderRequest } from "@/lib/render/orchestrator";
+import { appProxyErrorBody, authenticateDurableAppProxyRequest, enforceAppProxyRateLimit } from "@/lib/shopify/app-proxy";
 
 export async function POST(request: NextRequest, { params }: { params: { renderId: string } }) {
-  const auth = authenticateAppProxyRequest(request);
+  const auth = await authenticateDurableAppProxyRequest(request);
   if (!auth.ok) {
     return NextResponse.json(appProxyErrorBody(auth), { status: auth.status });
   }
-  const source = repository.mustGet(repository.renderRequests, params.renderId, "render_request");
-  if (source.shopId !== auth.shop.id) {
+  const source = await loadRenderRequestById(params.renderId);
+  if (!source || source.shopId !== auth.shop.id) {
     return NextResponse.json({ error: "render_not_found" }, { status: 404 });
   }
-  const body = await request.json();
+  const limit = enforceAppProxyRateLimit(request, auth, { roomSessionId: source.roomSessionId });
+  if (!limit.ok) {
+    return NextResponse.json(appProxyErrorBody(limit), { status: limit.status });
+  }
+  const body = await request.json().catch(() => ({}));
   const hint = String(body.hint ?? "").slice(0, 200);
   if (source.status !== "done") {
     return NextResponse.json({ error: "parent render must be done" }, { status: 409 });
@@ -23,7 +29,14 @@ export async function POST(request: NextRequest, { params }: { params: { renderI
   if (!source.roomSessionId) {
     return NextResponse.json({ error: "source_assets_unavailable" }, { status: 409 });
   }
+  try {
+    assertRenderQuota(auth.shop.id);
+  } catch {
+    return NextResponse.json({ error: "quota_exhausted" }, { status: 402 });
+  }
   repository.updateRenderRequest(source.id, { remainingRefinements: source.remainingRefinements - 1 });
-  const render = createRenderRequest({ roomSessionId: source.roomSessionId, tap: { x: source.tapX ?? 0.5, y: source.tapY ?? 0.7 }, sourceRenderRequestId: source.id, hintText: hint });
+  const render = await createDurableRenderRequest({ roomSessionId: source.roomSessionId, tap: { x: source.tapX ?? 0.5, y: source.tapY ?? 0.7 }, sourceRenderRequestId: source.id, hintText: hint });
+  await persistRenderBundle(source.id);
+  await persistRenderBundle(render.id);
   return NextResponse.json({ renderId: render.id, traceId: render.traceId, status: "queued" });
 }

@@ -1,11 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type {
   AiInvocationRecord,
+  AiExperimentArmRecord,
+  AiExperimentAssignmentRecord,
+  AiExperimentRecord,
   AiModelRecord,
   AiProviderRecord,
   AuditLogRecord,
+  EvalCaseRecord,
+  EvalDatasetRecord,
+  EvalResultRecord,
+  EvalRunRecord,
   EventLogRecord,
   JobRecord,
+  ManualReviewRecord,
   ModelRoutePolicyRecord,
   ProductSetupRecord,
   PromptBundleRecord,
@@ -56,6 +64,14 @@ export class InMemoryRepository {
   jobs = new Map<UUID, JobRecord>();
   eventLogs = new Map<UUID, EventLogRecord>();
   auditLogs = new Map<UUID, AuditLogRecord>();
+  manualReviews = new Map<UUID, ManualReviewRecord>();
+  evalDatasets = new Map<UUID, EvalDatasetRecord>();
+  evalCases = new Map<UUID, EvalCaseRecord>();
+  evalRuns = new Map<UUID, EvalRunRecord>();
+  evalResults = new Map<UUID, EvalResultRecord>();
+  experiments = new Map<UUID, AiExperimentRecord>();
+  experimentArms = new Map<UUID, AiExperimentArmRecord>();
+  experimentAssignments = new Map<UUID, AiExperimentAssignmentRecord>();
 
   reset() {
     for (const value of Object.values(this)) {
@@ -299,6 +315,90 @@ export class InMemoryRepository {
   audit(actor: string, action: string, entityType: string, entityId: UUID | undefined, before: unknown, after: unknown, reason?: string) {
     const record: AuditLogRecord = { id: id(), actor, action, entityType, entityId, before, after, reason, createdAt: now() };
     this.auditLogs.set(record.id, record);
+    return record;
+  }
+
+  createManualReview(input: Omit<ManualReviewRecord, "id" | "createdAt"> & { id?: UUID; createdAt?: string }) {
+    this.mustGet(this.renderRequests, input.renderRequestId, "render_request");
+    const record: ManualReviewRecord = { ...input, id: input.id ?? id(), createdAt: input.createdAt ?? now() };
+    this.manualReviews.set(record.id, record);
+    this.trace({
+      traceId: this.mustGet(this.renderRequests, input.renderRequestId, "render_request").traceId,
+      renderRequestId: input.renderRequestId,
+      eventName: "manual_review_recorded",
+      eventLevel: record.status === "approved" ? "info" : "warn",
+      props: { manualReviewId: record.id, status: record.status, score: record.score, issueTags: record.issueTags }
+    });
+    return record;
+  }
+
+  createEvalDataset(input: Omit<EvalDatasetRecord, "id" | "createdAt" | "updatedAt"> & { id?: UUID; createdAt?: string; updatedAt?: string }) {
+    const existing = [...this.evalDatasets.values()].find((dataset) => dataset.name === input.name);
+    if (existing) {
+      return existing;
+    }
+    const createdAt = input.createdAt ?? now();
+    const record: EvalDatasetRecord = { ...input, id: input.id ?? id(), createdAt, updatedAt: input.updatedAt ?? createdAt };
+    this.evalDatasets.set(record.id, record);
+    return record;
+  }
+
+  createEvalCase(input: Omit<EvalCaseRecord, "id" | "createdAt"> & { id?: UUID; createdAt?: string }) {
+    const duplicate = [...this.evalCases.values()].find((item) => item.evalDatasetId === input.evalDatasetId && item.caseSlug === input.caseSlug);
+    if (duplicate) {
+      return duplicate;
+    }
+    const record: EvalCaseRecord = { ...input, id: input.id ?? id(), createdAt: input.createdAt ?? now() };
+    this.evalCases.set(record.id, record);
+    return record;
+  }
+
+  createEvalRun(input: Omit<EvalRunRecord, "id" | "createdAt"> & { id?: UUID; createdAt?: string }) {
+    const record: EvalRunRecord = { ...input, id: input.id ?? id(), createdAt: input.createdAt ?? now() };
+    this.evalRuns.set(record.id, record);
+    return record;
+  }
+
+  updateEvalRun(idValue: UUID, patch: Partial<EvalRunRecord>) {
+    const current = this.mustGet(this.evalRuns, idValue, "eval_run");
+    const next = { ...current, ...patch };
+    this.evalRuns.set(idValue, next);
+    return next;
+  }
+
+  createEvalResult(input: Omit<EvalResultRecord, "id" | "createdAt"> & { id?: UUID; createdAt?: string }) {
+    const record: EvalResultRecord = { ...input, id: input.id ?? id(), createdAt: input.createdAt ?? now() };
+    this.evalResults.set(record.id, record);
+    return record;
+  }
+
+  createExperiment(input: Omit<AiExperimentRecord, "id" | "createdAt" | "updatedAt"> & { id?: UUID; createdAt?: string; updatedAt?: string }) {
+    const createdAt = input.createdAt ?? now();
+    const record: AiExperimentRecord = { ...input, id: input.id ?? id(), createdAt, updatedAt: input.updatedAt ?? createdAt };
+    this.experiments.set(record.id, record);
+    return record;
+  }
+
+  updateExperiment(idValue: UUID, patch: Partial<AiExperimentRecord>) {
+    const current = this.mustGet(this.experiments, idValue, "ai_experiment");
+    const next = { ...current, ...patch, updatedAt: now() };
+    this.experiments.set(idValue, next);
+    return next;
+  }
+
+  createExperimentArm(input: Omit<AiExperimentArmRecord, "id" | "createdAt"> & { id?: UUID; createdAt?: string }) {
+    const record: AiExperimentArmRecord = { ...input, id: input.id ?? id(), createdAt: input.createdAt ?? now() };
+    this.experimentArms.set(record.id, record);
+    return record;
+  }
+
+  assignExperiment(input: Omit<AiExperimentAssignmentRecord, "id" | "createdAt"> & { id?: UUID; createdAt?: string }) {
+    const duplicate = [...this.experimentAssignments.values()].find((item) => item.experimentId === input.experimentId && item.assignmentKey === input.assignmentKey);
+    if (duplicate) {
+      return duplicate;
+    }
+    const record: AiExperimentAssignmentRecord = { ...input, id: input.id ?? id(), createdAt: input.createdAt ?? now() };
+    this.experimentAssignments.set(record.id, record);
     return record;
   }
 

@@ -14,14 +14,15 @@ import { invokeAi } from "@/lib/ai/router";
 import { repository } from "@/lib/db/repository";
 import { deterministicAssignment } from "@/lib/experiments/assignment";
 import { createFounderSessionToken, isFounderHeaderValid, isFounderPasswordValid, isFounderSessionTokenValid } from "@/lib/founder/auth";
-import { enqueueJob, enqueueRenderJob, leaseJobs } from "@/lib/jobs/queue";
+import { enqueueDurableJob, enqueueJob, enqueueRenderJob, leaseJobs } from "@/lib/jobs/queue";
 import { runLeasedJob } from "@/lib/jobs/worker";
 import { mapBillingPlan } from "@/lib/shopify/billing";
-import { authenticateAppProxyParams, createAppProxySignature, signShopifyParams, verifyShopifyHmac } from "@/lib/shopify/app-proxy";
+import { authenticateAppProxyParams, createAppProxySignature, enforceAppProxyRateLimit, signShopifyParams, verifyShopifyHmac } from "@/lib/shopify/app-proxy";
 import { buildInstallUrl, handleOAuthCallback } from "@/lib/shopify/auth";
 import { handlePrivacyWebhook, verifyWebhook } from "@/lib/shopify/webhooks";
 import { verifyShopifySessionToken } from "@/lib/shopify/session";
-import { assertRenderQuota } from "@/lib/billing/quota";
+import { assertLifestyleQuota, assertRenderQuota, consumeLifestyleStarted, consumeRenderStarted } from "@/lib/billing/quota";
+import { resetRateLimitBuckets } from "@/lib/security/rate-limit";
 import { verifyServiceSecret } from "@/lib/security/service-auth";
 import { parseGateResult } from "@/lib/render/gate";
 import { buildReplayPayload } from "@/lib/render/replay";
@@ -62,6 +63,7 @@ function shopifySessionToken(payload: Record<string, unknown>, secret: string) {
 
 beforeEach(() => {
   repository.reset();
+  resetRateLimitBuckets();
   seedAiControlPlane(repository);
 });
 
@@ -168,12 +170,55 @@ describe("unit contract", () => {
   it("leases and retries jobs", async () => {
     const job = enqueueJob("daily_digest", {}, "digest");
     expect(leaseJobs("test", 1)[0].id).toBe(job.id);
+    const durable = await enqueueDurableJob("lifestyle_generate", { shopId: "shop" }, "lifestyle:unit");
+    expect(durable.type).toBe("lifestyle_generate");
     const failed = repository.failJob(job.id, "boom", "test");
     expect(failed.status).toBe("queued");
     const renderJob = enqueueRenderJob("missing");
     const leased = repository.leaseJobs("worker", 1).find((item) => item.id === renderJob.id) ?? renderJob;
     const result = await runLeasedJob(leased.id);
     expect(["queued", "dead"]).toContain(result.status);
+  });
+
+  it("records founder manual review, eval runs, fixture promotion data, and experiments", () => {
+    const shop = repository.createShop({ shopDomain: "founder-records.myshopify.com", plan: "trial", rendersQuota: 50, lifestyleImagesQuota: 10, billingStatus: "trial", roomPreviewEnabled: true });
+    const render = repository.createRenderRequest({
+      traceId: "trace-founder-records",
+      shopId: shop.id,
+      kind: "shopper",
+      surface: "widget",
+      status: "done"
+    });
+    const review = repository.createManualReview({
+      renderRequestId: render.id,
+      reviewer: "founder",
+      score: 7,
+      status: "needs_prompt_work",
+      issueTags: ["wrong_scale"]
+    });
+    expect(review.status).toBe("needs_prompt_work");
+    expect([...repository.traceEvents.values()].map((event) => event.eventName)).toContain("manual_review_recorded");
+    const dataset = repository.createEvalDataset({ name: "unit_promoted", status: "active" });
+    const evalCase = repository.createEvalCase({ evalDatasetId: dataset.id, caseSlug: "case-1", expectedJson: { renderRequestId: render.id } });
+    const run = repository.createEvalRun({ evalDatasetId: dataset.id, status: "running", summaryJson: {}, createdBy: "founder" });
+    const result = repository.createEvalResult({ evalRunId: run.id, evalCaseId: evalCase.id, automatedScoreJson: { score: 8 }, manualScoreJson: {}, status: "pass" });
+    expect(repository.updateEvalRun(run.id, { status: "completed", completedAt: new Date().toISOString() }).status).toBe("completed");
+    expect(result.status).toBe("pass");
+    const experiment = repository.createExperiment({
+      name: "unit model comparison",
+      type: "model_test",
+      surface: "widget",
+      status: "running",
+      trafficPercent: 10,
+      guardrailJson: {},
+      createdBy: "founder"
+    });
+    const control = repository.createExperimentArm({ experimentId: experiment.id, name: "control", trafficWeight: 50, paramsOverrideJson: {}, status: "active" });
+    const variant = repository.createExperimentArm({ experimentId: experiment.id, name: "variant", trafficWeight: 50, paramsOverrideJson: {}, status: "active" });
+    const armId = deterministicAssignment("stable-shop-product", [control, variant].map((arm) => ({ id: arm.id, trafficWeight: arm.trafficWeight })));
+    const assignment = repository.assignExperiment({ experimentId: experiment.id, armId, assignmentKey: "stable-shop-product" });
+    expect(repository.assignExperiment({ experimentId: experiment.id, armId, assignmentKey: "stable-shop-product" }).id).toBe(assignment.id);
+    expect(repository.updateExperiment(experiment.id, { status: "paused" }).status).toBe("paused");
   });
 
   it("builds storage paths and verifies signed uploads", async () => {
@@ -196,7 +241,25 @@ describe("unit contract", () => {
     const shop = repository.createShop({ shopDomain: "quota.myshopify.com", plan: "trial", rendersQuota: 1, lifestyleImagesQuota: 1, billingStatus: "trial", roomPreviewEnabled: true });
     expect(assertRenderQuota(shop.id)).toBe(true);
     const signedInstalledShop = createAppProxySignature({ ...params, shop: shop.shopDomain }, "secret");
-    expect(authenticateAppProxyParams(new URLSearchParams({ ...params, shop: shop.shopDomain, signature: signedInstalledShop }), "secret").ok).toBe(true);
+    const auth = authenticateAppProxyParams(new URLSearchParams({ ...params, shop: shop.shopDomain, signature: signedInstalledShop }), "secret");
+    expect(auth.ok).toBe(true);
+    if (!auth.ok) {
+      throw new Error("expected app proxy auth success");
+    }
+    for (let i = 0; i < 30; i += 1) {
+      expect(enforceAppProxyRateLimit({ headers: new Headers({ "x-forwarded-for": "203.0.113.10" }) }, auth, { roomSessionId: "room-1" }).ok).toBe(true);
+    }
+    expect(enforceAppProxyRateLimit({ headers: new Headers({ "x-forwarded-for": "203.0.113.10" }) }, auth, { roomSessionId: "room-1" })).toMatchObject({ ok: false, status: 429, error: "rate_limited", scope: "room_session" });
+    resetRateLimitBuckets();
+    for (let i = 0; i < 60; i += 1) {
+      expect(enforceAppProxyRateLimit({ headers: new Headers({ "x-forwarded-for": "203.0.113.11" }) }, auth).ok).toBe(true);
+    }
+    expect(enforceAppProxyRateLimit({ headers: new Headers({ "x-forwarded-for": "203.0.113.11" }) }, auth)).toMatchObject({ ok: false, status: 429, error: "rate_limited", scope: "ip" });
+    expect(consumeRenderStarted(shop.id).rendersQuota).toBe(0);
+    expect(() => assertRenderQuota(shop.id)).toThrow("quota_exhausted");
+    expect(assertLifestyleQuota(shop.id)).toBe(true);
+    expect(consumeLifestyleStarted(shop.id).lifestyleImagesQuota).toBe(0);
+    expect(() => assertLifestyleQuota(shop.id)).toThrow("lifestyle_quota_exhausted");
     expect(authenticateAppProxyParams(new URLSearchParams({ ...params, shop: shop.shopDomain }), "secret").ok).toBe(false);
     expect(handlePrivacyWebhook("customers/data_request", {}).ok).toBe(true);
     const body = JSON.stringify({ shop_domain: shop.shopDomain });

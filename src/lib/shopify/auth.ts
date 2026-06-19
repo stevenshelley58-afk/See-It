@@ -1,6 +1,7 @@
 import { encryptSecret } from "@/lib/security/encryption";
 import { verifyShopifyHmac } from "@/lib/shopify/app-proxy";
 import { repository } from "@/lib/db/repository";
+import { persistEvent, persistShop } from "@/lib/db/supabase-persistence";
 import type { AppEnv } from "@/lib/env";
 
 export function buildInstallUrl(shop: string, state: string, apiKey: string, appUrl: string, scopes: string[]) {
@@ -51,6 +52,7 @@ export async function handleOAuthCallback(url: URL, env: Pick<AppEnv, "SHOPIFY_A
     roomPreviewEnabled: true,
     offlineAccessTokenEncrypted: encryptSecret(accessToken, env.ENCRYPTION_KEY)
   });
-  repository.event({ surface: "admin", name: "oauth_callback_succeeded", shopId: shop.id, props: { shopDomain } });
+  await persistShop(shop);
+  await persistEvent(repository.event({ surface: "admin", name: "oauth_callback_succeeded", shopId: shop.id, props: { shopDomain } }));
   return shop;
 }

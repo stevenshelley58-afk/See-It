@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enqueueJob } from "@/lib/jobs/queue";
+import { enqueueDurableJob } from "@/lib/jobs/queue";
 import { authenticateServiceRequest, serviceAuthErrorBody } from "@/lib/security/service-auth";
 
 export async function POST(request: NextRequest) {
@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(serviceAuthErrorBody(auth), { status: auth.status });
   }
   const hour = new Date().toISOString().slice(0, 13);
-  const job = enqueueJob("sync_sender", { hour }, "sync_sender:" + hour, 80, 3);
+  const job = await enqueueDurableJob("sync_sender", { hour }, "sync_sender:" + hour, 80, 3);
   return NextResponse.json({ job });
 }
 

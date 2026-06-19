@@ -7,8 +7,9 @@ import { assetHash, renderAssetPath } from "@/lib/render/image-assets";
 import { deterministicGate } from "@/lib/render/gate";
 import { resolveActiveRecipe } from "@/lib/render/recipes";
 import { traceRender } from "@/lib/render/trace";
-import { enqueueRenderJob } from "@/lib/jobs/queue";
+import { enqueueDurableRenderJob, enqueueRenderJob } from "@/lib/jobs/queue";
 import { consumeRenderStarted } from "@/lib/billing/quota";
+import { hydrateRenderPipelineInputs, persistRenderBundle, persistShop } from "@/lib/db/supabase-persistence";
 
 export type StartRenderInput = {
   roomSessionId: string;
@@ -43,20 +44,28 @@ export function createRenderRequest(input: StartRenderInput) {
   return record;
 }
 
+export async function createDurableRenderRequest(input: StartRenderInput) {
+  const record = createRenderRequest(input);
+  await enqueueDurableRenderJob(record.id);
+  return record;
+}
+
 export async function runRenderPipeline(renderRequestId: string) {
+  await hydrateRenderPipelineInputs(renderRequestId);
   const request = repository.mustGet(repository.renderRequests, renderRequestId, "render_request");
   const room = request.roomSessionId ? repository.mustGet(repository.roomSessions, request.roomSessionId, "room_session") : undefined;
   const product = room?.productSetupId ? repository.mustGet(repository.products, room.productSetupId, "product_setup") : demoProduct(request, room);
   repository.updateRenderRequest(request.id, { status: "running" });
   if (request.shopId && request.kind === "shopper" && request.attemptCount === 0) {
     try {
-      consumeRenderStarted(request.shopId);
+      const shop = consumeRenderStarted(request.shopId);
+      await persistShop(shop);
       traceRender(request.traceId, "render_quota_consumed", { shopId: request.shopId }, request.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : "quota_exhausted";
       repository.updateRenderRequest(request.id, { status: "failed", finalErrorCode: "quota_exhausted", finalMessage: friendlyError("quota_exhausted") });
       traceRender(request.traceId, "render_failed", { errorCode: "quota_exhausted", message }, request.id, "warn");
-      return repository.renderBundleForRequest(request.id);
+      return persistRenderResult(request.id);
     }
   }
   traceRender(request.traceId, "product_cutout_selected", { cutoutKey: product.cutoutKey ?? "products/demo/cutout-primary.png" }, request.id);
@@ -83,7 +92,7 @@ export async function runRenderPipeline(renderRequestId: string) {
       const message = error instanceof Error ? error.message : "model_route_unavailable";
       repository.updateRenderRequest(request.id, { status: "failed", finalErrorCode: "model_route_unavailable", finalMessage: friendlyError("model_route_unavailable") });
       traceRender(request.traceId, "render_failed", { errorCode: "model_route_unavailable", message }, request.id, "error");
-      return repository.renderBundleForRequest(request.id);
+      return persistRenderResult(request.id);
     }
     traceRender(request.traceId, "model_route_selected", { provider: route.provider.providerKey, model: route.model.modelKey, attemptNumber }, request.id);
     const attempt = repository.createRenderAttempt({
@@ -124,7 +133,7 @@ export async function runRenderPipeline(renderRequestId: string) {
       }
       repository.updateRenderRequest(request.id, { status: "failed", finalErrorCode: lastErrorCode, finalMessage: friendlyError(lastErrorCode) });
       traceRender(request.traceId, "render_failed", { errorCode: lastErrorCode }, request.id, "error");
-      return repository.renderBundleForRequest(request.id);
+      return persistRenderResult(request.id);
     }
     const output = result.result.outputAssets.find((asset) => asset.role === "image") ?? result.result.outputAssets[0];
     const storageKey = output.storageKey ?? renderAssetPath(request.id, attempt.attemptNumber, "provider-output");
@@ -157,7 +166,7 @@ export async function runRenderPipeline(renderRequestId: string) {
       }
       repository.updateRenderRequest(request.id, { status: "failed", finalGateScore: gate.score, finalErrorCode: "gate_rejected", finalMessage: friendlyError("gate_rejected") });
       traceRender(request.traceId, "render_rejected", { gate }, request.id, "warn");
-      return repository.renderBundleForRequest(request.id);
+      return persistRenderResult(request.id);
     }
     const finalAsset = repository.createRenderAsset({
       renderRequestId: request.id,
@@ -176,11 +185,15 @@ export async function runRenderPipeline(renderRequestId: string) {
     repository.updateRenderRequest(request.id, { status: "done", selectedResultAssetId: finalAsset.id, finalGateScore: gate.score, completedAt: new Date().toISOString() });
     traceRender(request.traceId, "render_accepted", { assetId: finalAsset.id, gateScore: gate.score }, request.id);
     traceRender(request.traceId, "render_result_signed", { storageKey: finalAsset.storageKey }, request.id);
-    return repository.renderBundleForRequest(request.id);
+    return persistRenderResult(request.id);
   }
   repository.updateRenderRequest(request.id, { status: "failed", finalErrorCode: "job_retry_exhausted", finalMessage: friendlyError("job_retry_exhausted") });
   traceRender(request.traceId, "render_failed", { errorCode: "job_retry_exhausted" }, request.id, "error");
-  return repository.renderBundleForRequest(request.id);
+  return persistRenderResult(request.id);
+}
+
+async function persistRenderResult(renderRequestId: string) {
+  return persistRenderBundle(renderRequestId);
 }
 
 function demoProduct(request: RenderRequestRecord, room?: RoomSessionRecord): ProductSetupRecord {

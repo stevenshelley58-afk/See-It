@@ -11,5 +11,23 @@ export function assertRenderQuota(shopId: string) {
 export function consumeRenderStarted(shopId: string) {
   const shop = repository.mustGet(repository.shops, shopId, "shop");
   assertRenderQuota(shopId);
-  repository.shops.set(shopId, { ...shop, rendersQuota: shop.rendersQuota - 1 });
+  const next = { ...shop, rendersQuota: shop.rendersQuota - 1 };
+  repository.shops.set(shopId, next);
+  return next;
+}
+
+export function assertLifestyleQuota(shopId: string) {
+  const shop = repository.mustGet(repository.shops, shopId, "shop");
+  if (shop.lifestyleImagesQuota <= 0 || shop.plan === "cancelled") {
+    throw new Error("lifestyle_quota_exhausted");
+  }
+  return true;
+}
+
+export function consumeLifestyleStarted(shopId: string) {
+  const shop = repository.mustGet(repository.shops, shopId, "shop");
+  assertLifestyleQuota(shopId);
+  const next = { ...shop, lifestyleImagesQuota: shop.lifestyleImagesQuota - 1 };
+  repository.shops.set(shopId, next);
+  return next;
 }

@@ -17,7 +17,7 @@ export function getFounderDashboard() {
     costToday: Number(costs.toFixed(4)),
     costPerAcceptedRender: accepted ? Number((costs / accepted).toFixed(4)) : 0,
     activePromptDeployments: [...repository.deployments.values()].filter((deployment) => deployment.status === "active").length,
-    activeExperiments: 0,
+    activeExperiments: [...repository.experiments.values()].filter((experiment) => experiment.status === "running").length,
     shopsNeedingAttention: [...repository.shops.values()].filter((shop) => shop.uninstalledAt || shop.plan === "cancelled").length,
     providers: listProviders(),
     models: listModels(),

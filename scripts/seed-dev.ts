@@ -1,5 +1,10 @@
-import { ensureAiRegistrySeeded } from "@/lib/ai/registry";
-import { recordDemoGenerated } from "@/lib/growth/demo";
+import { createSmokeRoom } from "./smoke-utils";
 
-ensureAiRegistrySeeded();
-console.log("seed-dev ready", recordDemoGenerated("demo.myshopify.com").slug);
+const { shop, product, room } = await createSmokeRoom("dev-seed.myshopify.com");
+console.log(JSON.stringify({
+  shopId: shop.id,
+  productSetupId: product.id,
+  roomSessionId: room.id,
+  productReady: product.prepStatus,
+  widgetEnabled: shop.roomPreviewEnabled
+}, null, 2));

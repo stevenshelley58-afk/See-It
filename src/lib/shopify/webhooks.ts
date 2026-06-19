@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { repository } from "@/lib/db/repository";
+import { loadShopByDomain, persistEvent, persistJob, persistShop } from "@/lib/db/supabase-persistence";
 
 export function verifyWebhook(body: string, hmacHeader: string | null, secret: string) {
   if (!hmacHeader) {
@@ -14,6 +15,11 @@ export function verifyWebhook(body: string, hmacHeader: string | null, secret: s
 
 export function handlePrivacyWebhook(topic: string, payload: unknown) {
   repository.event({ surface: "system", name: "privacy_" + topic.replace(/[/:]/g, "_"), props: { payload } });
+  return { ok: true };
+}
+
+export async function handleDurablePrivacyWebhook(topic: string, payload: unknown) {
+  await persistEvent(repository.event({ surface: "system", name: "privacy_" + topic.replace(/[/:]/g, "_"), props: { payload } }));
   return { ok: true };
 }
 
@@ -54,4 +60,22 @@ export function handleUninstall(shopDomain: string) {
   repository.cancelJobsForShop(shop.id);
   repository.event({ surface: "system", name: "app_uninstalled", shopId: shop.id, props: { shopDomain } });
   return { ok: true, disabled: true };
+}
+
+export async function handleDurableUninstall(shopDomain: string) {
+  const shop = await loadShopByDomain(shopDomain);
+  if (!shop) {
+    return { ok: true, disabled: false };
+  }
+  const updated = { ...shop, uninstalledAt: new Date().toISOString(), offlineAccessTokenEncrypted: undefined, roomPreviewEnabled: false, billingStatus: "uninstalled" };
+  repository.shops.set(shop.id, updated);
+  const cancelled = repository.cancelJobsForShop(shop.id);
+  await persistShop(updated);
+  for (const job of repository.jobs.values()) {
+    if (job.payload.shopId === shop.id) {
+      await persistJob(job);
+    }
+  }
+  await persistEvent(repository.event({ surface: "system", name: "app_uninstalled", shopId: shop.id, props: { shopDomain, cancelledJobs: cancelled } }));
+  return { ok: true, disabled: true, cancelledJobs: cancelled };
 }

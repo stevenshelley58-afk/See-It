@@ -3,7 +3,7 @@ import { PLANS } from "@/lib/shopify/billing";
 import { authenticateMerchantRequest, merchantAuthErrorBody } from "@/lib/shopify/session";
 
 export async function GET(request: NextRequest) {
-  const auth = authenticateMerchantRequest(request);
+  const auth = await authenticateMerchantRequest(request);
   if (!auth.ok) {
     return NextResponse.json(merchantAuthErrorBody(auth), { status: auth.status });
   }
