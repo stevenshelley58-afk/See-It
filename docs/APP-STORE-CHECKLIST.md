@@ -56,6 +56,12 @@ The Shopify CLI deploy/dev-store gates require Shopify account device-code login
 pnpm.cmd dlx @shopify/cli@latest app deploy --no-release --no-color
 ```
 
+Latest non-interactive retry also fails before deploy:
+
+```text
+Authorization is required to continue, but the current environment does not support interactive prompts.
+```
+
 Until that login and dev-store validation are completed, App Store readiness is not green.
 
 ## Latest Automated Evidence

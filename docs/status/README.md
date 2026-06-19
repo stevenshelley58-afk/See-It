@@ -68,3 +68,9 @@ pnpm.cmd run manual:gates:template -- --evidence out/manual-gates-evidence.json
 ```powershell
 pnpm.cmd dlx @shopify/cli@latest app deploy --no-release --no-color
 ```
+
+The latest non-interactive retry failed before deploy with Shopify CLI authorization required:
+
+```text
+Authorization is required to continue, but the current environment does not support interactive prompts.
+```
