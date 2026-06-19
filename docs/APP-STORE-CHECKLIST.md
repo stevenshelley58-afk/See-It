@@ -80,6 +80,6 @@ Recorded on 2026-06-20 AWST from `C:\Dev\See It`:
 - `pnpm.cmd run static:verify` guards founder render details, replay, deployments, benchmark/evals, experiments, cost, and render-operations pages against losing their durable data hooks or required spec copy.
 - `pnpm.cmd run static:verify` checks the widget bundle budget; current widget bundle is below the 30 KB initial-JS gate.
 - `docs/adr/0001-shopify-app-pricing.md` is accepted and records Shopify App Pricing as the App Store billing path.
-- Vercel production deployment `dpl_HA2nio39nr73WK8vNFaCArcySVmQ` is Ready for commit `5bfafa43a75b723b962144ee187cfda346d2d793`.
-- GitHub CI passed for commit `5bfafa43a75b723b962144ee187cfda346d2d793`.
-- Vercel runtime logs had no error or fatal entries for deployment `dpl_HA2nio39nr73WK8vNFaCArcySVmQ` in the post-smoke window.
+- GitHub CI passed for the latest pushed `main` release candidate.
+- Vercel production deployment for the latest pushed `main` release candidate reached Ready and is aliased to `https://see-it-nine.vercel.app`.
+- Vercel runtime logs had no error or fatal entries for the checked production deployment in the post-smoke window.

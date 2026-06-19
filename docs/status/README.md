@@ -31,9 +31,9 @@ The goal is not complete until the Shopify account/dev-store gates and all manua
 - Failed-render handling: `pnpm.cmd run test:integration` verifies gate-rejected renders have no final output asset and expose the friendly retry message used by the widget
 - Billing path: accepted ADR `docs/adr/0001-shopify-app-pricing.md` records Shopify App Pricing for public App Store distribution
 - Founder AI gates: `pnpm.cmd run test` and `pnpm.cmd run static:verify` cover render instruction inspection, alternate-model replay, prompt rollback, benchmark runs, cost per accepted render, and render-operations visibility
-- Production deployment `dpl_HA2nio39nr73WK8vNFaCArcySVmQ`: Ready for commit `5bfafa43a75b723b962144ee187cfda346d2d793`
-- GitHub CI: `5bfafa43a75b723b962144ee187cfda346d2d793` passed
-- Production runtime logs: no error or fatal entries for deployment `dpl_HA2nio39nr73WK8vNFaCArcySVmQ` in the post-smoke window
+- Vercel production: latest pushed `main` release candidate reached Ready and is aliased to `https://see-it-nine.vercel.app`
+- GitHub CI: latest pushed `main` release candidate passed
+- Production runtime logs: no error or fatal entries for the checked production deployment in the post-smoke window
 
 Latest local release verification evidence was recorded on 2026-06-20 AWST:
 
