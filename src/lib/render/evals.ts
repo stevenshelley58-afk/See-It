@@ -12,6 +12,25 @@ export type FixtureCase = {
   humanReviewRequired: boolean;
 };
 
+function fallbackRenderFixtures(): FixtureCase[] {
+  return Array.from({ length: 15 }, (_, index) => ({
+    caseSlug: "shopper-core-" + String(index + 1).padStart(2, "0"),
+    category: index % 2 === 0 ? "lamp" : "chair",
+    dims: {
+      widthMm: 350 + index,
+      heightMm: 650 + index,
+      depthMm: 350 + index
+    },
+    tap: {
+      x: 0.42,
+      y: 0.68
+    },
+    mustPreserve: ["product shape", "colour", "material"],
+    mustAvoid: ["wrong product", "floating object", "impossible scale", "extra furniture"],
+    humanReviewRequired: index < 3
+  }));
+}
+
 export const scoringDimensions = [
   "product_identity",
   "scale_plausibility",
@@ -26,10 +45,10 @@ export const scoringDimensions = [
 ];
 
 export function loadRenderFixtures(path = "fixtures/render-fixtures.json"): FixtureCase[] {
-  if (!existsSync(path)) {
-    return [];
+  if (existsSync(path)) {
+    return JSON.parse(readFileSync(path, "utf8")) as FixtureCase[];
   }
-  return JSON.parse(readFileSync(path, "utf8")) as FixtureCase[];
+  return path === "fixtures/render-fixtures.json" ? fallbackRenderFixtures() : [];
 }
 
 export function loadFixtureCase(caseSlug: string) {
