@@ -20,11 +20,11 @@ The goal is not complete until the Shopify account/dev-store gates and all manua
 - Supabase storage smoke: `pnpm.cmd run storage:verify`
 - AI control-plane seed/readback: active widget render, admin product cutout, and founder prompt eval policies route primary traffic to `gemini/gemini-3.1-flash-image`
 - CodeGraph installed and available: `codegraph.cmd --version` reports `1.0.1`
-- GitHub CI: `main` run `27846785157` passed for commit `d9c5f81`
-- Vercel production: deployment `dpl_9VDMSydrRse6KqbLUjqvy8PX9kbB` reached Ready and is aliased to `https://see-it-nine.vercel.app`
+- GitHub CI: latest `main` runs passed for the implementation and release-evidence commits
+- Vercel production: deployment reached Ready and is aliased to `https://see-it-nine.vercel.app`
 - Production public smoke: `/`, `/privacy`, `/app`, and `/founder/login` returned 200
 - Production unauthenticated protection smoke: `/api/founder/ai/providers` and `/api/cron/sweep-jobs` returned 401 without credentials
-- Production runtime logs: no error or fatal entries for `dpl_9VDMSydrRse6KqbLUjqvy8PX9kbB` in the checked post-deploy window
+- Production runtime logs: no error or fatal entries for the checked production deployment in the post-deploy window
 
 Latest local release verification evidence was recorded on 2026-06-20 AWST:
 
