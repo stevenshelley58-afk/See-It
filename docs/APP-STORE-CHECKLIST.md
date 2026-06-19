@@ -13,6 +13,7 @@ This checklist is release evidence, not a plan. Mark an item green only after ch
 - [x] Production founder AI APIs return 200 for list endpoints
 - [x] Production cron routes return 401 without secret and 200 with secret
 - [x] Production app proxy room/render/feedback smoke passes with signed Shopify app proxy params
+- [x] Production Shopify privacy and uninstall webhooks pass with signed HMAC traffic
 - [x] Recent production logs show no new 500s after smoke traffic
 
 ## Shopify App Store Requirements
@@ -24,15 +25,15 @@ This checklist is release evidence, not a plan. Mark an item green only after ch
 - [ ] Install to working PDP button completes under 10 minutes
 - [ ] First merchant render completes under 5 minutes
 - [ ] Shopper room upload/tap/result path works on mobile and desktop
-- [ ] Bad render is hidden behind friendly retry state
-- [ ] Shopper feedback writes `render_feedback`
+- [x] Bad render is hidden behind friendly retry state
+- [x] Shopper feedback writes `render_feedback`
 - [ ] PDP Lighthouse performance delta is <= 10 points
-- [ ] Widget initial JS is < 30 KB
-- [ ] Billing path uses Shopify App Pricing or has an accepted ADR for manual Billing API
+- [x] Widget initial JS is < 30 KB
+- [x] Billing path uses Shopify App Pricing or has an accepted ADR for manual Billing API
 - [ ] Billing test mode works before App Store submission
-- [ ] Privacy webhooks pass
-- [ ] Uninstall disables shop state and cancels active jobs
-- [ ] Public privacy policy describes temporary room-photo processing and retention
+- [x] Privacy webhooks pass
+- [x] Uninstall disables shop state and cancels active jobs
+- [x] Public privacy policy describes temporary room-photo processing and retention
 
 ## AI And Render Gates
 
@@ -40,12 +41,12 @@ This checklist is release evidence, not a plan. Mark an item green only after ch
 - [x] Automated fixture pass count is >= 13
 - [ ] Human contact sheet review is complete
 - [ ] No product identity failures in approved cases
-- [ ] Founder can inspect every AI instruction for a render
-- [ ] Founder can replay a render with a different model
-- [ ] Founder can roll back active prompt deployment
-- [ ] Model comparison benchmark works
-- [ ] Cost dashboard shows cost per accepted render
-- [ ] Render operations dashboard shows attempts, assets, prompt snapshots, provider responses, gate scores, retries, and feedback
+- [x] Founder can inspect every AI instruction for a render
+- [x] Founder can replay a render with a different model
+- [x] Founder can roll back active prompt deployment
+- [x] Model comparison benchmark works
+- [x] Cost dashboard shows cost per accepted render
+- [x] Render operations dashboard shows attempts, assets, prompt snapshots, provider responses, gate scores, retries, and feedback
 
 ## Current External Blocker
 
@@ -72,5 +73,13 @@ Recorded on 2026-06-20 AWST from `C:\Dev\See It`:
 - Production unauthenticated protection smoke passed: `/api/founder/ai/providers` and `/api/cron/sweep-jobs` returned 401 without credentials.
 - Production authenticated founder smoke passed after rotating encrypted production `FOUNDER_PASSWORD`: founder session returned 303, `/founder`, `/founder/ai`, `/founder/money`, and `/api/founder/ai/providers` returned 200.
 - Production authenticated cron smoke passed after rotating encrypted production `CRON_SECRET`: `/api/cron/sweep-jobs` returned 200 with the secret.
-- `pnpm.cmd run app-proxy:smoke` passed against `https://see-it-nine.vercel.app`: signed app-proxy room creation, room verify, render creation, render status, and feedback all returned 200.
-- Vercel runtime logs had no error or fatal entries for the checked production deployment in the post-deploy window.
+- `pnpm.cmd run app-proxy:smoke` passed against `https://see-it-nine.vercel.app`: signed app-proxy room creation, room verify, render creation, render status, feedback endpoint, and persisted `render_feedback` row all passed.
+- `pnpm.cmd run webhooks:smoke` passed against `https://see-it-nine.vercel.app`: signed privacy topics and uninstall returned 200, uninstall cleared the offline token, disabled room preview, cancelled the seeded active job, and persisted the expected event names.
+- `pnpm.cmd run test:integration` proves gate-rejected renders end as failed without final output assets and carry the friendly retry message.
+- `pnpm.cmd run test` covers founder replay with alternate model, prompt rollback, benchmark creation/reuse, manual review records, eval results, experiments, billing/quota, and Shopify auth contracts.
+- `pnpm.cmd run static:verify` guards founder render details, replay, deployments, benchmark/evals, experiments, cost, and render-operations pages against losing their durable data hooks or required spec copy.
+- `pnpm.cmd run static:verify` checks the widget bundle budget; current widget bundle is below the 30 KB initial-JS gate.
+- `docs/adr/0001-shopify-app-pricing.md` is accepted and records Shopify App Pricing as the App Store billing path.
+- Vercel production deployment `dpl_HA2nio39nr73WK8vNFaCArcySVmQ` is Ready for commit `5bfafa43a75b723b962144ee187cfda346d2d793`.
+- GitHub CI passed for commit `5bfafa43a75b723b962144ee187cfda346d2d793`.
+- Vercel runtime logs had no error or fatal entries for deployment `dpl_HA2nio39nr73WK8vNFaCArcySVmQ` in the post-smoke window.

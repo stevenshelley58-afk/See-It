@@ -1,6 +1,6 @@
 import { signShopifyParams } from "@/lib/shopify/app-proxy";
 import { repository } from "@/lib/db/repository";
-import { persistProductSetup, persistShop } from "@/lib/db/supabase-persistence";
+import { loadRenderBundle, persistProductSetup, persistShop } from "@/lib/db/supabase-persistence";
 import { PLANS } from "@/lib/shopify/billing";
 import { loadScriptEnv } from "./script-env";
 
@@ -163,11 +163,21 @@ if (feedback.json.ok !== true) {
   throw new Error("Feedback smoke did not return ok=true");
 }
 
+const bundle = await loadRenderBundle(renderId);
+const persistedFeedback = bundle?.feedback.find((item) => item.issueTag === "smoke_test" && item.comment === "Automated production app proxy smoke");
+if (!persistedFeedback) {
+  throw new Error("Feedback smoke did not persist render_feedback row for render " + renderId);
+}
+if (persistedFeedback.verdict !== "down") {
+  throw new Error("Feedback smoke persisted unexpected verdict: " + persistedFeedback.verdict);
+}
+
 console.log(JSON.stringify({
   ok: true,
   baseUrl,
   shopDomain: shop.shopDomain,
   productSetupId: product.id,
   roomSessionId,
-  renderId
+  renderId,
+  feedbackId: persistedFeedback.id
 }, null, 2));

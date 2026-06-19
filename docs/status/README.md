@@ -26,8 +26,14 @@ The goal is not complete until the Shopify account/dev-store gates and all manua
 - Production unauthenticated protection smoke: `/api/founder/ai/providers` and `/api/cron/sweep-jobs` returned 401 without credentials
 - Production authenticated founder smoke: founder session returned 303, `/founder`, `/founder/ai`, `/founder/money`, and `/api/founder/ai/providers` returned 200 after rotating encrypted production `FOUNDER_PASSWORD`
 - Production authenticated cron smoke: `/api/cron/sweep-jobs` returned 200 after rotating encrypted production `CRON_SECRET`
-- Production signed app-proxy smoke: `pnpm.cmd run app-proxy:smoke` passed room creation, room verify, render creation, render status, and feedback against `https://see-it-nine.vercel.app`
-- Production runtime logs: no error or fatal entries for the checked production deployment in the post-deploy window
+- Production signed app-proxy smoke: `pnpm.cmd run app-proxy:smoke` passed room creation, room verify, render creation, render status, feedback endpoint, and persisted `render_feedback` row against `https://see-it-nine.vercel.app`
+- Production signed webhook smoke: `pnpm.cmd run webhooks:smoke` passed Shopify privacy topics and uninstall against `https://see-it-nine.vercel.app`, including offline-token clearing, room-preview disablement, active-job cancellation, and persisted event checks
+- Failed-render handling: `pnpm.cmd run test:integration` verifies gate-rejected renders have no final output asset and expose the friendly retry message used by the widget
+- Billing path: accepted ADR `docs/adr/0001-shopify-app-pricing.md` records Shopify App Pricing for public App Store distribution
+- Founder AI gates: `pnpm.cmd run test` and `pnpm.cmd run static:verify` cover render instruction inspection, alternate-model replay, prompt rollback, benchmark runs, cost per accepted render, and render-operations visibility
+- Production deployment `dpl_HA2nio39nr73WK8vNFaCArcySVmQ`: Ready for commit `5bfafa43a75b723b962144ee187cfda346d2d793`
+- GitHub CI: `5bfafa43a75b723b962144ee187cfda346d2d793` passed
+- Production runtime logs: no error or fatal entries for deployment `dpl_HA2nio39nr73WK8vNFaCArcySVmQ` in the post-smoke window
 
 Latest local release verification evidence was recorded on 2026-06-20 AWST:
 
@@ -36,7 +42,10 @@ pnpm.cmd run verify
 pnpm.cmd run db:verify:write
 pnpm.cmd run storage:verify
 pnpm.cmd run build
+pnpm.cmd run test
+pnpm.cmd run test:integration
 pnpm.cmd run app-proxy:smoke
+pnpm.cmd run webhooks:smoke
 ```
 
 ## Remaining Manual Gates

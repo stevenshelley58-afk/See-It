@@ -79,6 +79,7 @@ describe("integration flow", () => {
     const bundle = repository.renderBundleForRequest(render.id);
     expect(bundle.request.status).toBe("failed");
     expect(bundle.request.finalErrorCode).toBe("gate_rejected");
+    expect(bundle.request.finalMessage).toBe("We couldn't get this one right. Try another photo or retry.");
     expect(bundle.attempts).toHaveLength(3);
     expect(bundle.assets.some((asset) => asset.role === "final_output")).toBe(false);
     expect(bundle.trace.map((event) => event.eventName)).toContain("render_escalated");

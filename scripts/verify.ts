@@ -6,6 +6,7 @@ const required = [
   "AGENTS.md",
   "supabase/migrations/20260619120000_initial.sql",
   "src/app/privacy/page.tsx",
+  "docs/adr/0001-shopify-app-pricing.md",
   "src/lib/ai/router.ts",
   "extension/assets/widget.js",
   "scripts/db-verify.ts",
@@ -70,6 +71,8 @@ for (const file of globSync("src/app/api/auth/**/route.ts")) {
 assertContains("src/proxy.ts", "export async function proxy", "Founder proxy convention missing");
 assertContains("src/proxy.ts", "matcher: [\"/founder/:path*\", \"/api/founder/:path*\"]", "Founder proxy matcher missing");
 assertContains("src/proxy.ts", "isFounderSessionTokenValid", "Founder proxy missing session auth");
+assertContains("docs/adr/0001-shopify-app-pricing.md", "Status: accepted", "Shopify billing ADR must be accepted");
+assertContains("docs/adr/0001-shopify-app-pricing.md", "Shopify App Pricing", "Shopify billing ADR must choose Shopify App Pricing");
 
 const founderAiRoute = read("src/app/api/founder/ai/[...segments]/route.ts");
 if (founderAiRoute.includes("return NextResponse.json({ ok: true")) {
@@ -113,7 +116,7 @@ for (const requiredSnippet of ["SUPABASE_SERVICE_ROLE_KEY", "createClient", "Sup
 assertContains("scripts/seed-ai-registry.ts", "loadScriptEnv", "AI seed script must load local env files before persistence");
 assertContains("package.json", "db:verify:seeded", "Seeded runtime DB verification script missing");
 assertContains("package.json", "app-proxy:smoke", "Production app-proxy smoke script missing");
-for (const requiredSnippet of ["signedAppProxyUrl", "POST /app-proxy/rooms", "POST /app-proxy/renders", "POST /app-proxy/renders/:renderId/feedback"]) {
+for (const requiredSnippet of ["signedAppProxyUrl", "POST /app-proxy/rooms", "POST /app-proxy/renders", "POST /app-proxy/renders/:renderId/feedback", "loadRenderBundle", "Feedback smoke did not persist render_feedback row"]) {
   assertContains("scripts/app-proxy-smoke.ts", requiredSnippet, "App-proxy smoke script missing required flow");
 }
 assertContains("package.json", "webhooks:smoke", "Production webhook smoke script missing");
@@ -268,6 +271,28 @@ for (const file of [
 ] as const) {
   assertContains(file, "force-dynamic", "DB-backed founder page must not prerender against operational Supabase tables");
 }
+for (const [file, requiredSnippet] of [
+  ["src/app/founder/renders/[renderId]/page.tsx", "Prompt snapshots, inputs, outputs, provider responses, gate notes, costs, latency, storage keys, feedback, and replay controls."],
+  ["src/app/founder/renders/page.tsx", "Every render request, attempt, prompt snapshot, provider payload, gate decision, cost, latency, asset, replay, and feedback record."],
+  ["src/app/founder/renders/[renderId]/replay/page.tsx", "alternate prompt bundle, model, recipe, gate policy, fallback policy, and parameters"],
+  ["src/app/founder/ai/replay/page.tsx", "Replay candidates"],
+  ["src/app/founder/ai/deployments/page.tsx", "rollback-ready"],
+  ["src/app/founder/ai/costs/page.tsx", "Cost per accepted"],
+  ["src/app/founder/evals/page.tsx", "benchmark runs"],
+  ["src/app/founder/experiments/page.tsx", "Prompt, model, recipe, gate, fallback, and parameter tests"]
+] as const) {
+  assertContains(file, requiredSnippet, "Founder release gate UI missing required evidence");
+}
+for (const [file, requiredSnippet] of [
+  ["src/app/api/founder/ai/[...segments]/route.ts", "createDurableReplay"],
+  ["src/app/api/founder/ai/[...segments]/route.ts", "repository.rollbackDeployment"],
+  ["src/app/api/founder/ai/[...segments]/route.ts", "runBenchmarkSuite"],
+  ["tests/unit/spec-contract.test.ts", "modelKey: \"gpt-image-2\""],
+  ["tests/unit/spec-contract.test.ts", "unit benchmark"],
+  ["tests/unit/spec-contract.test.ts", "rollbackDeployment"]
+] as const) {
+  assertContains(file, requiredSnippet, "Founder release gate API/test missing required evidence");
+}
 
 for (const [file, secretName] of [["src/lib/ai/providers/openai.ts", "OPENAI_API_KEY"], ["src/lib/ai/providers/gemini.ts", "GEMINI_API_KEY"], ["src/lib/ai/providers/custom-http.ts", "CUSTOM_IMAGE_API_KEY"]] as const) {
   const text = read(file);
@@ -284,6 +309,10 @@ for (const requiredSnippet of ["render_retry_scheduled", "render_escalated", "co
     throw new Error("Render orchestrator missing launch-critical behavior: " + requiredSnippet);
   }
 }
+assertContains("src/lib/render/orchestrator.ts", "We couldn't get this one right. Try another photo or retry.", "Render failures must use a friendly retry message");
+assertContains("src/app/app-proxy/renders/[renderId]/route.ts", "message: render.finalMessage", "App-proxy render status must expose the friendly failed-render message");
+assertContains("extension/assets/widget.js", "result.status === \"failed\"", "Widget must handle failed render status");
+assertContains("extension/assets/widget.js", "Try another photo or retry", "Widget must show a friendly retry state for failed renders");
 
 for (const file of globSync("src/app/**/*.{ts,tsx}")) {
   const text = read(file);

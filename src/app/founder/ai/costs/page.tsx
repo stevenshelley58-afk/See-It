@@ -39,7 +39,7 @@ export default async function CostsPage() {
         <Metric label="Total cost" value={"$" + total.toFixed(4)} />
         <Metric label="Failed cost" value={"$" + failedCost.toFixed(4)} />
         <Metric label="Invocations" value={invocations.length} />
-        <Metric label="Cost per success" value={"$" + (acceptedCount ? total / acceptedCount : 0).toFixed(4)} />
+        <Metric label="Cost per accepted" value={"$" + (acceptedCount ? total / acceptedCount : 0).toFixed(4)} />
       </div>
       <section className="band">
         <div className="toolbar"><DollarSign size={18} /><strong>Provider and model cost</strong></div>
