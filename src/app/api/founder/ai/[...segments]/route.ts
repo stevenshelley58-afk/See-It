@@ -14,7 +14,7 @@ import { ensureAiRegistrySeeded, listModels, listProviders } from "@/lib/ai/regi
 import { promptHash } from "@/lib/ai/prompt-hash";
 import type { AiTaskType } from "@/lib/ai/types";
 import { repository } from "@/lib/db/repository";
-import { loadAiControlPlane, persistAiControlPlane, persistAuditLogs, persistEvalDataset, persistEvalResult, persistEvalRun, persistRenderBundle } from "@/lib/db/supabase-persistence";
+import { loadAiControlPlane, loadEvalOverview, persistAiControlPlane, persistAuditLogs, persistEvalDataset, persistEvalResult, persistEvalRun, persistRenderBundle } from "@/lib/db/supabase-persistence";
 import type { ModelStatus, PromptStatus, ProviderStatus, Surface } from "@/lib/db/schema";
 import { runBenchmarkSuite } from "@/lib/render/evals";
 import { createDurableReplay } from "@/lib/render/replay";
@@ -293,7 +293,9 @@ export async function POST(request: NextRequest, { params }: AiRouteContext) {
     }
     if (resource === "benchmark" && !id) {
       const report = runBenchmarkSuite();
-      const dataset = repository.createEvalDataset({ name: report.dataset, status: "active", description: "Founder benchmark run from Prompt Control Center" });
+      const overview = await loadEvalOverview();
+      const dataset = overview.datasets.find((item) => item.name === report.dataset)
+        ?? repository.createEvalDataset({ name: report.dataset, status: "active", description: "Founder benchmark run from Prompt Control Center" });
       const run = repository.createEvalRun({
         evalDatasetId: dataset.id,
         name: optionalString(body.name) ?? "founder benchmark",
