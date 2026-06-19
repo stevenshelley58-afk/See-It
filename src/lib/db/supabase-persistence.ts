@@ -1,4 +1,4 @@
-import { readEnv, type AppEnv } from "@/lib/env";
+import { readEnv, readSupabaseEnv, type AppEnv, type SupabaseRuntimeEnv } from "@/lib/env";
 import { createSupabaseServiceClient } from "@/lib/supabase";
 import { repository } from "@/lib/db/repository";
 import type {
@@ -95,18 +95,22 @@ const columnAliases: Record<string, string> = {
   outputPolicy: "output_policy_json"
 };
 
-function envForPersistence(env?: AppEnv) {
+function envForPersistence(env?: SupabaseRuntimeEnv) {
   if (env) {
     return env;
   }
   try {
     return readEnv();
   } catch {
-    return undefined;
+    try {
+      return readSupabaseEnv();
+    } catch {
+      return undefined;
+    }
   }
 }
 
-function shouldPersist(env?: AppEnv) {
+function shouldPersist(env?: SupabaseRuntimeEnv) {
   const resolved = envForPersistence(env);
   if (!resolved || resolved.APP_ENV === "test" || resolved.SUPABASE_URL.includes("supabase.local")) {
     return undefined;

@@ -30,6 +30,7 @@ const envSchema = z.object({
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
+export type SupabaseRuntimeEnv = Pick<AppEnv, "APP_ENV" | "SUPABASE_URL" | "SUPABASE_SERVICE_KEY" | "SUPABASE_ANON_KEY">;
 
 export function readEnv(source: Record<string, string | undefined> = process.env): AppEnv {
   const parsed = envSchema.safeParse(source);
@@ -38,6 +39,21 @@ export function readEnv(source: Record<string, string | undefined> = process.env
     throw new Error("Missing or invalid environment variables: " + names);
   }
   return parsed.data;
+}
+
+export function readSupabaseEnv(source: Record<string, string | undefined> = process.env): SupabaseRuntimeEnv {
+  const supabaseUrl = source.SUPABASE_URL ?? source.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = source.SUPABASE_SERVICE_KEY ?? source.SUPABASE_SERVICE_ROLE_KEY ?? source.SUPABASE_SECRET_KEY;
+  const anonKey = source.SUPABASE_ANON_KEY ?? source.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? source.SUPABASE_PUBLISHABLE_KEY ?? source.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!supabaseUrl || !serviceKey || !anonKey) {
+    throw new Error("Missing Supabase runtime environment variables");
+  }
+  return {
+    APP_ENV: source.APP_ENV === "test" || source.APP_ENV === "preview" || source.APP_ENV === "production" ? source.APP_ENV : "development",
+    SUPABASE_URL: supabaseUrl,
+    SUPABASE_SERVICE_KEY: serviceKey,
+    SUPABASE_ANON_KEY: anonKey
+  };
 }
 
 export function providerSecretStatus(env: Partial<AppEnv>) {

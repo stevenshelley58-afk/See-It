@@ -35,6 +35,7 @@ postgres_vars*.txt
 .codegraph/
 .shopify/
 .gemini/
+supabase/.temp/
 
 # OS/editor
 .DS_Store

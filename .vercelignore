@@ -4,6 +4,7 @@
 .codegraph/
 .claude/
 .taskmaster/
+supabase/.temp/
 .next/
 node_modules/
 coverage/

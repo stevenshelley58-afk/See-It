@@ -1,7 +1,16 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { globSync } from "node:fs";
 
-const required = ["BUILD-SPEC.md", "AGENTS.md", "supabase/migrations/0001_initial.sql", "src/lib/ai/router.ts", "extension/assets/widget.js"];
+const required = [
+  "BUILD-SPEC.md",
+  "AGENTS.md",
+  "supabase/migrations/20260619120000_initial.sql",
+  "supabase/migrations/20260620023500_complete_runtime_schema.sql",
+  "src/lib/ai/router.ts",
+  "extension/assets/widget.js",
+  "scripts/db-verify.ts",
+  "scripts/script-env.ts"
+];
 for (const file of required) {
   if (!existsSync(file)) {
     throw new Error("Missing required file: " + file);
@@ -93,6 +102,16 @@ for (const requiredSnippet of ["uploadGeneratedBase64Asset", ".storage.from(buck
     throw new Error("Generated asset storage helper missing Supabase upload support: " + requiredSnippet);
   }
 }
+assertContains("src/lib/env.ts", "readSupabaseEnv", "Supabase runtime env alias helper missing");
+assertContains("src/lib/db/supabase-persistence.ts", "readSupabaseEnv", "Persistence layer missing minimal Supabase env fallback");
+const dbVerify = read("scripts/db-verify.ts");
+for (const requiredSnippet of ["SUPABASE_SERVICE_ROLE_KEY", "createClient", "Supabase runtime schema verified", "--require-seed", "prompt_deployment", "readdirSync", ".select(\"*\").limit(1)"]) {
+  if (!dbVerify.includes(requiredSnippet)) {
+    throw new Error("Runtime database verifier missing required behavior: " + requiredSnippet);
+  }
+}
+assertContains("scripts/seed-ai-registry.ts", "loadScriptEnv", "AI seed script must load local env files before persistence");
+assertContains("package.json", "db:verify:seeded", "Seeded runtime DB verification script missing");
 const persistence = read("src/lib/db/supabase-persistence.ts");
 for (const requiredSnippet of ["persistRenderBundle", "persistRecord", "createSupabaseServiceClient", "loadShopByDomain", "loadQueueableJobs", "hydrateRenderPipelineInputs"]) {
   if (!persistence.includes(requiredSnippet)) {
@@ -109,7 +128,7 @@ for (const requiredSnippet of ["loadAiControlPlane", "persistAiControlPlane", "p
     throw new Error("Founder durable loader/control-plane helper missing: " + requiredSnippet);
   }
 }
-const migration = read("supabase/migrations/0001_initial.sql");
+const migration = globSync("supabase/migrations/*.sql").map(read).join("\n");
 for (const requiredSnippet of ["verified boolean default false", "width integer", "height integer", "remaining_refinements integer default 3"]) {
   if (!migration.includes(requiredSnippet)) {
     throw new Error("Initial migration missing runtime persistence column: " + requiredSnippet);

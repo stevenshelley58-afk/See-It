@@ -1,7 +1,9 @@
 import { seedAiControlPlane } from "@/lib/ai/bootstrap";
 import { repository } from "@/lib/db/repository";
 import { persistAiControlPlane } from "@/lib/db/supabase-persistence";
+import { loadScriptEnv } from "./script-env";
 
+loadScriptEnv();
 repository.reset();
 seedAiControlPlane(repository);
 await persistAiControlPlane();
