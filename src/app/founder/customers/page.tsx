@@ -3,6 +3,8 @@ import { Metric } from "@/components/metric";
 import { Shell } from "@/components/shell";
 import { loadFounderRenderRequests, loadShops } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function CustomersPage() {
   const [shops, renders] = await Promise.all([loadShops(), loadFounderRenderRequests(1000)]);
   const active = shops.filter((shop) => !shop.uninstalledAt && shop.plan !== "cancelled").length;

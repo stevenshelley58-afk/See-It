@@ -3,6 +3,8 @@ import { Shell } from "@/components/shell";
 import { ensureAiRegistrySeeded } from "@/lib/ai/registry";
 import { loadAiControlPlane } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function PromptDetailPage({ params }: { params: { promptId: string } }) {
   const control = await loadAiControlPlane();
   ensureAiRegistrySeeded();

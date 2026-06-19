@@ -3,6 +3,8 @@ import { Metric } from "@/components/metric";
 import { Shell } from "@/components/shell";
 import { loadAuditLogs } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function AuditPage() {
   const audits = await loadAuditLogs(300);
   const promptActions = audits.filter((audit) => audit.entityType.includes("prompt")).length;

@@ -184,6 +184,33 @@ for (const file of globSync("src/app/founder/**/page.tsx")) {
   }
 }
 
+for (const file of [
+  "src/app/founder/page.tsx",
+  "src/app/founder/renders/page.tsx",
+  "src/app/founder/renders/[renderId]/page.tsx",
+  "src/app/founder/evals/page.tsx",
+  "src/app/founder/experiments/page.tsx",
+  "src/app/founder/quality/page.tsx",
+  "src/app/founder/customers/page.tsx",
+  "src/app/founder/money/page.tsx",
+  "src/app/founder/outreach/page.tsx",
+  "src/app/founder/ai/page.tsx",
+  "src/app/founder/ai/providers/page.tsx",
+  "src/app/founder/ai/models/page.tsx",
+  "src/app/founder/ai/prompts/page.tsx",
+  "src/app/founder/ai/prompts/[promptId]/page.tsx",
+  "src/app/founder/ai/deployments/page.tsx",
+  "src/app/founder/ai/bundles/page.tsx",
+  "src/app/founder/ai/recipes/page.tsx",
+  "src/app/founder/ai/costs/page.tsx",
+  "src/app/founder/ai/audit/page.tsx",
+  "src/app/founder/ai/replay/page.tsx",
+  "src/app/founder/ai/test-lab/page.tsx",
+  "src/app/founder/ai/experiments/page.tsx"
+] as const) {
+  assertContains(file, "force-dynamic", "DB-backed founder page must not prerender against operational Supabase tables");
+}
+
 for (const [file, secretName] of [["src/lib/ai/providers/openai.ts", "OPENAI_API_KEY"], ["src/lib/ai/providers/gemini.ts", "GEMINI_API_KEY"], ["src/lib/ai/providers/custom-http.ts", "CUSTOM_IMAGE_API_KEY"]] as const) {
   const text = read(file);
   for (const requiredSnippet of ["fetch(", secretName, "uploadGeneratedBase64Asset"]) {

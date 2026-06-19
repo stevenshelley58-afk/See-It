@@ -3,6 +3,8 @@ import { Metric } from "@/components/metric";
 import { Shell } from "@/components/shell";
 import { loadExperimentOverview } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function ExperimentsPage() {
   const { experiments, arms, assignments } = await loadExperimentOverview();
   const running = experiments.filter((experiment) => experiment.status === "running").length;

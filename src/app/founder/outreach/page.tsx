@@ -3,6 +3,8 @@ import { Metric } from "@/components/metric";
 import { Shell } from "@/components/shell";
 import { loadOutreachOverview } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function OutreachPage() {
   const { prospects, suppressions } = await loadOutreachOverview();
   const approved = prospects.filter((prospect) => prospect.status === "approved").length;

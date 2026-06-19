@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { loadFounderRenderRequests } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function RenderOperationsPage() {
   const renders = await loadFounderRenderRequests();
   return (

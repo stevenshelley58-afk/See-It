@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { loadRenderBundle } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function RenderDetailPage({ params }: { params: { renderId: string } }) {
   const bundle = await loadRenderBundle(params.renderId);
   return (

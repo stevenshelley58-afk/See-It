@@ -4,6 +4,8 @@ import { Shell } from "@/components/shell";
 import { ensureAiRegistrySeeded } from "@/lib/ai/registry";
 import { loadAiControlPlane } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function ModelsPage() {
   const control = await loadAiControlPlane();
   ensureAiRegistrySeeded();

@@ -3,6 +3,8 @@ import { Metric } from "@/components/metric";
 import { Shell } from "@/components/shell";
 import { loadEvalOverview, loadFounderRenderRequests, loadManualReviews } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 function gateBand(score?: number) {
   if (score === undefined) {
     return "missing";

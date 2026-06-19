@@ -3,6 +3,8 @@ import { Metric } from "@/components/metric";
 import { Shell } from "@/components/shell";
 import { loadEvalOverview } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function EvalsPage() {
   const { datasets, cases, runs, results } = await loadEvalOverview();
   const completedRuns = runs.filter((run) => run.status === "completed").length;

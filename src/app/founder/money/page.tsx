@@ -3,6 +3,8 @@ import { Metric } from "@/components/metric";
 import { Shell } from "@/components/shell";
 import { loadAiInvocations, loadShops, loadUsageMonthly } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 function numberFrom(row: Record<string, unknown>, key: string) {
   const value = row[key];
   return typeof value === "number" ? value : typeof value === "string" ? Number(value) : 0;

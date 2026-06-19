@@ -5,6 +5,8 @@ import { ensureAiRegistrySeeded } from "@/lib/ai/registry";
 import { repository } from "@/lib/db/repository";
 import { loadAiControlPlane, loadAiInvocations } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function CostsPage() {
   await loadAiControlPlane();
   ensureAiRegistrySeeded();

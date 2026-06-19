@@ -4,6 +4,8 @@ import { Metric } from "@/components/metric";
 import { Shell } from "@/components/shell";
 import { loadFounderRenderRequests } from "@/lib/db/supabase-persistence";
 
+export const dynamic = "force-dynamic";
+
 export default async function ReplayPage() {
   const renders = await loadFounderRenderRequests(200);
   const replayable = renders.filter((render) => render.roomSessionId && render.status === "done");

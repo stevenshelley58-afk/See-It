@@ -5,6 +5,8 @@ import { Shell } from "@/components/shell";
 import { ensureAiRegistrySeeded } from "@/lib/ai/registry";
 import { getFounderDashboard } from "@/lib/founder/dashboard";
 
+export const dynamic = "force-dynamic";
+
 export default async function FounderHomePage() {
   ensureAiRegistrySeeded();
   const data = await getFounderDashboard();
