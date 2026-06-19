@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { NextRequest } from "next/server";
 import { repository } from "@/lib/db/repository";
 
 export function verifyWebhook(body: string, hmacHeader: string | null, secret: string) {
@@ -14,6 +15,34 @@ export function verifyWebhook(body: string, hmacHeader: string | null, secret: s
 export function handlePrivacyWebhook(topic: string, payload: unknown) {
   repository.event({ surface: "system", name: "privacy_" + topic.replace(/[/:]/g, "_"), props: { payload } });
   return { ok: true };
+}
+
+export type VerifiedWebhook =
+  | { ok: true; topic: string; shopDomain?: string; body: unknown; rawBody: string }
+  | { ok: false; status: number; error: string };
+
+export async function verifyShopifyWebhookRequest(request: NextRequest, secret: string, fallbackTopic: string): Promise<VerifiedWebhook> {
+  const rawBody = await request.text();
+  if (!verifyWebhook(rawBody, request.headers.get("x-shopify-hmac-sha256"), secret)) {
+    return { ok: false, status: 401, error: "invalid_shopify_webhook_hmac" };
+  }
+  let body: unknown;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    return { ok: false, status: 400, error: "invalid_shopify_webhook_json" };
+  }
+  return {
+    ok: true,
+    topic: request.headers.get("x-shopify-topic") ?? fallbackTopic,
+    shopDomain: request.headers.get("x-shopify-shop-domain") ?? undefined,
+    body,
+    rawBody
+  };
+}
+
+export function webhookErrorBody(result: Extract<VerifiedWebhook, { ok: false }>) {
+  return { error: result.error };
 }
 
 export function handleUninstall(shopDomain: string) {

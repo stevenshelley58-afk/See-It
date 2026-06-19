@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it, beforeEach } from "vitest";
 import { readEnv, providerSecretStatus } from "@/lib/env";
 import { seedAiControlPlane } from "@/lib/ai/bootstrap";
@@ -17,7 +18,8 @@ import { enqueueJob, enqueueRenderJob, leaseJobs } from "@/lib/jobs/queue";
 import { runLeasedJob } from "@/lib/jobs/worker";
 import { mapBillingPlan } from "@/lib/shopify/billing";
 import { authenticateAppProxyParams, createAppProxySignature, signShopifyParams, verifyShopifyHmac } from "@/lib/shopify/app-proxy";
-import { handlePrivacyWebhook } from "@/lib/shopify/webhooks";
+import { buildInstallUrl, handleOAuthCallback } from "@/lib/shopify/auth";
+import { handlePrivacyWebhook, verifyWebhook } from "@/lib/shopify/webhooks";
 import { assertRenderQuota } from "@/lib/billing/quota";
 import { verifyServiceSecret } from "@/lib/security/service-auth";
 import { parseGateResult } from "@/lib/render/gate";
@@ -172,6 +174,10 @@ describe("unit contract", () => {
     expect(authenticateAppProxyParams(new URLSearchParams({ ...params, shop: shop.shopDomain, signature: signedInstalledShop }), "secret").ok).toBe(true);
     expect(authenticateAppProxyParams(new URLSearchParams({ ...params, shop: shop.shopDomain }), "secret").ok).toBe(false);
     expect(handlePrivacyWebhook("customers/data_request", {}).ok).toBe(true);
+    const body = JSON.stringify({ shop_domain: shop.shopDomain });
+    const webhookHmac = createHmac("sha256", "secret").update(body).digest("base64");
+    expect(verifyWebhook(body, webhookHmac, "secret")).toBe(true);
+    expect(buildInstallUrl(shop.shopDomain, "state", "key", "https://app.test", ["read_products"])).toContain("/admin/oauth/authorize");
     expect(parseGateResult({ score: 8, detail: { productIdentity: 8, scalePlausibility: 8, placementAccuracy: 8, artifactAbsence: 8, lightingMatch: 8, perspectiveMatch: 8, shadowContact: 8, sceneIntegration: 8, promptCompliance: 8, commercialUsefulness: 8 } }).pass).toBe(true);
     expect(() => buildReplayPayload("missing")).toThrow();
     expect(loadRenderFixtures()).toHaveLength(15);
@@ -179,5 +185,16 @@ describe("unit contract", () => {
     expect(scoreEvalResult().status).toBe("pass");
     expect(deterministicAssignment("shop-product-room", [{ id: "a", trafficWeight: 50 }, { id: "b", trafficWeight: 50 }])).toMatch(/[ab]/);
     expect(resolveActiveRecipe("widget", "shopper").recipe.kind).toBe("shopper");
+  });
+
+  it("handles Shopify OAuth callback with HMAC and state before storing encrypted offline token", async () => {
+    const parsed = readEnv(env());
+    const params = { shop: "oauth.myshopify.com", code: "code", state: "state" };
+    const hmac = signShopifyParams(params, parsed.SHOPIFY_API_SECRET);
+    const url = new URL("https://app.test/api/auth/callback?" + new URLSearchParams({ ...params, hmac }).toString());
+    const shop = await handleOAuthCallback(url, parsed, "state");
+    expect(shop.shopDomain).toBe(params.shop);
+    expect(shop.offlineAccessTokenEncrypted).toBeTruthy();
+    await expect(handleOAuthCallback(url, parsed, "wrong")).rejects.toThrow("Invalid Shopify OAuth state");
   });
 });

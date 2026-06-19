@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { handlePrivacyWebhook } from "@/lib/shopify/webhooks";
+import { readEnv } from "@/lib/env";
+import { handlePrivacyWebhook, verifyShopifyWebhookRequest, webhookErrorBody } from "@/lib/shopify/webhooks";
 
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => ({}));
-  return NextResponse.json(handlePrivacyWebhook("shop/update", body));
+  const verified = await verifyShopifyWebhookRequest(request, readEnv().SHOPIFY_API_SECRET, "shop/update");
+  if (!verified.ok) {
+    return NextResponse.json(webhookErrorBody(verified), { status: verified.status });
+  }
+  return NextResponse.json(handlePrivacyWebhook("shop/update", verified.body));
 }

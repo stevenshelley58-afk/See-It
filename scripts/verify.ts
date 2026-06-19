@@ -41,6 +41,18 @@ for (const file of [...globSync("src/app/api/cron/**/route.ts"), "src/app/api/jo
   assertContains(file, "authenticateServiceRequest", "Cron/job route missing service auth");
 }
 
+for (const file of globSync("src/app/api/webhooks/**/route.ts")) {
+  assertContains(file, "verifyShopifyWebhookRequest", "Shopify webhook route missing HMAC verification");
+}
+assertContains("src/app/api/webhooks/route.ts", "verifyShopifyWebhookRequest", "Root Shopify webhook route missing HMAC verification");
+
+for (const file of globSync("src/app/api/auth/**/route.ts")) {
+  const text = read(file);
+  if (text.includes("local-shopify-secret") || text.includes("local-api-key") || text.includes("local-encryption-key")) {
+    throw new Error("Shopify auth route contains hard-coded local secret: " + file);
+  }
+}
+
 assertContains("src/proxy.ts", "export async function proxy", "Founder proxy convention missing");
 assertContains("src/proxy.ts", "matcher: [\"/founder/:path*\", \"/api/founder/:path*\"]", "Founder proxy matcher missing");
 assertContains("src/proxy.ts", "isFounderSessionTokenValid", "Founder proxy missing session auth");
