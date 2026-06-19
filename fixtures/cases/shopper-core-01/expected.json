@@ -1,0 +1,25 @@
+{
+  "caseSlug": "shopper-core-01",
+  "category": "lamp",
+  "dims": {
+    "widthMm": 350,
+    "heightMm": 650,
+    "depthMm": 350
+  },
+  "tap": {
+    "x": 0.42,
+    "y": 0.68
+  },
+  "mustPreserve": [
+    "product shape",
+    "shade colour",
+    "base material"
+  ],
+  "mustAvoid": [
+    "wrong product",
+    "floating object",
+    "impossible scale",
+    "extra furniture"
+  ],
+  "humanReviewRequired": true
+}

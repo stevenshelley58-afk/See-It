@@ -1,0 +1,19 @@
+{% render 'see-it-config' %}
+<button
+  type="button"
+  class="see-it-button"
+  data-see-it-open
+  aria-haspopup="dialog"
+>
+  See it in your room
+</button>
+{{ 'widget.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'widget.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "See it in your room",
+  "target": "section",
+  "settings": []
+}
+{% endschema %}

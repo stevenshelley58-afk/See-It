@@ -3,69 +3,21 @@ node_modules/
 .pnp
 .pnp.js
 
-# Testing
-coverage/
-
-# Production
+# Next/Vercel/build output
+.next/
+.vercel/
+out/
 build/
 dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
 
-# Environment
+# Environment and secrets
 .env
 .env.local
 .env.*.local
-
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-lerna-debug.log*
-
-# OS
-.DS_Store
-Thumbs.db
-# Windows reserved device name - prevent accidental creation/indexing issues
-nul
-NUL
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Cursor / local tooling (don’t commit)
-.cursor/
-.playwright-mcp/
-.taskmaster/
-.claude-skills/
-.claude/skills/
-.claude/settings.local.json
-audit-results.md
-
-# Prisma (dev databases only - migrations should be committed!)
-**/dev.sqlite
-**/dev.sqlite-journal
-
-# Shopify
-.shopify/
-
-# Vercel
-.vercel/
-
-# Artifacts (don't commit personal task tracking)
-.gemini/
-
-# Test files
-test-*.js
-
-# Local helper scripts (keep untracked)
-setup-deploy.bat
-deploy.bat
-cleanup-deployment.bat
-
-# Secrets - NEVER commit
 *.credentials*.txt
 env.txt
 postgres_vars*.txt
@@ -73,3 +25,23 @@ postgres_vars*.txt
 **/*-credentials.json
 **/service-account*.json
 **/*service-account*.json
+
+# Local tooling
+.cursor/
+.playwright-mcp/
+.taskmaster/
+.claude/
+.claude-skills/
+.shopify/
+.gemini/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+nul
+NUL
