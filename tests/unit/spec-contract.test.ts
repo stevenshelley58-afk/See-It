@@ -243,6 +243,13 @@ describe("unit contract", () => {
       variables: { productTitle: "Lamp", tapX: 0.5, tapY: 0.7, dimensionsText: "35 x 65 x 35 cm" }
     }), founderAiContext("test-render"));
     expect((await testRenderResponse.json()).result.ok).toBe(true);
+    const invocationsAfterFirstTestRender = repository.aiInvocations.size;
+    const secondTestRenderResponse = await founderAiPost(founderAiRequest(["test-render"], {
+      promptVersionId: firstPromptVersion.id,
+      variables: { productTitle: "Lamp", tapX: 0.5, tapY: 0.7, dimensionsText: "35 x 65 x 35 cm" }
+    }), founderAiContext("test-render"));
+    expect((await secondTestRenderResponse.json()).result.ok).toBe(true);
+    expect(repository.aiInvocations.size).toBeGreaterThan(invocationsAfterFirstTestRender);
 
     const benchmarkResponse = await founderAiPost(founderAiRequest(["benchmark"], { name: "unit benchmark" }), founderAiContext("benchmark"));
     const benchmark = await benchmarkResponse.json();
