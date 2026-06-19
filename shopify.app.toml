@@ -1,0 +1,19 @@
+name = "See It"
+client_id = "$SHOPIFY_API_KEY"
+application_url = "$SHOPIFY_APP_URL"
+embedded = true
+
+[access_scopes]
+scopes = "read_products,write_products,read_themes,write_themes"
+
+[auth]
+redirect_urls = ["$SHOPIFY_APP_URL/api/auth/callback"]
+
+[app_proxy]
+url = "$SHOPIFY_APP_URL/app-proxy"
+subpath = "see-it"
+prefix = "apps"
+
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled", "shop/update", "customers/data_request", "customers/redact", "shop/redact"]
+uri = "$SHOPIFY_APP_URL/api/webhooks"

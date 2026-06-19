@@ -1,0 +1,377 @@
+[
+  {
+    "caseSlug": "shopper-core-01",
+    "category": "lamp",
+    "dims": {
+      "widthMm": 350,
+      "heightMm": 650,
+      "depthMm": 350
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": true
+  },
+  {
+    "caseSlug": "shopper-core-02",
+    "category": "chair",
+    "dims": {
+      "widthMm": 351,
+      "heightMm": 651,
+      "depthMm": 351
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": true
+  },
+  {
+    "caseSlug": "shopper-core-03",
+    "category": "lamp",
+    "dims": {
+      "widthMm": 352,
+      "heightMm": 652,
+      "depthMm": 352
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": true
+  },
+  {
+    "caseSlug": "shopper-core-04",
+    "category": "chair",
+    "dims": {
+      "widthMm": 353,
+      "heightMm": 653,
+      "depthMm": 353
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-05",
+    "category": "lamp",
+    "dims": {
+      "widthMm": 354,
+      "heightMm": 654,
+      "depthMm": 354
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-06",
+    "category": "chair",
+    "dims": {
+      "widthMm": 355,
+      "heightMm": 655,
+      "depthMm": 355
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-07",
+    "category": "lamp",
+    "dims": {
+      "widthMm": 356,
+      "heightMm": 656,
+      "depthMm": 356
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-08",
+    "category": "chair",
+    "dims": {
+      "widthMm": 357,
+      "heightMm": 657,
+      "depthMm": 357
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-09",
+    "category": "lamp",
+    "dims": {
+      "widthMm": 358,
+      "heightMm": 658,
+      "depthMm": 358
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-10",
+    "category": "chair",
+    "dims": {
+      "widthMm": 359,
+      "heightMm": 659,
+      "depthMm": 359
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-11",
+    "category": "lamp",
+    "dims": {
+      "widthMm": 360,
+      "heightMm": 660,
+      "depthMm": 360
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-12",
+    "category": "chair",
+    "dims": {
+      "widthMm": 361,
+      "heightMm": 661,
+      "depthMm": 361
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-13",
+    "category": "lamp",
+    "dims": {
+      "widthMm": 362,
+      "heightMm": 662,
+      "depthMm": 362
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-14",
+    "category": "chair",
+    "dims": {
+      "widthMm": 363,
+      "heightMm": 663,
+      "depthMm": 363
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  },
+  {
+    "caseSlug": "shopper-core-15",
+    "category": "lamp",
+    "dims": {
+      "widthMm": 364,
+      "heightMm": 664,
+      "depthMm": 364
+    },
+    "tap": {
+      "x": 0.42,
+      "y": 0.68
+    },
+    "mustPreserve": [
+      "product shape",
+      "colour",
+      "material"
+    ],
+    "mustAvoid": [
+      "wrong product",
+      "floating object",
+      "impossible scale",
+      "extra furniture"
+    ],
+    "humanReviewRequired": false
+  }
+]

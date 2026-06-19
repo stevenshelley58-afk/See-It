@@ -1,5 +1,50 @@
 {
+  "name": "see-it",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.18.3",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "harness:smoke": "tsx scripts/harness.ts",
+    "eval:smoke": "tsx scripts/eval.ts",
+    "e2e:smoke": "playwright test tests/e2e/smoke.spec.ts --reporter=line",
+    "static:verify": "tsx scripts/verify.ts",
+    "verify": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run test:integration && pnpm run harness:smoke && pnpm run eval:smoke && pnpm run e2e:smoke && pnpm run static:verify",
+    "render": "tsx scripts/render.ts",
+    "replay": "tsx scripts/replay.ts",
+    "db:verify": "tsx scripts/db-verify.ts",
+    "db:verify:seeded": "tsx scripts/db-verify.ts --require-seed",
+    "seed:ai": "tsx scripts/seed-ai-registry.ts",
+    "seed:dev": "tsx scripts/seed-dev.ts",
+    "enrich": "tsx scripts/enrich.ts",
+    "demo:batch": "tsx scripts/demo-batch.ts"
+  },
   "dependencies": {
-    "google-auth-library": "^10.5.0"
+    "@supabase/supabase-js": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@eslint/js": "latest",
+    "@next/eslint-plugin-next": "latest",
+    "@playwright/test": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint": "latest",
+    "jsdom": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "typescript-eslint": "latest",
+    "vitest": "latest"
   }
 }
