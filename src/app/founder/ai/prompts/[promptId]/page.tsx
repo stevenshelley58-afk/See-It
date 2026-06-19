@@ -5,11 +5,12 @@ import { loadAiControlPlane } from "@/lib/db/supabase-persistence";
 
 export const dynamic = "force-dynamic";
 
-export default async function PromptDetailPage({ params }: { params: { promptId: string } }) {
+export default async function PromptDetailPage({ params }: { params: Promise<{ promptId: string }> }) {
+  const { promptId } = await params;
   const control = await loadAiControlPlane();
   ensureAiRegistrySeeded();
-  const template = control.promptTemplates.find((item) => item.id === params.promptId);
-  const versions = control.promptVersions.filter((version) => version.promptTemplateId === params.promptId).sort((a, b) => b.version - a.version);
+  const template = control.promptTemplates.find((item) => item.id === promptId);
+  const versions = control.promptVersions.filter((version) => version.promptTemplateId === promptId).sort((a, b) => b.version - a.version);
 
   return (
     <Shell>

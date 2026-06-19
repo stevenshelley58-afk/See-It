@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { repository } from "@/lib/db/repository";
 import { loadRenderBundle, persistAudit, persistEvalCase, persistEvalDataset, persistRenderBundle } from "@/lib/db/supabase-persistence";
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const body = await request.json().catch(() => ({}));
-  const bundle = await loadRenderBundle(params.id);
+  const bundle = await loadRenderBundle(id);
   if (!bundle) {
     return NextResponse.json({ error: "render_not_found" }, { status: 404 });
   }
@@ -17,12 +18,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const finalAsset = bundle.assets.find((asset) => asset.role === "final_output") ?? bundle.assets.find((asset) => asset.role === "provider_output");
   const fixture = repository.createEvalCase({
     evalDatasetId: dataset.id,
-    caseSlug: String(body.caseSlug ?? "render-" + params.id),
+    caseSlug: String(body.caseSlug ?? "render-" + id),
     productAssetKey: bundle.assets.find((asset) => asset.role === "product_cutout" || asset.role === "product_image")?.storageKey,
     cutoutAssetKey: bundle.assets.find((asset) => asset.role === "product_cutout")?.storageKey,
     roomAssetKey: bundle.assets.find((asset) => asset.role === "room_original" || asset.role === "room_normalized")?.storageKey,
     expectedJson: {
-      sourceRenderRequestId: params.id,
+      sourceRenderRequestId: id,
       traceId: bundle.request.traceId,
       finalAssetKey: finalAsset?.storageKey,
       fallbackAssetKey: firstAsset?.storageKey,
@@ -31,7 +32,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     },
     notes: typeof body.notes === "string" ? body.notes : undefined
   });
-  const audit = repository.audit("founder", "promote_to_fixture", "render_request", params.id, bundle.request, fixture, body.reason);
+  const audit = repository.audit("founder", "promote_to_fixture", "render_request", id, bundle.request, fixture, body.reason);
   repository.trace({
     traceId: bundle.request.traceId,
     renderRequestId: bundle.request.id,

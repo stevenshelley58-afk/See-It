@@ -1,7 +1,8 @@
 import { ImagePlus } from "lucide-react";
 import { Shell } from "@/components/shell";
 
-export default function ProductDetailPage({ params }: { params: { productId: string } }) {
+export default async function ProductDetailPage({ params }: { params: Promise<{ productId: string }> }) {
+  const { productId } = await params;
   return (
     <Shell>
       <div className="page-head">
@@ -9,7 +10,7 @@ export default function ProductDetailPage({ params }: { params: { productId: str
           <h1>Product detail</h1>
           <p>Dimensions, source asset, generated cutout, render test, enable state, and AI trace references.</p>
         </div>
-        <span className="status-pill">{params.productId}</span>
+        <span className="status-pill">{productId}</span>
       </div>
       <section className="band">
         <div className="toolbar"><ImagePlus size={18} /><strong>Product setup fields</strong></div>

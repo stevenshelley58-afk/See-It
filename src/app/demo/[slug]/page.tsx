@@ -1,11 +1,12 @@
 import { Shell } from "@/components/shell";
 
-export default function DemoPage({ params }: { params: { slug: string } }) {
+export default async function DemoPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   return (
     <Shell>
       <div className="page-head">
         <div>
-          <h1>Demo {params.slug}</h1>
+          <h1>Demo {slug}</h1>
           <p>Personalized generated preview assets expire under demo retention policy unless converted.</p>
         </div>
         <span className="status-pill">demo</span>
