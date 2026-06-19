@@ -48,6 +48,14 @@ This requires Shopify account/device-code login. After login:
 4. Complete merchant onboarding to a working product page.
 5. Run a shopper room upload/tap/result/refine/feedback test on the dev store.
 6. Measure PDP Lighthouse performance before and after enabling the block; delta must be <= 10 points.
+7. Generate the manual gate evidence template:
+   ```powershell
+   pnpm.cmd run manual:gates:template -- --evidence out/manual-gates-evidence.json
+   ```
+8. Fill the evidence file with the dev-store, timing, Lighthouse, billing test-mode, and human-review results, then run:
+   ```powershell
+   pnpm.cmd run manual:gates -- --evidence out/manual-gates-evidence.json
+   ```
 
 ## Release Rule
 

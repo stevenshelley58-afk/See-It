@@ -24,6 +24,8 @@
     "storage:verify": "tsx scripts/storage-verify.ts",
     "app-proxy:smoke": "tsx scripts/app-proxy-smoke.ts",
     "webhooks:smoke": "tsx scripts/webhooks-smoke.ts",
+    "manual:gates": "tsx scripts/manual-gates.ts",
+    "manual:gates:template": "tsx scripts/manual-gates.ts --template",
     "seed:ai": "tsx scripts/seed-ai-registry.ts",
     "seed:dev": "tsx scripts/seed-dev.ts",
     "enrich": "tsx scripts/enrich.ts",

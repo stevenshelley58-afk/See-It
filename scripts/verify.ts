@@ -10,6 +10,7 @@ const required = [
   "src/lib/ai/router.ts",
   "extension/assets/widget.js",
   "scripts/db-verify.ts",
+  "scripts/manual-gates.ts",
   "scripts/script-env.ts"
 ];
 for (const file of required) {
@@ -116,6 +117,23 @@ for (const requiredSnippet of ["SUPABASE_SERVICE_ROLE_KEY", "createClient", "Sup
 assertContains("scripts/seed-ai-registry.ts", "loadScriptEnv", "AI seed script must load local env files before persistence");
 assertContains("package.json", "db:verify:seeded", "Seeded runtime DB verification script missing");
 assertContains("package.json", "app-proxy:smoke", "Production app-proxy smoke script missing");
+assertContains("package.json", "manual:gates", "Manual gate verifier script missing");
+for (const requiredSnippet of [
+  "shopify_oauth_dev_store",
+  "theme_extension_deploy",
+  "theme_editor_block",
+  "merchant_enable_product",
+  "install_to_pdp_under_10m",
+  "first_render_under_5m",
+  "shopper_mobile_happy_path",
+  "shopper_desktop_happy_path",
+  "pdp_lighthouse_delta",
+  "billing_test_mode",
+  "human_contact_sheet_review",
+  "no_product_identity_failures"
+]) {
+  assertContains("scripts/manual-gates.ts", requiredSnippet, "Manual gate verifier missing required release gate");
+}
 for (const requiredSnippet of ["signedAppProxyUrl", "POST /app-proxy/rooms", "POST /app-proxy/renders", "POST /app-proxy/renders/:renderId/feedback", "loadRenderBundle", "Feedback smoke did not persist render_feedback row"]) {
   assertContains("scripts/app-proxy-smoke.ts", requiredSnippet, "App-proxy smoke script missing required flow");
 }

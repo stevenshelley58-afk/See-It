@@ -31,6 +31,7 @@ The goal is not complete until the Shopify account/dev-store gates and all manua
 - Failed-render handling: `pnpm.cmd run test:integration` verifies gate-rejected renders have no final output asset and expose the friendly retry message used by the widget
 - Billing path: accepted ADR `docs/adr/0001-shopify-app-pricing.md` records Shopify App Pricing for public App Store distribution
 - Founder AI gates: `pnpm.cmd run test` and `pnpm.cmd run static:verify` cover render instruction inspection, alternate-model replay, prompt rollback, benchmark runs, cost per accepted render, and render-operations visibility
+- Manual gate verifier: `pnpm.cmd run manual:gates:template -- --evidence out/manual-gates-evidence.json` generates the required evidence shape, and `pnpm.cmd run manual:gates -- --evidence out/manual-gates-evidence.json` fails until Shopify/dev-store/PDP/Lighthouse/billing/human-review proof is filled in
 - Vercel production: latest pushed `main` release candidate reached Ready and is aliased to `https://see-it-nine.vercel.app`
 - GitHub CI: latest pushed `main` release candidate passed
 - Production runtime logs: no error or fatal entries for the checked production deployment in the post-smoke window
@@ -46,6 +47,7 @@ pnpm.cmd run test
 pnpm.cmd run test:integration
 pnpm.cmd run app-proxy:smoke
 pnpm.cmd run webhooks:smoke
+pnpm.cmd run manual:gates:template -- --evidence out/manual-gates-evidence.json
 ```
 
 ## Remaining Manual Gates
