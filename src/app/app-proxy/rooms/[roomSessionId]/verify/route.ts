@@ -7,12 +7,13 @@ import { verifySignedUpload } from "@/lib/storage/signed-upload";
 import { traceRender } from "@/lib/render/trace";
 import { persistRoomSession } from "@/lib/db/supabase-persistence";
 
-export async function POST(request: NextRequest, { params }: { params: { roomSessionId: string } }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ roomSessionId: string }> }) {
+  const { roomSessionId } = await params;
   const auth = await authenticateDurableAppProxyRequest(request);
   if (!auth.ok) {
     return NextResponse.json(appProxyErrorBody(auth), { status: auth.status });
   }
-  const room = await loadRoomSessionById(params.roomSessionId);
+  const room = await loadRoomSessionById(roomSessionId);
   if (!room || room.shopId !== auth.shop.id) {
     return NextResponse.json({ error: "room_not_found" }, { status: 404 });
   }

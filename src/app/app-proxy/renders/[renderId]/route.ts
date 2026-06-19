@@ -4,12 +4,13 @@ import { loadRenderAssetsForRequest, loadRenderRequestById } from "@/lib/db/supa
 import { appProxyErrorBody, authenticateDurableAppProxyRequest, enforceAppProxyRateLimit } from "@/lib/shopify/app-proxy";
 import { createSignedReadUrl } from "@/lib/storage/signed-upload";
 
-export async function GET(request: NextRequest, { params }: { params: { renderId: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ renderId: string }> }) {
+  const { renderId } = await params;
   const auth = await authenticateDurableAppProxyRequest(request);
   if (!auth.ok) {
     return NextResponse.json(appProxyErrorBody(auth), { status: auth.status });
   }
-  const render = await loadRenderRequestById(params.renderId);
+  const render = await loadRenderRequestById(renderId);
   if (!render || render.shopId !== auth.shop.id) {
     return NextResponse.json({ error: "render_not_found" }, { status: 404 });
   }

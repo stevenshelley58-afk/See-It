@@ -20,10 +20,18 @@ function jsonError(error: unknown, status = 400) {
   return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status });
 }
 
-export async function GET(_request: NextRequest, { params }: { params: { segments: string[] } }) {
+type AiRouteContext = { params: Promise<{ segments?: string[] }> };
+
+async function resolveSegments(params: AiRouteContext["params"]) {
+  const resolved = await params;
+  return resolved.segments ?? [];
+}
+
+export async function GET(_request: NextRequest, { params }: AiRouteContext) {
   await loadAiControlPlane();
   ensureAiRegistrySeeded();
-  const [resource, id] = params.segments;
+  const segments = await resolveSegments(params);
+  const [resource, id] = segments;
   if (resource === "providers") return NextResponse.json({ providers: listProviders() });
   if (resource === "models") return NextResponse.json({ models: listModels() });
   if (resource === "prompts" && id) {
@@ -36,14 +44,15 @@ export async function GET(_request: NextRequest, { params }: { params: { segment
   if (resource === "bundles") return NextResponse.json({ bundles: [...repository.bundles.values()], versions: [...repository.bundleVersions.values()] });
   if (resource === "recipes") return NextResponse.json({ recipes: [...repository.recipes.values()], versions: [...repository.recipeVersions.values()] });
   if (resource === "deployments") return NextResponse.json({ deployments: [...repository.deployments.values()] });
-  return NextResponse.json({ error: "unknown_founder_ai_resource", resource, segments: params.segments }, { status: 404 });
+  return NextResponse.json({ error: "unknown_founder_ai_resource", resource, segments }, { status: 404 });
 }
 
-export async function POST(request: NextRequest, { params }: { params: { segments: string[] } }) {
+export async function POST(request: NextRequest, { params }: AiRouteContext) {
   await loadAiControlPlane();
   ensureAiRegistrySeeded();
   const body = await request.json().catch(() => ({}));
-  const [resource, id, action] = params.segments;
+  const segments = await resolveSegments(params);
+  const [resource, id, action] = segments;
   try {
     if (resource === "prompts" && !id) {
       const template = body.promptTemplateId
@@ -134,11 +143,12 @@ export async function POST(request: NextRequest, { params }: { params: { segment
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { segments: string[] } }) {
+export async function PATCH(request: NextRequest, { params }: AiRouteContext) {
   await loadAiControlPlane();
   ensureAiRegistrySeeded();
   const body = await request.json().catch(() => ({}));
-  const [resource, id] = params.segments;
+  const segments = await resolveSegments(params);
+  const [resource, id] = segments;
   try {
     if (resource === "prompt-versions") {
       const next = editPromptDraft(id, body, "founder");
@@ -146,7 +156,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { segmen
       await persistAuditLogs();
       return NextResponse.json(next);
     }
-    repository.audit("founder", "api_patch", params.segments.join("/"), undefined, undefined, body, "founder api");
+    repository.audit("founder", "api_patch", segments.join("/"), undefined, undefined, body, "founder api");
     return NextResponse.json({ error: "unknown_founder_ai_patch", resource, id }, { status: 404 });
   } catch (error) {
     return jsonError(error);

@@ -4,12 +4,13 @@ import { loadRenderRequestById, persistRenderBundle } from "@/lib/db/supabase-pe
 import { traceRender } from "@/lib/render/trace";
 import { appProxyErrorBody, authenticateDurableAppProxyRequest, enforceAppProxyRateLimit } from "@/lib/shopify/app-proxy";
 
-export async function POST(request: NextRequest, { params }: { params: { renderId: string } }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ renderId: string }> }) {
+  const { renderId } = await params;
   const auth = await authenticateDurableAppProxyRequest(request);
   if (!auth.ok) {
     return NextResponse.json(appProxyErrorBody(auth), { status: auth.status });
   }
-  const render = await loadRenderRequestById(params.renderId);
+  const render = await loadRenderRequestById(renderId);
   if (!render || render.shopId !== auth.shop.id) {
     return NextResponse.json({ error: "render_not_found" }, { status: 404 });
   }
