@@ -248,6 +248,9 @@ describe("unit contract", () => {
     const benchmark = await benchmarkResponse.json();
     expect(benchmark.report.total).toBe(15);
     expect(benchmark.report.passCount).toBeGreaterThanOrEqual(13);
+    const secondBenchmarkResponse = await founderAiPost(founderAiRequest(["benchmark"], { name: "unit benchmark repeat" }), founderAiContext("benchmark"));
+    const secondBenchmark = await secondBenchmarkResponse.json();
+    expect(secondBenchmark.dataset.id).toBe(benchmark.dataset.id);
 
     const shop = repository.createShop({ shopDomain: "founder-ai-api.myshopify.com", plan: "trial", rendersQuota: 50, lifestyleImagesQuota: 10, billingStatus: "trial", roomPreviewEnabled: true });
     const room = repository.createRoomSession({ shopId: shop.id, source: "widget", roomKey: "rooms/founder/original.jpg", expiresAt: new Date(Date.now() + 86400000).toISOString(), verified: true });
