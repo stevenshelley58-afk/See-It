@@ -203,6 +203,13 @@ for (const file of globSync("src/app/founder/**/page.tsx")) {
   }
 }
 
+for (const file of globSync("docs/**/*.md")) {
+  const text = read(file);
+  if (text.includes("This document follows BUILD-SPEC.md. Operational status is valid only when")) {
+    throw new Error("Documentation still contains placeholder scaffold text: " + file);
+  }
+}
+
 for (const file of [
   "src/app/founder/page.tsx",
   "src/app/founder/renders/page.tsx",

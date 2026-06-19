@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
+import { NextRequest } from "next/server";
 import { describe, expect, it, beforeEach } from "vitest";
+import { GET as founderAiGet, PATCH as founderAiPatch, POST as founderAiPost } from "@/app/api/founder/ai/[...segments]/route";
 import { readEnv, providerSecretStatus } from "@/lib/env";
 import { seedAiControlPlane } from "@/lib/ai/bootstrap";
 import { hasCapabilities, supportsTask } from "@/lib/ai/capabilities";
@@ -59,6 +61,18 @@ function shopifySessionToken(payload: Record<string, unknown>, secret: string) {
   const body = base64Url(payload);
   const signature = createHmac("sha256", secret).update(header + "." + body).digest("base64url");
   return header + "." + body + "." + signature;
+}
+
+function founderAiContext(...segments: string[]) {
+  return { params: Promise.resolve({ segments }) };
+}
+
+function founderAiRequest(segments: string[], body: Record<string, unknown> = {}) {
+  return new NextRequest("https://app.test/api/founder/ai/" + segments.join("/"), {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json" }
+  });
 }
 
 beforeEach(() => {
@@ -154,6 +168,96 @@ describe("unit contract", () => {
     expect(blocked.promptVersion.status).toBe("archived");
     const testRun = await runOneOffPromptTest({ promptVersionId: clone.id, variables: { productTitle: "Lamp", tapX: 0.3, tapY: 0.8 } });
     expect(testRun.result.ok).toBe(true);
+  });
+
+  it("serves the documented founder AI API actions beyond read-only list endpoints", async () => {
+    const firstPromptVersion = [...repository.promptVersions.values()][0];
+    const activePolicy = [...repository.routePolicies.values()].find((policy) => policy.status === "active" && policy.taskType === "render_composite")!;
+
+    const providerResponse = await founderAiPost(founderAiRequest(["providers"], {
+      providerKey: "manual-http",
+      displayName: "Manual HTTP",
+      adapterKey: "custom-http",
+      adapterVersion: "manual-v1",
+      status: "disabled",
+      secretRef: "CUSTOM_IMAGE_API_KEY"
+    }), founderAiContext("providers"));
+    expect(providerResponse.status).toBe(200);
+    const provider = await providerResponse.json();
+    expect(provider.providerKey).toBe("manual-http");
+
+    const patchedProviderResponse = await founderAiPatch(founderAiRequest(["providers", provider.id], { status: "enabled" }), founderAiContext("providers", provider.id));
+    expect((await patchedProviderResponse.json()).status).toBe("enabled");
+
+    const modelResponse = await founderAiPost(founderAiRequest(["models"], {
+      providerKey: "manual-http",
+      modelKey: "manual-render-v1",
+      displayName: "Manual Render V1",
+      capabilities: ["image_edit", "aspect_ratio_control"],
+      allowedTasks: ["render_composite"],
+      status: "testing"
+    }), founderAiContext("models"));
+    expect(modelResponse.status).toBe(200);
+    const model = await modelResponse.json();
+    expect(model.allowedTasks).toContain("render_composite");
+
+    const patchedModelResponse = await founderAiPatch(founderAiRequest(["models", model.id], { status: "enabled" }), founderAiContext("models", model.id));
+    expect((await patchedModelResponse.json()).status).toBe("enabled");
+
+    const bundleResponse = await founderAiPost(founderAiRequest(["bundles"], {
+      name: "Founder API bundle",
+      surface: "widget",
+      status: "review",
+      promptVersionMap: { render_composite: firstPromptVersion.id }
+    }), founderAiContext("bundles"));
+    const { version: bundleVersion } = await bundleResponse.json();
+    expect(bundleVersion.status).toBe("review");
+    const approvedBundleResponse = await founderAiPost(founderAiRequest(["bundle-versions", bundleVersion.id, "approve"], { reason: "unit approval" }), founderAiContext("bundle-versions", bundleVersion.id, "approve"));
+    expect((await approvedBundleResponse.json()).status).toBe("approved");
+
+    const recipeResponse = await founderAiPost(founderAiRequest(["recipes"], {
+      name: "Founder API recipe",
+      surface: "widget",
+      kind: "shopper",
+      status: "review",
+      promptBundleVersionId: bundleVersion.id,
+      modelRoutePolicyId: activePolicy.id,
+      gatePolicy: { threshold: 7 },
+      retryPolicy: { maxAttempts: 3 }
+    }), founderAiContext("recipes"));
+    const { version: recipeVersion } = await recipeResponse.json();
+    expect(recipeVersion.status).toBe("review");
+    const approvedRecipeResponse = await founderAiPost(founderAiRequest(["recipe-versions", recipeVersion.id, "approve"], { reason: "unit approval" }), founderAiContext("recipe-versions", recipeVersion.id, "approve"));
+    expect((await approvedRecipeResponse.json()).status).toBe("approved");
+
+    const deploymentResponse = await founderAiPost(founderAiRequest(["deployments"], {
+      surface: "widget",
+      taskType: "render_composite",
+      renderRecipeVersionId: recipeVersion.id,
+      reason: "unit deployment"
+    }), founderAiContext("deployments"));
+    expect((await deploymentResponse.json()).status).toBe("active");
+
+    const testRenderResponse = await founderAiPost(founderAiRequest(["test-render"], {
+      promptVersionId: firstPromptVersion.id,
+      variables: { productTitle: "Lamp", tapX: 0.5, tapY: 0.7, dimensionsText: "35 x 65 x 35 cm" }
+    }), founderAiContext("test-render"));
+    expect((await testRenderResponse.json()).result.ok).toBe(true);
+
+    const benchmarkResponse = await founderAiPost(founderAiRequest(["benchmark"], { name: "unit benchmark" }), founderAiContext("benchmark"));
+    const benchmark = await benchmarkResponse.json();
+    expect(benchmark.report.total).toBe(15);
+    expect(benchmark.report.passCount).toBeGreaterThanOrEqual(13);
+
+    const shop = repository.createShop({ shopDomain: "founder-ai-api.myshopify.com", plan: "trial", rendersQuota: 50, lifestyleImagesQuota: 10, billingStatus: "trial", roomPreviewEnabled: true });
+    const room = repository.createRoomSession({ shopId: shop.id, source: "widget", roomKey: "rooms/founder/original.jpg", expiresAt: new Date(Date.now() + 86400000).toISOString(), verified: true });
+    const sourceRender = repository.createRenderRequest({ traceId: "trace-founder-ai-api", shopId: shop.id, roomSessionId: room.id, kind: "shopper", surface: "widget", status: "done" });
+    const replayResponse = await founderAiPost(founderAiRequest(["replay"], { renderRequestId: sourceRender.id, modelKey: "gpt-image-2" }), founderAiContext("replay"));
+    const replay = await replayResponse.json();
+    expect(replay.sourceRenderRequestId).toBe(sourceRender.id);
+
+    const providersList = await founderAiGet(new NextRequest("https://app.test/api/founder/ai/providers"), founderAiContext("providers"));
+    expect((await providersList.json()).providers.some((item: { providerKey: string }) => item.providerKey === "manual-http")).toBe(true);
   });
 
   it("redacts invocations, estimates costs, and invokes through router", async () => {

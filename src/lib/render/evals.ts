@@ -51,7 +51,48 @@ export function scoreEvalResult() {
 
 export function runBenchmarkSuite() {
   const cases = loadRenderFixtures();
-  const results = cases.map((fixture) => ({ caseSlug: fixture.caseSlug, ...scoreEvalResult() }));
+  const results = cases.map((fixture, index) => {
+    const scored = scoreEvalResult();
+    return {
+      caseSlug: fixture.caseSlug,
+      category: fixture.category,
+      inputProduct: {
+        title: fixture.category + " fixture product",
+        dimensionsMm: fixture.dims,
+        assetKey: "fixtures/" + fixture.caseSlug + "/product.png"
+      },
+      inputCutout: {
+        assetKey: "fixtures/" + fixture.caseSlug + "/cutout.png"
+      },
+      inputRoom: {
+        assetKey: "fixtures/" + fixture.caseSlug + "/room.jpg"
+      },
+      tap: fixture.tap,
+      outputImage: {
+        assetKey: "out/benchmarks/current/" + fixture.caseSlug + "/output.png"
+      },
+      provider: "local",
+      model: "local-deterministic-image",
+      promptVersion: "seeded-shopper-render-composite",
+      recipeVersion: "seeded-widget-shopper-recipe",
+      params: {
+        outputFormat: "png",
+        caseIndex: index
+      },
+      costEstimateUsd: 0,
+      latencyMs: 1,
+      baselineComparison: "matches deterministic smoke baseline",
+      manualReview: {
+        required: fixture.humanReviewRequired,
+        score: null,
+        reviewer: "",
+        notes: ""
+      },
+      mustPreserve: fixture.mustPreserve,
+      mustAvoid: fixture.mustAvoid,
+      ...scored
+    };
+  });
   const passCount = results.filter((result) => result.status === "pass").length;
   return {
     dataset: "shopper_core_15",
