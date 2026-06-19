@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
-import { repository } from "@/lib/db/repository";
+import { loadEvalOverview } from "@/lib/db/supabase-persistence";
 
 export async function GET() {
-  return NextResponse.json({
-    datasets: [...repository.evalDatasets.values()],
-    cases: [...repository.evalCases.values()],
-    runs: [...repository.evalRuns.values()],
-    results: [...repository.evalResults.values()]
-  });
+  return NextResponse.json(await loadEvalOverview());
 }

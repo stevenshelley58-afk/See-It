@@ -1,9 +1,8 @@
 import { listModels, listProviders } from "@/lib/ai/registry";
-import { repository } from "@/lib/db/repository";
+import { loadFounderDashboardData } from "@/lib/db/supabase-persistence";
 
-export function getFounderDashboard() {
-  const renders = [...repository.renderRequests.values()];
-  const invocations = [...repository.aiInvocations.values()];
+export async function getFounderDashboard() {
+  const { renders, invocations, deployments, experiments, shops } = await loadFounderDashboardData();
   const accepted = renders.filter((render) => render.status === "done").length;
   const failed = renders.filter((render) => render.status === "failed").length;
   const costs = invocations.reduce((sum, invocation) => sum + (invocation.costEstimateUsd ?? 0), 0);
@@ -16,9 +15,9 @@ export function getFounderDashboard() {
     p95Latency: percentile(invocations.map((invocation) => invocation.latencyMs ?? 0), 0.95),
     costToday: Number(costs.toFixed(4)),
     costPerAcceptedRender: accepted ? Number((costs / accepted).toFixed(4)) : 0,
-    activePromptDeployments: [...repository.deployments.values()].filter((deployment) => deployment.status === "active").length,
-    activeExperiments: [...repository.experiments.values()].filter((experiment) => experiment.status === "running").length,
-    shopsNeedingAttention: [...repository.shops.values()].filter((shop) => shop.uninstalledAt || shop.plan === "cancelled").length,
+    activePromptDeployments: deployments.filter((deployment) => deployment.status === "active").length,
+    activeExperiments: experiments.filter((experiment) => experiment.status === "running").length,
+    shopsNeedingAttention: shops.filter((shop) => shop.uninstalledAt || shop.plan === "cancelled").length,
     providers: listProviders(),
     models: listModels(),
     todaysAction: "Review failed render traces and benchmark any prompt changes before activation."

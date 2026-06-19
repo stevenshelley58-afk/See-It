@@ -3,6 +3,7 @@ import { getAdapter } from "@/lib/ai/registry";
 import { redactSecrets } from "@/lib/ai/redaction";
 import type { AiInvocationRequest, AiNormalizedResult } from "@/lib/ai/types";
 import { repository } from "@/lib/db/repository";
+import { persistAiInvocation, persistRenderTraceEvent } from "@/lib/db/supabase-persistence";
 
 export async function invokeAi(request: AiInvocationRequest): Promise<{ invocationId: string; result: AiNormalizedResult }> {
   const model = [...repository.models.values()].find((item) => item.providerKey === request.providerKey && item.modelKey === request.modelKey && (!request.modelVersion || item.modelVersion === request.modelVersion));
@@ -47,12 +48,17 @@ export async function invokeAi(request: AiInvocationRequest): Promise<{ invocati
     retryable: false,
     idempotencyKey: request.idempotencyKey
   });
-  repository.trace({ traceId: request.traceId, aiInvocationId: created.id, eventName: "ai_invocation_created", eventLevel: "info", props: { provider: provider.providerKey, model: model.modelKey } });
-  repository.updateAiInvocation(created.id, { status: "sent" });
-  repository.trace({ traceId: request.traceId, aiInvocationId: created.id, eventName: "provider_request_sent", eventLevel: "info", props: { adapter: adapter.adapterVersion } });
+  await persistAiInvocation(created);
+  const createdTrace = repository.trace({ traceId: request.traceId, aiInvocationId: created.id, eventName: "ai_invocation_created", eventLevel: "info", props: { provider: provider.providerKey, model: model.modelKey } });
+  await persistRenderTraceEvent(createdTrace);
+  const sent = repository.updateAiInvocation(created.id, { status: "sent" });
+  await persistAiInvocation(sent);
+  const sentTrace = repository.trace({ traceId: request.traceId, aiInvocationId: created.id, eventName: "provider_request_sent", eventLevel: "info", props: { adapter: adapter.adapterVersion } });
+  await persistRenderTraceEvent(sentTrace);
   const result = await adapter.invoke(request, model);
-  repository.trace({ traceId: request.traceId, aiInvocationId: created.id, eventName: "provider_response_received", eventLevel: result.ok ? "info" : "error", props: { ok: result.ok, errorCode: result.error?.code } });
-  repository.updateAiInvocation(created.id, {
+  const responseTrace = repository.trace({ traceId: request.traceId, aiInvocationId: created.id, eventName: "provider_response_received", eventLevel: result.ok ? "info" : "error", props: { ok: result.ok, errorCode: result.error?.code } });
+  await persistRenderTraceEvent(responseTrace);
+  const completed = repository.updateAiInvocation(created.id, {
     status: result.ok ? "succeeded" : "failed",
     responseJsonRedacted: redactSecrets(result.rawResponseRedactedJson ?? result),
     normalizedResult: result,
@@ -67,5 +73,6 @@ export async function invokeAi(request: AiInvocationRequest): Promise<{ invocati
     retryable: Boolean(result.error?.retryable),
     completedAt: new Date().toISOString()
   });
+  await persistAiInvocation(completed);
   return { invocationId: created.id, result };
 }

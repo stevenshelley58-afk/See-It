@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/db/repository";
-import { persistAudit, persistExperiment, persistExperimentArm } from "@/lib/db/supabase-persistence";
+import { loadExperimentById, persistAudit, persistExperiment, persistExperimentArm } from "@/lib/db/supabase-persistence";
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const body = await request.json().catch(() => ({}));
+  const loaded = await loadExperimentById(params.id);
+  if (!loaded) {
+    return NextResponse.json({ error: "experiment_not_found" }, { status: 404 });
+  }
   const current = repository.mustGet(repository.experiments, params.id, "ai_experiment");
   const arms = [...repository.experimentArms.values()].filter((arm) => arm.experimentId === params.id);
   const winningArm = arms.find((arm) => arm.id === body.armId) ?? arms.find((arm) => arm.status === "active") ?? arms[0];

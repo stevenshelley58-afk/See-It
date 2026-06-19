@@ -1,20 +1,31 @@
-import { Settings } from "lucide-react";
+import Link from "next/link";
+import { PackageCheck } from "lucide-react";
 import { Shell } from "@/components/shell";
 
-export default function Page() {
+export default function ProductsPage() {
   return (
     <Shell>
       <div className="page-head">
         <div>
           <h1>Products</h1>
-          <p>Product setup fields include dimensions, source image, cutout, readiness, enable state, and AI trace links.</p>
+          <p>Product setups track dimensions, cutouts, readiness, widget enablement, and AI trace links.</p>
         </div>
-        <span className="status-pill">ready</span>
+        <span className="status-pill">product setup</span>
       </div>
       <section className="band">
-        <div className="toolbar"><Settings size={18} /><strong>Products</strong></div>
-        <p className="muted">Product setup fields include dimensions, source image, cutout, readiness, enable state, and AI trace links.</p>
+        <div className="toolbar"><PackageCheck size={18} /><strong>Configured products</strong></div>
       </section>
+      <table className="table">
+        <thead><tr><th>Product</th><th>Dimensions</th><th>Cutout</th><th>Status</th><th>Widget</th><th>Open</th></tr></thead>
+        <tbody>
+          <tr>
+            <td colSpan={6}>Product records appear after embedded product sync.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="toolbar" style={{ marginTop: 16 }}>
+        <Link className="btn" href="/app/onboarding">Activation checklist</Link>
+      </div>
     </Shell>
   );
 }

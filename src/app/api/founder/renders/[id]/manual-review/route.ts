@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/db/repository";
-import { persistAudit, persistManualReview, persistRenderBundle } from "@/lib/db/supabase-persistence";
+import { loadRenderRequestById, persistAudit, persistManualReview, persistRenderBundle } from "@/lib/db/supabase-persistence";
 import type { ManualReviewRecord } from "@/lib/db/schema";
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const body = await request.json().catch(() => ({}));
-  const render = repository.mustGet(repository.renderRequests, params.id, "render_request");
+  const render = await loadRenderRequestById(params.id);
+  if (!render) {
+    return NextResponse.json({ error: "render_not_found" }, { status: 404 });
+  }
   const review = repository.createManualReview({
     renderRequestId: render.id,
     reviewer: String(body.reviewer ?? "founder"),

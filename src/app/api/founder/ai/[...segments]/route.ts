@@ -13,6 +13,7 @@ import {
 import { ensureAiRegistrySeeded, listModels, listProviders } from "@/lib/ai/registry";
 import type { AiTaskType } from "@/lib/ai/types";
 import { repository } from "@/lib/db/repository";
+import { loadAiControlPlane, persistAiControlPlane, persistAuditLogs } from "@/lib/db/supabase-persistence";
 import type { Surface } from "@/lib/db/schema";
 
 function jsonError(error: unknown, status = 400) {
@@ -20,6 +21,7 @@ function jsonError(error: unknown, status = 400) {
 }
 
 export async function GET(_request: NextRequest, { params }: { params: { segments: string[] } }) {
+  await loadAiControlPlane();
   ensureAiRegistrySeeded();
   const [resource, id] = params.segments;
   if (resource === "providers") return NextResponse.json({ providers: listProviders() });
@@ -38,6 +40,7 @@ export async function GET(_request: NextRequest, { params }: { params: { segment
 }
 
 export async function POST(request: NextRequest, { params }: { params: { segments: string[] } }) {
+  await loadAiControlPlane();
   ensureAiRegistrySeeded();
   const body = await request.json().catch(() => ({}));
   const [resource, id, action] = params.segments;
@@ -51,19 +54,34 @@ export async function POST(request: NextRequest, { params }: { params: { segment
             surface: String(body.surface ?? "widget") as Surface,
             description: body.description
           });
-      return NextResponse.json(createPromptDraft({ ...body, promptTemplateId: template.id, createdBy: "founder" }));
+      const draft = createPromptDraft({ ...body, promptTemplateId: template.id, createdBy: "founder" });
+      await persistAiControlPlane();
+      await persistAuditLogs();
+      return NextResponse.json(draft);
     }
     if (resource === "prompts" && action === "versions") {
-      return NextResponse.json(createPromptDraft({ ...body, promptTemplateId: id, createdBy: "founder" }));
+      const draft = createPromptDraft({ ...body, promptTemplateId: id, createdBy: "founder" });
+      await persistAiControlPlane();
+      await persistAuditLogs();
+      return NextResponse.json(draft);
     }
     if (resource === "prompt-versions" && action === "approve") {
-      return NextResponse.json(setPromptVersionStatus(id, "approved", "founder", body.reason));
+      const next = setPromptVersionStatus(id, "approved", "founder", body.reason);
+      await persistAiControlPlane();
+      await persistAuditLogs();
+      return NextResponse.json(next);
     }
     if (resource === "prompt-versions" && action === "archive") {
-      return NextResponse.json(setPromptVersionStatus(id, "archived", "founder", body.reason));
+      const next = setPromptVersionStatus(id, "archived", "founder", body.reason);
+      await persistAiControlPlane();
+      await persistAuditLogs();
+      return NextResponse.json(next);
     }
     if (resource === "prompt-versions" && action === "clone") {
-      return NextResponse.json(clonePromptVersion(id, "founder", body));
+      const clone = clonePromptVersion(id, "founder", body);
+      await persistAiControlPlane();
+      await persistAuditLogs();
+      return NextResponse.json(clone);
     }
     if (resource === "prompt-versions" && action === "preview") {
       return NextResponse.json(previewPromptVersion(id, body.variables ?? {}));
@@ -72,29 +90,42 @@ export async function POST(request: NextRequest, { params }: { params: { segment
       return NextResponse.json(diffPromptVersionIds(id, String(body.toPromptVersionId)));
     }
     if (resource === "prompt-versions" && action === "block") {
-      return NextResponse.json(blockPromptVersionFromProduction(id, "founder", String(body.reason ?? "blocked from production")));
+      const blocked = blockPromptVersionFromProduction(id, "founder", String(body.reason ?? "blocked from production"));
+      await persistAiControlPlane();
+      await persistAuditLogs();
+      return NextResponse.json(blocked);
     }
     if (resource === "prompt-versions" && action === "test") {
-      return NextResponse.json(await runOneOffPromptTest({ promptVersionId: id, variables: body.variables ?? {}, providerKey: body.providerKey, modelKey: body.modelKey, actor: "founder" }));
+      const result = await runOneOffPromptTest({ promptVersionId: id, variables: body.variables ?? {}, providerKey: body.providerKey, modelKey: body.modelKey, actor: "founder" });
+      await persistAuditLogs();
+      return NextResponse.json(result);
     }
     if (resource === "deployments" && id === "activate") {
-      return NextResponse.json(activatePromptDeployment({
+      const deployment = activatePromptDeployment({
         surface: String(body.surface ?? "widget") as Surface,
         taskType: String(body.taskType ?? "render_composite") as AiTaskType,
         renderRecipeVersionId: String(body.renderRecipeVersionId),
         trafficPercent: body.trafficPercent,
         actor: "founder",
         reason: body.reason
-      }));
+      });
+      await persistAiControlPlane();
+      await persistAuditLogs();
+      return NextResponse.json(deployment);
     }
     if (resource === "deployments" && action === "rollback") {
-      return NextResponse.json(repository.rollbackDeployment(id, "founder", String(body.reason ?? "manual rollback")));
+      const deployment = repository.rollbackDeployment(id, "founder", String(body.reason ?? "manual rollback"));
+      await persistAiControlPlane();
+      await persistAuditLogs();
+      return NextResponse.json(deployment);
     }
     if (resource === "deployments" && action === "pause") {
       const current = repository.mustGet(repository.deployments, id, "prompt_deployment");
       const next = { ...current, status: "paused" as const, endedAt: new Date().toISOString() };
       repository.deployments.set(id, next);
       repository.audit("founder", "pause", "prompt_deployment", id, current, next, body.reason);
+      await persistAiControlPlane();
+      await persistAuditLogs();
       return NextResponse.json(next);
     }
     return NextResponse.json({ error: "unknown_founder_ai_action", resource, id, action }, { status: 404 });
@@ -104,12 +135,16 @@ export async function POST(request: NextRequest, { params }: { params: { segment
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: { segments: string[] } }) {
+  await loadAiControlPlane();
   ensureAiRegistrySeeded();
   const body = await request.json().catch(() => ({}));
   const [resource, id] = params.segments;
   try {
     if (resource === "prompt-versions") {
-      return NextResponse.json(editPromptDraft(id, body, "founder"));
+      const next = editPromptDraft(id, body, "founder");
+      await persistAiControlPlane();
+      await persistAuditLogs();
+      return NextResponse.json(next);
     }
     repository.audit("founder", "api_patch", params.segments.join("/"), undefined, undefined, body, "founder api");
     return NextResponse.json({ error: "unknown_founder_ai_patch", resource, id }, { status: 404 });

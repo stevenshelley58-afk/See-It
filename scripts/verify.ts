@@ -104,6 +104,11 @@ for (const requiredSnippet of ["persistManualReview", "persistEvalDataset", "per
     throw new Error("Founder record persistence helper missing: " + requiredSnippet);
   }
 }
+for (const requiredSnippet of ["loadAiControlPlane", "persistAiControlPlane", "persistAiModel", "loadFounderRenderRequests", "loadRenderBundle", "loadEvalOverview", "loadExperimentOverview", "loadManualReviews", "loadAuditLogs", "persistAiInvocation", "params_json"]) {
+  if (!persistence.includes(requiredSnippet)) {
+    throw new Error("Founder durable loader/control-plane helper missing: " + requiredSnippet);
+  }
+}
 const migration = read("supabase/migrations/0001_initial.sql");
 for (const requiredSnippet of ["verified boolean default false", "width integer", "height integer", "remaining_refinements integer default 3"]) {
   if (!migration.includes(requiredSnippet)) {
@@ -130,15 +135,52 @@ for (const [file, requiredSnippet] of [
   ["src/lib/shopify/webhooks.ts", "handleDurableUninstall"],
   ["src/lib/shopify/webhooks.ts", "handleDurablePrivacyWebhook"],
   ["src/app/api/founder/renders/[id]/manual-review/route.ts", "persistManualReview"],
+  ["src/app/api/founder/renders/[id]/manual-review/route.ts", "loadRenderRequestById"],
   ["src/app/api/founder/renders/[id]/promote-to-fixture/route.ts", "persistEvalCase"],
+  ["src/app/api/founder/renders/[id]/promote-to-fixture/route.ts", "loadRenderBundle"],
   ["src/app/api/founder/evals/run/route.ts", "persistEvalResult"],
+  ["src/app/api/founder/evals/route.ts", "loadEvalOverview"],
+  ["src/app/api/founder/evals/[id]/route.ts", "loadEvalRunBundle"],
+  ["src/app/api/founder/renders/route.ts", "loadFounderRenderRequests"],
+  ["src/app/api/founder/renders/[id]/route.ts", "loadRenderBundle"],
   ["src/app/api/founder/experiments/route.ts", "persistExperimentArm"],
+  ["src/app/api/founder/experiments/route.ts", "loadExperimentOverview"],
   ["src/app/api/founder/experiments/[id]/route.ts", "persistExperiment"],
+  ["src/app/api/founder/experiments/[id]/route.ts", "loadExperimentById"],
   ["src/app/api/founder/experiments/[id]/pause/route.ts", "persistExperiment"],
-  ["src/app/api/founder/experiments/[id]/promote-winner/route.ts", "persistExperimentArm"]
+  ["src/app/api/founder/experiments/[id]/pause/route.ts", "loadExperimentById"],
+  ["src/app/api/founder/experiments/[id]/promote-winner/route.ts", "persistExperimentArm"],
+  ["src/app/api/founder/experiments/[id]/promote-winner/route.ts", "loadExperimentById"]
 ] as const) {
   if (!read(file).includes(requiredSnippet)) {
     throw new Error("Launch-critical durable/quota hook missing: " + file + " " + requiredSnippet);
+  }
+}
+
+for (const [file, requiredSnippet] of [
+  ["src/app/api/founder/ai/[...segments]/route.ts", "loadAiControlPlane"],
+  ["src/app/api/founder/ai/[...segments]/route.ts", "persistAiControlPlane"],
+  ["src/app/api/founder/ai/[...segments]/route.ts", "persistAuditLogs"],
+  ["src/lib/ai/router.ts", "persistAiInvocation"],
+  ["src/lib/render/replay.ts", "loadRenderRequestById"],
+  ["src/app/founder/renders/page.tsx", "loadFounderRenderRequests"],
+  ["src/app/founder/renders/[renderId]/page.tsx", "loadRenderBundle"],
+  ["src/app/founder/ai/prompts/page.tsx", "loadAiControlPlane"],
+  ["src/app/founder/ai/costs/page.tsx", "loadAiInvocations"],
+  ["src/app/founder/quality/page.tsx", "loadManualReviews"],
+  ["src/app/founder/evals/page.tsx", "loadEvalOverview"],
+  ["src/app/founder/experiments/page.tsx", "loadExperimentOverview"],
+  ["scripts/seed-ai-registry.ts", "persistAiControlPlane"]
+] as const) {
+  if (!read(file).includes(requiredSnippet)) {
+    throw new Error("Founder durable UI/API hook missing: " + file + " " + requiredSnippet);
+  }
+}
+
+for (const file of globSync("src/app/founder/**/page.tsx")) {
+  const text = read(file);
+  if (text.includes("This screen is wired to the shared AI control plane") || text.includes("Inspectable records, route decisions")) {
+    throw new Error("Founder page still contains scaffold copy: " + file);
   }
 }
 

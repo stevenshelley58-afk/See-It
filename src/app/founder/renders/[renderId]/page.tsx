@@ -1,10 +1,10 @@
 import { RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { Shell } from "@/components/shell";
-import { repository } from "@/lib/db/repository";
+import { loadRenderBundle } from "@/lib/db/supabase-persistence";
 
-export default function RenderDetailPage({ params }: { params: { renderId: string } }) {
-  const bundle = repository.renderRequests.has(params.renderId) ? repository.renderBundleForRequest(params.renderId) : undefined;
+export default async function RenderDetailPage({ params }: { params: { renderId: string } }) {
+  const bundle = await loadRenderBundle(params.renderId);
   return (
     <Shell>
       <div className="page-head">

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/db/repository";
-import { persistAudit, persistEvalCase, persistEvalDataset, persistRenderBundle } from "@/lib/db/supabase-persistence";
+import { loadRenderBundle, persistAudit, persistEvalCase, persistEvalDataset, persistRenderBundle } from "@/lib/db/supabase-persistence";
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const body = await request.json().catch(() => ({}));
-  const bundle = repository.renderBundleForRequest(params.id);
+  const bundle = await loadRenderBundle(params.id);
+  if (!bundle) {
+    return NextResponse.json({ error: "render_not_found" }, { status: 404 });
+  }
   const dataset = repository.createEvalDataset({
     name: String(body.datasetName ?? "promoted_render_fixtures"),
     description: "Founder-promoted render fixtures",

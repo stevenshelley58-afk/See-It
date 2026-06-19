@@ -1,10 +1,10 @@
 import { RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { Shell } from "@/components/shell";
-import { repository } from "@/lib/db/repository";
+import { loadFounderRenderRequests } from "@/lib/db/supabase-persistence";
 
-export default function RenderOperationsPage() {
-  const renders = [...repository.renderRequests.values()];
+export default async function RenderOperationsPage() {
+  const renders = await loadFounderRenderRequests();
   return (
     <Shell>
       <div className="page-head">

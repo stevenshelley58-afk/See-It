@@ -1,4 +1,5 @@
 import { repository } from "@/lib/db/repository";
+import { loadRenderRequestById, persistRenderBundle, persistRenderTraceEvent } from "@/lib/db/supabase-persistence";
 import { createDurableRenderRequest, createRenderRequest } from "@/lib/render/orchestrator";
 import { traceRender } from "@/lib/render/trace";
 
@@ -19,7 +20,10 @@ export function createReplay(sourceRenderRequestId: string, overrides: { modelKe
 }
 
 export async function createDurableReplay(sourceRenderRequestId: string, overrides: { modelKey?: string; promptVersionId?: string } = {}) {
-  const source = repository.mustGet(repository.renderRequests, sourceRenderRequestId, "render_request");
+  const source = await loadRenderRequestById(sourceRenderRequestId);
+  if (!source) {
+    throw new Error("render_request not found: " + sourceRenderRequestId);
+  }
   if (source.roomSessionId) {
     const replay = await createDurableRenderRequest({
       roomSessionId: source.roomSessionId,
@@ -28,7 +32,9 @@ export async function createDurableReplay(sourceRenderRequestId: string, overrid
       sourceRenderRequestId: source.id,
       hintText: JSON.stringify(overrides)
     });
-    traceRender(source.traceId, "replay_created", { replayRenderRequestId: replay.id, overrides }, source.id);
+    const event = traceRender(source.traceId, "replay_created", { replayRenderRequestId: replay.id, overrides }, source.id);
+    await persistRenderTraceEvent(event);
+    await persistRenderBundle(source.id);
     return replay;
   }
   throw new Error("Replay requires retained source assets");

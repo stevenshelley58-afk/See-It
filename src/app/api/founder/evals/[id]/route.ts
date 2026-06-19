@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server";
-import { repository } from "@/lib/db/repository";
+import { loadEvalRunBundle } from "@/lib/db/supabase-persistence";
 
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
-  const run = repository.evalRuns.get(params.id);
-  if (!run) {
+  const bundle = await loadEvalRunBundle(params.id);
+  if (!bundle) {
     return NextResponse.json({ error: "eval_run_not_found" }, { status: 404 });
   }
-  return NextResponse.json({
-    run,
-    dataset: repository.evalDatasets.get(run.evalDatasetId),
-    results: [...repository.evalResults.values()].filter((result) => result.evalRunId === run.id)
-  });
+  return NextResponse.json(bundle);
 }

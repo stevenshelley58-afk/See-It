@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deterministicAssignment } from "@/lib/experiments/assignment";
 import { repository } from "@/lib/db/repository";
-import { persistAudit, persistExperiment, persistExperimentArm, persistExperimentAssignment } from "@/lib/db/supabase-persistence";
+import { loadExperimentOverview, persistAudit, persistExperiment, persistExperimentArm, persistExperimentAssignment } from "@/lib/db/supabase-persistence";
 import type { AiExperimentRecord, Surface } from "@/lib/db/schema";
 
 export async function GET() {
-  return NextResponse.json({
-    experiments: [...repository.experiments.values()],
-    arms: [...repository.experimentArms.values()],
-    assignments: [...repository.experimentAssignments.values()]
-  });
+  return NextResponse.json(await loadExperimentOverview());
 }
 
 export async function POST(request: NextRequest) {

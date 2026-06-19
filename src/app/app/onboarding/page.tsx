@@ -1,20 +1,37 @@
-import { Settings } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { Shell } from "@/components/shell";
 
-export default function Page() {
+const steps = [
+  ["OAuth install", "complete"],
+  ["Product sync", "required"],
+  ["Dimension confirmation", "required"],
+  ["Cutout generation", "required"],
+  ["Merchant test render", "required"],
+  ["Widget enable", "required"],
+  ["Theme editor deep link", "required"]
+] as const;
+
+export default function OnboardingPage() {
   return (
     <Shell>
       <div className="page-head">
         <div>
           <h1>Onboarding</h1>
-          <p>OAuth, product sync, dimension extraction, cutout generation, test render, and theme editor activation.</p>
+          <p>Activation checklist for getting one product from install to a working PDP button.</p>
         </div>
-        <span className="status-pill">ready</span>
+        <span className="status-pill">activation</span>
       </div>
-      <section className="band">
-        <div className="toolbar"><Settings size={18} /><strong>Onboarding</strong></div>
-        <p className="muted">OAuth, product sync, dimension extraction, cutout generation, test render, and theme editor activation.</p>
-      </section>
+      <table className="table">
+        <thead><tr><th>Step</th><th>Status</th></tr></thead>
+        <tbody>
+          {steps.map(([step, status]) => (
+            <tr key={step}>
+              <td><span className="toolbar"><CheckCircle2 size={16} />{step}</span></td>
+              <td>{status}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </Shell>
   );
 }

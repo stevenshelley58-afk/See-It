@@ -5,9 +5,9 @@ import { Shell } from "@/components/shell";
 import { ensureAiRegistrySeeded } from "@/lib/ai/registry";
 import { getFounderDashboard } from "@/lib/founder/dashboard";
 
-export default function FounderHomePage() {
+export default async function FounderHomePage() {
   ensureAiRegistrySeeded();
-  const data = getFounderDashboard();
+  const data = await getFounderDashboard();
   return (
     <Shell>
       <div className="page-head">
