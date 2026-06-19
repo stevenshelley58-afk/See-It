@@ -23,6 +23,7 @@
     "db:verify:write": "tsx scripts/db-verify.ts --require-seed --write-smoke",
     "storage:verify": "tsx scripts/storage-verify.ts",
     "app-proxy:smoke": "tsx scripts/app-proxy-smoke.ts",
+    "webhooks:smoke": "tsx scripts/webhooks-smoke.ts",
     "seed:ai": "tsx scripts/seed-ai-registry.ts",
     "seed:dev": "tsx scripts/seed-dev.ts",
     "enrich": "tsx scripts/enrich.ts",

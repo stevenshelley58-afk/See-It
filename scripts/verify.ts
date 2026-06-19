@@ -116,6 +116,12 @@ assertContains("package.json", "app-proxy:smoke", "Production app-proxy smoke sc
 for (const requiredSnippet of ["signedAppProxyUrl", "POST /app-proxy/rooms", "POST /app-proxy/renders", "POST /app-proxy/renders/:renderId/feedback"]) {
   assertContains("scripts/app-proxy-smoke.ts", requiredSnippet, "App-proxy smoke script missing required flow");
 }
+assertContains("package.json", "webhooks:smoke", "Production webhook smoke script missing");
+assertContains("src/lib/shopify/webhooks.ts", "loadActiveJobsByShop", "Durable uninstall must load active persisted shop jobs before cancellation");
+assertContains("src/lib/shopify/webhooks.ts", "offlineAccessTokenEncrypted: null", "Durable uninstall must persistently clear offline token");
+for (const requiredSnippet of ["x-shopify-hmac-sha256", "customers/data_request", "app/uninstalled", "offline_access_token_encrypted", "cancelled"]) {
+  assertContains("scripts/webhooks-smoke.ts", requiredSnippet, "Webhook smoke script missing required flow");
+}
 assertContains("src/app/privacy/page.tsx", "Temporary room-photo processing", "Public privacy page must disclose temporary room-photo processing");
 assertContains("src/app/privacy/page.tsx", "24 hour operational retention", "Public privacy page must disclose room-photo retention");
 assertContains("src/app/privacy/page.tsx", "customers/data_request", "Public privacy page must disclose Shopify privacy webhooks");

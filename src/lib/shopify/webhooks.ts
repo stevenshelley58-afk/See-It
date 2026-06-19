@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { repository } from "@/lib/db/repository";
-import { loadShopByDomain, persistEvent, persistJob, persistShop } from "@/lib/db/supabase-persistence";
+import { loadActiveJobsByShop, loadShopByDomain, persistEvent, persistJob, persistShop } from "@/lib/db/supabase-persistence";
 
 export function verifyWebhook(body: string, hmacHeader: string | null, secret: string) {
   if (!hmacHeader) {
@@ -18,9 +18,19 @@ export function handlePrivacyWebhook(topic: string, payload: unknown) {
   return { ok: true };
 }
 
-export async function handleDurablePrivacyWebhook(topic: string, payload: unknown) {
-  await persistEvent(repository.event({ surface: "system", name: "privacy_" + topic.replace(/[/:]/g, "_"), props: { payload } }));
-  return { ok: true };
+export async function handleDurablePrivacyWebhook(topic: string, payload: unknown, shopDomain?: string) {
+  const shop = shopDomain ? await loadShopByDomain(shopDomain) : undefined;
+  const event = repository.event({
+    surface: "system",
+    name: "privacy_" + topic.replace(/[/:]/g, "_"),
+    shopId: shop?.id,
+    props: { payload, shopDomain }
+  });
+  if (shop) {
+    await persistEvent(event);
+    return { ok: true, persisted: true };
+  }
+  return { ok: true, persisted: false };
 }
 
 export type VerifiedWebhook =
@@ -56,7 +66,7 @@ export function handleUninstall(shopDomain: string) {
   if (!shop) {
     return { ok: true, disabled: false };
   }
-  repository.shops.set(shop.id, { ...shop, uninstalledAt: new Date().toISOString(), offlineAccessTokenEncrypted: undefined, roomPreviewEnabled: false, billingStatus: "uninstalled" });
+  repository.shops.set(shop.id, { ...shop, uninstalledAt: new Date().toISOString(), offlineAccessTokenEncrypted: null, roomPreviewEnabled: false, billingStatus: "uninstalled" });
   repository.cancelJobsForShop(shop.id);
   repository.event({ surface: "system", name: "app_uninstalled", shopId: shop.id, props: { shopDomain } });
   return { ok: true, disabled: true };
@@ -67,7 +77,8 @@ export async function handleDurableUninstall(shopDomain: string) {
   if (!shop) {
     return { ok: true, disabled: false };
   }
-  const updated = { ...shop, uninstalledAt: new Date().toISOString(), offlineAccessTokenEncrypted: undefined, roomPreviewEnabled: false, billingStatus: "uninstalled" };
+  await loadActiveJobsByShop(shop.id);
+  const updated = { ...shop, uninstalledAt: new Date().toISOString(), offlineAccessTokenEncrypted: null, roomPreviewEnabled: false, billingStatus: "uninstalled" };
   repository.shops.set(shop.id, updated);
   const cancelled = repository.cancelJobsForShop(shop.id);
   await persistShop(updated);

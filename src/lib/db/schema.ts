@@ -14,7 +14,7 @@ export interface ShopRecord {
   shopDomain: string;
   shopName?: string;
   contactEmail?: string;
-  offlineAccessTokenEncrypted?: string;
+  offlineAccessTokenEncrypted?: string | null;
   plan: "trial" | "starter" | "growth" | "cancelled";
   rendersQuota: number;
   lifestyleImagesQuota: number;

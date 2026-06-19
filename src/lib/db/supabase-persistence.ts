@@ -1244,6 +1244,23 @@ export async function loadQueueableJobs(limit = 10, env?: AppEnv) {
   return ((data ?? []) as DbRow[]).map(hydrateJob);
 }
 
+export async function loadActiveJobsByShop(shopId: string, env?: AppEnv) {
+  const resolved = shouldPersist(env);
+  if (!resolved) {
+    return [...repository.jobs.values()].filter((job) => job.payload.shopId === shopId && ["queued", "leased", "running"].includes(job.status));
+  }
+  const client = createSupabaseServiceClient(resolved);
+  const { data, error } = await client
+    .from("job")
+    .select("*")
+    .contains("payload_json", { shopId })
+    .in("status", ["queued", "leased", "running"]);
+  if (error) {
+    throw new Error("supabase_load_failed:job:" + error.message);
+  }
+  return ((data ?? []) as DbRow[]).map(hydrateJob);
+}
+
 export async function hydrateRenderPipelineInputs(renderRequestId: string, env?: AppEnv) {
   const request = await loadRenderRequestById(renderRequestId, env);
   if (!request) {

@@ -7,5 +7,5 @@ export async function POST(request: NextRequest) {
   if (!verified.ok) {
     return NextResponse.json(webhookErrorBody(verified), { status: verified.status });
   }
-  return NextResponse.json(await handleDurablePrivacyWebhook("customers/data_request", verified.body));
+  return NextResponse.json(await handleDurablePrivacyWebhook("customers/data_request", verified.body, verified.shopDomain));
 }
