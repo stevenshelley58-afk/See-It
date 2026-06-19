@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deterministicAssignment } from "@/lib/experiments/assignment";
 import { repository } from "@/lib/db/repository";
+import { persistAudit, persistExperiment, persistExperimentArm, persistExperimentAssignment } from "@/lib/db/supabase-persistence";
 import type { AiExperimentRecord, Surface } from "@/lib/db/schema";
 
 export async function GET() {
@@ -48,6 +49,14 @@ export async function POST(request: NextRequest) {
   const assignment = assignmentKey && assignedArmId
     ? repository.assignExperiment({ experimentId: experiment.id, armId: assignedArmId, assignmentKey, renderRequestId: body.renderRequestId })
     : undefined;
-  repository.audit("founder", "create", "ai_experiment", experiment.id, undefined, { experiment, arms, assignment }, body.reason);
+  const audit = repository.audit("founder", "create", "ai_experiment", experiment.id, undefined, { experiment, arms, assignment }, body.reason);
+  await persistExperiment(experiment);
+  for (const arm of arms) {
+    await persistExperimentArm(arm);
+  }
+  if (assignment) {
+    await persistExperimentAssignment(assignment);
+  }
+  await persistAudit(audit);
   return NextResponse.json({ experiment, arms, assignment });
 }

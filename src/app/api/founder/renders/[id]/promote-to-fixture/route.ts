@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/db/repository";
+import { persistAudit, persistEvalCase, persistEvalDataset, persistRenderBundle } from "@/lib/db/supabase-persistence";
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   const body = await request.json().catch(() => ({}));
@@ -27,7 +28,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     },
     notes: typeof body.notes === "string" ? body.notes : undefined
   });
-  repository.audit("founder", "promote_to_fixture", "render_request", params.id, bundle.request, fixture, body.reason);
+  const audit = repository.audit("founder", "promote_to_fixture", "render_request", params.id, bundle.request, fixture, body.reason);
   repository.trace({
     traceId: bundle.request.traceId,
     renderRequestId: bundle.request.id,
@@ -35,5 +36,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
     eventLevel: "info",
     props: { evalDatasetId: dataset.id, evalCaseId: fixture.id }
   });
+  await persistEvalDataset(dataset);
+  await persistEvalCase(fixture);
+  await persistAudit(audit);
+  await persistRenderBundle(bundle.request.id);
   return NextResponse.json({ dataset, fixture });
 }

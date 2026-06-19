@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/db/repository";
+import { persistAudit, persistEvalCase, persistEvalDataset, persistEvalResult, persistEvalRun } from "@/lib/db/supabase-persistence";
 import { loadRenderFixtures, runBenchmarkSuite } from "@/lib/render/evals";
 
 export async function POST(request: Request) {
@@ -41,6 +42,15 @@ export async function POST(request: Request) {
     summaryJson: report,
     completedAt: new Date().toISOString()
   });
-  repository.audit("founder", "run", "eval_run", run.id, undefined, { run: completed, results }, body.reason);
+  const audit = repository.audit("founder", "run", "eval_run", run.id, undefined, { run: completed, results }, body.reason);
+  await persistEvalDataset(dataset);
+  for (const evalCase of cases) {
+    await persistEvalCase(evalCase);
+  }
+  await persistEvalRun(completed);
+  for (const result of results) {
+    await persistEvalResult(result);
+  }
+  await persistAudit(audit);
   return NextResponse.json({ dataset, run: completed, results, report });
 }

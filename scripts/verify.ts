@@ -99,6 +99,11 @@ for (const requiredSnippet of ["persistRenderBundle", "persistRecord", "createSu
     throw new Error("Supabase persistence adapter missing required behavior: " + requiredSnippet);
   }
 }
+for (const requiredSnippet of ["persistManualReview", "persistEvalDataset", "persistEvalCase", "persistEvalRun", "persistEvalResult", "persistExperiment", "persistExperimentArm", "persistExperimentAssignment"]) {
+  if (!persistence.includes(requiredSnippet)) {
+    throw new Error("Founder record persistence helper missing: " + requiredSnippet);
+  }
+}
 const migration = read("supabase/migrations/0001_initial.sql");
 for (const requiredSnippet of ["verified boolean default false", "width integer", "height integer", "remaining_refinements integer default 3"]) {
   if (!migration.includes(requiredSnippet)) {
@@ -123,7 +128,14 @@ for (const [file, requiredSnippet] of [
   ["src/lib/shopify/session.ts", "loadShopByDomain"],
   ["src/lib/shopify/app-proxy.ts", "loadShopByDomain"],
   ["src/lib/shopify/webhooks.ts", "handleDurableUninstall"],
-  ["src/lib/shopify/webhooks.ts", "handleDurablePrivacyWebhook"]
+  ["src/lib/shopify/webhooks.ts", "handleDurablePrivacyWebhook"],
+  ["src/app/api/founder/renders/[id]/manual-review/route.ts", "persistManualReview"],
+  ["src/app/api/founder/renders/[id]/promote-to-fixture/route.ts", "persistEvalCase"],
+  ["src/app/api/founder/evals/run/route.ts", "persistEvalResult"],
+  ["src/app/api/founder/experiments/route.ts", "persistExperimentArm"],
+  ["src/app/api/founder/experiments/[id]/route.ts", "persistExperiment"],
+  ["src/app/api/founder/experiments/[id]/pause/route.ts", "persistExperiment"],
+  ["src/app/api/founder/experiments/[id]/promote-winner/route.ts", "persistExperimentArm"]
 ] as const) {
   if (!read(file).includes(requiredSnippet)) {
     throw new Error("Launch-critical durable/quota hook missing: " + file + " " + requiredSnippet);

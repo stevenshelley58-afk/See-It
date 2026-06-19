@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { repository } from "@/lib/db/repository";
+import { persistAudit, persistExperiment } from "@/lib/db/supabase-persistence";
 import type { AiExperimentRecord } from "@/lib/db/schema";
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
@@ -16,6 +17,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     successMetric: typeof body.successMetric === "string" ? body.successMetric : current.successMetric,
     guardrailJson: typeof body.guardrailJson === "object" && body.guardrailJson ? body.guardrailJson as Record<string, unknown> : current.guardrailJson
   });
-  repository.audit("founder", "update", "ai_experiment", params.id, current, next, body.reason);
+  const audit = repository.audit("founder", "update", "ai_experiment", params.id, current, next, body.reason);
+  await persistExperiment(next);
+  await persistAudit(audit);
   return NextResponse.json(next);
 }

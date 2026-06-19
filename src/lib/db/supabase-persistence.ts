@@ -4,8 +4,16 @@ import { repository } from "@/lib/db/repository";
 import type {
   AiInvocationRecord,
   AuditLogRecord,
+  AiExperimentArmRecord,
+  AiExperimentAssignmentRecord,
+  AiExperimentRecord,
+  EvalCaseRecord,
+  EvalDatasetRecord,
+  EvalResultRecord,
+  EvalRunRecord,
   EventLogRecord,
   JobRecord,
+  ManualReviewRecord,
   ProductSetupRecord,
   RenderAssetRecord,
   RenderAttemptRecord,
@@ -30,7 +38,15 @@ type Persistable =
   | RenderFeedbackRecord
   | JobRecord
   | EventLogRecord
-  | AuditLogRecord;
+  | AuditLogRecord
+  | ManualReviewRecord
+  | EvalDatasetRecord
+  | EvalCaseRecord
+  | EvalRunRecord
+  | EvalResultRecord
+  | AiExperimentRecord
+  | AiExperimentArmRecord
+  | AiExperimentAssignmentRecord;
 
 const columnAliases: Record<string, string> = {
   attemptCount: "attempt_count",
@@ -328,6 +344,38 @@ export async function persistEvent(event: EventLogRecord, env?: AppEnv) {
 
 export async function persistAudit(audit: AuditLogRecord, env?: AppEnv) {
   return persistRecord("audit_log", audit, env);
+}
+
+export async function persistManualReview(review: ManualReviewRecord, env?: AppEnv) {
+  return persistRecord("manual_review", review, env);
+}
+
+export async function persistEvalDataset(dataset: EvalDatasetRecord, env?: AppEnv) {
+  return persistRecord("eval_dataset", dataset, env);
+}
+
+export async function persistEvalCase(evalCase: EvalCaseRecord, env?: AppEnv) {
+  return persistRecord("eval_case", evalCase, env);
+}
+
+export async function persistEvalRun(run: EvalRunRecord, env?: AppEnv) {
+  return persistRecord("eval_run", run, env);
+}
+
+export async function persistEvalResult(result: EvalResultRecord, env?: AppEnv) {
+  return persistRecord("eval_result", result, env);
+}
+
+export async function persistExperiment(experiment: AiExperimentRecord, env?: AppEnv) {
+  return persistRecord("ai_experiment", experiment, env);
+}
+
+export async function persistExperimentArm(arm: AiExperimentArmRecord, env?: AppEnv) {
+  return persistRecord("ai_experiment_arm", arm, env);
+}
+
+export async function persistExperimentAssignment(assignment: AiExperimentAssignmentRecord, env?: AppEnv) {
+  return persistRecord("ai_experiment_assignment", assignment, env);
 }
 
 export async function loadShopByDomain(shopDomain: string, env?: AppEnv) {
