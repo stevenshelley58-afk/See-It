@@ -24,6 +24,9 @@ The goal is not complete until the Shopify account/dev-store gates and all manua
 - Vercel production: deployment reached Ready and is aliased to `https://see-it-nine.vercel.app`
 - Production public smoke: `/`, `/privacy`, `/app`, and `/founder/login` returned 200
 - Production unauthenticated protection smoke: `/api/founder/ai/providers` and `/api/cron/sweep-jobs` returned 401 without credentials
+- Production authenticated founder smoke: founder session returned 303, `/founder`, `/founder/ai`, `/founder/money`, and `/api/founder/ai/providers` returned 200 after rotating encrypted production `FOUNDER_PASSWORD`
+- Production authenticated cron smoke: `/api/cron/sweep-jobs` returned 200 after rotating encrypted production `CRON_SECRET`
+- Production signed app-proxy smoke: `pnpm.cmd run app-proxy:smoke` passed room creation, room verify, render creation, render status, and feedback against `https://see-it-nine.vercel.app`
 - Production runtime logs: no error or fatal entries for the checked production deployment in the post-deploy window
 
 Latest local release verification evidence was recorded on 2026-06-20 AWST:
@@ -33,6 +36,7 @@ pnpm.cmd run verify
 pnpm.cmd run db:verify:write
 pnpm.cmd run storage:verify
 pnpm.cmd run build
+pnpm.cmd run app-proxy:smoke
 ```
 
 ## Remaining Manual Gates
@@ -47,18 +51,9 @@ pnpm.cmd run build
 - Install to working PDP button under 10 minutes.
 - Human review approval of the generated contact sheet.
 - Billing test-mode proof.
-- Authenticated founder and cron production smoke, because the current Vercel production `FOUNDER_PASSWORD` and `CRON_SECRET` are sensitive encrypted values and are not retrievable locally.
 
 ## Unblock Command
 
 ```powershell
 pnpm.cmd dlx @shopify/cli@latest app deploy --no-release --no-color
-```
-
-For authenticated founder and cron smoke, rotate to known values and redeploy:
-
-```powershell
-vercel.cmd env update FOUNDER_PASSWORD production --value "<known-founder-password>" --yes
-vercel.cmd env update CRON_SECRET production --value "<known-cron-secret>" --yes
-vercel.cmd --prod --yes
 ```

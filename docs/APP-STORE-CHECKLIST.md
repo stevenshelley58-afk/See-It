@@ -9,10 +9,10 @@ This checklist is release evidence, not a plan. Mark an item green only after ch
 - [x] `pnpm.cmd run storage:verify`
 - [x] `pnpm.cmd run build`
 - [x] Production deployment Ready in Vercel
-- [ ] Production founder protected routes return 200 with founder auth and 307/401 without auth as appropriate
-- [ ] Production founder AI APIs return 200 for list endpoints
-- [ ] Production cron routes return 401 without secret and 200 with secret
-- [ ] Production app proxy room/render/feedback smoke passes with signed Shopify app proxy params
+- [x] Production founder protected routes return 200 with founder auth and 307/401 without auth as appropriate
+- [x] Production founder AI APIs return 200 for list endpoints
+- [x] Production cron routes return 401 without secret and 200 with secret
+- [x] Production app proxy room/render/feedback smoke passes with signed Shopify app proxy params
 - [x] Recent production logs show no new 500s after smoke traffic
 
 ## Shopify App Store Requirements
@@ -70,12 +70,7 @@ Recorded on 2026-06-20 AWST from `C:\Dev\See It`:
 - Vercel production deployment reached Ready and is aliased to `https://see-it-nine.vercel.app`.
 - Production public smoke passed: `/`, `/privacy`, `/app`, and `/founder/login` returned 200.
 - Production unauthenticated protection smoke passed: `/api/founder/ai/providers` and `/api/cron/sweep-jobs` returned 401 without credentials.
+- Production authenticated founder smoke passed after rotating encrypted production `FOUNDER_PASSWORD`: founder session returned 303, `/founder`, `/founder/ai`, `/founder/money`, and `/api/founder/ai/providers` returned 200.
+- Production authenticated cron smoke passed after rotating encrypted production `CRON_SECRET`: `/api/cron/sweep-jobs` returned 200 with the secret.
+- `pnpm.cmd run app-proxy:smoke` passed against `https://see-it-nine.vercel.app`: signed app-proxy room creation, room verify, render creation, render status, and feedback all returned 200.
 - Vercel runtime logs had no error or fatal entries for the checked production deployment in the post-deploy window.
-
-Authenticated founder and cron production smoke remains blocked because the active Vercel production `FOUNDER_PASSWORD` and `CRON_SECRET` are sensitive encrypted values and are not retrievable by `vercel env pull` or `vercel env run`. They must be rotated to known values before the authenticated 200 checks can be completed:
-
-```powershell
-vercel.cmd env update FOUNDER_PASSWORD production --value "<known-founder-password>" --yes
-vercel.cmd env update CRON_SECRET production --value "<known-cron-secret>" --yes
-vercel.cmd --prod --yes
-```

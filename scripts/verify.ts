@@ -112,6 +112,10 @@ for (const requiredSnippet of ["SUPABASE_SERVICE_ROLE_KEY", "createClient", "Sup
 }
 assertContains("scripts/seed-ai-registry.ts", "loadScriptEnv", "AI seed script must load local env files before persistence");
 assertContains("package.json", "db:verify:seeded", "Seeded runtime DB verification script missing");
+assertContains("package.json", "app-proxy:smoke", "Production app-proxy smoke script missing");
+for (const requiredSnippet of ["signedAppProxyUrl", "POST /app-proxy/rooms", "POST /app-proxy/renders", "POST /app-proxy/renders/:renderId/feedback"]) {
+  assertContains("scripts/app-proxy-smoke.ts", requiredSnippet, "App-proxy smoke script missing required flow");
+}
 assertContains("src/app/privacy/page.tsx", "Temporary room-photo processing", "Public privacy page must disclose temporary room-photo processing");
 assertContains("src/app/privacy/page.tsx", "24 hour operational retention", "Public privacy page must disclose room-photo retention");
 assertContains("src/app/privacy/page.tsx", "customers/data_request", "Public privacy page must disclose Shopify privacy webhooks");
