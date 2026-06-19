@@ -121,6 +121,16 @@ for (const requiredSnippet of ["persistRenderBundle", "persistRecord", "createSu
     throw new Error("Supabase persistence adapter missing required behavior: " + requiredSnippet);
   }
 }
+for (const requiredSnippet of ["persistUsageMonthly", "usage_monthly", "shop_id,month"]) {
+  if (!persistence.includes(requiredSnippet)) {
+    throw new Error("Monthly usage persistence missing: " + requiredSnippet);
+  }
+}
+assertContains("src/lib/billing/quota.ts", "incrementUsageMonthly", "Quota consumption must write monthly usage counters");
+assertContains("src/lib/render/orchestrator.ts", "usage_rollup_updated", "Render pipeline must write accepted/failed monthly usage rollups");
+assertContains("src/lib/ai/bootstrap.ts", "primary: [{ providerKey: \"gemini\", modelKey: \"gemini-3.1-flash-image\" }]", "Seeded active shopper policy must not route production traffic to local deterministic model");
+assertContains("src/lib/render/cutout.ts", "resolveRoutePolicy(\"admin\", \"product_cutout\")", "Product cutout must use model route policy");
+assertContains("src/lib/ai/prompt-control.ts", "resolveRoutePolicy(\"founder\", \"prompt_eval\")", "Founder prompt tests must use model route policy");
 for (const requiredSnippet of ["persistManualReview", "persistEvalDataset", "persistEvalCase", "persistEvalRun", "persistEvalResult", "persistExperiment", "persistExperimentArm", "persistExperimentAssignment"]) {
   if (!persistence.includes(requiredSnippet)) {
     throw new Error("Founder record persistence helper missing: " + requiredSnippet);

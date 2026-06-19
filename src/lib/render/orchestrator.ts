@@ -8,8 +8,8 @@ import { deterministicGate } from "@/lib/render/gate";
 import { resolveActiveRecipe } from "@/lib/render/recipes";
 import { traceRender } from "@/lib/render/trace";
 import { enqueueDurableRenderJob, enqueueRenderJob } from "@/lib/jobs/queue";
-import { consumeRenderStarted } from "@/lib/billing/quota";
-import { hydrateRenderPipelineInputs, persistRenderBundle, persistShop } from "@/lib/db/supabase-persistence";
+import { consumeRenderStarted, currentUsageMonthly, recordRenderAccepted, recordRenderFailed } from "@/lib/billing/quota";
+import { hydrateRenderPipelineInputs, persistRenderBundle, persistShop, persistUsageMonthly } from "@/lib/db/supabase-persistence";
 
 export type StartRenderInput = {
   roomSessionId: string;
@@ -60,6 +60,7 @@ export async function runRenderPipeline(renderRequestId: string) {
     try {
       const shop = consumeRenderStarted(request.shopId);
       await persistShop(shop);
+      await persistUsageMonthly(currentUsageMonthly(request.shopId));
       traceRender(request.traceId, "render_quota_consumed", { shopId: request.shopId }, request.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : "quota_exhausted";
@@ -193,6 +194,17 @@ export async function runRenderPipeline(renderRequestId: string) {
 }
 
 async function persistRenderResult(renderRequestId: string) {
+  const request = repository.mustGet(repository.renderRequests, renderRequestId, "render_request");
+  const started = [...repository.traceEvents.values()].some((event) => event.renderRequestId === request.id && event.eventName === "render_quota_consumed");
+  const recorded = [...repository.traceEvents.values()].some((event) => event.renderRequestId === request.id && event.eventName === "usage_rollup_updated");
+  if (request.shopId && request.kind === "shopper" && started && !recorded && (request.status === "done" || request.status === "failed")) {
+    const costEstimateUsd = [...repository.renderAttempts.values()]
+      .filter((attempt) => attempt.renderRequestId === request.id)
+      .reduce((sum, attempt) => sum + (attempt.costEstimateUsd ?? 0), 0);
+    const usage = request.status === "done" ? recordRenderAccepted(request.shopId, costEstimateUsd) : recordRenderFailed(request.shopId, costEstimateUsd);
+    traceRender(request.traceId, "usage_rollup_updated", { month: usage.month, status: request.status, costEstimateUsd }, request.id);
+    await persistUsageMonthly(usage);
+  }
   return persistRenderBundle(renderRequestId);
 }
 

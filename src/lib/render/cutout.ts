@@ -1,16 +1,11 @@
 import { invokeAi } from "@/lib/ai/router";
 import { compilePrompt } from "@/lib/ai/prompt-compiler";
-import { ensureAiRegistrySeeded, findModel } from "@/lib/ai/registry";
+import { resolveRoutePolicy, selectModelRoute } from "@/lib/ai/route-policy";
 import { repository } from "@/lib/db/repository";
 
 export async function generateProductCutout(productSetupId: string) {
-  ensureAiRegistrySeeded();
   const product = repository.mustGet(repository.products, productSetupId, "product_setup");
-  const model = findModel("local", "local-deterministic-image");
-  const provider = [...repository.providers.values()].find((item) => item.providerKey === "local");
-  if (!model || !provider) {
-    throw new Error("Local provider unavailable");
-  }
+  const route = selectModelRoute(resolveRoutePolicy("admin", "product_cutout"));
   const template = repository.createPromptTemplate({ name: "cutout_bootstrap_" + product.id, taskType: "product_cutout", surface: "admin" });
   const version = repository.createPromptVersion({
     promptTemplateId: template.id,
@@ -30,8 +25,8 @@ export async function generateProductCutout(productSetupId: string) {
     traceId: "trace_cutout_" + product.id,
     surface: "admin",
     taskType: "product_cutout",
-    providerKey: provider.providerKey,
-    modelKey: model.modelKey,
+    providerKey: route.provider.providerKey,
+    modelKey: route.model.modelKey,
     promptSnapshot: prompt,
     assets: [{ role: "product_image", storageKey: product.primaryImageKey ?? "products/" + product.id + "/source.png", mimeType: "image/png", order: 1 }],
     params: { outputFormat: "png" },

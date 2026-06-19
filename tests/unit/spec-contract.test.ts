@@ -124,7 +124,7 @@ describe("unit contract", () => {
     expect(hasCapabilities(model, ["image_edit"])).toBe(true);
     expect(supportsTask(model, "render_composite")).toBe(true);
     const policy = resolveRoutePolicy("widget", "render_composite");
-    expect(selectModelRoute(policy).model.modelKey).toBe("local-deterministic-image");
+    expect(selectModelRoute(policy).model.modelKey).toBe("gemini-3.1-flash-image");
     expect(providerContractMatrix("render_composite").some((row) => row.adapterExists)).toBe(true);
   });
 
@@ -370,9 +370,11 @@ describe("unit contract", () => {
     }
     expect(enforceAppProxyRateLimit({ headers: new Headers({ "x-forwarded-for": "203.0.113.11" }) }, auth)).toMatchObject({ ok: false, status: 429, error: "rate_limited", scope: "ip" });
     expect(consumeRenderStarted(shop.id).rendersQuota).toBe(0);
+    expect(repository.getOrCreateUsageMonthly(shop.id).rendersStarted).toBe(1);
     expect(() => assertRenderQuota(shop.id)).toThrow("quota_exhausted");
     expect(assertLifestyleQuota(shop.id)).toBe(true);
     expect(consumeLifestyleStarted(shop.id).lifestyleImagesQuota).toBe(0);
+    expect(repository.getOrCreateUsageMonthly(shop.id).lifestyleImagesUsed).toBe(1);
     expect(() => assertLifestyleQuota(shop.id)).toThrow("lifestyle_quota_exhausted");
     expect(authenticateAppProxyParams(new URLSearchParams({ ...params, shop: shop.shopDomain }), "secret").ok).toBe(false);
     expect(handlePrivacyWebhook("customers/data_request", {}).ok).toBe(true);

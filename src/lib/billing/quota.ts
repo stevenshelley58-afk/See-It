@@ -13,7 +13,20 @@ export function consumeRenderStarted(shopId: string) {
   assertRenderQuota(shopId);
   const next = { ...shop, rendersQuota: shop.rendersQuota - 1 };
   repository.shops.set(shopId, next);
+  repository.incrementUsageMonthly(shopId, { rendersStarted: 1 });
   return next;
+}
+
+export function recordRenderAccepted(shopId: string, costEstimateUsd = 0) {
+  return repository.incrementUsageMonthly(shopId, { rendersAccepted: 1, costEstimateUsd });
+}
+
+export function recordRenderFailed(shopId: string, costEstimateUsd = 0) {
+  return repository.incrementUsageMonthly(shopId, { rendersFailed: 1, costEstimateUsd });
+}
+
+export function currentUsageMonthly(shopId: string) {
+  return repository.getOrCreateUsageMonthly(shopId);
 }
 
 export function assertLifestyleQuota(shopId: string) {
@@ -29,5 +42,6 @@ export function consumeLifestyleStarted(shopId: string) {
   assertLifestyleQuota(shopId);
   const next = { ...shop, lifestyleImagesQuota: shop.lifestyleImagesQuota - 1 };
   repository.shops.set(shopId, next);
+  repository.incrementUsageMonthly(shopId, { lifestyleImagesUsed: 1 });
   return next;
 }

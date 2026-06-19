@@ -2,9 +2,6 @@ import { promptHash } from "@/lib/ai/prompt-hash";
 import type { InMemoryRepository } from "@/lib/db/repository";
 
 export function seedAiControlPlane(repo: InMemoryRepository) {
-  if (repo.providers.size > 0) {
-    return;
-  }
   const localProvider = repo.upsertProvider({ providerKey: "local", displayName: "Local deterministic", adapterKey: "local", adapterVersion: "local-deterministic-v1", status: "enabled", notes: "Local bootstrap and tests only" });
   const gemini = repo.upsertProvider({ providerKey: "gemini", displayName: "Gemini", adapterKey: "gemini", adapterVersion: "gemini-image-docs-2026-06-v1", status: "enabled", secretRef: "GEMINI_API_KEY", docsUrl: "https://ai.google.dev/gemini-api/docs/image-generation" });
   const openai = repo.upsertProvider({ providerKey: "openai", displayName: "OpenAI", adapterKey: "openai", adapterVersion: "openai-image-docs-2026-06-v1", status: "enabled", secretRef: "OPENAI_API_KEY", docsUrl: "https://platform.openai.com/docs/guides/images" });
@@ -26,11 +23,39 @@ export function seedAiControlPlane(repo: InMemoryRepository) {
     taskType: "render_composite",
     status: "active",
     policy: {
-      primary: [{ providerKey: "local", modelKey: "local-deterministic-image" }],
+      primary: [{ providerKey: "gemini", modelKey: "gemini-3.1-flash-image" }],
       fallbacks: [{ providerKey: "openai", modelKey: "gpt-image-2", onErrorCodes: ["provider_timeout", "provider_5xx", "provider_bad_response"] }],
       escalation: [{ providerKey: "gemini", modelKey: "gemini-3-pro-image", onGateFail: true }],
       maxAttempts: 3,
       maxCostUsd: 0.75,
+      maxLatencyMs: 90000
+    }
+  });
+  repo.upsertRoutePolicy({
+    name: "Product cutout launch policy",
+    surface: "admin",
+    taskType: "product_cutout",
+    status: "active",
+    policy: {
+      primary: [{ providerKey: "gemini", modelKey: "gemini-3.1-flash-image" }],
+      fallbacks: [{ providerKey: "openai", modelKey: "gpt-image-2", onErrorCodes: ["provider_timeout", "provider_5xx", "provider_bad_response"] }],
+      escalation: [],
+      maxAttempts: 2,
+      maxCostUsd: 0.5,
+      maxLatencyMs: 90000
+    }
+  });
+  repo.upsertRoutePolicy({
+    name: "Founder prompt eval launch policy",
+    surface: "founder",
+    taskType: "prompt_eval",
+    status: "active",
+    policy: {
+      primary: [{ providerKey: "gemini", modelKey: "gemini-3.1-flash-image" }],
+      fallbacks: [{ providerKey: "openai", modelKey: "gpt-image-2", onErrorCodes: ["provider_timeout", "provider_5xx", "provider_bad_response"] }],
+      escalation: [],
+      maxAttempts: 2,
+      maxCostUsd: 0.5,
       maxLatencyMs: 90000
     }
   });

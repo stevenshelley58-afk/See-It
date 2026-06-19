@@ -4,10 +4,10 @@ This checklist is release evidence, not a plan. Mark an item green only after ch
 
 ## Automated Gates
 
-- [ ] `pnpm.cmd run verify`
-- [ ] `pnpm.cmd run db:verify:write`
-- [ ] `pnpm.cmd run storage:verify`
-- [ ] `pnpm.cmd run build`
+- [x] `pnpm.cmd run verify`
+- [x] `pnpm.cmd run db:verify:write`
+- [x] `pnpm.cmd run storage:verify`
+- [x] `pnpm.cmd run build`
 - [ ] Production deployment Ready in Vercel
 - [ ] Production founder protected routes return 200 with founder auth and 307/401 without auth as appropriate
 - [ ] Production founder AI APIs return 200 for list endpoints
@@ -36,8 +36,8 @@ This checklist is release evidence, not a plan. Mark an item green only after ch
 
 ## AI And Render Gates
 
-- [ ] 15 shopper fixtures run
-- [ ] Automated fixture pass count is >= 13
+- [x] 15 shopper fixtures run
+- [x] Automated fixture pass count is >= 13
 - [ ] Human contact sheet review is complete
 - [ ] No product identity failures in approved cases
 - [ ] Founder can inspect every AI instruction for a render
@@ -56,3 +56,13 @@ pnpm.cmd dlx @shopify/cli@latest app deploy --no-release --no-color
 ```
 
 Until that login and dev-store validation are completed, App Store readiness is not green.
+
+## Latest Automated Evidence
+
+Recorded on 2026-06-20 AWST from `C:\Dev\See It`:
+
+- `pnpm.cmd run verify` passed: lint, typecheck, unit 14/14, integration 3/3, harness 15/15, eval 15/15, Playwright smoke 1/1, static architecture guard.
+- `pnpm.cmd run build` passed with 37 generated static pages and all expected dynamic API, founder, merchant, demo, privacy, and app-proxy routes.
+- `pnpm.cmd run db:verify:write` passed against Supabase: 35 clean schema tables, seeded AI rows, and write smoke.
+- `pnpm.cmd run storage:verify` passed for buckets `rooms`, `products`, `renders`, `ai-debug`, `evals`, `demo-assets`, and `exports`.
+- `pnpm.cmd run seed:ai` passed and live route-policy readback shows active primary routes for widget render, product cutout, and founder prompt eval use `gemini/gemini-3.1-flash-image`.

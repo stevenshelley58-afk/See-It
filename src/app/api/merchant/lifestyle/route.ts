@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { consumeLifestyleStarted } from "@/lib/billing/quota";
-import { persistShop } from "@/lib/db/supabase-persistence";
+import { consumeLifestyleStarted, currentUsageMonthly } from "@/lib/billing/quota";
+import { persistShop, persistUsageMonthly } from "@/lib/db/supabase-persistence";
 import { enqueueDurableJob } from "@/lib/jobs/queue";
 import { authenticateMerchantRequest, merchantAuthErrorBody } from "@/lib/shopify/session";
 
@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "lifestyle_quota_exhausted" }, { status: 402 });
   }
   await persistShop(shop);
+  await persistUsageMonthly(currentUsageMonthly(auth.shop.id));
   const body = await request.json().catch(() => ({}));
   const job = await enqueueDurableJob(
     "lifestyle_generate",

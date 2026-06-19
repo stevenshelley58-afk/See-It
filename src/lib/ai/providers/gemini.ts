@@ -5,6 +5,19 @@ import { readEnv } from "@/lib/env";
 import { uploadGeneratedBase64Asset } from "@/lib/storage/generated-assets";
 
 function simulatedGeminiResult(request: AiInvocationRequest, model: AiModelRecord, started: number): AiNormalizedResult {
+  if (request.params.providerSpecific?.forceProviderError === true) {
+    return {
+      ok: false,
+      outputAssets: [],
+      error: { code: "provider_timeout", message: "Forced provider error", retryable: true, providerStatus: 504 },
+      providerResponseId: "gemini-forced-error-" + request.idempotencyKey,
+      finishReason: "error",
+      usageJson: { simulated: true, model: model.modelKey },
+      costEstimateUsd: estimateInvocationCost(request, model),
+      rawResponseRedactedJson: { provider: "gemini", model: model.modelKey, simulated: true, result: "forced-error" },
+      latencyMs: Math.max(1, Date.now() - started)
+    };
+  }
   return {
     ok: true,
     outputAssets: [{
@@ -65,6 +78,9 @@ export const geminiAdapter: AiProviderAdapter = {
   },
   async invoke(request: AiInvocationRequest, model: AiModelRecord): Promise<AiNormalizedResult> {
     const started = Date.now();
+    if (request.params.providerSpecific?.forceProviderError === true) {
+      return simulatedGeminiResult(request, model, started);
+    }
     let env: ReturnType<typeof readEnv> | undefined;
     try {
       env = readEnv();

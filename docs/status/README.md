@@ -8,11 +8,20 @@ The goal is not complete until the Shopify account/dev-store gates and all manua
 
 ## Verified Locally
 
+- Full release verify: `pnpm.cmd run verify`
 - Static architecture guard: `pnpm.cmd run static:verify`
-- Unit contract coverage: `pnpm.cmd run test`
-- Harness report generation: `pnpm.cmd run harness:smoke`
+- Unit contract coverage: `pnpm.cmd run test` passed 14/14
+- Integration contract coverage: `pnpm.cmd run test:integration` passed 3/3
+- Harness report generation: `pnpm.cmd run harness:smoke` passed 15/15
+- Eval smoke: `pnpm.cmd run eval:smoke` passed 15/15
+- Playwright smoke: `pnpm.cmd run e2e:smoke` passed 1/1
+- Production build: `pnpm.cmd run build`
+- Supabase write smoke: `pnpm.cmd run db:verify:write`
+- Supabase storage smoke: `pnpm.cmd run storage:verify`
+- AI control-plane seed/readback: active widget render, admin product cutout, and founder prompt eval policies route primary traffic to `gemini/gemini-3.1-flash-image`
+- CodeGraph installed and available: `codegraph.cmd --version` reports `1.0.1`
 
-Full release verification also requires:
+Latest local release verification evidence was recorded on 2026-06-20 AWST:
 
 ```powershell
 pnpm.cmd run verify

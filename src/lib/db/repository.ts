@@ -30,6 +30,7 @@ import type {
   RenderTraceEventRecord,
   RoomSessionRecord,
   ShopRecord,
+  UsageMonthlyRecord,
   UUID
 } from "@/lib/db/schema";
 
@@ -69,6 +70,7 @@ export class InMemoryRepository {
   evalCases = new Map<UUID, EvalCaseRecord>();
   evalRuns = new Map<UUID, EvalRunRecord>();
   evalResults = new Map<UUID, EvalResultRecord>();
+  usageMonthly = new Map<string, UsageMonthlyRecord>();
   experiments = new Map<UUID, AiExperimentRecord>();
   experimentArms = new Map<UUID, AiExperimentArmRecord>();
   experimentAssignments = new Map<UUID, AiExperimentAssignmentRecord>();
@@ -96,18 +98,27 @@ export class InMemoryRepository {
   }
 
   upsertRoutePolicy(input: Omit<ModelRoutePolicyRecord, "id"> & { id?: UUID }) {
-    const record: ModelRoutePolicyRecord = { ...input, id: input.id ?? id() };
+    const existing = [...this.routePolicies.values()].find((policy) => policy.name === input.name && policy.surface === input.surface && policy.taskType === input.taskType);
+    const record: ModelRoutePolicyRecord = { ...existing, ...input, id: input.id ?? existing?.id ?? id() };
     this.routePolicies.set(record.id, record);
     return record;
   }
 
   createPromptTemplate(input: Omit<PromptTemplateRecord, "id"> & { id?: UUID }) {
+    const existing = [...this.promptTemplates.values()].find((template) => template.name === input.name && template.surface === input.surface && template.taskType === input.taskType);
+    if (existing) {
+      return existing;
+    }
     const record: PromptTemplateRecord = { ...input, id: input.id ?? id() };
     this.promptTemplates.set(record.id, record);
     return record;
   }
 
   createPromptVersion(input: Omit<PromptVersionRecord, "id"> & { id?: UUID }) {
+    const existing = [...this.promptVersions.values()].find((version) => version.promptTemplateId === input.promptTemplateId && version.version === input.version);
+    if (existing) {
+      return existing;
+    }
     const record: PromptVersionRecord = { ...input, id: input.id ?? id() };
     this.promptVersions.set(record.id, record);
     return record;
@@ -121,30 +132,50 @@ export class InMemoryRepository {
   }
 
   createBundle(input: Omit<PromptBundleRecord, "id"> & { id?: UUID }) {
+    const existing = [...this.bundles.values()].find((bundle) => bundle.name === input.name && bundle.surface === input.surface);
+    if (existing) {
+      return existing;
+    }
     const record: PromptBundleRecord = { ...input, id: input.id ?? id() };
     this.bundles.set(record.id, record);
     return record;
   }
 
   createBundleVersion(input: Omit<PromptBundleVersionRecord, "id"> & { id?: UUID }) {
+    const existing = [...this.bundleVersions.values()].find((version) => version.promptBundleId === input.promptBundleId && version.version === input.version);
+    if (existing) {
+      return existing;
+    }
     const record: PromptBundleVersionRecord = { ...input, id: input.id ?? id() };
     this.bundleVersions.set(record.id, record);
     return record;
   }
 
   createRecipe(input: Omit<RenderRecipeRecord, "id"> & { id?: UUID }) {
+    const existing = [...this.recipes.values()].find((recipe) => recipe.name === input.name && recipe.surface === input.surface && recipe.kind === input.kind);
+    if (existing) {
+      return existing;
+    }
     const record: RenderRecipeRecord = { ...input, id: input.id ?? id() };
     this.recipes.set(record.id, record);
     return record;
   }
 
   createRecipeVersion(input: Omit<RenderRecipeVersionRecord, "id"> & { id?: UUID }) {
+    const existing = [...this.recipeVersions.values()].find((version) => version.renderRecipeId === input.renderRecipeId && version.version === input.version);
+    if (existing) {
+      return existing;
+    }
     const record: RenderRecipeVersionRecord = { ...input, id: input.id ?? id() };
     this.recipeVersions.set(record.id, record);
     return record;
   }
 
   createDeployment(input: Omit<PromptDeploymentRecord, "id" | "startedAt"> & { id?: UUID; startedAt?: string }) {
+    const existing = [...this.deployments.values()].find((deployment) => deployment.surface === input.surface && deployment.taskType === input.taskType && deployment.status === input.status);
+    if (existing) {
+      return existing;
+    }
     const record: PromptDeploymentRecord = { ...input, id: input.id ?? id(), startedAt: input.startedAt ?? now() };
     this.deployments.set(record.id, record);
     return record;
@@ -370,6 +401,51 @@ export class InMemoryRepository {
     const record: EvalResultRecord = { ...input, id: input.id ?? id(), createdAt: input.createdAt ?? now() };
     this.evalResults.set(record.id, record);
     return record;
+  }
+
+  usageMonth(date = new Date()) {
+    return date.toISOString().slice(0, 7);
+  }
+
+  usageKey(shopId: UUID, month: string) {
+    return shopId + ":" + month;
+  }
+
+  getOrCreateUsageMonthly(shopId: UUID, month = this.usageMonth()) {
+    const key = this.usageKey(shopId, month);
+    const existing = this.usageMonthly.get(key);
+    if (existing) {
+      return existing;
+    }
+    const stamp = now();
+    const record: UsageMonthlyRecord = {
+      shopId,
+      month,
+      rendersStarted: 0,
+      rendersAccepted: 0,
+      rendersFailed: 0,
+      lifestyleImagesUsed: 0,
+      costEstimateUsd: 0,
+      createdAt: stamp,
+      updatedAt: stamp
+    };
+    this.usageMonthly.set(key, record);
+    return record;
+  }
+
+  incrementUsageMonthly(shopId: UUID, patch: Partial<Pick<UsageMonthlyRecord, "rendersStarted" | "rendersAccepted" | "rendersFailed" | "lifestyleImagesUsed" | "costEstimateUsd">>, month = this.usageMonth()) {
+    const current = this.getOrCreateUsageMonthly(shopId, month);
+    const next: UsageMonthlyRecord = {
+      ...current,
+      rendersStarted: current.rendersStarted + (patch.rendersStarted ?? 0),
+      rendersAccepted: current.rendersAccepted + (patch.rendersAccepted ?? 0),
+      rendersFailed: current.rendersFailed + (patch.rendersFailed ?? 0),
+      lifestyleImagesUsed: current.lifestyleImagesUsed + (patch.lifestyleImagesUsed ?? 0),
+      costEstimateUsd: current.costEstimateUsd + (patch.costEstimateUsd ?? 0),
+      updatedAt: now()
+    };
+    this.usageMonthly.set(this.usageKey(shopId, month), next);
+    return next;
   }
 
   createExperiment(input: Omit<AiExperimentRecord, "id" | "createdAt" | "updatedAt"> & { id?: UUID; createdAt?: string; updatedAt?: string }) {

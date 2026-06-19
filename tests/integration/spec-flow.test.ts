@@ -32,6 +32,10 @@ describe("integration flow", () => {
     const bundle = repository.renderBundleForRequest(render.id);
     expect(bundle.request.status).toBe("done");
     expect(repository.shops.get(shop.id)?.rendersQuota).toBe(PLANS.trial.renders - 1);
+    const usage = repository.getOrCreateUsageMonthly(shop.id);
+    expect(usage.rendersStarted).toBe(1);
+    expect(usage.rendersAccepted).toBe(1);
+    expect(usage.costEstimateUsd).toBeGreaterThan(0);
     expect(bundle.attempts).toHaveLength(1);
     expect(bundle.assets.some((asset) => asset.role === "final_output")).toBe(true);
     expect(bundle.invocations[0].resolvedUserPrompt).toContain("Lamp");

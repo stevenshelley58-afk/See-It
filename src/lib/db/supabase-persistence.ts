@@ -31,7 +31,8 @@ import type {
   RenderRequestRecord,
   RenderTraceEventRecord,
   RoomSessionRecord,
-  ShopRecord
+  ShopRecord,
+  UsageMonthlyRecord
 } from "@/lib/db/schema";
 
 type DbRow = Record<string, unknown>;
@@ -810,6 +811,33 @@ export async function persistShop(shop: ShopRecord, env?: AppEnv) {
   return persistRecord("shop", shop, env);
 }
 
+function usageMonthlyToDbRecord(usage: UsageMonthlyRecord) {
+  return {
+    shop_id: usage.shopId,
+    month: usage.month,
+    renders_started: usage.rendersStarted,
+    renders_accepted: usage.rendersAccepted,
+    renders_failed: usage.rendersFailed,
+    lifestyle_images_used: usage.lifestyleImagesUsed,
+    cost_estimate_usd: usage.costEstimateUsd,
+    created_at: usage.createdAt,
+    updated_at: usage.updatedAt
+  };
+}
+
+export async function persistUsageMonthly(usage: UsageMonthlyRecord, env?: AppEnv) {
+  const resolved = shouldPersist(env);
+  if (!resolved) {
+    return { persisted: false, table: "usage_monthly", id: usage.shopId + ":" + usage.month };
+  }
+  const client = createSupabaseServiceClient(resolved);
+  const { error } = await client.from("usage_monthly").upsert(usageMonthlyToDbRecord(usage), { onConflict: "shop_id,month" });
+  if (error) {
+    throw new Error("supabase_persist_failed:usage_monthly:" + error.message);
+  }
+  return { persisted: true, table: "usage_monthly", id: usage.shopId + ":" + usage.month };
+}
+
 export async function persistProductSetup(product: ProductSetupRecord, env?: AppEnv) {
   return persistRecord("product_setup", product, env);
 }
@@ -1129,7 +1157,14 @@ export async function loadAuditLogs(limit = 200, env?: AppEnv) {
 }
 
 export async function loadUsageMonthly(limit = 200, env?: AppEnv): Promise<Record<string, unknown>[]> {
-  return loadAll("usage_monthly", env, { orderBy: "updated_at", ascending: false, limit });
+  const rows = await loadAll("usage_monthly", env, { orderBy: "updated_at", ascending: false, limit });
+  if (rows.length > 0 || shouldPersist(env)) {
+    return rows;
+  }
+  return [...repository.usageMonthly.values()]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, limit)
+    .map(usageMonthlyToDbRecord);
 }
 
 export async function loadOutreachOverview(limit = 200, env?: AppEnv): Promise<{ prospects: Record<string, unknown>[]; suppressions: Record<string, unknown>[] }> {

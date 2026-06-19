@@ -399,6 +399,18 @@ export interface EvalResultRecord {
   createdAt: string;
 }
 
+export interface UsageMonthlyRecord {
+  shopId: UUID;
+  month: string;
+  rendersStarted: number;
+  rendersAccepted: number;
+  rendersFailed: number;
+  lifestyleImagesUsed: number;
+  costEstimateUsd: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AiExperimentRecord {
   id: UUID;
   name: string;

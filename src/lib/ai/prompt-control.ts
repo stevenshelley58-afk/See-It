@@ -1,6 +1,7 @@
 import type { AiTaskType } from "@/lib/ai/types";
 import { compilePrompt, diffPromptVersions } from "@/lib/ai/prompt-compiler";
 import { promptHash } from "@/lib/ai/prompt-hash";
+import { resolveRoutePolicy, selectModelRoute } from "@/lib/ai/route-policy";
 import { invokeAi } from "@/lib/ai/router";
 import { repository } from "@/lib/db/repository";
 import type { PromptStatus, PromptVersionRecord, Surface } from "@/lib/db/schema";
@@ -172,8 +173,12 @@ export function blockPromptVersionFromProduction(promptVersionId: string, actor 
 
 export async function runOneOffPromptTest(input: { promptVersionId: string; variables: Record<string, unknown>; providerKey?: string; modelKey?: string; actor?: string }) {
   const compiled = previewPromptVersion(input.promptVersionId, input.variables);
-  const providerKey = input.providerKey ?? "local";
-  const modelKey = input.modelKey ?? "local-deterministic-image";
+  const route = input.providerKey && input.modelKey ? undefined : selectModelRoute(resolveRoutePolicy("founder", "prompt_eval"));
+  const providerKey = input.providerKey ?? route?.provider.providerKey;
+  const modelKey = input.modelKey ?? route?.model.modelKey;
+  if (!providerKey || !modelKey) {
+    throw new Error("No prompt eval model route available");
+  }
   const result = await invokeAi({
     traceId: "prompt_test_" + crypto.randomUUID(),
     surface: "founder",
