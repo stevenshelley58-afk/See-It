@@ -10,6 +10,18 @@ export async function runLeasedJob(jobId: string) {
     if (job.type === "purge_expired_assets") {
       purgeExpiredAssets();
     }
+    if (job.type === "usage_rollup") {
+      repository.event({ surface: "billing", name: "usage_rollup_completed", props: job.payload });
+    }
+    if (job.type === "sync_sender") {
+      repository.event({ surface: "outreach", name: "sender_sync_completed", props: job.payload });
+    }
+    if (job.type === "demo_generate") {
+      repository.event({ surface: "demo", name: "demo_batch_completed", props: job.payload });
+    }
+    if (job.type === "daily_digest") {
+      repository.event({ surface: "system", name: "daily_digest_completed", props: job.payload });
+    }
     repository.completeJob(job.id);
     return repository.mustGet(repository.jobs, job.id, "job");
   } catch (error) {

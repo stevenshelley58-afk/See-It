@@ -8,6 +8,7 @@ import { deterministicGate } from "@/lib/render/gate";
 import { resolveActiveRecipe } from "@/lib/render/recipes";
 import { traceRender } from "@/lib/render/trace";
 import { enqueueRenderJob } from "@/lib/jobs/queue";
+import { consumeRenderStarted } from "@/lib/billing/quota";
 
 export type StartRenderInput = {
   roomSessionId: string;
@@ -47,6 +48,17 @@ export async function runRenderPipeline(renderRequestId: string) {
   const room = request.roomSessionId ? repository.mustGet(repository.roomSessions, request.roomSessionId, "room_session") : undefined;
   const product = room?.productSetupId ? repository.mustGet(repository.products, room.productSetupId, "product_setup") : demoProduct(request, room);
   repository.updateRenderRequest(request.id, { status: "running" });
+  if (request.shopId && request.kind === "shopper" && request.attemptCount === 0) {
+    try {
+      consumeRenderStarted(request.shopId);
+      traceRender(request.traceId, "render_quota_consumed", { shopId: request.shopId }, request.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "quota_exhausted";
+      repository.updateRenderRequest(request.id, { status: "failed", finalErrorCode: "quota_exhausted", finalMessage: friendlyError("quota_exhausted") });
+      traceRender(request.traceId, "render_failed", { errorCode: "quota_exhausted", message }, request.id, "warn");
+      return repository.renderBundleForRequest(request.id);
+    }
+  }
   traceRender(request.traceId, "product_cutout_selected", { cutoutKey: product.cutoutKey ?? "products/demo/cutout-primary.png" }, request.id);
   const { recipeVersion } = resolveActiveRecipe(request.surface === "founder" ? "widget" : request.surface, request.kind === "replay" ? "shopper" : request.kind);
   const bundleVersion = repository.mustGet(repository.bundleVersions, recipeVersion.promptBundleVersionId, "prompt_bundle_version");
@@ -60,84 +72,114 @@ export async function runRenderPipeline(renderRequestId: string) {
     dimensionsText: dimensionsText(product)
   });
   const policy = resolveRoutePolicy("widget", "render_composite");
-  const route = selectModelRoute(policy);
-  traceRender(request.traceId, "model_route_selected", { provider: route.provider.providerKey, model: route.model.modelKey }, request.id);
-  const attempt = repository.createRenderAttempt({
-    renderRequestId: request.id,
-    attemptNumber: request.attemptCount + 1,
-    providerId: route.provider.id,
-    aiModelId: route.model.id,
-    renderRecipeVersionId: recipeVersion.id,
-    promptBundleVersionId: bundleVersion.id,
-    status: "running"
-  });
-  repository.updateRenderRequest(request.id, { attemptCount: attempt.attemptNumber });
-  const result = await invokeAi({
-    traceId: request.traceId,
-    surface: request.surface,
-    taskType: "render_composite",
-    providerKey: route.provider.providerKey,
-    modelKey: route.model.modelKey,
-    promptSnapshot: {
-      ...compiled,
+  const maxAttempts = Math.max(1, Math.min(Number(recipeVersion.retryPolicy.maxAttempts ?? policy.policy.maxAttempts ?? 1), policy.policy.maxAttempts));
+  let lastErrorCode: string | undefined;
+  let gateFailed = false;
+  for (let attemptNumber = request.attemptCount + 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
+    let route: ReturnType<typeof selectModelRoute>;
+    try {
+      route = selectModelRoute(policy, lastErrorCode, gateFailed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "model_route_unavailable";
+      repository.updateRenderRequest(request.id, { status: "failed", finalErrorCode: "model_route_unavailable", finalMessage: friendlyError("model_route_unavailable") });
+      traceRender(request.traceId, "render_failed", { errorCode: "model_route_unavailable", message }, request.id, "error");
+      return repository.renderBundleForRequest(request.id);
+    }
+    traceRender(request.traceId, "model_route_selected", { provider: route.provider.providerKey, model: route.model.modelKey, attemptNumber }, request.id);
+    const attempt = repository.createRenderAttempt({
+      renderRequestId: request.id,
+      attemptNumber,
+      providerId: route.provider.id,
+      aiModelId: route.model.id,
+      renderRecipeVersionId: recipeVersion.id,
       promptBundleVersionId: bundleVersion.id,
-      renderRecipeVersionId: recipeVersion.id
-    },
-    assets: [
-      { role: "room_image", storageKey: room?.normalizedRoomKey ?? room?.roomKey ?? "rooms/demo/normalized.jpg", mimeType: "image/jpeg", width: room?.width ?? 1600, height: room?.height ?? 1200, order: 1 },
-      { role: "product_cutout", storageKey: product.cutoutKey ?? "products/demo/cutout-primary.png", mimeType: "image/png", width: 800, height: 800, order: 2 }
-    ],
-    params: { ...promptVersion.defaultParams, outputFormat: "png" },
-    idempotencyKey: request.id + ":attempt:" + attempt.attemptNumber
-  });
-  repository.updateRenderAttempt(attempt.id, { aiInvocationId: result.invocationId, status: result.result.ok ? "provider_done" : "failed", errorCode: result.result.error?.code, errorMessage: result.result.error?.message, latencyMs: result.result.latencyMs, costEstimateUsd: result.result.costEstimateUsd });
-  if (!result.result.ok) {
-    repository.updateRenderRequest(request.id, { status: "failed", finalErrorCode: result.result.error?.code ?? "provider_bad_response", finalMessage: friendlyError(result.result.error?.code) });
-    traceRender(request.traceId, "render_failed", { errorCode: result.result.error?.code }, request.id, "error");
+      status: "running"
+    });
+    repository.updateRenderRequest(request.id, { attemptCount: attempt.attemptNumber });
+    const result = await invokeAi({
+      traceId: request.traceId,
+      surface: request.surface,
+      taskType: "render_composite",
+      providerKey: route.provider.providerKey,
+      modelKey: route.model.modelKey,
+      promptSnapshot: {
+        ...compiled,
+        promptBundleVersionId: bundleVersion.id,
+        renderRecipeVersionId: recipeVersion.id
+      },
+      assets: [
+        { role: "room_image", storageKey: room?.normalizedRoomKey ?? room?.roomKey ?? "rooms/demo/normalized.jpg", mimeType: "image/jpeg", width: room?.width ?? 1600, height: room?.height ?? 1200, order: 1 },
+        { role: "product_cutout", storageKey: product.cutoutKey ?? "products/demo/cutout-primary.png", mimeType: "image/png", width: 800, height: 800, order: 2 }
+      ],
+      params: { ...promptVersion.defaultParams, outputFormat: "png" },
+      idempotencyKey: request.id + ":attempt:" + attempt.attemptNumber
+    });
+    repository.updateRenderAttempt(attempt.id, { aiInvocationId: result.invocationId, status: result.result.ok ? "provider_done" : "failed", errorCode: result.result.error?.code, errorMessage: result.result.error?.message, latencyMs: result.result.latencyMs, costEstimateUsd: result.result.costEstimateUsd });
+    if (!result.result.ok) {
+      lastErrorCode = result.result.error?.code ?? "provider_bad_response";
+      if (attemptNumber < maxAttempts) {
+        traceRender(request.traceId, "render_retry_scheduled", { attemptNumber, nextAttemptNumber: attemptNumber + 1, errorCode: lastErrorCode }, request.id, "warn");
+        gateFailed = false;
+        continue;
+      }
+      repository.updateRenderRequest(request.id, { status: "failed", finalErrorCode: lastErrorCode, finalMessage: friendlyError(lastErrorCode) });
+      traceRender(request.traceId, "render_failed", { errorCode: lastErrorCode }, request.id, "error");
+      return repository.renderBundleForRequest(request.id);
+    }
+    const output = result.result.outputAssets.find((asset) => asset.role === "image") ?? result.result.outputAssets[0];
+    const storageKey = output.storageKey ?? renderAssetPath(request.id, attempt.attemptNumber, "provider-output");
+    const asset = repository.createRenderAsset({
+      renderRequestId: request.id,
+      renderAttemptId: attempt.id,
+      aiInvocationId: result.invocationId,
+      role: "provider_output",
+      storageBucket: "renders",
+      storageKey,
+      mimeType: output.mimeType ?? "image/png",
+      width: output.width,
+      height: output.height,
+      sha256: output.sha256 ?? assetHash(storageKey),
+      retentionExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString()
+    });
+    traceRender(request.traceId, "provider_output_stored", { storageKey }, request.id);
+    traceRender(request.traceId, "quality_gate_started", { assetId: asset.id }, request.id);
+    const forcedGateScore = promptVersion.defaultParams.forceGateScore;
+    const gate = deterministicGate(typeof forcedGateScore === "number" ? forcedGateScore : 8.2);
+    traceRender(request.traceId, "quality_gate_completed", { pass: gate.pass, score: gate.score }, request.id);
+    if (!gate.pass) {
+      repository.updateRenderAttempt(attempt.id, { status: "rejected", gateScore: gate.score, gateDetail: gate.detail });
+      lastErrorCode = "gate_rejected";
+      if (attemptNumber < maxAttempts) {
+        traceRender(request.traceId, "render_escalated", { attemptNumber, gateScore: gate.score }, request.id, "warn");
+        traceRender(request.traceId, "render_retry_scheduled", { attemptNumber, nextAttemptNumber: attemptNumber + 1, errorCode: lastErrorCode }, request.id, "warn");
+        gateFailed = true;
+        continue;
+      }
+      repository.updateRenderRequest(request.id, { status: "failed", finalGateScore: gate.score, finalErrorCode: "gate_rejected", finalMessage: friendlyError("gate_rejected") });
+      traceRender(request.traceId, "render_rejected", { gate }, request.id, "warn");
+      return repository.renderBundleForRequest(request.id);
+    }
+    const finalAsset = repository.createRenderAsset({
+      renderRequestId: request.id,
+      renderAttemptId: attempt.id,
+      aiInvocationId: result.invocationId,
+      role: "final_output",
+      storageBucket: "renders",
+      storageKey: renderAssetPath(request.id, attempt.attemptNumber, "final"),
+      mimeType: "image/png",
+      width: asset.width,
+      height: asset.height,
+      sha256: assetHash(renderAssetPath(request.id, attempt.attemptNumber, "final")),
+      retentionExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString()
+    });
+    repository.updateRenderAttempt(attempt.id, { status: "accepted", resultAssetId: finalAsset.id, gateScore: gate.score, gateDetail: gate.detail });
+    repository.updateRenderRequest(request.id, { status: "done", selectedResultAssetId: finalAsset.id, finalGateScore: gate.score, completedAt: new Date().toISOString() });
+    traceRender(request.traceId, "render_accepted", { assetId: finalAsset.id, gateScore: gate.score }, request.id);
+    traceRender(request.traceId, "render_result_signed", { storageKey: finalAsset.storageKey }, request.id);
     return repository.renderBundleForRequest(request.id);
   }
-  const output = result.result.outputAssets.find((asset) => asset.role === "image") ?? result.result.outputAssets[0];
-  const storageKey = output.storageKey ?? renderAssetPath(request.id, attempt.attemptNumber, "provider-output");
-  const asset = repository.createRenderAsset({
-    renderRequestId: request.id,
-    renderAttemptId: attempt.id,
-    aiInvocationId: result.invocationId,
-    role: "provider_output",
-    storageBucket: "renders",
-    storageKey,
-    mimeType: output.mimeType ?? "image/png",
-    width: output.width,
-    height: output.height,
-    sha256: output.sha256 ?? assetHash(storageKey),
-    retentionExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString()
-  });
-  traceRender(request.traceId, "provider_output_stored", { storageKey }, request.id);
-  traceRender(request.traceId, "quality_gate_started", { assetId: asset.id }, request.id);
-  const gate = deterministicGate(8.2);
-  traceRender(request.traceId, "quality_gate_completed", { pass: gate.pass, score: gate.score }, request.id);
-  if (!gate.pass) {
-    repository.updateRenderAttempt(attempt.id, { status: "rejected", gateScore: gate.score, gateDetail: gate.detail });
-    repository.updateRenderRequest(request.id, { status: "failed", finalGateScore: gate.score, finalErrorCode: "gate_rejected", finalMessage: friendlyError("gate_rejected") });
-    traceRender(request.traceId, "render_rejected", { gate }, request.id, "warn");
-    return repository.renderBundleForRequest(request.id);
-  }
-  const finalAsset = repository.createRenderAsset({
-    renderRequestId: request.id,
-    renderAttemptId: attempt.id,
-    aiInvocationId: result.invocationId,
-    role: "final_output",
-    storageBucket: "renders",
-    storageKey: renderAssetPath(request.id, attempt.attemptNumber, "final"),
-    mimeType: "image/png",
-    width: asset.width,
-    height: asset.height,
-    sha256: assetHash(renderAssetPath(request.id, attempt.attemptNumber, "final")),
-    retentionExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString()
-  });
-  repository.updateRenderAttempt(attempt.id, { status: "accepted", resultAssetId: finalAsset.id, gateScore: gate.score, gateDetail: gate.detail });
-  repository.updateRenderRequest(request.id, { status: "done", selectedResultAssetId: finalAsset.id, finalGateScore: gate.score, completedAt: new Date().toISOString() });
-  traceRender(request.traceId, "render_accepted", { assetId: finalAsset.id, gateScore: gate.score }, request.id);
-  traceRender(request.traceId, "render_result_signed", { storageKey: finalAsset.storageKey }, request.id);
+  repository.updateRenderRequest(request.id, { status: "failed", finalErrorCode: "job_retry_exhausted", finalMessage: friendlyError("job_retry_exhausted") });
+  traceRender(request.traceId, "render_failed", { errorCode: "job_retry_exhausted" }, request.id, "error");
   return repository.renderBundleForRequest(request.id);
 }
 

@@ -1,44 +1,119 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  activatePromptDeployment,
+  blockPromptVersionFromProduction,
+  clonePromptVersion,
+  createPromptDraft,
+  diffPromptVersionIds,
+  editPromptDraft,
+  previewPromptVersion,
+  runOneOffPromptTest,
+  setPromptVersionStatus
+} from "@/lib/ai/prompt-control";
 import { ensureAiRegistrySeeded, listModels, listProviders } from "@/lib/ai/registry";
+import type { AiTaskType } from "@/lib/ai/types";
 import { repository } from "@/lib/db/repository";
+import type { Surface } from "@/lib/db/schema";
+
+function jsonError(error: unknown, status = 400) {
+  return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status });
+}
 
 export async function GET(_request: NextRequest, { params }: { params: { segments: string[] } }) {
   ensureAiRegistrySeeded();
-  const [resource] = params.segments;
+  const [resource, id] = params.segments;
   if (resource === "providers") return NextResponse.json({ providers: listProviders() });
   if (resource === "models") return NextResponse.json({ models: listModels() });
+  if (resource === "prompts" && id) {
+    return NextResponse.json({
+      template: repository.promptTemplates.get(id),
+      versions: [...repository.promptVersions.values()].filter((version) => version.promptTemplateId === id)
+    });
+  }
   if (resource === "prompts") return NextResponse.json({ templates: [...repository.promptTemplates.values()], versions: [...repository.promptVersions.values()] });
   if (resource === "bundles") return NextResponse.json({ bundles: [...repository.bundles.values()], versions: [...repository.bundleVersions.values()] });
   if (resource === "recipes") return NextResponse.json({ recipes: [...repository.recipes.values()], versions: [...repository.recipeVersions.values()] });
   if (resource === "deployments") return NextResponse.json({ deployments: [...repository.deployments.values()] });
-  return NextResponse.json({ ok: true, resource, segments: params.segments });
+  return NextResponse.json({ error: "unknown_founder_ai_resource", resource, segments: params.segments }, { status: 404 });
 }
 
 export async function POST(request: NextRequest, { params }: { params: { segments: string[] } }) {
   ensureAiRegistrySeeded();
   const body = await request.json().catch(() => ({}));
   const [resource, id, action] = params.segments;
-  if (resource === "prompt-versions" && action === "approve") {
-    return NextResponse.json(repository.updatePromptVersion(id, { status: "approved", approvedBy: "founder", approvedAt: new Date().toISOString() }));
+  try {
+    if (resource === "prompts" && !id) {
+      const template = body.promptTemplateId
+        ? repository.mustGet(repository.promptTemplates, String(body.promptTemplateId), "prompt_template")
+        : repository.createPromptTemplate({
+            name: String(body.name ?? "founder_prompt"),
+            taskType: String(body.taskType ?? "render_composite") as AiTaskType,
+            surface: String(body.surface ?? "widget") as Surface,
+            description: body.description
+          });
+      return NextResponse.json(createPromptDraft({ ...body, promptTemplateId: template.id, createdBy: "founder" }));
+    }
+    if (resource === "prompts" && action === "versions") {
+      return NextResponse.json(createPromptDraft({ ...body, promptTemplateId: id, createdBy: "founder" }));
+    }
+    if (resource === "prompt-versions" && action === "approve") {
+      return NextResponse.json(setPromptVersionStatus(id, "approved", "founder", body.reason));
+    }
+    if (resource === "prompt-versions" && action === "archive") {
+      return NextResponse.json(setPromptVersionStatus(id, "archived", "founder", body.reason));
+    }
+    if (resource === "prompt-versions" && action === "clone") {
+      return NextResponse.json(clonePromptVersion(id, "founder", body));
+    }
+    if (resource === "prompt-versions" && action === "preview") {
+      return NextResponse.json(previewPromptVersion(id, body.variables ?? {}));
+    }
+    if (resource === "prompt-versions" && action === "diff") {
+      return NextResponse.json(diffPromptVersionIds(id, String(body.toPromptVersionId)));
+    }
+    if (resource === "prompt-versions" && action === "block") {
+      return NextResponse.json(blockPromptVersionFromProduction(id, "founder", String(body.reason ?? "blocked from production")));
+    }
+    if (resource === "prompt-versions" && action === "test") {
+      return NextResponse.json(await runOneOffPromptTest({ promptVersionId: id, variables: body.variables ?? {}, providerKey: body.providerKey, modelKey: body.modelKey, actor: "founder" }));
+    }
+    if (resource === "deployments" && id === "activate") {
+      return NextResponse.json(activatePromptDeployment({
+        surface: String(body.surface ?? "widget") as Surface,
+        taskType: String(body.taskType ?? "render_composite") as AiTaskType,
+        renderRecipeVersionId: String(body.renderRecipeVersionId),
+        trafficPercent: body.trafficPercent,
+        actor: "founder",
+        reason: body.reason
+      }));
+    }
+    if (resource === "deployments" && action === "rollback") {
+      return NextResponse.json(repository.rollbackDeployment(id, "founder", String(body.reason ?? "manual rollback")));
+    }
+    if (resource === "deployments" && action === "pause") {
+      const current = repository.mustGet(repository.deployments, id, "prompt_deployment");
+      const next = { ...current, status: "paused" as const, endedAt: new Date().toISOString() };
+      repository.deployments.set(id, next);
+      repository.audit("founder", "pause", "prompt_deployment", id, current, next, body.reason);
+      return NextResponse.json(next);
+    }
+    return NextResponse.json({ error: "unknown_founder_ai_action", resource, id, action }, { status: 404 });
+  } catch (error) {
+    return jsonError(error);
   }
-  if (resource === "prompt-versions" && action === "archive") {
-    return NextResponse.json(repository.updatePromptVersion(id, { status: "archived" }));
-  }
-  if (resource === "deployments" && action === "rollback") {
-    return NextResponse.json(repository.rollbackDeployment(id, "founder", String(body.reason ?? "manual rollback")));
-  }
-  if (resource === "deployments" && action === "pause") {
-    const current = repository.mustGet(repository.deployments, id, "prompt_deployment");
-    const next = { ...current, status: "paused" as const, endedAt: new Date().toISOString() };
-    repository.deployments.set(id, next);
-    return NextResponse.json(next);
-  }
-  repository.audit("founder", "api_write", resource ?? "ai", undefined, undefined, body, "founder api");
-  return NextResponse.json({ ok: true, resource, body });
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: { segments: string[] } }) {
+  ensureAiRegistrySeeded();
   const body = await request.json().catch(() => ({}));
-  repository.audit("founder", "api_patch", params.segments.join("/"), undefined, undefined, body, "founder api");
-  return NextResponse.json({ ok: true, body });
+  const [resource, id] = params.segments;
+  try {
+    if (resource === "prompt-versions") {
+      return NextResponse.json(editPromptDraft(id, body, "founder"));
+    }
+    repository.audit("founder", "api_patch", params.segments.join("/"), undefined, undefined, body, "founder api");
+    return NextResponse.json({ error: "unknown_founder_ai_patch", resource, id }, { status: 404 });
+  } catch (error) {
+    return jsonError(error);
+  }
 }

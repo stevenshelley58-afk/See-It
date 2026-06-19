@@ -24,6 +24,19 @@ export const localAdapter: AiProviderAdapter = {
   async invoke(request: AiInvocationRequest): Promise<AiNormalizedResult> {
     const started = Date.now();
     const digest = sha256Text(request.traceId + request.taskType + request.promptSnapshot.promptHash).slice(0, 16);
+    if (request.params.providerSpecific?.forceProviderError === true) {
+      return {
+        ok: false,
+        outputAssets: [],
+        error: { code: "provider_timeout", message: "Forced provider error", retryable: true, providerStatus: 504 },
+        providerResponseId: "local-forced-error-" + digest,
+        finishReason: "error",
+        usageJson: { local: true },
+        costEstimateUsd: 0,
+        rawResponseRedactedJson: { result: "forced-error" },
+        latencyMs: Math.max(1, Date.now() - started)
+      };
+    }
     if (request.taskType === "quality_gate") {
       return {
         ok: true,
