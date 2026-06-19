@@ -183,7 +183,7 @@ export async function runOneOffPromptTest(input: { promptVersionId: string; vari
     promptSnapshot: compiled,
     assets: [],
     params: {},
-    idempotencyKey: "prompt-test:" + input.promptVersionId + ":" + promptHash({ variables: input.variables, providerKey, modelKey })
+    idempotencyKey: "prompt-test:" + input.promptVersionId + ":" + promptHash({ variables: input.variables, providerKey, modelKey }) + ":" + crypto.randomUUID()
   });
   repository.audit(input.actor ?? "founder", "test", "prompt_version", input.promptVersionId, undefined, result.invocationId, "one-off prompt test");
   return result;
