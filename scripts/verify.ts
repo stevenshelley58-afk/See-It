@@ -46,6 +46,10 @@ for (const file of globSync("src/app/api/webhooks/**/route.ts")) {
 }
 assertContains("src/app/api/webhooks/route.ts", "verifyShopifyWebhookRequest", "Root Shopify webhook route missing HMAC verification");
 
+for (const file of globSync("src/app/api/merchant/**/route.ts")) {
+  assertContains(file, "authenticateMerchantRequest", "Merchant API route missing embedded session auth");
+}
+
 for (const file of globSync("src/app/api/auth/**/route.ts")) {
   const text = read(file);
   if (text.includes("local-shopify-secret") || text.includes("local-api-key") || text.includes("local-encryption-key")) {

@@ -20,6 +20,7 @@ import { mapBillingPlan } from "@/lib/shopify/billing";
 import { authenticateAppProxyParams, createAppProxySignature, signShopifyParams, verifyShopifyHmac } from "@/lib/shopify/app-proxy";
 import { buildInstallUrl, handleOAuthCallback } from "@/lib/shopify/auth";
 import { handlePrivacyWebhook, verifyWebhook } from "@/lib/shopify/webhooks";
+import { verifyShopifySessionToken } from "@/lib/shopify/session";
 import { assertRenderQuota } from "@/lib/billing/quota";
 import { verifyServiceSecret } from "@/lib/security/service-auth";
 import { parseGateResult } from "@/lib/render/gate";
@@ -46,6 +47,17 @@ function env() {
     ENCRYPTION_KEY: "encrypt",
     DEMO_BASE_URL: "http://localhost:3000/demo"
   };
+}
+
+function base64Url(value: unknown) {
+  return Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64url");
+}
+
+function shopifySessionToken(payload: Record<string, unknown>, secret: string) {
+  const header = base64Url({ alg: "HS256", typ: "JWT" });
+  const body = base64Url(payload);
+  const signature = createHmac("sha256", secret).update(header + "." + body).digest("base64url");
+  return header + "." + body + "." + signature;
 }
 
 beforeEach(() => {
@@ -75,6 +87,19 @@ describe("unit contract", () => {
     expect(verifyServiceSecret({ querySecret: "cron" }, "cron").ok).toBe(true);
     expect(verifyServiceSecret({}, "cron")).toEqual({ ok: false, status: 401, error: "service_auth_required" });
     expect(verifyServiceSecret({ authorization: "Bearer wrong" }, "cron")).toEqual({ ok: false, status: 403, error: "invalid_service_secret" });
+  });
+
+  it("validates Shopify embedded merchant session tokens", () => {
+    const parsed = readEnv(env());
+    const shop = repository.createShop({ shopDomain: "merchant.myshopify.com", plan: "trial", rendersQuota: 50, lifestyleImagesQuota: 10, billingStatus: "trial", roomPreviewEnabled: true });
+    const token = shopifySessionToken({ aud: parsed.SHOPIFY_API_KEY, dest: "https://" + shop.shopDomain, exp: 9999999999, nbf: 1 }, parsed.SHOPIFY_API_SECRET);
+    const result = verifyShopifySessionToken(token, parsed, 100);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.shop.id).toBe(shop.id);
+    }
+    const wrongAud = shopifySessionToken({ aud: "wrong", dest: "https://" + shop.shopDomain, exp: 9999999999 }, parsed.SHOPIFY_API_SECRET);
+    expect(verifyShopifySessionToken(wrongAud, parsed, 100)).toEqual({ ok: false, status: 403, error: "invalid_session_audience" });
   });
 
   it("registers providers, models, capabilities, and route policy", () => {
