@@ -32,6 +32,7 @@ postgres_vars*.txt
 .taskmaster/
 .claude/
 .claude-skills/
+.codegraph/
 .shopify/
 .gemini/
 
