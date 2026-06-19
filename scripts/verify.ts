@@ -5,7 +5,6 @@ const required = [
   "BUILD-SPEC.md",
   "AGENTS.md",
   "supabase/migrations/20260619120000_initial.sql",
-  "supabase/migrations/20260620023500_complete_runtime_schema.sql",
   "src/lib/ai/router.ts",
   "extension/assets/widget.js",
   "scripts/db-verify.ts",
@@ -129,6 +128,15 @@ for (const requiredSnippet of ["loadAiControlPlane", "persistAiControlPlane", "p
   }
 }
 const migration = globSync("supabase/migrations/*.sql").map(read).join("\n");
+const migrationFiles = globSync("supabase/migrations/*.sql");
+if (migrationFiles.length !== 1 || migrationFiles[0].replace(/\\/g, "/") !== "supabase/migrations/20260619120000_initial.sql") {
+  throw new Error("Supabase migrations must stay collapsed to one clean initial migration");
+}
+for (const file of migrationFiles) {
+  if (/legacy|compat|complete_runtime/i.test(file)) {
+    throw new Error("Compatibility migration must not be reintroduced: " + file);
+  }
+}
 for (const requiredSnippet of ["verified boolean default false", "width integer", "height integer", "remaining_refinements integer default 3"]) {
   if (!migration.includes(requiredSnippet)) {
     throw new Error("Initial migration missing runtime persistence column: " + requiredSnippet);

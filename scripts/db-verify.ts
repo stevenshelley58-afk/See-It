@@ -277,4 +277,4 @@ if (writeSmoke) {
   }
 }
 
-console.log("Supabase runtime schema verified " + expectedTables.length + " tables and legacy columns" + (requireSeed ? " with AI seed rows" : "") + (writeSmoke ? " plus write smoke" : ""));
+console.log("Supabase runtime schema verified " + expectedTables.length + " clean schema tables" + (requireSeed ? " with AI seed rows" : "") + (writeSmoke ? " plus write smoke" : ""));
