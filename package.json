@@ -20,6 +20,8 @@
     "replay": "tsx scripts/replay.ts",
     "db:verify": "tsx scripts/db-verify.ts",
     "db:verify:seeded": "tsx scripts/db-verify.ts --require-seed",
+    "db:verify:write": "tsx scripts/db-verify.ts --require-seed --write-smoke",
+    "storage:verify": "tsx scripts/storage-verify.ts",
     "seed:ai": "tsx scripts/seed-ai-registry.ts",
     "seed:dev": "tsx scripts/seed-dev.ts",
     "enrich": "tsx scripts/enrich.ts",
